@@ -4,7 +4,8 @@ use yubikit::transport::otphid::HidOtpConnection;
 use yubikit::yubiotp::{self, ConfigSlot, NdefType, Slot, YubiOtpSession};
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py,
+    BoxedSmartCardConnection, extract_smartcard_connection, restore_smartcard_connection,
+    scp_key_params_from_py,
 };
 
 fn yubiotp_err<E: std::fmt::Debug + std::fmt::Display>(e: yubiotp::YubiOtpError<E>) -> PyErr {
@@ -54,7 +55,22 @@ fn parse_ndef_type(ndef_type: u8) -> PyResult<NdefType> {
 
 #[pyclass(name = "YubiOtpSession", unsendable)]
 pub struct PyYubiOtpSession {
-    session: YubiOtpSession<BoxedSmartCardConnection>,
+    session: Option<YubiOtpSession<BoxedSmartCardConnection>>,
+    py_connection: PyObject,
+}
+
+impl PyYubiOtpSession {
+    fn session(&self) -> PyResult<&YubiOtpSession<BoxedSmartCardConnection>> {
+        self.session
+            .as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
+
+    fn session_mut(&mut self) -> PyResult<&mut YubiOtpSession<BoxedSmartCardConnection>> {
+        self.session
+            .as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
 }
 
 #[pymethods]
@@ -65,33 +81,48 @@ impl PyYubiOtpSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
+        let py_connection: PyObject = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let session =
                 YubiOtpSession::new_with_scp(conn, &scp_params).map_err(|(e, _)| yubiotp_err(e))?;
-            Ok(Self { session })
+            Ok(Self {
+                session: Some(session),
+                py_connection,
+            })
         } else {
             let session = YubiOtpSession::new(conn).map_err(|(e, _)| yubiotp_err(e))?;
-            Ok(Self { session })
+            Ok(Self {
+                session: Some(session),
+                py_connection,
+            })
         }
     }
 
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.session.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+
     #[getter]
-    fn version(&self) -> (u8, u8, u8) {
-        let v = self.session.version();
-        (v.0, v.1, v.2)
+    fn version(&self) -> PyResult<(u8, u8, u8)> {
+        let v = self.session()?.version();
+        Ok((v.0, v.1, v.2))
     }
 
     fn get_serial(&mut self) -> PyResult<u32> {
-        self.session.get_serial().map_err(yubiotp_err)
+        self.session_mut()?.get_serial().map_err(yubiotp_err)
     }
 
     /// Returns (version_tuple, flags).
-    fn get_config_state(&self) -> ((u8, u8, u8), u8) {
-        let state = self.session.get_config_state();
+    fn get_config_state(&self) -> PyResult<((u8, u8, u8), u8)> {
+        let state = self.session()?.get_config_state();
         let v = state.version;
-        ((v.0, v.1, v.2), state.flags)
+        Ok(((v.0, v.1, v.2), state.flags))
     }
 
     #[pyo3(signature = (slot, config, acc_code=None, cur_acc_code=None))]
@@ -105,7 +136,7 @@ impl PyYubiOtpSession {
         let _ = acc_code; // acc_code already baked into config bytes
         let s = parse_slot(slot)?;
         let config_slot = s.map(ConfigSlot::Config1, ConfigSlot::Config2);
-        self.session
+        self.session_mut()?
             .write_config(config_slot, config, cur_acc_code)
             .map_err(yubiotp_err)
     }
@@ -121,26 +152,26 @@ impl PyYubiOtpSession {
         let _ = acc_code;
         let s = parse_slot(slot)?;
         let config_slot = s.map(ConfigSlot::Update1, ConfigSlot::Update2);
-        self.session
+        self.session_mut()?
             .write_config(config_slot, config, cur_acc_code)
             .map_err(yubiotp_err)
     }
 
     fn swap_slots(&mut self) -> PyResult<()> {
-        self.session.swap_slots().map_err(yubiotp_err)
+        self.session_mut()?.swap_slots().map_err(yubiotp_err)
     }
 
     #[pyo3(signature = (slot, cur_acc_code=None))]
     fn delete_slot(&mut self, slot: u8, cur_acc_code: Option<&[u8]>) -> PyResult<()> {
         let s = parse_slot(slot)?;
-        self.session
+        self.session_mut()?
             .delete_slot(s, cur_acc_code)
             .map_err(yubiotp_err)
     }
 
     #[pyo3(signature = (scan_map, cur_acc_code=None))]
     fn set_scan_map(&mut self, scan_map: &[u8], cur_acc_code: Option<&[u8]>) -> PyResult<()> {
-        self.session
+        self.session_mut()?
             .set_scan_map(scan_map, cur_acc_code)
             .map_err(yubiotp_err)
     }
@@ -155,7 +186,7 @@ impl PyYubiOtpSession {
     ) -> PyResult<()> {
         let s = parse_slot(slot)?;
         let nt = parse_ndef_type(ndef_type)?;
-        self.session
+        self.session_mut()?
             .set_ndef_configuration(s, uri, cur_acc_code, nt)
             .map_err(yubiotp_err)
     }
@@ -168,7 +199,7 @@ impl PyYubiOtpSession {
     ) -> PyResult<Bound<'py, PyBytes>> {
         let s = parse_slot(slot)?;
         let result = self
-            .session
+            .session_mut()?
             .calculate_hmac_sha1(s, challenge)
             .map_err(yubiotp_err)?;
         Ok(PyBytes::new(py, &result))
@@ -181,36 +212,67 @@ impl PyYubiOtpSession {
 
 #[pyclass(name = "YubiOtpOtpSession", unsendable)]
 pub struct PyYubiOtpOtpSession {
-    session: YubiOtpSession<HidOtpConnection>,
+    session: Option<YubiOtpSession<HidOtpConnection>>,
+    py_connection: PyObject,
+}
+
+impl PyYubiOtpOtpSession {
+    fn session(&self) -> PyResult<&YubiOtpSession<HidOtpConnection>> {
+        self.session
+            .as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
+
+    fn session_mut(&mut self) -> PyResult<&mut YubiOtpSession<HidOtpConnection>> {
+        self.session
+            .as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
 }
 
 #[pymethods]
 impl PyYubiOtpOtpSession {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let py_connection: PyObject = connection.clone().unbind();
         let mut conn_wrapper = connection
             .downcast::<crate::py_hid::OtpConnection>()?
             .borrow_mut();
         let conn = conn_wrapper.take_inner()?;
         let session = YubiOtpSession::new_otp(conn).map_err(|(e, _)| yubiotp_err(e))?;
-        Ok(Self { session })
+        Ok(Self {
+            session: Some(session),
+            py_connection,
+        })
+    }
+
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.session.take() {
+            let conn = session.into_connection();
+            let py_conn = self.py_connection.bind(py);
+            let mut conn_wrapper = py_conn
+                .downcast::<crate::py_hid::OtpConnection>()?
+                .borrow_mut();
+            conn_wrapper.restore_inner(conn);
+        }
+        Ok(())
     }
 
     #[getter]
-    fn version(&self) -> (u8, u8, u8) {
-        let v = self.session.version();
-        (v.0, v.1, v.2)
+    fn version(&self) -> PyResult<(u8, u8, u8)> {
+        let v = self.session()?.version();
+        Ok((v.0, v.1, v.2))
     }
 
     fn get_serial(&mut self) -> PyResult<u32> {
-        self.session.get_serial().map_err(yubiotp_err)
+        self.session_mut()?.get_serial().map_err(yubiotp_err)
     }
 
     /// Returns (version_tuple, flags).
-    fn get_config_state(&self) -> ((u8, u8, u8), u8) {
-        let state = self.session.get_config_state();
+    fn get_config_state(&self) -> PyResult<((u8, u8, u8), u8)> {
+        let state = self.session()?.get_config_state();
         let v = state.version;
-        ((v.0, v.1, v.2), state.flags)
+        Ok(((v.0, v.1, v.2), state.flags))
     }
 
     #[pyo3(signature = (slot, config, acc_code=None, cur_acc_code=None))]
@@ -224,7 +286,7 @@ impl PyYubiOtpOtpSession {
         let _ = acc_code;
         let s = parse_slot(slot)?;
         let config_slot = s.map(ConfigSlot::Config1, ConfigSlot::Config2);
-        self.session
+        self.session_mut()?
             .write_config(config_slot, config, cur_acc_code)
             .map_err(yubiotp_err)
     }
@@ -240,26 +302,26 @@ impl PyYubiOtpOtpSession {
         let _ = acc_code;
         let s = parse_slot(slot)?;
         let config_slot = s.map(ConfigSlot::Update1, ConfigSlot::Update2);
-        self.session
+        self.session_mut()?
             .write_config(config_slot, config, cur_acc_code)
             .map_err(yubiotp_err)
     }
 
     fn swap_slots(&mut self) -> PyResult<()> {
-        self.session.swap_slots().map_err(yubiotp_err)
+        self.session_mut()?.swap_slots().map_err(yubiotp_err)
     }
 
     #[pyo3(signature = (slot, cur_acc_code=None))]
     fn delete_slot(&mut self, slot: u8, cur_acc_code: Option<&[u8]>) -> PyResult<()> {
         let s = parse_slot(slot)?;
-        self.session
+        self.session_mut()?
             .delete_slot(s, cur_acc_code)
             .map_err(yubiotp_err)
     }
 
     #[pyo3(signature = (scan_map, cur_acc_code=None))]
     fn set_scan_map(&mut self, scan_map: &[u8], cur_acc_code: Option<&[u8]>) -> PyResult<()> {
-        self.session
+        self.session_mut()?
             .set_scan_map(scan_map, cur_acc_code)
             .map_err(yubiotp_err)
     }
@@ -274,7 +336,7 @@ impl PyYubiOtpOtpSession {
     ) -> PyResult<()> {
         let s = parse_slot(slot)?;
         let nt = parse_ndef_type(ndef_type)?;
-        self.session
+        self.session_mut()?
             .set_ndef_configuration(s, uri, cur_acc_code, nt)
             .map_err(yubiotp_err)
     }
@@ -318,7 +380,7 @@ impl PyYubiOtpOtpSession {
             None
         };
         let result = self
-            .session
+            .session_mut()?
             .calculate_hmac_sha1_with_cancel(s, challenge, cancel_ref, keepalive_ref)
             .map_err(yubiotp_err)?;
         Ok(PyBytes::new(py, &result))

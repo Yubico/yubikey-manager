@@ -2,7 +2,8 @@ use pyo3::prelude::*;
 use yubikit::hsmauth::{self, HsmAuthSession as RustHsmAuthSession};
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err,
+    BoxedSmartCardConnection, extract_smartcard_connection, restore_smartcard_connection,
+    scp_key_params_from_py, smartcard_err,
 };
 
 fn hsmauth_err(e: hsmauth::HsmAuthError) -> PyErr {
@@ -42,7 +43,22 @@ fn cred_to_tuple(c: hsmauth::Credential) -> (String, u8, u32, bool) {
 
 #[pyclass]
 pub struct HsmAuthSession {
-    inner: RustHsmAuthSession<BoxedSmartCardConnection>,
+    inner: Option<RustHsmAuthSession<BoxedSmartCardConnection>>,
+    py_connection: PyObject,
+}
+
+impl HsmAuthSession {
+    fn session(&self) -> PyResult<&RustHsmAuthSession<BoxedSmartCardConnection>> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
+
+    fn session_mut(&mut self) -> PyResult<&mut RustHsmAuthSession<BoxedSmartCardConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
 }
 
 #[pymethods]
@@ -53,31 +69,49 @@ impl HsmAuthSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
+        let py_connection: PyObject = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let inner = RustHsmAuthSession::new_with_scp(conn, &scp_params)
                 .map_err(|(e, _)| hsmauth_err(e))?;
-            Ok(Self { inner })
+            Ok(Self {
+                inner: Some(inner),
+                py_connection,
+            })
         } else {
             let inner = RustHsmAuthSession::new(conn).map_err(|(e, _)| hsmauth_err(e))?;
-            Ok(Self { inner })
+            Ok(Self {
+                inner: Some(inner),
+                py_connection,
+            })
         }
     }
 
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+
     #[getter]
-    fn version(&self) -> (u8, u8, u8) {
-        let v = self.inner.version();
-        (v.0, v.1, v.2)
+    fn version(&self) -> PyResult<(u8, u8, u8)> {
+        let v = self.session()?.version();
+        Ok((v.0, v.1, v.2))
     }
 
     fn reset(&mut self) -> PyResult<()> {
-        self.inner.reset().map_err(hsmauth_err)
+        self.session_mut()?.reset().map_err(hsmauth_err)
     }
 
     /// List credentials. Returns list of (label, algorithm, counter, touch_required).
     fn list_credentials(&mut self) -> PyResult<Vec<(String, u8, u32, bool)>> {
-        let creds = self.inner.list_credentials().map_err(hsmauth_err)?;
+        let creds = self
+            .session_mut()?
+            .list_credentials()
+            .map_err(hsmauth_err)?;
         Ok(creds.into_iter().map(cred_to_tuple).collect())
     }
 
@@ -92,7 +126,7 @@ impl HsmAuthSession {
         touch_required: bool,
     ) -> PyResult<(String, u8, u32, bool)> {
         let cred = self
-            .inner
+            .session_mut()?
             .put_credential_symmetric(
                 management_key,
                 label,
@@ -115,7 +149,7 @@ impl HsmAuthSession {
         touch_required: bool,
     ) -> PyResult<(String, u8, u32, bool)> {
         let cred = self
-            .inner
+            .session_mut()?
             .put_credential_derived(
                 management_key,
                 label,
@@ -143,7 +177,7 @@ impl HsmAuthSession {
         let sk = SecretKey::<p256::NistP256>::from_slice(private_key)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         let cred = self
-            .inner
+            .session_mut()?
             .put_credential_asymmetric(
                 management_key,
                 label,
@@ -165,7 +199,7 @@ impl HsmAuthSession {
         touch_required: bool,
     ) -> PyResult<(String, u8, u32, bool)> {
         let cred = self
-            .inner
+            .session_mut()?
             .generate_credential_asymmetric(
                 management_key,
                 label,
@@ -180,13 +214,16 @@ impl HsmAuthSession {
     /// Returns SEC1 uncompressed point bytes (65 bytes: 0x04 || x || y).
     fn get_public_key(&mut self, label: &str) -> PyResult<Vec<u8>> {
         use elliptic_curve::sec1::ToEncodedPoint;
-        let pk = self.inner.get_public_key(label).map_err(hsmauth_err)?;
+        let pk = self
+            .session_mut()?
+            .get_public_key(label)
+            .map_err(hsmauth_err)?;
         let encoded = pk.to_encoded_point(false);
         Ok(encoded.as_bytes().to_vec())
     }
 
     fn delete_credential(&mut self, management_key: &[u8], label: &str) -> PyResult<()> {
-        self.inner
+        self.session_mut()?
             .delete_credential(management_key, label)
             .map_err(hsmauth_err)
     }
@@ -197,7 +234,7 @@ impl HsmAuthSession {
         credential_password: &[u8],
         new_credential_password: &[u8],
     ) -> PyResult<()> {
-        self.inner
+        self.session_mut()?
             .change_credential_password(label, credential_password, new_credential_password)
             .map_err(hsmauth_err)
     }
@@ -208,7 +245,7 @@ impl HsmAuthSession {
         label: &str,
         new_credential_password: &[u8],
     ) -> PyResult<()> {
-        self.inner
+        self.session_mut()?
             .change_credential_password_admin(management_key, label, new_credential_password)
             .map_err(hsmauth_err)
     }
@@ -218,13 +255,15 @@ impl HsmAuthSession {
         management_key: &[u8],
         new_management_key: &[u8],
     ) -> PyResult<()> {
-        self.inner
+        self.session_mut()?
             .put_management_key(management_key, new_management_key)
             .map_err(hsmauth_err)
     }
 
     fn get_management_key_retries(&mut self) -> PyResult<u32> {
-        self.inner.get_management_key_retries().map_err(hsmauth_err)
+        self.session_mut()?
+            .get_management_key_retries()
+            .map_err(hsmauth_err)
     }
 
     /// Calculate symmetric session keys.
@@ -237,7 +276,7 @@ impl HsmAuthSession {
         card_crypto: Option<&[u8]>,
     ) -> PyResult<(Vec<u8>, Vec<u8>, Vec<u8>)> {
         let keys = self
-            .inner
+            .session_mut()?
             .calculate_session_keys_symmetric(label, context, credential_password, card_crypto)
             .map_err(hsmauth_err)?;
         Ok((
@@ -265,7 +304,7 @@ impl HsmAuthSession {
         let pk = Option::from(p256::PublicKey::from_encoded_point(&point))
             .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid P-256 public key"))?;
         let keys = self
-            .inner
+            .session_mut()?
             .calculate_session_keys_asymmetric(
                 label,
                 context,
@@ -287,7 +326,7 @@ impl HsmAuthSession {
         label: &str,
         credential_password: Option<&[u8]>,
     ) -> PyResult<Vec<u8>> {
-        self.inner
+        self.session_mut()?
             .get_challenge(label, credential_password)
             .map_err(hsmauth_err)
     }

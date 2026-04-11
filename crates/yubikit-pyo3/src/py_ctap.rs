@@ -11,7 +11,7 @@ use yubikit::ctap2::{
 
 use crate::py_bridge::{
     BoxedFidoConnection, BoxedSmartCardConnection, extract_fido_connection,
-    extract_smartcard_connection,
+    extract_smartcard_connection, restore_fido_connection, restore_smartcard_connection,
 };
 
 // ---------------------------------------------------------------------------
@@ -210,6 +210,7 @@ fn py_to_cbor_value(obj: &Bound<'_, PyAny>) -> PyResult<cbor::Value> {
 #[pyclass(name = "Ctap2Session", unsendable)]
 pub struct PyCtap2Session {
     session: Option<Ctap2Session<BoxedSmartCardConnection>>,
+    py_connection: PyObject,
 }
 
 impl PyCtap2Session {
@@ -244,6 +245,7 @@ impl PyCtap2Session {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
+        let py_connection: PyObject = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         let ctap = if let Some(params) = scp_key_params {
             let scp_params = crate::py_bridge::scp_key_params_from_py(params)?;
@@ -256,7 +258,16 @@ impl PyCtap2Session {
         }
         Ok(Self {
             session: Some(Ctap2Session::new(ctap).map_err(ctap2_err)?),
+            py_connection,
         })
+    }
+
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.session.take() {
+            let conn = session.into_session().into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
     }
 
     #[getter]
@@ -329,6 +340,7 @@ impl PyCtap2Session {
 #[pyclass(name = "Ctap2FidoSession", unsendable)]
 pub struct PyCtap2FidoSession {
     session: Option<Ctap2Session<BoxedFidoConnection>>,
+    py_connection: PyObject,
 }
 
 impl PyCtap2FidoSession {
@@ -359,6 +371,7 @@ impl PyCtap2FidoSession {
 impl PyCtap2FidoSession {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let py_connection: PyObject = connection.clone().unbind();
         let conn = extract_fido_connection(connection)?;
         let ctap = CtapSession::new_fido(conn).map_err(|(e, _)| ctap_err(e))?;
         if !ctap.has_ctap2() {
@@ -366,7 +379,16 @@ impl PyCtap2FidoSession {
         }
         Ok(Self {
             session: Some(Ctap2Session::new(ctap).map_err(ctap2_err)?),
+            py_connection,
         })
+    }
+
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.session.take() {
+            let conn = session.into_session().into_connection();
+            restore_fido_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
     }
 
     #[getter]

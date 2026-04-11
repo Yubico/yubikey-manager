@@ -2,7 +2,8 @@ use pyo3::prelude::*;
 use yubikit::oath::{self, OathError, OathSession as RustOathSession};
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err,
+    BoxedSmartCardConnection, extract_smartcard_connection, restore_smartcard_connection,
+    scp_key_params_from_py, smartcard_err,
 };
 
 fn oath_err(e: OathError) -> PyErr {
@@ -47,7 +48,22 @@ fn parse_b32_key(key: &str) -> PyResult<Vec<u8>> {
 
 #[pyclass]
 pub struct OathSession {
-    inner: RustOathSession<BoxedSmartCardConnection>,
+    inner: Option<RustOathSession<BoxedSmartCardConnection>>,
+    py_connection: PyObject,
+}
+
+impl OathSession {
+    fn session(&self) -> PyResult<&RustOathSession<BoxedSmartCardConnection>> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
+
+    fn session_mut(&mut self) -> PyResult<&mut RustOathSession<BoxedSmartCardConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
 }
 
 #[pymethods]
@@ -58,57 +74,72 @@ impl OathSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
+        let py_connection: PyObject = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let inner = RustOathSession::new_with_scp(conn, &scp_params)
                 .map_err(|(e, _)| smartcard_err(e))?;
-            Ok(Self { inner })
+            Ok(Self {
+                inner: Some(inner),
+                py_connection,
+            })
         } else {
             let inner = RustOathSession::new(conn).map_err(|(e, _)| smartcard_err(e))?;
-            Ok(Self { inner })
+            Ok(Self {
+                inner: Some(inner),
+                py_connection,
+            })
         }
     }
 
-    #[getter]
-    fn version(&self) -> (u8, u8, u8) {
-        let v = self.inner.version();
-        (v.0, v.1, v.2)
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
     }
 
     #[getter]
-    fn device_id(&self) -> &str {
-        self.inner.device_id()
+    fn version(&self) -> PyResult<(u8, u8, u8)> {
+        let v = self.session()?.version();
+        Ok((v.0, v.1, v.2))
     }
 
     #[getter]
-    fn has_key(&self) -> bool {
-        self.inner.has_key()
+    fn device_id(&self) -> PyResult<&str> {
+        Ok(self.session()?.device_id())
     }
 
     #[getter]
-    fn locked(&self) -> bool {
-        self.inner.locked()
+    fn has_key(&self) -> PyResult<bool> {
+        Ok(self.session()?.has_key())
+    }
+
+    #[getter]
+    fn locked(&self) -> PyResult<bool> {
+        Ok(self.session()?.locked())
     }
 
     fn reset(&mut self) -> PyResult<()> {
-        self.inner.reset().map_err(oath_err)
+        self.session_mut()?.reset().map_err(oath_err)
     }
 
-    fn derive_key(&self, password: &str) -> Vec<u8> {
-        self.inner.derive_key(password).to_vec()
+    fn derive_key(&self, password: &str) -> PyResult<Vec<u8>> {
+        Ok(self.session()?.derive_key(password).to_vec())
     }
 
     fn validate(&mut self, key: &[u8]) -> PyResult<()> {
-        self.inner.validate(key).map_err(oath_err)
+        self.session_mut()?.validate(key).map_err(oath_err)
     }
 
     fn set_key(&mut self, key: &[u8]) -> PyResult<()> {
-        self.inner.set_key(key).map_err(oath_err)
+        self.session_mut()?.set_key(key).map_err(oath_err)
     }
 
     fn unset_key(&mut self) -> PyResult<()> {
-        self.inner.unset_key().map_err(oath_err)
+        self.session_mut()?.unset_key().map_err(oath_err)
     }
 
     /// Put a credential on the device.
@@ -152,7 +183,7 @@ impl OathSession {
         };
 
         let cred = self
-            .inner
+            .session_mut()?
             .put_credential(&cred_data, touch_required)
             .map_err(oath_err)?;
 
@@ -174,7 +205,7 @@ impl OathSession {
         name: &str,
         issuer: Option<&str>,
     ) -> PyResult<Vec<u8>> {
-        self.inner
+        self.session_mut()?
             .rename_credential(credential_id, name, issuer)
             .map_err(oath_err)
     }
@@ -195,7 +226,7 @@ impl OathSession {
             Option<bool>,
         )>,
     > {
-        let creds = self.inner.list_credentials().map_err(oath_err)?;
+        let creds = self.session_mut()?.list_credentials().map_err(oath_err)?;
         Ok(creds
             .into_iter()
             .map(|c| {
@@ -213,13 +244,13 @@ impl OathSession {
     }
 
     fn calculate(&mut self, credential_id: &[u8], challenge: &[u8]) -> PyResult<Vec<u8>> {
-        self.inner
+        self.session_mut()?
             .calculate(credential_id, challenge)
             .map_err(oath_err)
     }
 
     fn delete_credential(&mut self, credential_id: &[u8]) -> PyResult<()> {
-        self.inner
+        self.session_mut()?
             .delete_credential(credential_id)
             .map_err(oath_err)
     }
@@ -247,7 +278,10 @@ impl OathSession {
             Option<u64>,
         )>,
     > {
-        let results = self.inner.calculate_all(timestamp).map_err(oath_err)?;
+        let results = self
+            .session_mut()?
+            .calculate_all(timestamp)
+            .map_err(oath_err)?;
         Ok(results
             .into_iter()
             .map(|(cred, code)| {
@@ -297,7 +331,7 @@ impl OathSession {
             touch_required,
         };
         let code = self
-            .inner
+            .session_mut()?
             .calculate_code(&credential, timestamp)
             .map_err(oath_err)?;
         Ok((code.value, code.valid_from, code.valid_to))

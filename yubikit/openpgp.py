@@ -996,7 +996,8 @@ class OpenPgpSession:
         self.close()
 
     def close(self) -> None:
-        """Close the session."""
+        """Close the session, restoring the underlying connection."""
+        self._native.close()
 
     @property
     def aid(self) -> OpenPgpAid:

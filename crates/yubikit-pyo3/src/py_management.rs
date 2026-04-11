@@ -4,7 +4,8 @@ use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::transport::otphid::HidOtpConnection;
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py,
+    BoxedSmartCardConnection, PyFidoConn, extract_smartcard_connection, restore_fido_connection,
+    restore_smartcard_connection, scp_key_params_from_py,
 };
 
 fn management_err(e: impl std::fmt::Display) -> PyErr {
@@ -71,7 +72,22 @@ pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObje
 
 #[pyclass(name = "ManagementSession", unsendable)]
 pub struct ManagementCcidSession {
-    inner: ManagementSession<BoxedSmartCardConnection>,
+    inner: Option<ManagementSession<BoxedSmartCardConnection>>,
+    py_connection: PyObject,
+}
+
+impl ManagementCcidSession {
+    fn session(&self) -> PyResult<&ManagementSession<BoxedSmartCardConnection>> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
+
+    fn session_mut(&mut self) -> PyResult<&mut ManagementSession<BoxedSmartCardConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
 }
 
 #[pymethods]
@@ -82,34 +98,52 @@ impl ManagementCcidSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
+        let py_connection: PyObject = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let inner = ManagementSession::new_with_scp(conn, &scp_params)
                 .map_err(|(e, _)| management_err(e))?;
-            Ok(Self { inner })
+            Ok(Self {
+                inner: Some(inner),
+                py_connection,
+            })
         } else {
             let inner = ManagementSession::new(conn).map_err(|(e, _)| management_err(e))?;
-            Ok(Self { inner })
+            Ok(Self {
+                inner: Some(inner),
+                py_connection,
+            })
         }
     }
 
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+
     #[getter]
-    fn version(&self) -> (u8, u8, u8) {
-        let v = self.inner.version();
-        (v.0, v.1, v.2)
+    fn version(&self) -> PyResult<(u8, u8, u8)> {
+        let v = self.session()?.version();
+        Ok((v.0, v.1, v.2))
     }
 
     /// Read device info. Returns a dict with parsed fields.
     fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self.inner.read_device_info().map_err(management_err)?;
+        let info = self
+            .session_mut()?
+            .read_device_info()
+            .map_err(management_err)?;
         device_info_to_dict(py, &info)
     }
 
     /// Read device info without version check (for dev device version override).
     fn read_device_info_unchecked(&mut self, py: Python<'_>) -> PyResult<PyObject> {
         let info = self
-            .inner
+            .session_mut()?
             .read_device_info_unchecked()
             .map_err(management_err)?;
         device_info_to_dict(py, &info)
@@ -159,7 +193,7 @@ impl ManagementCcidSession {
             nfc_restricted,
         };
 
-        self.inner
+        self.session_mut()?
             .write_device_config(&config, reboot, cur_lock_code, new_lock_code)
             .map_err(management_err)
     }
@@ -170,47 +204,81 @@ impl ManagementCcidSession {
         chalresp_timeout: u8,
         auto_eject_timeout: u16,
     ) -> PyResult<()> {
-        self.inner
+        self.session_mut()?
             .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
             .map_err(management_err)
     }
 
     fn device_reset(&mut self) -> PyResult<()> {
-        self.inner.device_reset().map_err(management_err)
+        self.session_mut()?.device_reset().map_err(management_err)
     }
 }
 
 #[pyclass(name = "ManagementOtpSession", unsendable)]
 pub struct ManagementOtpSession {
-    inner: ManagementSession<HidOtpConnection>,
+    inner: Option<ManagementSession<HidOtpConnection>>,
+    py_connection: PyObject,
+}
+
+impl ManagementOtpSession {
+    fn session(&self) -> PyResult<&ManagementSession<HidOtpConnection>> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
+
+    fn session_mut(&mut self) -> PyResult<&mut ManagementSession<HidOtpConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
 }
 
 #[pymethods]
 impl ManagementOtpSession {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let py_connection: PyObject = connection.clone().unbind();
         let mut conn_wrapper = connection
             .downcast::<crate::py_hid::OtpConnection>()?
             .borrow_mut();
         let hid_conn = conn_wrapper.take_inner()?;
         let inner = ManagementSession::new_otp(hid_conn).map_err(|(e, _)| management_err(e))?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Some(inner),
+            py_connection,
+        })
+    }
+
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            let py_conn = self.py_connection.bind(py);
+            let mut conn_wrapper = py_conn
+                .downcast::<crate::py_hid::OtpConnection>()?
+                .borrow_mut();
+            conn_wrapper.restore_inner(conn);
+        }
+        Ok(())
     }
 
     #[getter]
-    fn version(&self) -> (u8, u8, u8) {
-        let v = self.inner.version();
-        (v.0, v.1, v.2)
+    fn version(&self) -> PyResult<(u8, u8, u8)> {
+        let v = self.session()?.version();
+        Ok((v.0, v.1, v.2))
     }
 
     fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self.inner.read_device_info().map_err(management_err)?;
+        let info = self
+            .session_mut()?
+            .read_device_info()
+            .map_err(management_err)?;
         device_info_to_dict(py, &info)
     }
 
     fn read_device_info_unchecked(&mut self, py: Python<'_>) -> PyResult<PyObject> {
         let info = self
-            .inner
+            .session_mut()?
             .read_device_info_unchecked()
             .map_err(management_err)?;
         device_info_to_dict(py, &info)
@@ -257,7 +325,7 @@ impl ManagementOtpSession {
             nfc_restricted,
         };
 
-        self.inner
+        self.session_mut()?
             .write_device_config(&config, reboot, cur_lock_code, new_lock_code)
             .map_err(management_err)
     }
@@ -268,7 +336,7 @@ impl ManagementOtpSession {
         chalresp_timeout: u8,
         auto_eject_timeout: u16,
     ) -> PyResult<()> {
-        self.inner
+        self.session_mut()?
             .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
             .map_err(management_err)
     }
@@ -276,35 +344,65 @@ impl ManagementOtpSession {
 
 #[pyclass(name = "ManagementFidoSession", unsendable)]
 pub struct ManagementFidoSession {
-    inner: ManagementSession<HidFidoConnection>,
+    inner: Option<ManagementSession<HidFidoConnection>>,
+    py_connection: PyObject,
+}
+
+impl ManagementFidoSession {
+    fn session(&self) -> PyResult<&ManagementSession<HidFidoConnection>> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
+
+    fn session_mut(&mut self) -> PyResult<&mut ManagementSession<HidFidoConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
 }
 
 #[pymethods]
 impl ManagementFidoSession {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let py_connection: PyObject = connection.clone().unbind();
         let mut conn_wrapper = connection
             .downcast::<crate::py_hid::FidoConnection>()?
             .borrow_mut();
         let conn = conn_wrapper.take_inner()?;
         let inner = ManagementSession::new_fido(conn).map_err(|(e, _)| management_err(e))?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Some(inner),
+            py_connection,
+        })
+    }
+
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_fido_connection(self.py_connection.bind(py), PyFidoConn::Native(conn))?;
+        }
+        Ok(())
     }
 
     #[getter]
-    fn version(&self) -> (u8, u8, u8) {
-        let v = self.inner.version();
-        (v.0, v.1, v.2)
+    fn version(&self) -> PyResult<(u8, u8, u8)> {
+        let v = self.session()?.version();
+        Ok((v.0, v.1, v.2))
     }
 
     fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self.inner.read_device_info().map_err(management_err)?;
+        let info = self
+            .session_mut()?
+            .read_device_info()
+            .map_err(management_err)?;
         device_info_to_dict(py, &info)
     }
 
     fn read_device_info_unchecked(&mut self, py: Python<'_>) -> PyResult<PyObject> {
         let info = self
-            .inner
+            .session_mut()?
             .read_device_info_unchecked()
             .map_err(management_err)?;
         device_info_to_dict(py, &info)
@@ -351,7 +449,7 @@ impl ManagementFidoSession {
             nfc_restricted,
         };
 
-        self.inner
+        self.session_mut()?
             .write_device_config(&config, reboot, cur_lock_code, new_lock_code)
             .map_err(management_err)
     }
@@ -362,7 +460,7 @@ impl ManagementFidoSession {
         chalresp_timeout: u8,
         auto_eject_timeout: u16,
     ) -> PyResult<()> {
-        self.inner
+        self.session_mut()?
             .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
             .map_err(management_err)
     }

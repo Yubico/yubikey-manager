@@ -5,7 +5,8 @@ use yubikit::securitydomain::{
 };
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err,
+    BoxedSmartCardConnection, extract_smartcard_connection, restore_smartcard_connection,
+    scp_key_params_from_py, smartcard_err,
 };
 
 fn sd_err(e: SecurityDomainError) -> PyErr {
@@ -39,6 +40,7 @@ fn parse_curve(v: u8) -> PyResult<Curve> {
 #[pyclass]
 pub struct SecurityDomainSession {
     inner: Option<RustSecurityDomainSession<BoxedSmartCardConnection>>,
+    py_connection: PyObject,
 }
 
 impl SecurityDomainSession {
@@ -61,9 +63,21 @@ impl SecurityDomainSession {
 impl SecurityDomainSession {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let py_connection: PyObject = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         let inner = RustSecurityDomainSession::new(conn).map_err(|(e, _)| smartcard_err(e))?;
-        Ok(Self { inner: Some(inner) })
+        Ok(Self {
+            inner: Some(inner),
+            py_connection,
+        })
+    }
+
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
     }
 
     /// Take the connection from the current session, re-open with SCP.

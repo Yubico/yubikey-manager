@@ -83,7 +83,8 @@ class SecurityDomainSession:
         self.close()
 
     def close(self) -> None:
-        """Close the session."""
+        """Close the session, restoring the underlying connection."""
+        self._native.close()
 
     def authenticate(self, key_params: ScpKeyParams) -> None:
         """Initialize SCP and authenticate the session.

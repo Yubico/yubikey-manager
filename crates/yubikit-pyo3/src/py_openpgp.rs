@@ -4,7 +4,8 @@ use yubikit::openpgp::{
 };
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, extract_smartcard_connection, scp_key_params_from_py, smartcard_err,
+    BoxedSmartCardConnection, extract_smartcard_connection, restore_smartcard_connection,
+    scp_key_params_from_py, smartcard_err,
 };
 
 fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
@@ -158,7 +159,22 @@ fn parse_pw(v: u8) -> PyResult<Pw> {
 
 #[pyclass]
 pub struct OpenPgpSession {
-    inner: RustOpenPgpSession<BoxedSmartCardConnection>,
+    inner: Option<RustOpenPgpSession<BoxedSmartCardConnection>>,
+    py_connection: PyObject,
+}
+
+impl OpenPgpSession {
+    fn session(&self) -> PyResult<&RustOpenPgpSession<BoxedSmartCardConnection>> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
+
+    fn session_mut(&mut self) -> PyResult<&mut RustOpenPgpSession<BoxedSmartCardConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
 }
 
 #[pymethods]
@@ -169,47 +185,62 @@ impl OpenPgpSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
+        let py_connection: PyObject = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let inner = RustOpenPgpSession::new_with_scp(conn, &scp_params)
                 .map_err(|(e, _)| openpgp_err(e))?;
-            Ok(Self { inner })
+            Ok(Self {
+                inner: Some(inner),
+                py_connection,
+            })
         } else {
             let inner = RustOpenPgpSession::new(conn).map_err(|(e, _)| openpgp_err(e))?;
-            Ok(Self { inner })
+            Ok(Self {
+                inner: Some(inner),
+                py_connection,
+            })
         }
     }
 
-    #[getter]
-    fn version(&self) -> (u8, u8, u8) {
-        let v = self.inner.version();
-        (v.0, v.1, v.2)
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
     }
 
     #[getter]
-    fn aid(&self) -> Vec<u8> {
-        self.inner.aid().raw.clone()
+    fn version(&self) -> PyResult<(u8, u8, u8)> {
+        let v = self.session()?.version();
+        Ok((v.0, v.1, v.2))
+    }
+
+    #[getter]
+    fn aid(&self) -> PyResult<Vec<u8>> {
+        Ok(self.session()?.aid().raw.clone())
     }
 
     fn reset(&mut self) -> PyResult<()> {
-        self.inner.reset().map_err(openpgp_err)
+        self.session_mut()?.reset().map_err(openpgp_err)
     }
 
     fn get_data(&mut self, data_object: u16) -> PyResult<Vec<u8>> {
         let do_ = parse_do(data_object)?;
-        self.inner.get_data(do_).map_err(openpgp_err)
+        self.session_mut()?.get_data(do_).map_err(openpgp_err)
     }
 
     fn put_data(&mut self, data_object: u16, data: &[u8]) -> PyResult<()> {
         let do_ = parse_do(data_object)?;
-        self.inner.put_data(do_, data).map_err(openpgp_err)
+        self.session_mut()?.put_data(do_, data).map_err(openpgp_err)
     }
 
     /// Returns raw encoded application related data bytes.
     fn get_application_related_data(&mut self) -> PyResult<Vec<u8>> {
         // Return the raw DO data so Python can parse it
-        self.inner
+        self.session_mut()?
             .get_data(Do::ApplicationRelatedData)
             .map_err(openpgp_err)
     }
@@ -217,7 +248,7 @@ impl OpenPgpSession {
     /// Returns (pin_policy_user, max_len_user, max_len_reset, max_len_admin,
     ///          attempts_user, attempts_reset, attempts_admin).
     fn get_pin_status(&mut self) -> PyResult<(u8, u8, u8, u8, u8, u8, u8)> {
-        let s = self.inner.get_pin_status().map_err(openpgp_err)?;
+        let s = self.session_mut()?.get_pin_status().map_err(openpgp_err)?;
         Ok((
             s.pin_policy_user as u8,
             s.max_len_user,
@@ -230,12 +261,17 @@ impl OpenPgpSession {
     }
 
     fn get_signature_counter(&mut self) -> PyResult<u32> {
-        self.inner.get_signature_counter().map_err(openpgp_err)
+        self.session_mut()?
+            .get_signature_counter()
+            .map_err(openpgp_err)
     }
 
     /// Returns dict mapping key_ref (u8) to key_status (u8).
     fn get_key_information(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self.inner.get_key_information().map_err(openpgp_err)?;
+        let info = self
+            .session_mut()?
+            .get_key_information()
+            .map_err(openpgp_err)?;
         let dict = pyo3::types::PyDict::new(py);
         for (key_ref, status) in &info {
             dict.set_item(*key_ref as u8, *status as u8)?;
@@ -245,7 +281,10 @@ impl OpenPgpSession {
 
     /// Returns dict mapping key_ref (u8) to generation timestamp (u32).
     fn get_generation_times(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let times = self.inner.get_generation_times().map_err(openpgp_err)?;
+        let times = self
+            .session_mut()?
+            .get_generation_times()
+            .map_err(openpgp_err)?;
         let dict = pyo3::types::PyDict::new(py);
         for (key_ref, ts) in &times {
             dict.set_item(*key_ref as u8, *ts)?;
@@ -255,7 +294,10 @@ impl OpenPgpSession {
 
     /// Returns dict mapping key_ref (u8) to fingerprint bytes.
     fn get_fingerprints(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let fps = self.inner.get_fingerprints().map_err(openpgp_err)?;
+        let fps = self
+            .session_mut()?
+            .get_fingerprints()
+            .map_err(openpgp_err)?;
         let dict = pyo3::types::PyDict::new(py);
         for (key_ref, fp) in &fps {
             dict.set_item(*key_ref as u8, fp.clone())?;
@@ -264,41 +306,51 @@ impl OpenPgpSession {
     }
 
     fn verify_pin(&mut self, pin: &str, extended: bool) -> PyResult<()> {
-        self.inner.verify_pin(pin, extended).map_err(openpgp_err)
+        self.session_mut()?
+            .verify_pin(pin, extended)
+            .map_err(openpgp_err)
     }
 
     fn verify_admin(&mut self, admin_pin: &str) -> PyResult<()> {
-        self.inner.verify_admin(admin_pin).map_err(openpgp_err)
+        self.session_mut()?
+            .verify_admin(admin_pin)
+            .map_err(openpgp_err)
     }
 
     fn unverify_pin(&mut self, pw: u8) -> PyResult<()> {
         let p = parse_pw(pw)?;
-        self.inner.unverify_pin(p).map_err(openpgp_err)
+        self.session_mut()?.unverify_pin(p).map_err(openpgp_err)
     }
 
     fn change_pin(&mut self, pin: &str, new_pin: &str) -> PyResult<()> {
-        self.inner.change_pin(pin, new_pin).map_err(openpgp_err)
+        self.session_mut()?
+            .change_pin(pin, new_pin)
+            .map_err(openpgp_err)
     }
 
     fn change_admin(&mut self, admin_pin: &str, new_admin_pin: &str) -> PyResult<()> {
-        self.inner
+        self.session_mut()?
             .change_admin(admin_pin, new_admin_pin)
             .map_err(openpgp_err)
     }
 
     fn set_reset_code(&mut self, reset_code: &str) -> PyResult<()> {
-        self.inner.set_reset_code(reset_code).map_err(openpgp_err)
+        self.session_mut()?
+            .set_reset_code(reset_code)
+            .map_err(openpgp_err)
     }
 
     fn reset_pin(&mut self, new_pin: &str, reset_code: Option<&str>) -> PyResult<()> {
-        self.inner
+        self.session_mut()?
             .reset_pin(new_pin, reset_code)
             .map_err(openpgp_err)
     }
 
     fn set_signature_pin_policy(&mut self, pin_policy: u8) -> PyResult<()> {
         let pp = openpgp::PinPolicy::from_u8(pin_policy);
-        self.inner.set_signature_pin_policy(pp).map_err(openpgp_err)
+        self.session_mut()?
+            .set_signature_pin_policy(pp)
+            .map_err(openpgp_err)
     }
 
     fn set_pin_attempts(
@@ -307,14 +359,14 @@ impl OpenPgpSession {
         reset_attempts: u8,
         admin_attempts: u8,
     ) -> PyResult<()> {
-        self.inner
+        self.session_mut()?
             .set_pin_attempts(user_attempts, reset_attempts, admin_attempts)
             .map_err(openpgp_err)
     }
 
     /// Get KDF as raw encoded bytes.
     fn get_kdf(&mut self) -> PyResult<Vec<u8>> {
-        let kdf = self.inner.get_kdf().map_err(openpgp_err)?;
+        let kdf = self.session_mut()?.get_kdf().map_err(openpgp_err)?;
         Ok(kdf.to_bytes())
     }
 
@@ -322,14 +374,14 @@ impl OpenPgpSession {
     fn set_kdf(&mut self, kdf_data: &[u8]) -> PyResult<()> {
         let kdf = openpgp::Kdf::parse(kdf_data)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        self.inner.set_kdf(&kdf).map_err(openpgp_err)
+        self.session_mut()?.set_kdf(&kdf).map_err(openpgp_err)
     }
 
     /// Get algorithm attributes as raw encoded bytes.
     fn get_algorithm_attributes(&mut self, key_ref: u8) -> PyResult<Vec<u8>> {
         let kr = parse_key_ref(key_ref)?;
         let attrs = self
-            .inner
+            .session_mut()?
             .get_algorithm_attributes(kr)
             .map_err(openpgp_err)?;
         Ok(attrs.to_bytes())
@@ -340,7 +392,7 @@ impl OpenPgpSession {
     /// Returns dict mapping key_ref (u8) to list of encoded algorithm attribute bytes.
     fn get_algorithm_information(&mut self, py: Python<'_>) -> PyResult<PyObject> {
         let info = self
-            .inner
+            .session_mut()?
             .get_algorithm_information()
             .map_err(openpgp_err)?;
         let dict = pyo3::types::PyDict::new(py);
@@ -356,14 +408,14 @@ impl OpenPgpSession {
         let kr = parse_key_ref(key_ref)?;
         let attrs = openpgp::AlgorithmAttributes::parse(attributes)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        self.inner
+        self.session_mut()?
             .set_algorithm_attributes(kr, &attrs)
             .map_err(openpgp_err)
     }
 
     fn get_uif(&mut self, key_ref: u8) -> PyResult<u8> {
         let kr = parse_key_ref(key_ref)?;
-        let uif = self.inner.get_uif(kr).map_err(openpgp_err)?;
+        let uif = self.session_mut()?.get_uif(kr).map_err(openpgp_err)?;
         Ok(uif as u8)
     }
 
@@ -372,19 +424,19 @@ impl OpenPgpSession {
         let u = Uif::from_u8(uif).ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(format!("Invalid UIF value: {}", uif))
         })?;
-        self.inner.set_uif(kr, u).map_err(openpgp_err)
+        self.session_mut()?.set_uif(kr, u).map_err(openpgp_err)
     }
 
     fn set_generation_time(&mut self, key_ref: u8, timestamp: u32) -> PyResult<()> {
         let kr = parse_key_ref(key_ref)?;
-        self.inner
+        self.session_mut()?
             .set_generation_time(kr, timestamp)
             .map_err(openpgp_err)
     }
 
     fn set_fingerprint(&mut self, key_ref: u8, fingerprint: &[u8]) -> PyResult<()> {
         let kr = parse_key_ref(key_ref)?;
-        self.inner
+        self.session_mut()?
             .set_fingerprint(kr, fingerprint)
             .map_err(openpgp_err)
     }
@@ -393,21 +445,23 @@ impl OpenPgpSession {
     fn generate_rsa_key(&mut self, key_ref: u8, key_size: u16) -> PyResult<Vec<u8>> {
         let kr = parse_key_ref(key_ref)?;
         let rs = parse_rsa_size(key_size)?;
-        self.inner.generate_rsa_key(kr, rs).map_err(openpgp_err)
+        self.session_mut()?
+            .generate_rsa_key(kr, rs)
+            .map_err(openpgp_err)
     }
 
     /// Generate an EC key. `curve_oid` is the OID as a dotted string (e.g. "1.2.840.10045.3.1.7").
     /// Returns public key bytes.
     fn generate_ec_key(&mut self, key_ref: u8, curve_oid: &str) -> PyResult<Vec<u8>> {
         let kr = parse_key_ref(key_ref)?;
-        self.inner
+        self.session_mut()?
             .generate_ec_key(kr, curve_oid)
             .map_err(openpgp_err)
     }
 
     fn get_public_key(&mut self, key_ref: u8) -> PyResult<Vec<u8>> {
         let kr = parse_key_ref(key_ref)?;
-        self.inner.get_public_key(kr).map_err(openpgp_err)
+        self.session_mut()?.get_public_key(kr).map_err(openpgp_err)
     }
 
     /// Import a private key.
@@ -469,53 +523,61 @@ impl OpenPgpSession {
                 )));
             }
         };
-        self.inner.put_key(kr, &private_key).map_err(openpgp_err)
+        self.session_mut()?
+            .put_key(kr, &private_key)
+            .map_err(openpgp_err)
     }
 
     fn delete_key(&mut self, key_ref: u8) -> PyResult<()> {
         let kr = parse_key_ref(key_ref)?;
-        self.inner.delete_key(kr).map_err(openpgp_err)
+        self.session_mut()?.delete_key(kr).map_err(openpgp_err)
     }
 
     fn sign(&mut self, message: &[u8], hash_algorithm: u8) -> PyResult<Vec<u8>> {
         let ha = parse_hash_algorithm(hash_algorithm)?;
-        self.inner.sign(message, ha).map_err(openpgp_err)
+        self.session_mut()?.sign(message, ha).map_err(openpgp_err)
     }
 
     fn decrypt(&mut self, value: &[u8]) -> PyResult<Vec<u8>> {
-        self.inner.decrypt(value).map_err(openpgp_err)
+        self.session_mut()?.decrypt(value).map_err(openpgp_err)
     }
 
     fn authenticate(&mut self, message: &[u8], hash_algorithm: u8) -> PyResult<Vec<u8>> {
         let ha = parse_hash_algorithm(hash_algorithm)?;
-        self.inner.authenticate(message, ha).map_err(openpgp_err)
+        self.session_mut()?
+            .authenticate(message, ha)
+            .map_err(openpgp_err)
     }
 
     /// Get certificate as DER bytes.
     fn get_certificate(&mut self, key_ref: u8) -> PyResult<Vec<u8>> {
         let kr = parse_key_ref(key_ref)?;
-        self.inner.get_certificate(kr).map_err(openpgp_err)
+        self.session_mut()?.get_certificate(kr).map_err(openpgp_err)
     }
 
     fn put_certificate(&mut self, key_ref: u8, cert_der: &[u8]) -> PyResult<()> {
         let kr = parse_key_ref(key_ref)?;
-        self.inner
+        self.session_mut()?
             .put_certificate(kr, cert_der)
             .map_err(openpgp_err)
     }
 
     fn delete_certificate(&mut self, key_ref: u8) -> PyResult<()> {
         let kr = parse_key_ref(key_ref)?;
-        self.inner.delete_certificate(kr).map_err(openpgp_err)
+        self.session_mut()?
+            .delete_certificate(kr)
+            .map_err(openpgp_err)
     }
 
     /// Attest a key. Returns DER certificate.
     fn attest_key(&mut self, key_ref: u8) -> PyResult<Vec<u8>> {
         let kr = parse_key_ref(key_ref)?;
-        self.inner.attest_key(kr).map_err(openpgp_err)
+        self.session_mut()?.attest_key(kr).map_err(openpgp_err)
     }
 
     fn get_challenge(&mut self, length: u16) -> PyResult<Vec<u8>> {
-        self.inner.get_challenge(length).map_err(openpgp_err)
+        self.session_mut()?
+            .get_challenge(length)
+            .map_err(openpgp_err)
     }
 }

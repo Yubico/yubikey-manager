@@ -41,13 +41,51 @@ use pyo3::types::PyBytes;
 use yubikit::core::Transport;
 use yubikit::fido::FidoConnection as FidoConnectionTrait;
 use yubikit::smartcard::{SmartCardConnection, SmartCardError, SmartCardProtocol};
-use yubikit::transport::ctaphid::{CtapHidCapability, FidoError};
+use yubikit::transport::ctaphid::{CtapHidCapability, FidoError, HidFidoConnection};
+use yubikit::transport::pcsc::PcscSmartCardConnection;
 
 use crate::py_pcsc::PcscConnection;
 
-/// Type alias for a boxed smart card connection (used as the generic parameter
-/// for sessions and protocols in the PyO3 layer).
-pub type BoxedSmartCardConnection = Box<dyn SmartCardConnection + Send + Sync>;
+// ---------------------------------------------------------------------------
+// SmartCard connection enum
+// ---------------------------------------------------------------------------
+
+/// Enum over the two concrete SmartCard connection types used in the PyO3 layer.
+///
+/// Replaces `Box<dyn SmartCardConnection>` to allow type-safe restoration
+/// without downcasting when a session is closed.
+pub enum PySmartCardConn {
+    Native(PcscSmartCardConnection),
+    Bridge(PythonSmartCardConnection),
+}
+
+impl yubikit::core::Connection for PySmartCardConn {
+    type Error = SmartCardError;
+    fn close(&mut self) {
+        match self {
+            Self::Native(c) => c.close(),
+            Self::Bridge(c) => c.close(),
+        }
+    }
+}
+
+impl SmartCardConnection for PySmartCardConn {
+    fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+        match self {
+            Self::Native(c) => c.send_and_receive(apdu),
+            Self::Bridge(c) => c.send_and_receive(apdu),
+        }
+    }
+    fn transport(&self) -> Transport {
+        match self {
+            Self::Native(c) => c.transport(),
+            Self::Bridge(c) => c.transport(),
+        }
+    }
+}
+
+/// Type alias used as the generic parameter for sessions in the PyO3 layer.
+pub type BoxedSmartCardConnection = PySmartCardConn;
 
 /// A Rust `SmartCardConnection` backed by a Python connection object.
 ///
@@ -55,7 +93,7 @@ pub type BoxedSmartCardConnection = Box<dyn SmartCardConnection + Send + Sync>;
 /// and reads `transport` property to determine USB vs NFC. Used as the
 /// slow-path bridge when the connection is implemented in Python rather than
 /// being a native Rust connection.
-struct PythonSmartCardConnection {
+pub struct PythonSmartCardConnection {
     /// The Python connection's `send_and_receive` bound method.
     send_fn: PyObject,
     transport: Transport,
@@ -124,19 +162,64 @@ pub fn extract_smartcard_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedSma
     // Fast path: native PcscConnection
     if let Ok(pcsc) = obj.downcast::<PcscConnection>() {
         let conn = pcsc.borrow_mut().take_inner()?;
-        return Ok(Box::new(conn));
+        return Ok(PySmartCardConn::Native(conn));
     }
 
     // Slow path: arbitrary Python connection
-    Ok(Box::new(PythonSmartCardConnection::from_py(obj)?))
+    Ok(PySmartCardConn::Bridge(PythonSmartCardConnection::from_py(
+        obj,
+    )?))
 }
 
 // ---------------------------------------------------------------------------
-// FidoConnection bridge
+// FidoConnection enum
 // ---------------------------------------------------------------------------
 
-/// Type alias for a boxed FIDO connection.
-pub type BoxedFidoConnection = Box<dyn FidoConnectionTrait + Send>;
+/// Enum over the two concrete FIDO connection types used in the PyO3 layer.
+pub enum PyFidoConn {
+    Native(HidFidoConnection),
+    Bridge(PythonFidoConnection),
+}
+
+impl yubikit::core::Connection for PyFidoConn {
+    type Error = FidoError;
+    fn close(&mut self) {
+        match self {
+            Self::Native(c) => c.close(),
+            Self::Bridge(c) => c.close(),
+        }
+    }
+}
+
+impl FidoConnectionTrait for PyFidoConn {
+    fn call(
+        &mut self,
+        cmd: u8,
+        data: &[u8],
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Vec<u8>, FidoError> {
+        match self {
+            Self::Native(c) => c.call(cmd, data, on_keepalive, cancel),
+            Self::Bridge(c) => c.call(cmd, data, on_keepalive, cancel),
+        }
+    }
+    fn device_version(&self) -> (u8, u8, u8) {
+        match self {
+            Self::Native(c) => c.device_version(),
+            Self::Bridge(c) => c.device_version(),
+        }
+    }
+    fn capabilities(&self) -> CtapHidCapability {
+        match self {
+            Self::Native(c) => c.capabilities(),
+            Self::Bridge(c) => c.capabilities(),
+        }
+    }
+}
+
+/// Type alias used as the generic parameter for FIDO sessions in the PyO3 layer.
+pub type BoxedFidoConnection = PyFidoConn;
 
 /// A Rust `FidoConnection` backed by a Python connection object.
 ///
@@ -144,7 +227,7 @@ pub type BoxedFidoConnection = Box<dyn FidoConnectionTrait + Send>;
 /// command. Reads `device_version` and `capabilities` properties once at
 /// construction time. Used as the slow-path bridge when the connection is
 /// implemented in Python rather than being a native Rust connection.
-struct PythonFidoConnection {
+pub struct PythonFidoConnection {
     call_fn: PyObject,
     device_version: (u8, u8, u8),
     capabilities: CtapHidCapability,
@@ -211,11 +294,61 @@ pub fn extract_fido_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedFidoConn
     // Fast path: native FidoConnection
     if let Ok(fido) = obj.downcast::<crate::py_hid::FidoConnection>() {
         let conn = fido.borrow_mut().take_inner()?;
-        return Ok(Box::new(conn));
+        return Ok(PyFidoConn::Native(conn));
     }
 
     // Slow path: arbitrary Python connection
-    Ok(Box::new(PythonFidoConnection::from_py(obj)?))
+    Ok(PyFidoConn::Bridge(PythonFidoConnection::from_py(obj)?))
+}
+
+/// Restore a `BoxedSmartCardConnection` back to the Python connection wrapper.
+///
+/// **Native variant**: restore the `PcscSmartCardConnection` into the pyclass.
+/// **Bridge variant**: just drop — the Python object was never modified.
+pub fn restore_smartcard_connection(
+    py_conn: &Bound<'_, PyAny>,
+    conn: BoxedSmartCardConnection,
+) -> PyResult<()> {
+    match conn {
+        PySmartCardConn::Native(inner) => {
+            let pcsc = py_conn.downcast::<PcscConnection>().map_err(|_| {
+                pyo3::exceptions::PyRuntimeError::new_err(
+                    "Native SmartCard connection but Python object is not PcscConnection",
+                )
+            })?;
+            pcsc.borrow_mut().restore_inner(inner);
+        }
+        PySmartCardConn::Bridge(_) => {
+            // Nothing to restore — the Python connection object is unchanged
+        }
+    }
+    Ok(())
+}
+
+/// Restore a `BoxedFidoConnection` back to the Python connection wrapper.
+///
+/// **Native variant**: restore the `HidFidoConnection` into the pyclass.
+/// **Bridge variant**: just drop.
+pub fn restore_fido_connection(
+    py_conn: &Bound<'_, PyAny>,
+    conn: BoxedFidoConnection,
+) -> PyResult<()> {
+    match conn {
+        PyFidoConn::Native(inner) => {
+            let fido = py_conn
+                .downcast::<crate::py_hid::FidoConnection>()
+                .map_err(|_| {
+                    pyo3::exceptions::PyRuntimeError::new_err(
+                        "Native FIDO connection but Python object is not FidoConnection",
+                    )
+                })?;
+            fido.borrow_mut().restore_inner(inner);
+        }
+        PyFidoConn::Bridge(_) => {
+            // Nothing to restore
+        }
+    }
+    Ok(())
 }
 
 /// Convert a `FidoError` to a Python exception.
