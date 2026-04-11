@@ -56,6 +56,11 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         Ok(s)
     }
 
+    /// Get a reference to the cached authenticator info.
+    pub fn info(&self) -> &Info {
+        &self.cached_info
+    }
+
     /// The protocol version reported by the authenticator.
     pub fn version(&self) -> crate::core::Version {
         self.session.version()

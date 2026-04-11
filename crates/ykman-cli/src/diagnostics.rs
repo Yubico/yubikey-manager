@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
+use yubikit::core::Connection;
 use yubikit::core::Transport;
 use yubikit::device::{get_name, list_readers, read_info_ccid, read_info_fido, read_info_otp};
 use yubikit::management::{Capability, DeviceInfo, ReleaseType};
@@ -16,7 +17,8 @@ use yubikit::transport::pcsc::{PcscSmartCardConnection, is_reader_usb};
 
 use yubikit::yubiotp::YubiOtpSession;
 
-use crate::ctap_device::HidCtapDevice;
+use yubikit::ctap::CtapSession;
+use yubikit::ctap2::{ClientPin, Ctap2Session};
 
 /// A value that is either a successful result or an error message.
 #[derive(Debug, Serialize)]
@@ -358,7 +360,7 @@ fn management_diag(info: &DeviceInfo) -> ManagementDiag {
     }
 }
 
-fn ctap2_info_diag(info: &fido2_client::ctap2::Info) -> Ctap2InfoDiag {
+fn ctap2_info_diag(info: &yubikit::ctap2::Info) -> Ctap2InfoDiag {
     Ctap2InfoDiag {
         versions: info.versions.clone(),
         extensions: info.extensions.clone(),
@@ -366,11 +368,11 @@ fn ctap2_info_diag(info: &fido2_client::ctap2::Info) -> Ctap2InfoDiag {
         options: info.options.clone(),
         max_msg_size: info.max_msg_size,
         pin_uv_auth_protocols: info.pin_uv_protocols.clone(),
-        max_creds_in_list: info.max_creds_in_list,
-        max_cred_id_length: info.max_cred_id_length,
+        max_creds_in_list: info.max_creds_in_list.unwrap_or(0),
+        max_cred_id_length: info.max_cred_id_length.unwrap_or(0),
         transports: info.transports.clone(),
         min_pin_length: info.min_pin_length,
-        firmware_version: info.firmware_version,
+        firmware_version: info.firmware_version.unwrap_or(0),
         remaining_disc_creds: info.remaining_disc_creds,
         force_pin_change: info.force_pin_change,
     }
@@ -554,13 +556,10 @@ fn probe_hsmauth(
     }
 }
 
-fn probe_ctap2_pin(
-    ctap2: fido2_client::ctap2::Ctap2<HidCtapDevice>,
-) -> (
-    ResultOrError<PinStatusDiag>,
-    fido2_client::ctap2::Ctap2<HidCtapDevice>,
-) {
-    let info = ctap2.info();
+fn probe_ctap2_pin<C: Connection + 'static>(
+    ctap2: Ctap2Session<C>,
+) -> (ResultOrError<PinStatusDiag>, Ctap2Session<C>) {
+    let info = ctap2.info().clone();
     if info.options.get("clientPin") != Some(&true) {
         return (
             ResultOrError::Ok(PinStatusDiag {
@@ -575,7 +574,7 @@ fn probe_ctap2_pin(
 
     let bio_enroll_option = info.options.get("bioEnroll").copied();
 
-    match fido2_client::pin::ClientPin::new(ctap2, None) {
+    match ClientPin::new(ctap2) {
         Ok(mut client_pin) => {
             let (retries, power_cycle) = client_pin.get_pin_retries().unwrap_or((0, None));
 
@@ -590,7 +589,7 @@ fn probe_ctap2_pin(
                 _ => None,
             };
 
-            let ctap2 = client_pin.into_ctap();
+            let ctap2 = client_pin.into_session();
             (
                 ResultOrError::Ok(PinStatusDiag {
                     configured: true,
@@ -601,7 +600,7 @@ fn probe_ctap2_pin(
                 ctap2,
             )
         }
-        Err((_, e)) => panic!("ClientPin::new failed after info check: {e}"),
+        Err(e) => panic!("ClientPin::new failed after info check: {e}"),
     }
 }
 
@@ -814,9 +813,8 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
                         let caps = conn.capabilities();
 
                         if caps.has_cbor() {
-                            let adapter = HidCtapDevice::new(conn);
-                            let (ctap2, mgmt) =
-                                match fido2_client::ctap2::Ctap2::new(adapter, false) {
+                            let (ctap2, mgmt) = match CtapSession::new_fido(conn) {
+                                Ok(ctap) => match Ctap2Session::new(ctap) {
                                     Ok(ctap2) => {
                                         let info_diag = ctap2_info_diag(ctap2.info());
                                         let (pin, ctap2) = probe_ctap2_pin(ctap2);
@@ -825,7 +823,7 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
                                             pin,
                                         });
 
-                                        let conn = ctap2.into_device().into_connection();
+                                        let conn = ctap2.into_session().into_connection();
                                         let mgmt = match read_info_fido(conn) {
                                             Ok((info, _)) => {
                                                 ResultOrError::Ok(management_diag(&info))
@@ -834,11 +832,16 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
                                         };
                                         (ctap2_diag, mgmt)
                                     }
-                                    Err((_, e)) => (
+                                    Err(e) => (
                                         ResultOrError::Err(format!("{e}")),
                                         ResultOrError::Err(format!("{e}")),
                                     ),
-                                };
+                                },
+                                Err((e, _)) => (
+                                    ResultOrError::Err(format!("{e}")),
+                                    ResultOrError::Err(format!("{e}")),
+                                ),
+                            };
 
                             devices.insert(
                                 key,

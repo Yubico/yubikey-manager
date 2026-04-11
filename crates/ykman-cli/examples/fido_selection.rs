@@ -5,175 +5,68 @@
 //
 // Usage: cargo run -p ykman-cli --example fido_selection
 
-use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use fido2_client::ctap::{self, CtapDevice, CtapError};
-use fido2_client::ctap2::Ctap2;
-use yubikit::fido::FidoConnection;
-use yubikit::smartcard::{SmartCardConnection, SmartCardError, SmartCardProtocol};
+use yubikit::ctap::CtapSession;
+use yubikit::ctap2::{Ctap2Session, CtapStatus};
 use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::transport::pcsc::{PcscSmartCardConnection, list_readers};
 
-const AID_FIDO: &[u8] = &[0xA0, 0x00, 0x00, 0x06, 0x47, 0x2F, 0x00, 0x01];
-const SW_KEEPALIVE: u16 = 0x9100;
-
-// --- HID adapter ---
-
-struct HidCtapDevice {
-    conn: HidFidoConnection,
-}
-
-impl CtapDevice for HidCtapDevice {
-    fn call(
-        &mut self,
-        cmd: u8,
-        data: &[u8],
-        on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Vec<u8>, CtapError> {
-        self.conn
-            .call(cmd, data, Some(on_keepalive), cancel)
-            .map_err(|e: yubikit::transport::ctaphid::FidoError| {
-                CtapError::TransportError(e.to_string())
-            })
-    }
-
-    fn capabilities(&self) -> u8 {
-        self.conn.capabilities().raw()
-    }
-
-    fn close(&mut self) {
-        self.conn.close();
-    }
-}
-
-// --- SmartCard (PCSC) adapter ---
-
-struct SmartCardCtapDevice<C: SmartCardConnection> {
-    protocol: RefCell<SmartCardProtocol<C>>,
-    capabilities: u8,
-}
-
-impl<C: SmartCardConnection> SmartCardCtapDevice<C> {
-    fn open(connection: C) -> Result<Self, CtapError> {
-        let mut protocol = SmartCardProtocol::new(connection);
-        let resp = protocol
-            .select(AID_FIDO)
-            .map_err(|e| CtapError::TransportError(format!("FIDO select failed: {e}")))?;
-
-        let mut capabilities = 0u8;
-        if resp == b"U2F_V2" {
-            capabilities |= ctap::capability::NMSG;
-        }
-
-        let protocol = RefCell::new(protocol);
-        // Probe for CTAP2
-        {
-            let mut proto = protocol.borrow_mut();
-            if proto.send_apdu(0x80, 0x10, 0x80, 0x00, b"\x04").is_ok() {
-                capabilities |= ctap::capability::CBOR;
-            }
-        }
-
-        Ok(Self {
-            protocol,
-            capabilities,
-        })
-    }
-
-    fn call_cbor(
-        &self,
-        data: &[u8],
-        on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Vec<u8>, CtapError> {
-        let resp = {
-            let mut protocol = self.protocol.borrow_mut();
-            match protocol.send_apdu(0x80, 0x10, 0x80, 0x00, data) {
-                Ok(resp) => return Ok(resp),
-                Err(SmartCardError::Apdu { data, sw }) if sw == SW_KEEPALIVE => data,
-                Err(SmartCardError::Apdu { sw, .. }) => {
-                    return Err(CtapError::TransportError(format!(
-                        "NFCCTAP error: SW={sw:04X}"
-                    )));
-                }
-                Err(e) => return Err(CtapError::TransportError(e.to_string())),
-            }
-        };
-
-        let mut last_ka: Option<u8> = None;
-        if !resp.is_empty() {
-            last_ka = Some(resp[0]);
-            on_keepalive(resp[0]);
-        }
-
-        loop {
-            std::thread::sleep(Duration::from_millis(100));
-            let p1 = if cancel.is_some_and(|f| f()) {
-                0x11
-            } else {
-                0x00
-            };
-            let mut protocol = self.protocol.borrow_mut();
-            match protocol.send_apdu(0x80, 0x11, p1, 0x00, &[]) {
-                Ok(resp) => return Ok(resp),
-                Err(SmartCardError::Apdu { data, sw }) if sw == SW_KEEPALIVE => {
-                    if let Some(&status) = data.first()
-                        && last_ka != Some(status)
-                    {
-                        last_ka = Some(status);
-                        on_keepalive(status);
-                    }
-                }
-                Err(SmartCardError::Apdu { sw, .. }) => {
-                    return Err(CtapError::TransportError(format!(
-                        "NFCCTAP error: SW={sw:04X}"
-                    )));
-                }
-                Err(e) => return Err(CtapError::TransportError(e.to_string())),
-            }
-        }
-    }
-}
-
-impl<C: SmartCardConnection> CtapDevice for SmartCardCtapDevice<C> {
-    fn call(
-        &mut self,
-        cmd: u8,
-        data: &[u8],
-        on_keepalive: &mut dyn FnMut(u8),
-        cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Vec<u8>, CtapError> {
-        match cmd {
-            ctap::cmd::CBOR => self.call_cbor(data, on_keepalive, cancel),
-            _ => Err(CtapError::StatusError(ctap::CtapStatus::InvalidCommand)),
-        }
-    }
-
-    fn capabilities(&self) -> u8 {
-        self.capabilities
-    }
-
-    fn close(&mut self) {}
-}
-
 // --- Main ---
 
-fn run_selection<D: CtapDevice>(device: D, transport_name: &str) {
-    println!("=== Testing selection over {transport_name} ===");
+fn run_selection_hid(conn: HidFidoConnection) {
+    println!("=== Testing selection over HID ===");
 
-    let mut ctap2 = match Ctap2::new(device, false) {
+    let ctap = match CtapSession::new_fido(conn) {
         Ok(c) => c,
-        Err((_, e)) => {
+        Err((e, _)) => {
+            eprintln!("Failed to init CTAP: {e}");
+            return;
+        }
+    };
+    let mut ctap2 = match Ctap2Session::new(ctap) {
+        Ok(c) => c,
+        Err(e) => {
             eprintln!("Failed to init CTAP2: {e}");
             return;
         }
     };
 
-    println!("CTAP2 initialized, AAGUID: {:?}", ctap2.info().aaguid);
+    println!("CTAP2 initialized, AAGUID: {}", ctap2.info().aaguid);
+    run_selection_inner(&mut ctap2);
+}
+
+fn run_selection_smartcard(conn: PcscSmartCardConnection, reader: &str) {
+    println!("=== Testing selection over PC/SC ({reader}) ===");
+
+    let ctap = match CtapSession::new(conn) {
+        Ok(c) => c,
+        Err((e, _)) => {
+            eprintln!("Failed to init CTAP: {e}");
+            return;
+        }
+    };
+
+    if !ctap.has_ctap2() {
+        eprintln!("  FIDO2 not available on this device");
+        return;
+    }
+
+    let mut ctap2 = match Ctap2Session::new(ctap) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to init CTAP2: {e}");
+            return;
+        }
+    };
+
+    println!("CTAP2 initialized, AAGUID: {}", ctap2.info().aaguid);
+    run_selection_inner(&mut ctap2);
+}
+
+fn run_selection_inner<C: yubikit::core::Connection + 'static>(ctap2: &mut Ctap2Session<C>) {
     println!("Starting selection (will cancel after 3 seconds)...");
 
     let cancel = Arc::new(AtomicBool::new(false));
@@ -186,9 +79,9 @@ fn run_selection<D: CtapDevice>(device: D, transport_name: &str) {
 
     let is_cancelled = || cancel.load(Ordering::Relaxed);
     let result = ctap2.selection(
-        &mut |status| {
+        Some(&mut |status| {
             println!("  [keepalive] status={status:#04x}");
-        },
+        }),
         Some(&is_cancelled),
     );
 
@@ -196,10 +89,12 @@ fn run_selection<D: CtapDevice>(device: D, transport_name: &str) {
 
     match result {
         Ok(()) => println!("Selection succeeded (user touched the device)"),
-        Err(ref e) if e.get_status() == Some(ctap::CtapStatus::KeepaliveCancel) => {
-            println!("Selection was cancelled (expected)")
-        }
-        Err(e) => println!("Selection failed: {e}"),
+        Err(ref e) => match e {
+            yubikit::ctap2::Ctap2Error::StatusError(CtapStatus::KeepaliveCancel) => {
+                println!("Selection was cancelled (expected)")
+            }
+            _ => println!("Selection failed: {e}"),
+        },
     }
     println!();
 }
@@ -213,10 +108,7 @@ fn main() {
                 dev_info.path, dev_info.pid
             );
             match HidFidoConnection::open(dev_info) {
-                Ok(conn) => {
-                    let device = HidCtapDevice { conn };
-                    run_selection(device, "HID");
-                }
+                Ok(conn) => run_selection_hid(conn),
                 Err(e) => eprintln!("Failed to open HID device: {e}"),
             }
         }
@@ -227,10 +119,7 @@ fn main() {
         for reader in &readers {
             println!("Found PC/SC reader: {reader}");
             match PcscSmartCardConnection::open(reader) {
-                Ok(conn) => match SmartCardCtapDevice::open(conn) {
-                    Ok(device) => run_selection(device, &format!("PC/SC ({reader})")),
-                    Err(e) => eprintln!("  FIDO not available: {e}"),
-                },
+                Ok(conn) => run_selection_smartcard(conn, reader),
                 Err(e) => eprintln!("  Failed to connect: {e}"),
             }
         }

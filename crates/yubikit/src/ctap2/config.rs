@@ -46,8 +46,8 @@ mod config_cmd {
 /// Owns a [`Ctap2Session`] and a [`PinProtocol`] for authenticated commands.
 pub struct Config<C: Connection> {
     session: Ctap2Session<C>,
-    protocol: PinProtocol,
-    pin_token: Vec<u8>,
+    protocol: Option<PinProtocol>,
+    pin_token: Option<Vec<u8>>,
 }
 
 impl<C: Connection + 'static> Config<C> {
@@ -67,8 +67,25 @@ impl<C: Connection + 'static> Config<C> {
         }
         Ok(Self {
             session,
-            protocol,
-            pin_token,
+            protocol: Some(protocol),
+            pin_token: Some(pin_token),
+        })
+    }
+
+    /// Create a new `Config` without PIN authentication.
+    ///
+    /// Used when no PIN is set on the authenticator but config commands are needed.
+    pub fn new_unauthenticated(session: Ctap2Session<C>) -> Result<Self, Ctap2Error<C::Error>> {
+        let info = &session.cached_info;
+        if info.options.get("authnrCfg") != Some(&true) {
+            return Err(Ctap2Error::InvalidResponse(
+                "Authenticator does not support authenticatorConfig".into(),
+            ));
+        }
+        Ok(Self {
+            session,
+            protocol: None,
+            pin_token: None,
         })
     }
 
@@ -87,16 +104,18 @@ impl<C: Connection + 'static> Config<C> {
         if let Some(p) = sub_cmd_params {
             params.push((Value::Int(0x02), p.clone()));
         }
-        // Auth message: 0xff*32 || 0x0d || subCmd || serialize(subCmdParams)
-        let mut msg = vec![0xff; 32];
-        msg.push(cmd::CONFIG);
-        msg.push(sub_cmd);
-        if let Some(p) = sub_cmd_params {
-            msg.extend_from_slice(&cbor::encode(p));
+        if let (Some(protocol), Some(pin_token)) = (&self.protocol, &self.pin_token) {
+            // Auth message: 0xff*32 || 0x0d || subCmd || serialize(subCmdParams)
+            let mut msg = vec![0xff; 32];
+            msg.push(cmd::CONFIG);
+            msg.push(sub_cmd);
+            if let Some(p) = sub_cmd_params {
+                msg.extend_from_slice(&cbor::encode(p));
+            }
+            let pin_uv_param = protocol.authenticate(pin_token, &msg);
+            params.push((Value::Int(0x03), Value::Int(protocol.version() as i64)));
+            params.push((Value::Int(0x04), Value::Bytes(pin_uv_param)));
         }
-        let pin_uv_param = self.protocol.authenticate(&self.pin_token, &msg);
-        params.push((Value::Int(0x03), Value::Int(self.protocol.version() as i64)));
-        params.push((Value::Int(0x04), Value::Bytes(pin_uv_param)));
 
         let data = cbor::encode(&Value::Map(params));
         self.session

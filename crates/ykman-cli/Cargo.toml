@@ -19,8 +19,6 @@ path = "examples/fido_selection.rs"
 
 [dependencies]
 yubikit = { path = "../yubikit" }
-fido2-server = { git = "https://github.com/Yubico/python-fido2.git", branch = "experiment/rust" }
-fido2-client = { git = "https://github.com/Yubico/python-fido2.git", branch = "experiment/rust" }
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 getrandom = "0.3"
