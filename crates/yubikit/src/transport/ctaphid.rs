@@ -115,6 +115,10 @@ impl CtapHidCapability {
         self.0 & Self::WINK != 0
     }
 
+    pub fn has_nmsg(self) -> bool {
+        self.0 & Self::NMSG != 0
+    }
+
     pub fn raw(self) -> u8 {
         self.0
     }
@@ -428,19 +432,16 @@ impl crate::core::Connection for HidFidoConnection {
 }
 
 impl crate::fido::FidoConnection for HidFidoConnection {
-    fn call(&mut self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
-        self.send_request(cmd, data)?;
-        self.recv_response(cmd, &mut |_| {}, None)
-    }
-
-    fn call_with_keepalive(
+    fn call(
         &mut self,
         cmd: u8,
         data: &[u8],
-        on_keepalive: &mut dyn FnMut(u8),
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, FidoError> {
         self.send_request(cmd, data)?;
+        let mut noop = |_: u8| {};
+        let on_keepalive = on_keepalive.unwrap_or(&mut noop);
         self.recv_response(cmd, on_keepalive, cancel)
     }
 

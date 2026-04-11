@@ -1397,12 +1397,12 @@ mod fido {
         // can only be sent in response to a keepalive packet).
         let got_keepalive = std::sync::atomic::AtomicBool::new(false);
         let start = std::time::Instant::now();
-        let result = conn.call_with_keepalive(
+        let result = conn.call(
             0x10,
             &[0x0B], // CBOR authenticatorSelection
-            &mut |_status| {
+            Some(&mut |_status| {
                 got_keepalive.store(true, std::sync::atomic::Ordering::Relaxed);
-            },
+            }),
             Some(&|| got_keepalive.load(std::sync::atomic::Ordering::Relaxed)),
         );
         let elapsed = start.elapsed();

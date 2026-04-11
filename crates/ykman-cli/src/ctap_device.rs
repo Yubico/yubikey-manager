@@ -39,7 +39,7 @@ impl CtapDevice for HidCtapDevice {
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, CtapError> {
         self.conn
-            .call_with_keepalive(cmd, data, on_keepalive, cancel)
+            .call(cmd, data, Some(on_keepalive), cancel)
             .map_err(|e| CtapError::TransportError(e.to_string()))
     }
 

@@ -202,7 +202,7 @@ impl FidoConnection {
             .inner
             .as_mut()
             .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
-        let response = conn.call(cmd, data).map_err(ctap_err)?;
+        let response = conn.call(cmd, data, None, None).map_err(ctap_err)?;
         Ok(PyBytes::new(py, &response))
     }
 

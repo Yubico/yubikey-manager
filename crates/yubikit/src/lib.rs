@@ -26,6 +26,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 pub mod core;
+pub mod ctap;
 pub mod device;
 pub mod fido;
 pub mod hsmauth;

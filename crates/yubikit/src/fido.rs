@@ -31,12 +31,11 @@ use crate::transport::ctaphid::FidoError;
 
 /// Abstract FIDO connection — send CTAP HID commands.
 pub trait FidoConnection: crate::core::Connection<Error = FidoError> {
-    fn call(&mut self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError>;
-    fn call_with_keepalive(
+    fn call(
         &mut self,
         cmd: u8,
         data: &[u8],
-        on_keepalive: &mut dyn FnMut(u8),
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, FidoError>;
     fn device_version(&self) -> (u8, u8, u8);
@@ -51,17 +50,14 @@ impl crate::core::Connection for Box<dyn FidoConnection + Send> {
 }
 
 impl FidoConnection for Box<dyn FidoConnection + Send> {
-    fn call(&mut self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
-        (**self).call(cmd, data)
-    }
-    fn call_with_keepalive(
+    fn call(
         &mut self,
         cmd: u8,
         data: &[u8],
-        on_keepalive: &mut dyn FnMut(u8),
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, FidoError> {
-        (**self).call_with_keepalive(cmd, data, on_keepalive, cancel)
+        (**self).call(cmd, data, on_keepalive, cancel)
     }
     fn device_version(&self) -> (u8, u8, u8) {
         (**self).device_version()
@@ -79,17 +75,14 @@ impl crate::core::Connection for Box<dyn FidoConnection + Send + Sync> {
 }
 
 impl FidoConnection for Box<dyn FidoConnection + Send + Sync> {
-    fn call(&mut self, cmd: u8, data: &[u8]) -> Result<Vec<u8>, FidoError> {
-        (**self).call(cmd, data)
-    }
-    fn call_with_keepalive(
+    fn call(
         &mut self,
         cmd: u8,
         data: &[u8],
-        on_keepalive: &mut dyn FnMut(u8),
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, FidoError> {
-        (**self).call_with_keepalive(cmd, data, on_keepalive, cancel)
+        (**self).call(cmd, data, on_keepalive, cancel)
     }
     fn device_version(&self) -> (u8, u8, u8) {
         (**self).device_version()

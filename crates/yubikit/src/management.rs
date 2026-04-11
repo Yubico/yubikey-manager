@@ -1319,11 +1319,12 @@ impl<C: FidoConnection + 'static> ManagementOps<FidoError> for FidoManagement<C>
 
     fn read_config(&mut self, page: u8) -> Result<Vec<u8>, FidoError> {
         let data = int2bytes(page as u64);
-        self.connection.call(CTAP_READ_CONFIG, &data)
+        self.connection.call(CTAP_READ_CONFIG, &data, None, None)
     }
 
     fn write_config(&mut self, config: &[u8]) -> Result<(), FidoError> {
-        self.connection.call(CTAP_WRITE_CONFIG, config)?;
+        self.connection
+            .call(CTAP_WRITE_CONFIG, config, None, None)?;
         Ok(())
     }
 
@@ -1339,7 +1340,8 @@ impl<C: FidoConnection + 'static> ManagementOps<FidoError> for FidoManagement<C>
             (auto_eject_timeout & 0xFF) as u8,
             (auto_eject_timeout >> 8) as u8,
         ];
-        self.connection.call(CTAP_YUBIKEY_DEVICE_CONFIG, &data)?;
+        self.connection
+            .call(CTAP_YUBIKEY_DEVICE_CONFIG, &data, None, None)?;
         Ok(())
     }
 
