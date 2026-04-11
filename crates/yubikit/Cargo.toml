@@ -7,6 +7,7 @@ license = "BSD-2-Clause"
 
 [dependencies]
 aes = "0.8"
+aes-gcm = "0.10"
 base32 = "0.5"
 cbc = { version = "0.1", features = ["alloc"] }
 cmac = "0.7"

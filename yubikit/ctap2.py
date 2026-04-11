@@ -448,3 +448,28 @@ class LargeBlobs(Closable):
 
     def write_blob_array(self, data: bytes) -> None:
         self._native.write_blob_array(data)
+
+    def get_blob(self, large_blob_key: bytes) -> bytes | None:
+        """Get the decrypted blob for a single credential.
+
+        :param large_blob_key: The largeBlobKey for the credential.
+        :returns: The decrypted data, or None if no matching entry.
+        """
+        return self._native.get_blob(large_blob_key)
+
+    def put_blob(self, large_blob_key: bytes, data: bytes) -> None:
+        """Store a blob for a single credential.
+
+        Replaces any existing entry for the same key.
+
+        :param large_blob_key: The largeBlobKey for the credential.
+        :param data: The data to store.
+        """
+        self._native.put_blob(large_blob_key, data)
+
+    def delete_blob(self, large_blob_key: bytes) -> None:
+        """Delete any blob(s) stored for a single credential.
+
+        :param large_blob_key: The largeBlobKey for the credential.
+        """
+        self._native.delete_blob(large_blob_key)

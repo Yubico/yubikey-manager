@@ -1383,6 +1383,33 @@ impl PyLargeBlobs {
     fn write_blob_array(&mut self, data: &[u8]) -> PyResult<()> {
         self.get_mut()?.write_blob_array(data).map_err(ctap2_err)
     }
+
+    fn get_blob<'py>(
+        &mut self,
+        py: Python<'py>,
+        large_blob_key: &[u8],
+    ) -> PyResult<Option<Bound<'py, PyBytes>>> {
+        match self
+            .get_mut()?
+            .get_blob(large_blob_key)
+            .map_err(ctap2_err)?
+        {
+            Some(data) => Ok(Some(PyBytes::new(py, &data))),
+            None => Ok(None),
+        }
+    }
+
+    fn put_blob(&mut self, large_blob_key: &[u8], data: &[u8]) -> PyResult<()> {
+        self.get_mut()?
+            .put_blob(large_blob_key, data)
+            .map_err(ctap2_err)
+    }
+
+    fn delete_blob(&mut self, large_blob_key: &[u8]) -> PyResult<()> {
+        self.get_mut()?
+            .delete_blob(large_blob_key)
+            .map_err(ctap2_err)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1432,5 +1459,32 @@ impl PyLargeBlobsFido {
 
     fn write_blob_array(&mut self, data: &[u8]) -> PyResult<()> {
         self.get_mut()?.write_blob_array(data).map_err(ctap2_err)
+    }
+
+    fn get_blob<'py>(
+        &mut self,
+        py: Python<'py>,
+        large_blob_key: &[u8],
+    ) -> PyResult<Option<Bound<'py, PyBytes>>> {
+        match self
+            .get_mut()?
+            .get_blob(large_blob_key)
+            .map_err(ctap2_err)?
+        {
+            Some(data) => Ok(Some(PyBytes::new(py, &data))),
+            None => Ok(None),
+        }
+    }
+
+    fn put_blob(&mut self, large_blob_key: &[u8], data: &[u8]) -> PyResult<()> {
+        self.get_mut()?
+            .put_blob(large_blob_key, data)
+            .map_err(ctap2_err)
+    }
+
+    fn delete_blob(&mut self, large_blob_key: &[u8]) -> PyResult<()> {
+        self.get_mut()?
+            .delete_blob(large_blob_key)
+            .map_err(ctap2_err)
     }
 }
