@@ -1,0 +1,299 @@
+// Copyright (c) 2026 Yubico AB
+// All rights reserved.
+//
+//   Redistribution and use in source and binary forms, with or
+//   without modification, are permitted provided that the following
+//   conditions are met:
+//
+//    1. Redistributions of source code must retain the above copyright
+//       notice, this list of conditions and the following disclaimer.
+//    2. Redistributions in binary form must reproduce the above
+//       copyright notice, this list of conditions and the following
+//       disclaimer in the documentation and/or other materials provided
+//       with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+// FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+// COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+// INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+// BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+// LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+// ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
+
+use std::collections::BTreeMap;
+
+use crate::cbor::{self, Value};
+use crate::core::Connection;
+
+use super::pin_protocol::PinProtocol;
+use super::session::Ctap2Session;
+use super::{Ctap2Error, cmd};
+
+/// Fingerprint bio-enrollment sub-command identifiers (§6.7).
+mod bio_cmd {
+    pub const ENROLL_BEGIN: u8 = 0x01;
+    pub const ENROLL_CAPTURE_NEXT: u8 = 0x02;
+    pub const ENROLL_CANCEL: u8 = 0x03;
+    pub const ENUMERATE_ENROLLMENTS: u8 = 0x04;
+    pub const SET_NAME: u8 = 0x05;
+    pub const REMOVE_ENROLLMENT: u8 = 0x06;
+    pub const GET_SENSOR_INFO: u8 = 0x07;
+}
+
+/// BioEnrollment response map keys (§6.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum BioResult {
+    Modality = 0x01,
+    FingerprintKind = 0x02,
+    MaxSamplesRequired = 0x03,
+    TemplateId = 0x04,
+    LastSampleStatus = 0x05,
+    RemainingSamples = 0x06,
+    TemplateInfos = 0x07,
+    MaxTemplateFriendlyName = 0x08,
+}
+
+/// Template info map keys inside `TemplateInfos` entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum TemplateInfo {
+    Id = 0x01,
+    Name = 0x02,
+}
+
+/// CTAP2 BioEnrollment operations (§6.7).
+///
+/// Provides fingerprint enrollment, enumeration, naming, and removal.
+/// Owns a [`Ctap2Session`] and a [`PinProtocol`] for authenticated commands.
+pub struct BioEnrollment<C: Connection> {
+    session: Ctap2Session<C>,
+    protocol: PinProtocol,
+    pin_token: Vec<u8>,
+    use_legacy: bool,
+}
+
+impl<C: Connection + 'static> BioEnrollment<C> {
+    /// Create a new `BioEnrollment` from a `Ctap2Session` and a PIN token.
+    ///
+    /// The PIN token must have the `BIO_ENROLL` permission.
+    pub fn new(
+        session: Ctap2Session<C>,
+        protocol: PinProtocol,
+        pin_token: Vec<u8>,
+    ) -> Result<Self, Ctap2Error<C::Error>> {
+        let info = &session.cached_info;
+        let has_bio = info.options.get("bioEnroll") == Some(&true);
+        let has_preview = info.versions.contains(&"FIDO_2_1_PRE".to_string())
+            && info.options.get("userVerificationMgmtPreview") == Some(&true);
+
+        if !has_bio && !has_preview {
+            return Err(Ctap2Error::InvalidResponse(
+                "Authenticator does not support bioEnrollment".into(),
+            ));
+        }
+
+        let use_legacy = !has_bio && has_preview;
+
+        Ok(Self {
+            session,
+            protocol,
+            pin_token,
+            use_legacy,
+        })
+    }
+
+    /// Consume this `BioEnrollment`, returning the underlying `Ctap2Session`.
+    pub fn into_session(self) -> Ctap2Session<C> {
+        self.session
+    }
+
+    fn cmd_byte(&self) -> u8 {
+        if self.use_legacy {
+            cmd::BIO_ENROLLMENT_PRE
+        } else {
+            cmd::BIO_ENROLLMENT
+        }
+    }
+
+    fn call(
+        &mut self,
+        modality: Option<u8>,
+        sub_cmd: Option<u8>,
+        sub_cmd_params: Option<&Value>,
+        auth: bool,
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+        let mut params: Vec<(Value, Value)> = Vec::new();
+        if let Some(m) = modality {
+            params.push((Value::Int(0x01), Value::Int(m as i64)));
+        }
+        if let Some(sc) = sub_cmd {
+            params.push((Value::Int(0x02), Value::Int(sc as i64)));
+        }
+        if let Some(p) = sub_cmd_params {
+            params.push((Value::Int(0x03), p.clone()));
+        }
+        if auth {
+            let mut msg: Vec<u8> = Vec::new();
+            if let Some(m) = modality {
+                msg.push(m);
+            }
+            if let Some(sc) = sub_cmd {
+                msg.push(sc);
+            }
+            if let Some(p) = sub_cmd_params {
+                msg.extend_from_slice(&cbor::encode(p));
+            }
+            let pin_uv_param = self.protocol.authenticate(&self.pin_token, &msg);
+            params.push((Value::Int(0x04), Value::Int(self.protocol.version() as i64)));
+            params.push((Value::Int(0x05), Value::Bytes(pin_uv_param)));
+        }
+
+        let data = cbor::encode(&Value::Map(params));
+        let response =
+            self.session
+                .send_cbor(self.cmd_byte(), Some(&data), on_keepalive, cancel)?;
+
+        if response.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+
+        let value = cbor::decode(&response)
+            .map_err(|e| Ctap2Error::InvalidResponse(format!("CBOR decode error: {e}")))?;
+        let map = value
+            .as_map()
+            .ok_or_else(|| Ctap2Error::InvalidResponse("Expected CBOR map".into()))?;
+
+        let mut result = BTreeMap::new();
+        for (k, v) in map {
+            if let Some(key) = k.as_int() {
+                result.insert(key as u32, v.clone());
+            }
+        }
+        Ok(result)
+    }
+
+    /// Get fingerprint sensor info (type and max samples).
+    pub fn get_fingerprint_sensor_info(
+        &mut self,
+    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::GET_SENSOR_INFO),
+            None,
+            false,
+            None,
+            None,
+        )
+    }
+
+    /// Begin a new fingerprint enrollment.
+    ///
+    /// Returns the response map containing `TemplateId`, `LastSampleStatus`,
+    /// and `RemainingSamples`.
+    pub fn enroll_begin(
+        &mut self,
+        timeout: Option<u32>,
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+        let sub_params =
+            timeout.map(|t| Value::Map(vec![(Value::Int(0x03), Value::Int(t as i64))]));
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::ENROLL_BEGIN),
+            sub_params.as_ref(),
+            true,
+            on_keepalive,
+            cancel,
+        )
+    }
+
+    /// Capture next fingerprint sample during enrollment.
+    pub fn enroll_capture_next(
+        &mut self,
+        template_id: &[u8],
+        timeout: Option<u32>,
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+        let mut sub_entries = vec![(Value::Int(0x01), Value::Bytes(template_id.to_vec()))];
+        if let Some(t) = timeout {
+            sub_entries.push((Value::Int(0x03), Value::Int(t as i64)));
+        }
+        let sub_params = Value::Map(sub_entries);
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::ENROLL_CAPTURE_NEXT),
+            Some(&sub_params),
+            true,
+            on_keepalive,
+            cancel,
+        )
+    }
+
+    /// Cancel an ongoing enrollment.
+    pub fn enroll_cancel(&mut self) -> Result<(), Ctap2Error<C::Error>> {
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::ENROLL_CANCEL),
+            None,
+            false,
+            None,
+            None,
+        )?;
+        Ok(())
+    }
+
+    /// Enumerate all enrolled fingerprints.
+    ///
+    /// Returns a response map containing `TemplateInfos`.
+    pub fn enumerate_enrollments(&mut self) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::ENUMERATE_ENROLLMENTS),
+            None,
+            true,
+            None,
+            None,
+        )
+    }
+
+    /// Set a friendly name for a fingerprint template.
+    pub fn set_name(&mut self, template_id: &[u8], name: &str) -> Result<(), Ctap2Error<C::Error>> {
+        let sub_params = Value::Map(vec![
+            (Value::Int(0x01), Value::Bytes(template_id.to_vec())),
+            (Value::Int(0x02), Value::Text(name.to_string())),
+        ]);
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::SET_NAME),
+            Some(&sub_params),
+            true,
+            None,
+            None,
+        )?;
+        Ok(())
+    }
+
+    /// Remove a fingerprint enrollment.
+    pub fn remove_enrollment(&mut self, template_id: &[u8]) -> Result<(), Ctap2Error<C::Error>> {
+        let sub_params = Value::Map(vec![(Value::Int(0x01), Value::Bytes(template_id.to_vec()))]);
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::REMOVE_ENROLLMENT),
+            Some(&sub_params),
+            true,
+            None,
+            None,
+        )?;
+        Ok(())
+    }
+}
