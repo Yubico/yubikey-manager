@@ -6,7 +6,7 @@
 //
 // A background thread cancels selection after 5 seconds if the user hasn't touched the key.
 //
-// Usage: cargo run -p ykman-cli --example ctap2_selection
+// Usage: cargo run -p yubikit --example ctap2_selection
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

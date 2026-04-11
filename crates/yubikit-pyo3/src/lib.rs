@@ -27,6 +27,7 @@
 
 mod py_bridge;
 mod py_core;
+mod py_ctap;
 mod py_device;
 mod py_hid;
 mod py_hsmauth;
@@ -70,6 +71,8 @@ fn register_sessions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<py_securitydomain::SecurityDomainSession>()?;
     m.add_class::<py_yubiotp::PyYubiOtpSession>()?;
     m.add_class::<py_yubiotp::PyYubiOtpOtpSession>()?;
+    m.add_class::<py_ctap::PyCtap2Session>()?;
+    m.add_class::<py_ctap::PyCtap2FidoSession>()?;
     parent.add_submodule(&m)?;
 
     let sys = parent.py().import("sys")?;

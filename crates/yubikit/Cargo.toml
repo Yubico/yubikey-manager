@@ -47,5 +47,9 @@ rsa = "0.9"
 rstest = "0.25"
 sha2 = { version = "0.10", features = ["oid"] }
 
+[[example]]
+name = "ctap2_selection"
+path = "examples/ctap2_selection.rs"
+
 [lints]
 workspace = true
