@@ -11,20 +11,15 @@ Usage: uv run python examples/credential_management.py
 import getpass
 import hashlib
 
-from _yubikit_native.sessions import (
-    ClientPin,
-    ClientPinFido,
-    CredentialManagement,
-    CredentialManagementFido,
-    Ctap2FidoSession,
-    Ctap2Session,
-)
 from ykman.device import list_all_devices
-from yubikit.core import YubiKeyDevice
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
-
-PERMISSION_CREDENTIAL_MGMT = 0x04
+from yubikit.ctap2 import (
+    PERMISSION_CREDENTIAL_MGMT,
+    ClientPin,
+    CredentialManagement,
+    Ctap2Session,
+)
 
 
 def print_credential(cred: dict) -> None:
@@ -46,9 +41,7 @@ def print_credential(cred: dict) -> None:
         print(f"      CredProtect: {cred_protect}")
 
 
-def list_credentials(
-    cred_mgmt: CredentialManagement | CredentialManagementFido,
-) -> None:
+def list_credentials(cred_mgmt: CredentialManagement) -> None:
     """Enumerate and print all stored credentials."""
     existing, remaining = cred_mgmt.get_metadata()
     print(f"\n  Credentials stored: {existing}")
@@ -92,39 +85,26 @@ def main() -> None:
 
     pin = getpass.getpass("  Enter PIN: ")
 
-    # Prefer FIDO HID over CCID
-    cred_mgmt: CredentialManagement | CredentialManagementFido
     if dev.supports_connection(FidoConnection):  # type: ignore[arg-type]
         print("  Using FIDO HID transport")
-        cred_mgmt = _open_fido(dev, pin)
+        conn = dev.open_connection(FidoConnection)  # type: ignore[arg-type]
     elif dev.supports_connection(SmartCardConnection):
         print("  Using CCID transport")
-        cred_mgmt = _open_ccid(dev, pin)
+        conn = dev.open_connection(SmartCardConnection)
     else:
         print("  No usable connection available on this device.")
         return
 
-    list_credentials(cred_mgmt)
-
-
-def _open_fido(dev: YubiKeyDevice, pin: str) -> CredentialManagementFido:
-    conn = dev.open_connection(FidoConnection)  # type: ignore[arg-type]
-    session = Ctap2FidoSession(conn)
-    client_pin = ClientPinFido(session)
-    pin_token = client_pin.get_pin_token(pin, permissions=PERMISSION_CREDENTIAL_MGMT)
-    protocol = client_pin.protocol
-    client_pin.close(session)  # Return session for reuse
-    return CredentialManagementFido(session, protocol, pin_token)
-
-
-def _open_ccid(dev: YubiKeyDevice, pin: str) -> CredentialManagement:
-    conn = dev.open_connection(SmartCardConnection)
     session = Ctap2Session(conn)
-    client_pin = ClientPin(session)
-    pin_token = client_pin.get_pin_token(pin, permissions=PERMISSION_CREDENTIAL_MGMT)
-    protocol = client_pin.protocol
-    client_pin.close(session)  # Return session for reuse
-    return CredentialManagement(session, protocol, pin_token)
+
+    with ClientPin(session) as client_pin:
+        pin_token = client_pin.get_pin_token(
+            pin, permissions=PERMISSION_CREDENTIAL_MGMT
+        )
+        protocol = client_pin.protocol
+
+    with CredentialManagement(session, protocol, pin_token) as cred_mgmt:
+        list_credentials(cred_mgmt)
 
 
 if __name__ == "__main__":
