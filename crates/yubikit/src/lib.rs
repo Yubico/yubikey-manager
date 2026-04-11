@@ -27,6 +27,7 @@
 
 pub mod core;
 pub mod ctap;
+pub mod ctap2;
 pub mod device;
 pub mod fido;
 pub mod hsmauth;
