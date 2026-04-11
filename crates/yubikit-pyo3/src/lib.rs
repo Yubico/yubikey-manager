@@ -78,6 +78,12 @@ fn register_sessions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<py_ctap::PyClientPinFido>()?;
     m.add_class::<py_ctap::PyCredentialManagement>()?;
     m.add_class::<py_ctap::PyCredentialManagementFido>()?;
+    m.add_class::<py_ctap::PyConfig>()?;
+    m.add_class::<py_ctap::PyConfigFido>()?;
+    m.add_class::<py_ctap::PyBioEnrollment>()?;
+    m.add_class::<py_ctap::PyBioEnrollmentFido>()?;
+    m.add_class::<py_ctap::PyLargeBlobs>()?;
+    m.add_class::<py_ctap::PyLargeBlobsFido>()?;
     parent.add_submodule(&m)?;
 
     let sys = parent.py().import("sys")?;

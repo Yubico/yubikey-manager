@@ -569,6 +569,19 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         Ok(response[1..].to_vec())
     }
 
+    /// authenticatorReset command.
+    ///
+    /// Resets the authenticator to factory defaults: deletes all credentials,
+    /// resets PIN/UV state. Requires user presence (touch).
+    pub fn reset(
+        &mut self,
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<(), Ctap2Error<C::Error>> {
+        self.send_cbor(cmd::RESET, None, on_keepalive, cancel)?;
+        Ok(())
+    }
+
     /// authenticatorSelection command (CTAP 2.1+).
     ///
     /// Asks the user to confirm presence on the authenticator. Returns
@@ -1465,6 +1478,548 @@ impl<C: Connection + 'static> CredentialManagement<C> {
             (Value::Int(0x03), user.clone()),
         ]);
         self.call(cred_mgmt_cmd::UPDATE_USER_INFO, Some(&params), true)?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+/// Config sub-command identifiers (§6.11).
+mod config_cmd {
+    pub const ENABLE_ENTERPRISE_ATT: u8 = 0x01;
+    pub const TOGGLE_ALWAYS_UV: u8 = 0x02;
+    pub const SET_MIN_PIN_LENGTH: u8 = 0x03;
+}
+
+/// CTAP2 Authenticator Config operations (§6.11).
+///
+/// Provides authenticator configuration management: enterprise attestation,
+/// always-UV toggle, and minimum PIN length enforcement.
+/// Owns a [`Ctap2Session`] and a [`PinProtocol`] for authenticated commands.
+pub struct Config<C: Connection> {
+    session: Ctap2Session<C>,
+    protocol: PinProtocol,
+    pin_token: Vec<u8>,
+}
+
+impl<C: Connection + 'static> Config<C> {
+    /// Create a new `Config` from a `Ctap2Session` and a PIN token.
+    ///
+    /// The PIN token must have the `AUTHENTICATOR_CFG` permission.
+    pub fn new(
+        session: Ctap2Session<C>,
+        protocol: PinProtocol,
+        pin_token: Vec<u8>,
+    ) -> Result<Self, Ctap2Error<C::Error>> {
+        let info = &session.cached_info;
+        if info.options.get("authnrCfg") != Some(&true) {
+            return Err(Ctap2Error::InvalidResponse(
+                "Authenticator does not support authenticatorConfig".into(),
+            ));
+        }
+        Ok(Self {
+            session,
+            protocol,
+            pin_token,
+        })
+    }
+
+    /// Consume this `Config`, returning the underlying `Ctap2Session`.
+    pub fn into_session(self) -> Ctap2Session<C> {
+        self.session
+    }
+
+    fn call(
+        &mut self,
+        sub_cmd: u8,
+        sub_cmd_params: Option<&Value>,
+    ) -> Result<(), Ctap2Error<C::Error>> {
+        let mut params: Vec<(Value, Value)> = Vec::new();
+        params.push((Value::Int(0x01), Value::Int(sub_cmd as i64)));
+        if let Some(p) = sub_cmd_params {
+            params.push((Value::Int(0x02), p.clone()));
+        }
+        // Auth message: 0xff*32 || 0x0d || subCmd || serialize(subCmdParams)
+        let mut msg = vec![0xff; 32];
+        msg.push(cmd::CONFIG);
+        msg.push(sub_cmd);
+        if let Some(p) = sub_cmd_params {
+            msg.extend_from_slice(&cbor::encode(p));
+        }
+        let pin_uv_param = self.protocol.authenticate(&self.pin_token, &msg);
+        params.push((Value::Int(0x03), Value::Int(self.protocol.version() as i64)));
+        params.push((Value::Int(0x04), Value::Bytes(pin_uv_param)));
+
+        let data = cbor::encode(&Value::Map(params));
+        self.session
+            .send_cbor(cmd::CONFIG, Some(&data), None, None)?;
+        Ok(())
+    }
+
+    /// Enable enterprise attestation.
+    pub fn enable_enterprise_attestation(&mut self) -> Result<(), Ctap2Error<C::Error>> {
+        self.call(config_cmd::ENABLE_ENTERPRISE_ATT, None)
+    }
+
+    /// Toggle the alwaysUv option.
+    pub fn toggle_always_uv(&mut self) -> Result<(), Ctap2Error<C::Error>> {
+        self.call(config_cmd::TOGGLE_ALWAYS_UV, None)
+    }
+
+    /// Set minimum PIN length and related policies.
+    pub fn set_min_pin_length(
+        &mut self,
+        min_pin_length: Option<u32>,
+        rp_ids: Option<&[String]>,
+        force_change_pin: bool,
+    ) -> Result<(), Ctap2Error<C::Error>> {
+        let mut sub_params: Vec<(Value, Value)> = Vec::new();
+        if let Some(len) = min_pin_length {
+            sub_params.push((Value::Int(0x01), Value::Int(len as i64)));
+        }
+        if let Some(ids) = rp_ids {
+            let arr: Vec<Value> = ids.iter().map(|s| Value::Text(s.clone())).collect();
+            sub_params.push((Value::Int(0x02), Value::Array(arr)));
+        }
+        if force_change_pin {
+            sub_params.push((Value::Int(0x03), Value::Bool(true)));
+        }
+        let params = if sub_params.is_empty() {
+            None
+        } else {
+            Some(Value::Map(sub_params))
+        };
+        self.call(config_cmd::SET_MIN_PIN_LENGTH, params.as_ref())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BioEnrollment
+// ---------------------------------------------------------------------------
+
+/// Fingerprint bio-enrollment sub-command identifiers (§6.7).
+mod bio_cmd {
+    pub const ENROLL_BEGIN: u8 = 0x01;
+    pub const ENROLL_CAPTURE_NEXT: u8 = 0x02;
+    pub const ENROLL_CANCEL: u8 = 0x03;
+    pub const ENUMERATE_ENROLLMENTS: u8 = 0x04;
+    pub const SET_NAME: u8 = 0x05;
+    pub const REMOVE_ENROLLMENT: u8 = 0x06;
+    pub const GET_SENSOR_INFO: u8 = 0x07;
+}
+
+/// BioEnrollment response map keys (§6.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum BioResult {
+    Modality = 0x01,
+    FingerprintKind = 0x02,
+    MaxSamplesRequired = 0x03,
+    TemplateId = 0x04,
+    LastSampleStatus = 0x05,
+    RemainingSamples = 0x06,
+    TemplateInfos = 0x07,
+    MaxTemplateFriendlyName = 0x08,
+}
+
+/// Template info map keys inside `TemplateInfos` entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum TemplateInfo {
+    Id = 0x01,
+    Name = 0x02,
+}
+
+/// CTAP2 BioEnrollment operations (§6.7).
+///
+/// Provides fingerprint enrollment, enumeration, naming, and removal.
+/// Owns a [`Ctap2Session`] and a [`PinProtocol`] for authenticated commands.
+pub struct BioEnrollment<C: Connection> {
+    session: Ctap2Session<C>,
+    protocol: PinProtocol,
+    pin_token: Vec<u8>,
+    use_legacy: bool,
+}
+
+impl<C: Connection + 'static> BioEnrollment<C> {
+    /// Create a new `BioEnrollment` from a `Ctap2Session` and a PIN token.
+    ///
+    /// The PIN token must have the `BIO_ENROLL` permission.
+    pub fn new(
+        session: Ctap2Session<C>,
+        protocol: PinProtocol,
+        pin_token: Vec<u8>,
+    ) -> Result<Self, Ctap2Error<C::Error>> {
+        let info = &session.cached_info;
+        let has_bio = info.options.get("bioEnroll") == Some(&true);
+        let has_preview = info.versions.contains(&"FIDO_2_1_PRE".to_string())
+            && info.options.get("userVerificationMgmtPreview") == Some(&true);
+
+        if !has_bio && !has_preview {
+            return Err(Ctap2Error::InvalidResponse(
+                "Authenticator does not support bioEnrollment".into(),
+            ));
+        }
+
+        let use_legacy = !has_bio && has_preview;
+
+        Ok(Self {
+            session,
+            protocol,
+            pin_token,
+            use_legacy,
+        })
+    }
+
+    /// Consume this `BioEnrollment`, returning the underlying `Ctap2Session`.
+    pub fn into_session(self) -> Ctap2Session<C> {
+        self.session
+    }
+
+    fn cmd_byte(&self) -> u8 {
+        if self.use_legacy {
+            cmd::BIO_ENROLLMENT_PRE
+        } else {
+            cmd::BIO_ENROLLMENT
+        }
+    }
+
+    fn call(
+        &mut self,
+        modality: Option<u8>,
+        sub_cmd: Option<u8>,
+        sub_cmd_params: Option<&Value>,
+        auth: bool,
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+        let mut params: Vec<(Value, Value)> = Vec::new();
+        if let Some(m) = modality {
+            params.push((Value::Int(0x01), Value::Int(m as i64)));
+        }
+        if let Some(sc) = sub_cmd {
+            params.push((Value::Int(0x02), Value::Int(sc as i64)));
+        }
+        if let Some(p) = sub_cmd_params {
+            params.push((Value::Int(0x03), p.clone()));
+        }
+        if auth {
+            let mut msg: Vec<u8> = Vec::new();
+            if let Some(m) = modality {
+                msg.push(m);
+            }
+            if let Some(sc) = sub_cmd {
+                msg.push(sc);
+            }
+            if let Some(p) = sub_cmd_params {
+                msg.extend_from_slice(&cbor::encode(p));
+            }
+            let pin_uv_param = self.protocol.authenticate(&self.pin_token, &msg);
+            params.push((Value::Int(0x04), Value::Int(self.protocol.version() as i64)));
+            params.push((Value::Int(0x05), Value::Bytes(pin_uv_param)));
+        }
+
+        let data = cbor::encode(&Value::Map(params));
+        let response =
+            self.session
+                .send_cbor(self.cmd_byte(), Some(&data), on_keepalive, cancel)?;
+
+        if response.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+
+        let value = cbor::decode(&response)
+            .map_err(|e| Ctap2Error::InvalidResponse(format!("CBOR decode error: {e}")))?;
+        let map = value
+            .as_map()
+            .ok_or_else(|| Ctap2Error::InvalidResponse("Expected CBOR map".into()))?;
+
+        let mut result = BTreeMap::new();
+        for (k, v) in map {
+            if let Some(key) = k.as_int() {
+                result.insert(key as u32, v.clone());
+            }
+        }
+        Ok(result)
+    }
+
+    /// Get fingerprint sensor info (type and max samples).
+    pub fn get_fingerprint_sensor_info(
+        &mut self,
+    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::GET_SENSOR_INFO),
+            None,
+            false,
+            None,
+            None,
+        )
+    }
+
+    /// Begin a new fingerprint enrollment.
+    ///
+    /// Returns the response map containing `TemplateId`, `LastSampleStatus`,
+    /// and `RemainingSamples`.
+    pub fn enroll_begin(
+        &mut self,
+        timeout: Option<u32>,
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+        let sub_params =
+            timeout.map(|t| Value::Map(vec![(Value::Int(0x03), Value::Int(t as i64))]));
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::ENROLL_BEGIN),
+            sub_params.as_ref(),
+            true,
+            on_keepalive,
+            cancel,
+        )
+    }
+
+    /// Capture next fingerprint sample during enrollment.
+    pub fn enroll_capture_next(
+        &mut self,
+        template_id: &[u8],
+        timeout: Option<u32>,
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+        let mut sub_entries = vec![(Value::Int(0x01), Value::Bytes(template_id.to_vec()))];
+        if let Some(t) = timeout {
+            sub_entries.push((Value::Int(0x03), Value::Int(t as i64)));
+        }
+        let sub_params = Value::Map(sub_entries);
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::ENROLL_CAPTURE_NEXT),
+            Some(&sub_params),
+            true,
+            on_keepalive,
+            cancel,
+        )
+    }
+
+    /// Cancel an ongoing enrollment.
+    pub fn enroll_cancel(&mut self) -> Result<(), Ctap2Error<C::Error>> {
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::ENROLL_CANCEL),
+            None,
+            false,
+            None,
+            None,
+        )?;
+        Ok(())
+    }
+
+    /// Enumerate all enrolled fingerprints.
+    ///
+    /// Returns a response map containing `TemplateInfos`.
+    pub fn enumerate_enrollments(&mut self) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::ENUMERATE_ENROLLMENTS),
+            None,
+            true,
+            None,
+            None,
+        )
+    }
+
+    /// Set a friendly name for a fingerprint template.
+    pub fn set_name(&mut self, template_id: &[u8], name: &str) -> Result<(), Ctap2Error<C::Error>> {
+        let sub_params = Value::Map(vec![
+            (Value::Int(0x01), Value::Bytes(template_id.to_vec())),
+            (Value::Int(0x02), Value::Text(name.to_string())),
+        ]);
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::SET_NAME),
+            Some(&sub_params),
+            true,
+            None,
+            None,
+        )?;
+        Ok(())
+    }
+
+    /// Remove a fingerprint enrollment.
+    pub fn remove_enrollment(&mut self, template_id: &[u8]) -> Result<(), Ctap2Error<C::Error>> {
+        let sub_params = Value::Map(vec![(Value::Int(0x01), Value::Bytes(template_id.to_vec()))]);
+        self.call(
+            Some(0x01),
+            Some(bio_cmd::REMOVE_ENROLLMENT),
+            Some(&sub_params),
+            true,
+            None,
+            None,
+        )?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LargeBlobs
+// ---------------------------------------------------------------------------
+
+/// CTAP2 Large Blobs operations (§6.10).
+///
+/// Provides reading and writing of the large-blob array stored on the
+/// authenticator. Uses chunked transfer with SHA-256 integrity verification.
+pub struct LargeBlobs<C: Connection> {
+    session: Ctap2Session<C>,
+    protocol: PinProtocol,
+    pin_token: Vec<u8>,
+    max_fragment_length: usize,
+}
+
+impl<C: Connection + 'static> LargeBlobs<C> {
+    /// Create a new `LargeBlobs` from a `Ctap2Session` and a PIN token.
+    ///
+    /// The PIN token must have the `LARGE_BLOB_WRITE` permission for write
+    /// operations. Read operations do not require authentication.
+    pub fn new(
+        session: Ctap2Session<C>,
+        protocol: PinProtocol,
+        pin_token: Vec<u8>,
+    ) -> Result<Self, Ctap2Error<C::Error>> {
+        let info = &session.cached_info;
+        if info.max_large_blob.is_none() {
+            return Err(Ctap2Error::InvalidResponse(
+                "Authenticator does not support largeBlobs".into(),
+            ));
+        }
+        let max_msg = info.max_msg_size;
+        let max_fragment_length = max_msg.saturating_sub(64);
+        Ok(Self {
+            session,
+            protocol,
+            pin_token,
+            max_fragment_length,
+        })
+    }
+
+    /// Consume this `LargeBlobs`, returning the underlying `Ctap2Session`.
+    pub fn into_session(self) -> Ctap2Session<C> {
+        self.session
+    }
+
+    /// Read the complete large-blob array from the authenticator.
+    ///
+    /// Performs chunked reads and verifies SHA-256 integrity. Returns the
+    /// raw CBOR-encoded blob array (without the trailing hash).
+    pub fn read_blob_array(&mut self) -> Result<Vec<u8>, Ctap2Error<C::Error>> {
+        let mut data = Vec::new();
+        let mut offset: usize = 0;
+
+        loop {
+            let params: Vec<(Value, Value)> = vec![
+                (
+                    Value::Int(0x01),
+                    Value::Int(self.max_fragment_length as i64),
+                ),
+                (Value::Int(0x03), Value::Int(offset as i64)),
+            ];
+
+            let encoded = cbor::encode(&Value::Map(params));
+            let response = self
+                .session
+                .send_cbor(cmd::LARGE_BLOBS, Some(&encoded), None, None)?;
+
+            if response.is_empty() {
+                break;
+            }
+
+            let value = cbor::decode(&response)
+                .map_err(|e| Ctap2Error::InvalidResponse(format!("CBOR decode error: {e}")))?;
+            let map = value
+                .as_map()
+                .ok_or_else(|| Ctap2Error::InvalidResponse("Expected CBOR map".into()))?;
+
+            let fragment = map
+                .iter()
+                .find(|(k, _)| k.as_int() == Some(0x01))
+                .and_then(|(_, v)| v.as_bytes())
+                .ok_or_else(|| {
+                    Ctap2Error::InvalidResponse(
+                        "Missing config (0x01) in largeBlobs response".into(),
+                    )
+                })?;
+
+            let frag_len = fragment.len();
+            data.extend_from_slice(fragment);
+            offset += frag_len;
+
+            if frag_len < self.max_fragment_length {
+                break;
+            }
+        }
+
+        // Verify SHA-256 integrity: last 16 bytes are hash of the rest
+        if data.len() < 16 {
+            return Err(Ctap2Error::InvalidResponse(
+                "Large blob data too short for integrity check".into(),
+            ));
+        }
+        let (blob_data, hash_suffix) = data.split_at(data.len() - 16);
+        let digest = Sha256::digest(blob_data);
+        if &digest[..16] != hash_suffix {
+            return Err(Ctap2Error::InvalidResponse(
+                "Large blob integrity check failed".into(),
+            ));
+        }
+
+        Ok(blob_data.to_vec())
+    }
+
+    /// Write a complete large-blob array to the authenticator.
+    ///
+    /// `blob_data` should be the CBOR-encoded blob array (without hash).
+    /// This method appends the SHA-256 hash and writes in fragments.
+    pub fn write_blob_array(&mut self, blob_data: &[u8]) -> Result<(), Ctap2Error<C::Error>> {
+        // Append SHA-256 hash (first 16 bytes)
+        let digest = Sha256::digest(blob_data);
+        let mut data = blob_data.to_vec();
+        data.extend_from_slice(&digest[..16]);
+
+        let total_length = data.len();
+        let mut offset: usize = 0;
+
+        while offset < total_length {
+            let end = (offset + self.max_fragment_length).min(total_length);
+            let fragment = &data[offset..end];
+
+            let mut params: Vec<(Value, Value)> = Vec::new();
+            params.push((Value::Int(0x02), Value::Bytes(fragment.to_vec())));
+            params.push((Value::Int(0x03), Value::Int(offset as i64)));
+
+            if offset == 0 {
+                params.push((Value::Int(0x04), Value::Int(total_length as i64)));
+            }
+
+            // Auth: authenticate(pinToken, 0xff*32 || h'0c00' || uint32le(offset) || sha256(fragment))
+            let mut msg = vec![0xff; 32];
+            msg.extend_from_slice(&[0x0c, 0x00]);
+            msg.extend_from_slice(&(offset as u32).to_le_bytes());
+            let frag_hash = Sha256::digest(fragment);
+            msg.extend_from_slice(&frag_hash);
+            let pin_uv_param = self.protocol.authenticate(&self.pin_token, &msg);
+
+            params.push((Value::Int(0x06), Value::Int(self.protocol.version() as i64)));
+            params.push((Value::Int(0x05), Value::Bytes(pin_uv_param)));
+
+            let encoded = cbor::encode(&Value::Map(params));
+            self.session
+                .send_cbor(cmd::LARGE_BLOBS, Some(&encoded), None, None)?;
+
+            offset = end;
+        }
+
         Ok(())
     }
 }

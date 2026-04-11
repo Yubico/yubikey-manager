@@ -39,14 +39,20 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from _yubikit_native.sessions import BioEnrollment as _BioEnrollment
+from _yubikit_native.sessions import BioEnrollmentFido as _BioEnrollmentFido
 from _yubikit_native.sessions import ClientPin as _ClientPin
 from _yubikit_native.sessions import ClientPinFido as _ClientPinFido
+from _yubikit_native.sessions import Config as _Config
+from _yubikit_native.sessions import ConfigFido as _ConfigFido
 from _yubikit_native.sessions import CredentialManagement as _CredentialManagement
 from _yubikit_native.sessions import (
     CredentialManagementFido as _CredentialManagementFido,
 )
 from _yubikit_native.sessions import Ctap2FidoSession as _Ctap2FidoSession
 from _yubikit_native.sessions import Ctap2Session as _Ctap2Session
+from _yubikit_native.sessions import LargeBlobs as _LargeBlobs
+from _yubikit_native.sessions import LargeBlobsFido as _LargeBlobsFido
 from _yubikit_native.sessions import PinProtocol as _PinProtocol
 
 from .core import Closable, Session, Version
@@ -122,6 +128,13 @@ class Ctap2Session(Session):
         on_keepalive: object | None = None,
     ) -> bytes:
         return self._native.send_cbor(cmd, data, event, on_keepalive)
+
+    def reset(
+        self,
+        event: object | None = None,
+        on_keepalive: object | None = None,
+    ) -> None:
+        self._native.reset(event, on_keepalive)
 
 
 class ClientPin(Closable):
@@ -258,3 +271,180 @@ class CredentialManagement(Closable):
 
     def update_user_info(self, credential_id: Any, user: Any) -> None:
         self._native.update_user_info(credential_id, user)
+
+
+class Config(Closable):
+    """Authenticator Config command facade with context-manager support.
+
+    Usage::
+
+        session = Ctap2Session(connection)
+        with ClientPin(session) as client_pin:
+            token = client_pin.get_pin_token(pin, permissions=0x20)
+            protocol = client_pin.protocol
+        with Config(session, protocol, token) as config:
+            config.toggle_always_uv()
+    """
+
+    def __init__(
+        self,
+        session: Ctap2Session,
+        protocol: PinProtocol,
+        pin_token: bytes,
+    ) -> None:
+        self._session = session
+        native = session._native
+        if isinstance(native, _Ctap2Session):
+            self._native: _Config | _ConfigFido = _Config(
+                native, protocol._native, pin_token
+            )
+        else:
+            self._native = _ConfigFido(native, protocol._native, pin_token)
+
+    def close(self) -> None:
+        """Restore the session so it can be reused."""
+        native_session = self._session._native
+        if isinstance(self._native, _Config) and isinstance(
+            native_session, _Ctap2Session
+        ):
+            self._native.close(native_session)
+        elif isinstance(self._native, _ConfigFido) and isinstance(
+            native_session, _Ctap2FidoSession
+        ):
+            self._native.close(native_session)
+
+    def enable_enterprise_attestation(self) -> None:
+        self._native.enable_enterprise_attestation()
+
+    def toggle_always_uv(self) -> None:
+        self._native.toggle_always_uv()
+
+    def set_min_pin_length(
+        self,
+        min_pin_length: int | None = None,
+        rp_ids: list[str] | None = None,
+        force_change_pin: bool = False,
+    ) -> None:
+        self._native.set_min_pin_length(min_pin_length, rp_ids, force_change_pin)
+
+
+class BioEnrollment(Closable):
+    """BioEnrollment command facade with context-manager support.
+
+    Usage::
+
+        session = Ctap2Session(connection)
+        with ClientPin(session) as client_pin:
+            token = client_pin.get_pin_token(pin, permissions=0x08)
+            protocol = client_pin.protocol
+        with BioEnrollment(session, protocol, token) as bio:
+            info = bio.get_fingerprint_sensor_info()
+    """
+
+    def __init__(
+        self,
+        session: Ctap2Session,
+        protocol: PinProtocol,
+        pin_token: bytes,
+    ) -> None:
+        self._session = session
+        native = session._native
+        if isinstance(native, _Ctap2Session):
+            self._native: _BioEnrollment | _BioEnrollmentFido = _BioEnrollment(
+                native, protocol._native, pin_token
+            )
+        else:
+            self._native = _BioEnrollmentFido(native, protocol._native, pin_token)
+
+    def close(self) -> None:
+        """Restore the session so it can be reused."""
+        native_session = self._session._native
+        if isinstance(self._native, _BioEnrollment) and isinstance(
+            native_session, _Ctap2Session
+        ):
+            self._native.close(native_session)
+        elif isinstance(self._native, _BioEnrollmentFido) and isinstance(
+            native_session, _Ctap2FidoSession
+        ):
+            self._native.close(native_session)
+
+    def get_fingerprint_sensor_info(self) -> dict[int, Any]:
+        return self._native.get_fingerprint_sensor_info()
+
+    def enroll_begin(
+        self,
+        timeout: int | None = None,
+        event: object | None = None,
+        on_keepalive: object | None = None,
+    ) -> dict[int, Any]:
+        return self._native.enroll_begin(timeout, event, on_keepalive)
+
+    def enroll_capture_next(
+        self,
+        template_id: bytes,
+        timeout: int | None = None,
+        event: object | None = None,
+        on_keepalive: object | None = None,
+    ) -> dict[int, Any]:
+        return self._native.enroll_capture_next(
+            template_id, timeout, event, on_keepalive
+        )
+
+    def enroll_cancel(self) -> None:
+        self._native.enroll_cancel()
+
+    def enumerate_enrollments(self) -> dict[int, Any]:
+        return self._native.enumerate_enrollments()
+
+    def set_name(self, template_id: bytes, name: str) -> None:
+        self._native.set_name(template_id, name)
+
+    def remove_enrollment(self, template_id: bytes) -> None:
+        self._native.remove_enrollment(template_id)
+
+
+class LargeBlobs(Closable):
+    """Large Blobs command facade with context-manager support.
+
+    Usage::
+
+        session = Ctap2Session(connection)
+        with ClientPin(session) as client_pin:
+            token = client_pin.get_pin_token(pin, permissions=0x10)
+            protocol = client_pin.protocol
+        with LargeBlobs(session, protocol, token) as blobs:
+            data = blobs.read_blob_array()
+    """
+
+    def __init__(
+        self,
+        session: Ctap2Session,
+        protocol: PinProtocol,
+        pin_token: bytes,
+    ) -> None:
+        self._session = session
+        native = session._native
+        if isinstance(native, _Ctap2Session):
+            self._native: _LargeBlobs | _LargeBlobsFido = _LargeBlobs(
+                native, protocol._native, pin_token
+            )
+        else:
+            self._native = _LargeBlobsFido(native, protocol._native, pin_token)
+
+    def close(self) -> None:
+        """Restore the session so it can be reused."""
+        native_session = self._session._native
+        if isinstance(self._native, _LargeBlobs) and isinstance(
+            native_session, _Ctap2Session
+        ):
+            self._native.close(native_session)
+        elif isinstance(self._native, _LargeBlobsFido) and isinstance(
+            native_session, _Ctap2FidoSession
+        ):
+            self._native.close(native_session)
+
+    def read_blob_array(self) -> bytes:
+        return self._native.read_blob_array()
+
+    def write_blob_array(self, data: bytes) -> None:
+        self._native.write_blob_array(data)

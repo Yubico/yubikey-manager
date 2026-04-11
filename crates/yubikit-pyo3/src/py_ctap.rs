@@ -6,7 +6,8 @@ use pyo3::types::{PyBool, PyBytes, PyDict, PyList};
 use yubikit::cbor;
 use yubikit::ctap::CtapSession;
 use yubikit::ctap2::{
-    ClientPin, CredentialManagement, Ctap2Error, Ctap2Session, Info, Permissions, PinProtocol,
+    BioEnrollment, ClientPin, Config, CredentialManagement, Ctap2Error, Ctap2Session, Info,
+    LargeBlobs, Permissions, PinProtocol,
 };
 
 use crate::py_bridge::{
@@ -331,11 +332,26 @@ impl PyCtap2Session {
             .map_err(ctap2_err)?;
         Ok(PyBytes::new(py, &response))
     }
-}
 
-// ---------------------------------------------------------------------------
-// FIDO HID-backed Ctap2Session
-// ---------------------------------------------------------------------------
+    #[pyo3(signature = (event=None, on_keepalive=None))]
+    fn reset(&mut self, event: Option<PyObject>, on_keepalive: Option<PyObject>) -> PyResult<()> {
+        let cancel_fn = make_cancel_fn(&event);
+        let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
+        let keepalive_ref: Option<&mut dyn FnMut(u8)> = if on_keepalive.is_some() {
+            Some(&mut keepalive_fn)
+        } else {
+            None
+        };
+        self.get_session_mut()?
+            .reset(keepalive_ref, cancel_ref)
+            .map_err(ctap2_err)
+    }
+}
 
 #[pyclass(name = "Ctap2FidoSession", unsendable)]
 pub struct PyCtap2FidoSession {
@@ -451,6 +467,25 @@ impl PyCtap2FidoSession {
             .send_cbor(cmd, data, keepalive_ref, cancel_ref)
             .map_err(ctap2_err)?;
         Ok(PyBytes::new(py, &response))
+    }
+
+    #[pyo3(signature = (event=None, on_keepalive=None))]
+    fn reset(&mut self, event: Option<PyObject>, on_keepalive: Option<PyObject>) -> PyResult<()> {
+        let cancel_fn = make_cancel_fn(&event);
+        let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
+        let keepalive_ref: Option<&mut dyn FnMut(u8)> = if on_keepalive.is_some() {
+            Some(&mut keepalive_fn)
+        } else {
+            None
+        };
+        self.get_session_mut()?
+            .reset(keepalive_ref, cancel_ref)
+            .map_err(ctap2_err)
     }
 }
 
@@ -921,5 +956,481 @@ impl PyCredentialManagementFido {
         self.get_mut()?
             .update_user_info(&cred, &user)
             .map_err(ctap2_err)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SmartCard-backed Config
+// ---------------------------------------------------------------------------
+
+#[pyclass(name = "Config", unsendable)]
+pub struct PyConfig {
+    inner: Option<Config<BoxedSmartCardConnection>>,
+}
+
+impl PyConfig {
+    fn get_mut(&mut self) -> PyResult<&mut Config<BoxedSmartCardConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("Config has been closed"))
+    }
+}
+
+#[pymethods]
+impl PyConfig {
+    #[new]
+    fn new(
+        session: &mut PyCtap2Session,
+        protocol: &PyPinProtocol,
+        pin_token: &[u8],
+    ) -> PyResult<Self> {
+        let ctap2 = session.take_session()?;
+        let inner =
+            Config::new(ctap2, protocol.protocol(), pin_token.to_vec()).map_err(ctap2_err)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn close(&mut self, session: &mut PyCtap2Session) -> PyResult<()> {
+        let cfg = self
+            .inner
+            .take()
+            .ok_or_else(|| PyRuntimeError::new_err("Config has been closed"))?;
+        session.restore_session(cfg.into_session());
+        Ok(())
+    }
+
+    fn enable_enterprise_attestation(&mut self) -> PyResult<()> {
+        self.get_mut()?
+            .enable_enterprise_attestation()
+            .map_err(ctap2_err)
+    }
+
+    fn toggle_always_uv(&mut self) -> PyResult<()> {
+        self.get_mut()?.toggle_always_uv().map_err(ctap2_err)
+    }
+
+    #[pyo3(signature = (min_pin_length=None, rp_ids=None, force_change_pin=false))]
+    fn set_min_pin_length(
+        &mut self,
+        min_pin_length: Option<u32>,
+        rp_ids: Option<Vec<String>>,
+        force_change_pin: bool,
+    ) -> PyResult<()> {
+        self.get_mut()?
+            .set_min_pin_length(min_pin_length, rp_ids.as_deref(), force_change_pin)
+            .map_err(ctap2_err)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FIDO HID-backed Config
+// ---------------------------------------------------------------------------
+
+#[pyclass(name = "ConfigFido", unsendable)]
+pub struct PyConfigFido {
+    inner: Option<Config<BoxedFidoConnection>>,
+}
+
+impl PyConfigFido {
+    fn get_mut(&mut self) -> PyResult<&mut Config<BoxedFidoConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("ConfigFido has been closed"))
+    }
+}
+
+#[pymethods]
+impl PyConfigFido {
+    #[new]
+    fn new(
+        session: &mut PyCtap2FidoSession,
+        protocol: &PyPinProtocol,
+        pin_token: &[u8],
+    ) -> PyResult<Self> {
+        let ctap2 = session.take_session()?;
+        let inner =
+            Config::new(ctap2, protocol.protocol(), pin_token.to_vec()).map_err(ctap2_err)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn close(&mut self, session: &mut PyCtap2FidoSession) -> PyResult<()> {
+        let cfg = self
+            .inner
+            .take()
+            .ok_or_else(|| PyRuntimeError::new_err("ConfigFido has been closed"))?;
+        session.restore_session(cfg.into_session());
+        Ok(())
+    }
+
+    fn enable_enterprise_attestation(&mut self) -> PyResult<()> {
+        self.get_mut()?
+            .enable_enterprise_attestation()
+            .map_err(ctap2_err)
+    }
+
+    fn toggle_always_uv(&mut self) -> PyResult<()> {
+        self.get_mut()?.toggle_always_uv().map_err(ctap2_err)
+    }
+
+    #[pyo3(signature = (min_pin_length=None, rp_ids=None, force_change_pin=false))]
+    fn set_min_pin_length(
+        &mut self,
+        min_pin_length: Option<u32>,
+        rp_ids: Option<Vec<String>>,
+        force_change_pin: bool,
+    ) -> PyResult<()> {
+        self.get_mut()?
+            .set_min_pin_length(min_pin_length, rp_ids.as_deref(), force_change_pin)
+            .map_err(ctap2_err)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SmartCard-backed BioEnrollment
+// ---------------------------------------------------------------------------
+
+#[pyclass(name = "BioEnrollment", unsendable)]
+pub struct PyBioEnrollment {
+    inner: Option<BioEnrollment<BoxedSmartCardConnection>>,
+}
+
+impl PyBioEnrollment {
+    fn get_mut(&mut self) -> PyResult<&mut BioEnrollment<BoxedSmartCardConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("BioEnrollment has been closed"))
+    }
+}
+
+#[pymethods]
+impl PyBioEnrollment {
+    #[new]
+    fn new(
+        session: &mut PyCtap2Session,
+        protocol: &PyPinProtocol,
+        pin_token: &[u8],
+    ) -> PyResult<Self> {
+        let ctap2 = session.take_session()?;
+        let inner = BioEnrollment::new(ctap2, protocol.protocol(), pin_token.to_vec())
+            .map_err(ctap2_err)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn close(&mut self, session: &mut PyCtap2Session) -> PyResult<()> {
+        let bio = self
+            .inner
+            .take()
+            .ok_or_else(|| PyRuntimeError::new_err("BioEnrollment has been closed"))?;
+        session.restore_session(bio.into_session());
+        Ok(())
+    }
+
+    fn get_fingerprint_sensor_info<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+        let info = self
+            .get_mut()?
+            .get_fingerprint_sensor_info()
+            .map_err(ctap2_err)?;
+        cbor_result_to_py(py, &info)
+    }
+
+    #[pyo3(signature = (timeout=None, event=None, on_keepalive=None))]
+    fn enroll_begin<'py>(
+        &mut self,
+        py: Python<'py>,
+        timeout: Option<u32>,
+        event: Option<PyObject>,
+        on_keepalive: Option<PyObject>,
+    ) -> PyResult<PyObject> {
+        let cancel_fn = make_cancel_fn(&event);
+        let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
+        let keepalive_ref: Option<&mut dyn FnMut(u8)> = if on_keepalive.is_some() {
+            Some(&mut keepalive_fn)
+        } else {
+            None
+        };
+        let result = self
+            .get_mut()?
+            .enroll_begin(timeout, keepalive_ref, cancel_ref)
+            .map_err(ctap2_err)?;
+        cbor_result_to_py(py, &result)
+    }
+
+    #[pyo3(signature = (template_id, timeout=None, event=None, on_keepalive=None))]
+    fn enroll_capture_next<'py>(
+        &mut self,
+        py: Python<'py>,
+        template_id: &[u8],
+        timeout: Option<u32>,
+        event: Option<PyObject>,
+        on_keepalive: Option<PyObject>,
+    ) -> PyResult<PyObject> {
+        let cancel_fn = make_cancel_fn(&event);
+        let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
+        let keepalive_ref: Option<&mut dyn FnMut(u8)> = if on_keepalive.is_some() {
+            Some(&mut keepalive_fn)
+        } else {
+            None
+        };
+        let result = self
+            .get_mut()?
+            .enroll_capture_next(template_id, timeout, keepalive_ref, cancel_ref)
+            .map_err(ctap2_err)?;
+        cbor_result_to_py(py, &result)
+    }
+
+    fn enroll_cancel(&mut self) -> PyResult<()> {
+        self.get_mut()?.enroll_cancel().map_err(ctap2_err)
+    }
+
+    fn enumerate_enrollments<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+        let result = self.get_mut()?.enumerate_enrollments().map_err(ctap2_err)?;
+        cbor_result_to_py(py, &result)
+    }
+
+    fn set_name(&mut self, template_id: &[u8], name: &str) -> PyResult<()> {
+        self.get_mut()?
+            .set_name(template_id, name)
+            .map_err(ctap2_err)
+    }
+
+    fn remove_enrollment(&mut self, template_id: &[u8]) -> PyResult<()> {
+        self.get_mut()?
+            .remove_enrollment(template_id)
+            .map_err(ctap2_err)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FIDO HID-backed BioEnrollment
+// ---------------------------------------------------------------------------
+
+#[pyclass(name = "BioEnrollmentFido", unsendable)]
+pub struct PyBioEnrollmentFido {
+    inner: Option<BioEnrollment<BoxedFidoConnection>>,
+}
+
+impl PyBioEnrollmentFido {
+    fn get_mut(&mut self) -> PyResult<&mut BioEnrollment<BoxedFidoConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("BioEnrollmentFido has been closed"))
+    }
+}
+
+#[pymethods]
+impl PyBioEnrollmentFido {
+    #[new]
+    fn new(
+        session: &mut PyCtap2FidoSession,
+        protocol: &PyPinProtocol,
+        pin_token: &[u8],
+    ) -> PyResult<Self> {
+        let ctap2 = session.take_session()?;
+        let inner = BioEnrollment::new(ctap2, protocol.protocol(), pin_token.to_vec())
+            .map_err(ctap2_err)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn close(&mut self, session: &mut PyCtap2FidoSession) -> PyResult<()> {
+        let bio = self
+            .inner
+            .take()
+            .ok_or_else(|| PyRuntimeError::new_err("BioEnrollmentFido has been closed"))?;
+        session.restore_session(bio.into_session());
+        Ok(())
+    }
+
+    fn get_fingerprint_sensor_info<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+        let info = self
+            .get_mut()?
+            .get_fingerprint_sensor_info()
+            .map_err(ctap2_err)?;
+        cbor_result_to_py(py, &info)
+    }
+
+    #[pyo3(signature = (timeout=None, event=None, on_keepalive=None))]
+    fn enroll_begin<'py>(
+        &mut self,
+        py: Python<'py>,
+        timeout: Option<u32>,
+        event: Option<PyObject>,
+        on_keepalive: Option<PyObject>,
+    ) -> PyResult<PyObject> {
+        let cancel_fn = make_cancel_fn(&event);
+        let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
+        let keepalive_ref: Option<&mut dyn FnMut(u8)> = if on_keepalive.is_some() {
+            Some(&mut keepalive_fn)
+        } else {
+            None
+        };
+        let result = self
+            .get_mut()?
+            .enroll_begin(timeout, keepalive_ref, cancel_ref)
+            .map_err(ctap2_err)?;
+        cbor_result_to_py(py, &result)
+    }
+
+    #[pyo3(signature = (template_id, timeout=None, event=None, on_keepalive=None))]
+    fn enroll_capture_next<'py>(
+        &mut self,
+        py: Python<'py>,
+        template_id: &[u8],
+        timeout: Option<u32>,
+        event: Option<PyObject>,
+        on_keepalive: Option<PyObject>,
+    ) -> PyResult<PyObject> {
+        let cancel_fn = make_cancel_fn(&event);
+        let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
+        let keepalive_ref: Option<&mut dyn FnMut(u8)> = if on_keepalive.is_some() {
+            Some(&mut keepalive_fn)
+        } else {
+            None
+        };
+        let result = self
+            .get_mut()?
+            .enroll_capture_next(template_id, timeout, keepalive_ref, cancel_ref)
+            .map_err(ctap2_err)?;
+        cbor_result_to_py(py, &result)
+    }
+
+    fn enroll_cancel(&mut self) -> PyResult<()> {
+        self.get_mut()?.enroll_cancel().map_err(ctap2_err)
+    }
+
+    fn enumerate_enrollments<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+        let result = self.get_mut()?.enumerate_enrollments().map_err(ctap2_err)?;
+        cbor_result_to_py(py, &result)
+    }
+
+    fn set_name(&mut self, template_id: &[u8], name: &str) -> PyResult<()> {
+        self.get_mut()?
+            .set_name(template_id, name)
+            .map_err(ctap2_err)
+    }
+
+    fn remove_enrollment(&mut self, template_id: &[u8]) -> PyResult<()> {
+        self.get_mut()?
+            .remove_enrollment(template_id)
+            .map_err(ctap2_err)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SmartCard-backed LargeBlobs
+// ---------------------------------------------------------------------------
+
+#[pyclass(name = "LargeBlobs", unsendable)]
+pub struct PyLargeBlobs {
+    inner: Option<LargeBlobs<BoxedSmartCardConnection>>,
+}
+
+impl PyLargeBlobs {
+    fn get_mut(&mut self) -> PyResult<&mut LargeBlobs<BoxedSmartCardConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("LargeBlobs has been closed"))
+    }
+}
+
+#[pymethods]
+impl PyLargeBlobs {
+    #[new]
+    fn new(
+        session: &mut PyCtap2Session,
+        protocol: &PyPinProtocol,
+        pin_token: &[u8],
+    ) -> PyResult<Self> {
+        let ctap2 = session.take_session()?;
+        let inner =
+            LargeBlobs::new(ctap2, protocol.protocol(), pin_token.to_vec()).map_err(ctap2_err)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn close(&mut self, session: &mut PyCtap2Session) -> PyResult<()> {
+        let lb = self
+            .inner
+            .take()
+            .ok_or_else(|| PyRuntimeError::new_err("LargeBlobs has been closed"))?;
+        session.restore_session(lb.into_session());
+        Ok(())
+    }
+
+    fn read_blob_array<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let data = self.get_mut()?.read_blob_array().map_err(ctap2_err)?;
+        Ok(PyBytes::new(py, &data))
+    }
+
+    fn write_blob_array(&mut self, data: &[u8]) -> PyResult<()> {
+        self.get_mut()?.write_blob_array(data).map_err(ctap2_err)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FIDO HID-backed LargeBlobs
+// ---------------------------------------------------------------------------
+
+#[pyclass(name = "LargeBlobsFido", unsendable)]
+pub struct PyLargeBlobsFido {
+    inner: Option<LargeBlobs<BoxedFidoConnection>>,
+}
+
+impl PyLargeBlobsFido {
+    fn get_mut(&mut self) -> PyResult<&mut LargeBlobs<BoxedFidoConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("LargeBlobsFido has been closed"))
+    }
+}
+
+#[pymethods]
+impl PyLargeBlobsFido {
+    #[new]
+    fn new(
+        session: &mut PyCtap2FidoSession,
+        protocol: &PyPinProtocol,
+        pin_token: &[u8],
+    ) -> PyResult<Self> {
+        let ctap2 = session.take_session()?;
+        let inner =
+            LargeBlobs::new(ctap2, protocol.protocol(), pin_token.to_vec()).map_err(ctap2_err)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn close(&mut self, session: &mut PyCtap2FidoSession) -> PyResult<()> {
+        let lb = self
+            .inner
+            .take()
+            .ok_or_else(|| PyRuntimeError::new_err("LargeBlobsFido has been closed"))?;
+        session.restore_session(lb.into_session());
+        Ok(())
+    }
+
+    fn read_blob_array<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let data = self.get_mut()?.read_blob_array().map_err(ctap2_err)?;
+        Ok(PyBytes::new(py, &data))
+    }
+
+    fn write_blob_array(&mut self, data: &[u8]) -> PyResult<()> {
+        self.get_mut()?.write_blob_array(data).map_err(ctap2_err)
     }
 }
