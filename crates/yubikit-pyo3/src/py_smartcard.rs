@@ -36,14 +36,22 @@ use yubikit::core::Version;
 use yubikit::smartcard::SmartCardProtocol as RustSmartCardProtocol;
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, extract_smartcard_connection, init_scp_from_py, smartcard_err,
+    BoxedSmartCardConnection, extract_smartcard_connection, init_scp_from_py,
+    restore_smartcard_connection, smartcard_err,
 };
 
 #[pyclass]
 pub struct SmartCardProtocol {
-    inner: RustSmartCardProtocol<BoxedSmartCardConnection>,
-    /// Keep a reference to the Python connection so it can be accessed.
-    connection: PyObject,
+    inner: Option<RustSmartCardProtocol<BoxedSmartCardConnection>>,
+    py_connection: PyObject,
+}
+
+impl SmartCardProtocol {
+    fn protocol_mut(&mut self) -> PyResult<&mut RustSmartCardProtocol<BoxedSmartCardConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("SmartCardProtocol is closed"))
+    }
 }
 
 #[pymethods]
@@ -55,21 +63,24 @@ impl SmartCardProtocol {
         let protocol =
             RustSmartCardProtocol::new(py_conn).with_ins_send_remaining(ins_send_remaining);
         Ok(Self {
-            inner: protocol,
-            connection: connection.clone().unbind(),
+            inner: Some(protocol),
+            py_connection: connection.clone().unbind(),
         })
     }
 
-    fn close(&self, py: Python<'_>) -> PyResult<()> {
-        let conn = self.connection.bind(py);
-        conn.call_method0("close")?;
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(protocol) = self.inner.take() {
+            let conn = protocol.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
         Ok(())
     }
 
-    fn configure(&mut self, version: (u8, u8, u8), force_short: Option<bool>) {
+    fn configure(&mut self, version: (u8, u8, u8), force_short: Option<bool>) -> PyResult<()> {
         let v = Version(version.0, version.1, version.2);
-        self.inner
+        self.protocol_mut()?
             .configure_force_short(v, force_short.unwrap_or(false));
+        Ok(())
     }
 
     #[pyo3(signature = (cla, ins, p1, p2, data=None, le=0))]
@@ -84,21 +95,21 @@ impl SmartCardProtocol {
     ) -> PyResult<Vec<u8>> {
         let data = data.unwrap_or(&[]);
         if le > 0 {
-            self.inner
+            self.protocol_mut()?
                 .send_apdu_with_le(cla, ins, p1, p2, data, le)
                 .map_err(smartcard_err)
         } else {
-            self.inner
+            self.protocol_mut()?
                 .send_apdu(cla, ins, p1, p2, data)
                 .map_err(smartcard_err)
         }
     }
 
     fn select(&mut self, aid: &[u8]) -> PyResult<Vec<u8>> {
-        self.inner.select(aid).map_err(smartcard_err)
+        self.protocol_mut()?.select(aid).map_err(smartcard_err)
     }
 
     fn init_scp(&mut self, key_params: &Bound<'_, PyAny>) -> PyResult<()> {
-        init_scp_from_py(&mut self.inner, key_params)
+        init_scp_from_py(self.protocol_mut()?, key_params)
     }
 }

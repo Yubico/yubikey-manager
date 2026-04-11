@@ -38,7 +38,7 @@ from _yubikit_native.core import (
     modhex_encode,  # noqa: F401 - re-exported
 )
 
-from . import USB_INTERFACE, CommandError, Connection, Version
+from . import USB_INTERFACE, Closable, CommandError, Connection, Version
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ STATUS_PROCESSING = 1
 STATUS_UPNEEDED = 2
 
 
-class OtpProtocol:
+class OtpProtocol(Closable):
     """OTP protocol backed by a native Rust implementation."""
 
     def __init__(self, otp_connection: OtpConnection):
@@ -77,7 +77,7 @@ class OtpProtocol:
         self.version = Version(*self._native.version)
 
     def close(self) -> None:
-        self.connection.close()
+        self._native.close()
 
     def send_and_receive(
         self,

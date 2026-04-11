@@ -8,7 +8,6 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
-
 from ykman.piv import (
     check_key,
     generate_csr,
@@ -75,13 +74,14 @@ def scp(info, transport, scp_params):
 @condition.capability(CAPABILITY.PIV)
 def session(ccid_connection, scp, info):
     if CAPABILITY.PIV in info.reset_blocked:
-        mgmt = ManagementSession(ccid_connection)
-        mgmt.device_reset()
+        with ManagementSession(ccid_connection) as mgmt:
+            mgmt.device_reset()
         piv = PivSession(ccid_connection, scp)
     else:
         piv = PivSession(ccid_connection, scp)
         piv.reset()
     yield piv
+    piv.close()
     reset_state(ccid_connection, scp)
 
 
@@ -108,7 +108,10 @@ def keys(session, info, default_keys, scp, ccid_connection):
         session.change_puk(default_keys.puk, new_keys.puk)
         session.authenticate(default_keys.mgmt)
         session.set_management_key(session.management_key_type, new_keys.mgmt)
+        # Close session to release connection, reset state, re-initialize
+        session.close()
         reset_state(ccid_connection, scp)
+        session.__init__(ccid_connection, scp)
 
         yield new_keys
     else:
@@ -120,26 +123,36 @@ def not_roca(version):
 
 
 def reset_state(session_or_connection, scp_params):
+    """Reset PIV session state on the card.
+
+    If given a PivSession, closes it, resets the card, and re-initializes
+    the session. If given a connection, just resets the card.
+    """
     if isinstance(session_or_connection, PivSession):
-        connection = session_or_connection.connection
+        session = session_or_connection
+        connection = session.connection
+        session.close()
     else:
+        session = None
         connection = session_or_connection
+
     if connection.transport == TRANSPORT.NFC:
-        # NFC disconnect/reconnect doesn't power-cycle the card.
-        # Select a different applet first to force PIV state reset.
-        protocol = SmartCardProtocol(connection)
-        protocol.select(AID.OATH)
-        protocol = SmartCardProtocol(connection)
-        protocol.select(AID.PIV)
-        if scp_params:
-            protocol.init_scp(scp_params)
+        with SmartCardProtocol(connection) as p:
+            p.select(AID.OATH)
+        with SmartCardProtocol(connection) as p:
+            p.select(AID.PIV)
+            if scp_params:
+                p.init_scp(scp_params)
     else:
-        connection.connection.disconnect()
-        connection.connection.connect()
-        protocol = SmartCardProtocol(connection)
-        protocol.select(AID.PIV)
-        if scp_params:
-            protocol.init_scp(scp_params)
+        connection._native.disconnect()
+        connection._native.connect()
+        with SmartCardProtocol(connection) as p:
+            p.select(AID.PIV)
+            if scp_params:
+                p.init_scp(scp_params)
+
+    if session is not None:
+        session.__init__(connection, scp_params)
 
 
 def assert_mgm_key_is(session, key):

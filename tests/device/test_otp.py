@@ -1,10 +1,8 @@
 import pytest
-
-from ykman.device import list_all_devices
 from yubikit.core import TRANSPORT
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
-from yubikit.management import CAPABILITY, ManagementSession
+from yubikit.management import CAPABILITY
 from yubikit.yubiotp import (
     SLOT,
     HmacSha1SlotConfiguration,
@@ -36,9 +34,8 @@ def no_pin_complexity(info):
 @condition.capability(CAPABILITY.OTP)
 def session(conn_type, info, device):
     with device.open_connection(conn_type) as c:
-        s = YubiOtpSession(c)
-        s._test_connection = c
-        yield s
+        with YubiOtpSession(c) as s:
+            yield s
 
 
 def test_status(info, session):
@@ -52,33 +49,10 @@ def not_usb_ccid(conn_type, transport):
 @pytest.fixture()
 def read_config(session, conn_type, info, transport, await_reboot, device):
     need_reboot = conn_type == SmartCardConnection and (4, 0) <= info.version < (5, 5)
-    if need_reboot and info.version[0] == 4:
+    if need_reboot:
         pytest.skip("Can't read config")
 
-    def call():
-        otp = session
-        if need_reboot:
-            if transport == TRANSPORT.NFC:
-                # NFC only allows one connection; reuse the existing one
-                otp = YubiOtpSession(session._test_connection)
-                return otp.get_config_state()
-            else:
-                with device.open_connection(SmartCardConnection) as conn:
-                    ManagementSession(conn).write_device_config(reboot=True)
-                await_reboot()
-                devs = list_all_devices([SmartCardConnection])
-                if len(devs) != 1:
-                    raise Exception("More than one YubiKey connected")
-                dev, info2 = devs[0]
-                if info.serial != info2.serial:
-                    raise Exception("Connected YubiKey has wrong serial")
-                conn = dev.open_connection(SmartCardConnection)
-
-                otp = YubiOtpSession(conn)
-                session.backend = otp.backend
-        return otp.get_config_state()
-
-    return call
+    return session.get_config_state()
 
 
 class TestProgrammingState:

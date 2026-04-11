@@ -37,6 +37,7 @@ from .. import (
     USB_INTERFACE,
     ApplicationNotAvailableError,
     BadResponseError,
+    Closable,
     CommandError,
     Connection,
     NotSupportedError,
@@ -133,7 +134,7 @@ P2_SELECT = 0x00
 INS_SEND_REMAINING = 0xC0
 
 
-class SmartCardProtocol:
+class SmartCardProtocol(Closable):
     """Smart Card protocol backed by a native Rust implementation."""
 
     def __init__(
@@ -147,7 +148,7 @@ class SmartCardProtocol:
         )
 
     def close(self) -> None:
-        self.connection.close()
+        self._native.close()
 
     def enable_touch_workaround(self, version: Version) -> None:
         warnings.warn(

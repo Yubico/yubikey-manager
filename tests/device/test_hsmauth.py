@@ -31,6 +31,7 @@ def session(ccid_connection, transport, info, scp_params):
         hsmauth = HsmAuthSession(ccid_connection)
     hsmauth.reset()
     yield hsmauth
+    hsmauth.close()
 
 
 @pytest.fixture
