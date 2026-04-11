@@ -107,6 +107,10 @@ impl CtapHidCapability {
     pub const CBOR: u8 = 0x04;
     pub const NMSG: u8 = 0x08;
 
+    pub fn from_raw(raw: u8) -> Self {
+        Self(raw)
+    }
+
     pub fn has_cbor(self) -> bool {
         self.0 & Self::CBOR != 0
     }
@@ -144,6 +148,8 @@ pub enum FidoError {
     InvalidResponse,
     #[error("Timeout")]
     Timeout,
+    #[error("{0}")]
+    Other(String),
 }
 
 /// Information about an enumerated FIDO HID device.

@@ -124,12 +124,12 @@ def main() -> None:
         )
 
         try:
-            session = Ctap2FidoSession(conn)
+            fido_session = Ctap2FidoSession(conn)
         except Exception as e:
             print(f"  Failed to open CTAP2 session: {e}")
             continue
 
-        run_demo(session, "FIDO HID")
+        run_demo(fido_session, "FIDO HID")
 
     # CCID / SmartCard
     for reader in readers:
@@ -137,18 +137,18 @@ def main() -> None:
         print(f"Found CCID reader: {reader}")
 
         try:
-            conn = PcscConnection(reader)
+            sc_conn = PcscConnection(reader)
         except OSError as e:
             print(f"  Failed to connect: {e}")
             continue
 
         try:
-            session = Ctap2Session(conn)
+            ccid_session = Ctap2Session(sc_conn)
         except Exception as e:
             print(f"  FIDO not available: {e}")
             continue
 
-        run_demo(session, f"CCID ({reader})")
+        run_demo(ccid_session, f"CCID ({reader})")
 
     if not found_any:
         print("No YubiKeys found.")

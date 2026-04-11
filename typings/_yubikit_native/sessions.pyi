@@ -457,3 +457,39 @@ class YubiOtpOtpSession:
         event: object | None = None,
         on_keepalive: object | None = None,
     ) -> bytes: ...
+
+class Ctap2Session:
+    def __init__(self, connection: Any, scp_key_params: Any | None = None) -> None: ...
+    @property
+    def version(self) -> tuple[int, int, int]: ...
+    def selection(
+        self,
+        event: object | None = None,
+        on_keepalive: object | None = None,
+    ) -> None: ...
+    def get_info(self) -> dict[str, Any]: ...
+    def send_cbor(
+        self,
+        cmd: int,
+        data: bytes | None = None,
+        event: object | None = None,
+        on_keepalive: object | None = None,
+    ) -> bytes: ...
+
+class Ctap2FidoSession:
+    def __init__(self, connection: Any) -> None: ...
+    @property
+    def version(self) -> tuple[int, int, int]: ...
+    def selection(
+        self,
+        event: object | None = None,
+        on_keepalive: object | None = None,
+    ) -> None: ...
+    def get_info(self) -> dict[str, Any]: ...
+    def send_cbor(
+        self,
+        cmd: int,
+        data: bytes | None = None,
+        event: object | None = None,
+        on_keepalive: object | None = None,
+    ) -> bytes: ...

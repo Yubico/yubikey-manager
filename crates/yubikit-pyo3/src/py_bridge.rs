@@ -25,17 +25,23 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! Bridge between Python SmartCardConnection and Rust SmartCardConnection trait.
+//! Bridge between Python connection types and Rust connection traits.
 //!
-//! This module provides [`extract_smartcard_connection`], which extracts a Rust
-//! `SmartCardConnection` from a Python connection object — either by unwrapping
-//! a native `PcscConnection` (fast path) or by bridging an arbitrary Python
-//! object via `PythonSmartCardConnection` (slow path).
+//! This module provides extraction functions that convert Python connection
+//! objects into their Rust trait counterparts:
+//!
+//! - [`extract_smartcard_connection`]: `SmartCardConnection` from Python
+//! - [`extract_fido_connection`]: `FidoConnection` from Python
+//!
+//! Each supports a **fast path** (unwrapping a native pyclass) and a
+//! **slow path** (bridging an arbitrary Python object via the GIL).
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use yubikit::core::Transport;
+use yubikit::fido::FidoConnection as FidoConnectionTrait;
 use yubikit::smartcard::{SmartCardConnection, SmartCardError, SmartCardProtocol};
+use yubikit::transport::ctaphid::{CtapHidCapability, FidoError};
 
 use crate::py_pcsc::PcscConnection;
 
@@ -123,6 +129,99 @@ pub fn extract_smartcard_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedSma
 
     // Slow path: arbitrary Python connection
     Ok(Box::new(PythonSmartCardConnection::from_py(obj)?))
+}
+
+// ---------------------------------------------------------------------------
+// FidoConnection bridge
+// ---------------------------------------------------------------------------
+
+/// Type alias for a boxed FIDO connection.
+pub type BoxedFidoConnection = Box<dyn FidoConnectionTrait + Send>;
+
+/// A Rust `FidoConnection` backed by a Python connection object.
+///
+/// Calls the Python object's `call(cmd, data)` method for each CTAP HID
+/// command. Reads `device_version` and `capabilities` properties once at
+/// construction time. Used as the slow-path bridge when the connection is
+/// implemented in Python rather than being a native Rust connection.
+struct PythonFidoConnection {
+    call_fn: PyObject,
+    device_version: (u8, u8, u8),
+    capabilities: CtapHidCapability,
+}
+
+unsafe impl Send for PythonFidoConnection {}
+
+impl PythonFidoConnection {
+    fn from_py(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let call_fn = connection.getattr("call")?.unbind();
+        let device_version: (u8, u8, u8) = connection.getattr("device_version")?.extract()?;
+        let caps_raw: u8 = connection.getattr("capabilities")?.extract()?;
+
+        Ok(Self {
+            call_fn,
+            device_version,
+            capabilities: CtapHidCapability::from_raw(caps_raw),
+        })
+    }
+}
+
+impl yubikit::core::Connection for PythonFidoConnection {
+    type Error = FidoError;
+    fn close(&mut self) {}
+}
+
+impl FidoConnectionTrait for PythonFidoConnection {
+    fn call(
+        &mut self,
+        cmd: u8,
+        data: &[u8],
+        _on_keepalive: Option<&mut dyn FnMut(u8)>,
+        _cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Vec<u8>, FidoError> {
+        Python::with_gil(|py| {
+            let data_bytes = PyBytes::new(py, data);
+            let result = self
+                .call_fn
+                .call1(py, (cmd, data_bytes))
+                .map_err(|e| FidoError::Other(e.to_string()))?;
+            result
+                .extract::<Vec<u8>>(py)
+                .map_err(|e| FidoError::Other(e.to_string()))
+        })
+    }
+
+    fn device_version(&self) -> (u8, u8, u8) {
+        self.device_version
+    }
+
+    fn capabilities(&self) -> CtapHidCapability {
+        self.capabilities
+    }
+}
+
+/// Extract a `BoxedFidoConnection` from a Python connection argument.
+///
+/// **Fast path**: if `obj` is a native `FidoConnection` pyclass, take the
+/// inner `HidFidoConnection` directly (no Python call overhead per command).
+///
+/// **Slow path**: wrap the Python object in a `PythonFidoConnection` bridge
+/// that calls `call(cmd, data)` via the GIL.
+pub fn extract_fido_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedFidoConnection> {
+    // Fast path: native FidoConnection
+    if let Ok(fido) = obj.downcast::<crate::py_hid::FidoConnection>() {
+        let conn = fido.borrow_mut().take_inner()?;
+        return Ok(Box::new(conn));
+    }
+
+    // Slow path: arbitrary Python connection
+    Ok(Box::new(PythonFidoConnection::from_py(obj)?))
+}
+
+/// Convert a `FidoError` to a Python exception.
+#[expect(dead_code)]
+pub fn fido_err(e: FidoError) -> PyErr {
+    pyo3::exceptions::PyOSError::new_err(e.to_string())
 }
 
 /// Convert a `SmartCardError` to the appropriate Python exception.

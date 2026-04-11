@@ -6,9 +6,11 @@ use pyo3::types::{PyBool, PyBytes, PyDict, PyList};
 use yubikit::cbor;
 use yubikit::ctap::CtapSession;
 use yubikit::ctap2::{Ctap2Error, Ctap2Session, Info};
-use yubikit::transport::ctaphid::HidFidoConnection;
 
-use crate::py_bridge::{BoxedSmartCardConnection, extract_smartcard_connection};
+use crate::py_bridge::{
+    BoxedFidoConnection, BoxedSmartCardConnection, extract_fido_connection,
+    extract_smartcard_connection,
+};
 
 // ---------------------------------------------------------------------------
 // Error mapping
@@ -274,17 +276,14 @@ impl PyCtap2Session {
 
 #[pyclass(name = "Ctap2FidoSession", unsendable)]
 pub struct PyCtap2FidoSession {
-    session: Ctap2Session<HidFidoConnection>,
+    session: Ctap2Session<BoxedFidoConnection>,
 }
 
 #[pymethods]
 impl PyCtap2FidoSession {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let mut conn_wrapper = connection
-            .downcast::<crate::py_hid::FidoConnection>()?
-            .borrow_mut();
-        let conn = conn_wrapper.take_inner()?;
+        let conn = extract_fido_connection(connection)?;
         let ctap = CtapSession::new_fido(conn).map_err(|(e, _)| ctap_err(e))?;
         if !ctap.has_ctap2() {
             return Err(PyRuntimeError::new_err("Device does not support CTAP2"));
