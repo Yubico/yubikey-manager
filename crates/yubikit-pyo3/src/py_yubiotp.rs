@@ -1,11 +1,11 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikit::transport::otphid::HidOtpConnection;
 use yubikit::yubiotp::{self, ConfigSlot, NdefType, Slot, YubiOtpSession};
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, extract_otp_connection, extract_smartcard_connection,
-    restore_otp_connection, restore_smartcard_connection, scp_key_params_from_py,
+    BoxedOtpConnection, BoxedSmartCardConnection, extract_otp_connection,
+    extract_smartcard_connection, restore_otp_connection, restore_smartcard_connection,
+    scp_key_params_from_py,
 };
 
 fn yubiotp_err<E: std::fmt::Debug + std::fmt::Display>(e: yubiotp::YubiOtpError<E>) -> PyErr {
@@ -212,18 +212,18 @@ impl PyYubiOtpSession {
 
 #[pyclass(name = "YubiOtpOtpSession", unsendable)]
 pub struct PyYubiOtpOtpSession {
-    session: Option<YubiOtpSession<HidOtpConnection>>,
+    session: Option<YubiOtpSession<BoxedOtpConnection>>,
     py_connection: PyObject,
 }
 
 impl PyYubiOtpOtpSession {
-    fn session(&self) -> PyResult<&YubiOtpSession<HidOtpConnection>> {
+    fn session(&self) -> PyResult<&YubiOtpSession<BoxedOtpConnection>> {
         self.session
             .as_ref()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
 
-    fn session_mut(&mut self) -> PyResult<&mut YubiOtpSession<HidOtpConnection>> {
+    fn session_mut(&mut self) -> PyResult<&mut YubiOtpSession<BoxedOtpConnection>> {
         self.session
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))

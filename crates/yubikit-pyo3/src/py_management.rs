@@ -1,12 +1,11 @@
 use pyo3::prelude::*;
 use yubikit::management::{DeviceInfo, ManagementSession};
 use yubikit::transport::ctaphid::list_fido_devices;
-use yubikit::transport::otphid::HidOtpConnection;
 
 use crate::py_bridge::{
-    BoxedFidoConnection, BoxedSmartCardConnection, extract_fido_connection, extract_otp_connection,
-    extract_smartcard_connection, restore_fido_connection, restore_otp_connection,
-    restore_smartcard_connection, scp_key_params_from_py,
+    BoxedFidoConnection, BoxedOtpConnection, BoxedSmartCardConnection, extract_fido_connection,
+    extract_otp_connection, extract_smartcard_connection, restore_fido_connection,
+    restore_otp_connection, restore_smartcard_connection, scp_key_params_from_py,
 };
 
 fn management_err(e: impl std::fmt::Display) -> PyErr {
@@ -217,18 +216,18 @@ impl ManagementCcidSession {
 
 #[pyclass(name = "ManagementOtpSession", unsendable)]
 pub struct ManagementOtpSession {
-    inner: Option<ManagementSession<HidOtpConnection>>,
+    inner: Option<ManagementSession<BoxedOtpConnection>>,
     py_connection: PyObject,
 }
 
 impl ManagementOtpSession {
-    fn session(&self) -> PyResult<&ManagementSession<HidOtpConnection>> {
+    fn session(&self) -> PyResult<&ManagementSession<BoxedOtpConnection>> {
         self.inner
             .as_ref()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
 
-    fn session_mut(&mut self) -> PyResult<&mut ManagementSession<HidOtpConnection>> {
+    fn session_mut(&mut self) -> PyResult<&mut ManagementSession<BoxedOtpConnection>> {
         self.inner
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))

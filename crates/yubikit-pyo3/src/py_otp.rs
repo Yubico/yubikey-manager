@@ -32,83 +32,28 @@
 //! and arbitrary Python OTP connections (slow path via bridge).
 
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
-use yubikit::otp::{OtpConnection, OtpError, OtpProtocol as RustOtpProtocol};
+use yubikit::otp::{OtpError, OtpProtocol as RustOtpProtocol};
 
-use crate::py_hid;
-
-/// Type alias for a boxed OTP connection.
-pub type BoxedOtpConnection = Box<dyn OtpConnection + Send>;
-
-/// Bridges an arbitrary Python OtpConnection to the Rust OtpConnection trait.
-struct PythonOtpConnection {
-    receive_fn: PyObject,
-    send_fn: PyObject,
-}
-
-unsafe impl Send for PythonOtpConnection {}
-unsafe impl Sync for PythonOtpConnection {}
-
-impl PythonOtpConnection {
-    fn from_py(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let receive_fn = connection.getattr("receive")?.unbind();
-        let send_fn = connection.getattr("send")?.unbind();
-        Ok(Self {
-            receive_fn,
-            send_fn,
-        })
-    }
-}
-
-impl yubikit::core::Connection for PythonOtpConnection {
-    type Error = OtpError;
-
-    fn close(&mut self) {}
-}
-
-impl OtpConnection for PythonOtpConnection {
-    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
-        Python::with_gil(|py| {
-            let result = self
-                .receive_fn
-                .call0(py)
-                .map_err(|e| OtpError::BadResponse(e.to_string()))?;
-            let bytes: Vec<u8> = result
-                .extract(py)
-                .map_err(|e| OtpError::BadResponse(e.to_string()))?;
-            Ok(bytes)
-        })
-    }
-
-    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
-        Python::with_gil(|py| {
-            let py_bytes = PyBytes::new(py, data);
-            self.send_fn
-                .call1(py, (py_bytes,))
-                .map_err(|e| OtpError::BadResponse(e.to_string()))?;
-            Ok(())
-        })
-    }
-}
-
-/// Extract a `BoxedOtpConnection` from a Python connection argument.
-///
-/// **Fast path**: if `obj` is a native `OtpConnection` pyclass, take the inner
-/// `HidOtpConnection` directly.
-///
-/// **Slow path**: wrap the Python object in a `PythonOtpConnection` bridge.
-fn extract_otp_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedOtpConnection> {
-    if let Ok(hid_conn) = obj.downcast::<py_hid::OtpConnection>() {
-        let conn = hid_conn.borrow_mut().take_inner()?;
-        return Ok(Box::new(conn));
-    }
-    Ok(Box::new(PythonOtpConnection::from_py(obj)?))
-}
+use crate::py_bridge::{BoxedOtpConnection, extract_otp_connection, restore_otp_connection};
 
 #[pyclass(unsendable)]
 pub struct OtpProtocol {
-    inner: RustOtpProtocol<BoxedOtpConnection>,
-    connection: PyObject,
+    inner: Option<RustOtpProtocol<BoxedOtpConnection>>,
+    py_connection: PyObject,
+}
+
+impl OtpProtocol {
+    fn protocol(&self) -> PyResult<&RustOtpProtocol<BoxedOtpConnection>> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("OtpProtocol is closed"))
+    }
+
+    fn protocol_mut(&mut self) -> PyResult<&mut RustOtpProtocol<BoxedOtpConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("OtpProtocol is closed"))
+    }
 }
 
 #[pymethods]
@@ -119,24 +64,23 @@ impl OtpProtocol {
         let protocol = RustOtpProtocol::new(otp_conn)
             .map_err(|(e, _)| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(Self {
-            inner: protocol,
-            connection: connection.clone().unbind(),
+            inner: Some(protocol),
+            py_connection: connection.clone().unbind(),
         })
     }
 
-    fn close(&self, py: Python<'_>) -> PyResult<()> {
-        let conn = self.connection.bind(py);
-        conn.call_method0("close")?;
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(protocol) = self.inner.take() {
+            let conn = protocol.into_connection();
+            restore_otp_connection(self.py_connection.bind(py), conn)?;
+        }
         Ok(())
     }
 
     #[getter]
-    fn version(&self) -> (u8, u8, u8) {
-        (
-            self.inner.version.0,
-            self.inner.version.1,
-            self.inner.version.2,
-        )
+    fn version(&self) -> PyResult<(u8, u8, u8)> {
+        let p = self.protocol()?;
+        Ok((p.version.0, p.version.1, p.version.2))
     }
 
     #[pyo3(signature = (slot, data=None, expected_len=None, event=None, on_keepalive=None))]
@@ -180,7 +124,7 @@ impl OtpProtocol {
             None
         };
 
-        self.inner
+        self.protocol_mut()?
             .send_and_receive_with_cancel(slot, data, expected_len, cancel_ref, keepalive_ref)
             .map_err(|e| match e {
                 OtpError::CommandRejected(msg) => {
@@ -210,7 +154,7 @@ impl OtpProtocol {
     }
 
     fn read_status(&mut self) -> PyResult<Vec<u8>> {
-        self.inner
+        self.protocol_mut()?
             .read_status()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }

@@ -384,51 +384,146 @@ pub fn restore_fido_connection(
 }
 
 // ---------------------------------------------------------------------------
-// OtpConnection extract / restore
+// OtpConnection enum
 // ---------------------------------------------------------------------------
 
+use yubikit::otp::{OtpConnection as OtpConnectionTrait, OtpError};
 use yubikit::transport::otphid::HidOtpConnection;
 
-/// Extract a `HidOtpConnection` from a Python connection argument.
+/// Enum over the two concrete OTP connection types used in the PyO3 layer.
+pub enum PyOtpConn {
+    Native(HidOtpConnection),
+    Bridge(PythonOtpConnection),
+}
+
+impl yubikit::core::Connection for PyOtpConn {
+    type Error = OtpError;
+    fn close(&mut self) {
+        match self {
+            Self::Native(c) => c.close(),
+            Self::Bridge(c) => c.close(),
+        }
+    }
+}
+
+impl OtpConnectionTrait for PyOtpConn {
+    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
+        match self {
+            Self::Native(c) => c.otp_receive(),
+            Self::Bridge(c) => c.otp_receive(),
+        }
+    }
+    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
+        match self {
+            Self::Native(c) => c.otp_send(data),
+            Self::Bridge(c) => c.otp_send(data),
+        }
+    }
+}
+
+/// Type alias used as the generic parameter for OTP protocols in the PyO3 layer.
+pub type BoxedOtpConnection = PyOtpConn;
+
+/// A Rust `OtpConnection` backed by a Python connection object.
+pub struct PythonOtpConnection {
+    receive_fn: PyObject,
+    send_fn: PyObject,
+}
+
+unsafe impl Send for PythonOtpConnection {}
+unsafe impl Sync for PythonOtpConnection {}
+
+impl PythonOtpConnection {
+    fn from_py(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let receive_fn = connection.getattr("receive")?.unbind();
+        let send_fn = connection.getattr("send")?.unbind();
+        Ok(Self {
+            receive_fn,
+            send_fn,
+        })
+    }
+}
+
+impl yubikit::core::Connection for PythonOtpConnection {
+    type Error = OtpError;
+    fn close(&mut self) {}
+}
+
+impl OtpConnectionTrait for PythonOtpConnection {
+    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
+        Python::with_gil(|py| {
+            let result = self
+                .receive_fn
+                .call0(py)
+                .map_err(|e| OtpError::BadResponse(e.to_string()))?;
+            let bytes: Vec<u8> = result
+                .extract(py)
+                .map_err(|e| OtpError::BadResponse(e.to_string()))?;
+            Ok(bytes)
+        })
+    }
+
+    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
+        Python::with_gil(|py| {
+            let py_bytes = PyBytes::new(py, data);
+            self.send_fn
+                .call1(py, (py_bytes,))
+                .map_err(|e| OtpError::BadResponse(e.to_string()))?;
+            Ok(())
+        })
+    }
+}
+
+/// Extract a `BoxedOtpConnection` from a Python connection argument.
 ///
-/// Checks for the native `OtpConnection` pyclass directly, or inside a
-/// Python wrapper's `._native` attribute. OTP connections always require
-/// the native transport (no bridge/slow path).
-pub fn extract_otp_connection(obj: &Bound<'_, PyAny>) -> PyResult<HidOtpConnection> {
+/// **Fast path**: if `obj` is (or wraps) a native `OtpConnection`, take the
+/// inner `HidOtpConnection` directly.
+///
+/// **Slow path**: wrap the Python object in a `PythonOtpConnection` bridge.
+pub fn extract_otp_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedOtpConnection> {
     // Direct PyO3 OtpConnection pyclass
     if let Ok(otp) = obj.downcast::<crate::py_hid::OtpConnection>() {
-        return otp.borrow_mut().take_inner();
+        let conn = otp.borrow_mut().take_inner()?;
+        return Ok(PyOtpConn::Native(conn));
     }
 
     // Python wrapper with ._native attribute holding an OtpConnection
     if let Ok(inner) = obj.getattr("_native")
         && let Ok(otp) = inner.downcast::<crate::py_hid::OtpConnection>()
     {
-        return otp.borrow_mut().take_inner();
+        let conn = otp.borrow_mut().take_inner()?;
+        return Ok(PyOtpConn::Native(conn));
     }
 
-    Err(pyo3::exceptions::PyTypeError::new_err(
-        "Expected a native OtpConnection",
-    ))
+    // Slow path: arbitrary Python connection
+    Ok(PyOtpConn::Bridge(PythonOtpConnection::from_py(obj)?))
 }
 
-/// Restore a `HidOtpConnection` back to the Python connection wrapper.
-pub fn restore_otp_connection(py_conn: &Bound<'_, PyAny>, conn: HidOtpConnection) -> PyResult<()> {
-    // Direct PyO3 OtpConnection
-    if let Ok(otp) = py_conn.downcast::<crate::py_hid::OtpConnection>() {
-        otp.borrow_mut().restore_inner(conn);
-        return Ok(());
+/// Restore a `BoxedOtpConnection` back to the Python connection wrapper.
+pub fn restore_otp_connection(
+    py_conn: &Bound<'_, PyAny>,
+    conn: BoxedOtpConnection,
+) -> PyResult<()> {
+    match conn {
+        PyOtpConn::Native(inner) => {
+            // Direct PyO3 OtpConnection
+            if let Ok(otp) = py_conn.downcast::<crate::py_hid::OtpConnection>() {
+                otp.borrow_mut().restore_inner(inner);
+                return Ok(());
+            }
+            // Python wrapper with ._native attribute
+            if let Ok(attr) = py_conn.getattr("_native")
+                && let Ok(otp) = attr.downcast::<crate::py_hid::OtpConnection>()
+            {
+                otp.borrow_mut().restore_inner(inner);
+                return Ok(());
+            }
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Cannot find OtpConnection to restore into",
+            ))
+        }
+        PyOtpConn::Bridge(_) => Ok(()),
     }
-    // Python wrapper with ._native attribute
-    if let Ok(attr) = py_conn.getattr("_native")
-        && let Ok(otp) = attr.downcast::<crate::py_hid::OtpConnection>()
-    {
-        otp.borrow_mut().restore_inner(conn);
-        return Ok(());
-    }
-    Err(pyo3::exceptions::PyRuntimeError::new_err(
-        "Cannot find OtpConnection to restore into",
-    ))
 }
 
 /// Convert a `FidoError` to a Python exception.
