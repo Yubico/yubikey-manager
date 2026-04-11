@@ -37,9 +37,6 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/Yubico/yubikey-manager"
 
-[project.scripts]
-ykman = "ykman._cli.__main__:main"
-
 [build-system]
 requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
