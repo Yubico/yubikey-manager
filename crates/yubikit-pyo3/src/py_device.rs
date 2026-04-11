@@ -25,10 +25,12 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-use crate::py_bridge::extract_smartcard_connection;
-use crate::py_hid;
+use crate::py_bridge::{
+    extract_fido_connection, extract_otp_connection, extract_smartcard_connection,
+    restore_fido_connection, restore_otp_connection, restore_smartcard_connection,
+};
 use crate::py_management::device_info_to_dict;
-use pyo3::exceptions::{PyRuntimeError, PyTypeError};
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use yubikit::device;
@@ -45,16 +47,15 @@ fn device_err(e: device::DeviceError) -> PyErr {
 #[pyfunction]
 pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<PyObject> {
     // Try OTP connection
-    if let Ok(otp_conn) = connection.downcast::<py_hid::OtpConnection>() {
-        let native = otp_conn.borrow_mut().take_inner()?;
+    if let Ok(native) = extract_otp_connection(connection) {
         match device::read_info_otp(native) {
             Ok((info, conn)) => {
-                otp_conn.borrow_mut().restore_inner(conn);
+                restore_otp_connection(connection, conn)?;
                 return device_info_to_dict(py, &info);
             }
             Err((e, conn)) => {
                 if let Some(conn) = conn {
-                    otp_conn.borrow_mut().restore_inner(conn);
+                    let _ = restore_otp_connection(connection, conn);
                 }
                 return Err(device_err(e));
             }
@@ -62,28 +63,34 @@ pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<PyOb
     }
 
     // Try FIDO connection
-    if let Ok(fido_conn) = connection.downcast::<py_hid::FidoConnection>() {
-        let native = fido_conn.borrow_mut().take_inner()?;
+    if let Ok(native) = extract_fido_connection(connection) {
         match device::read_info_fido(native) {
             Ok((info, conn)) => {
-                fido_conn.borrow_mut().restore_inner(conn);
+                restore_fido_connection(connection, conn)?;
                 return device_info_to_dict(py, &info);
             }
             Err((e, conn)) => {
                 if let Some(conn) = conn {
-                    fido_conn.borrow_mut().restore_inner(conn);
+                    let _ = restore_fido_connection(connection, conn);
                 }
                 return Err(device_err(e));
             }
         }
     }
 
-    // Try SmartCard connection (duck-typed via send_and_receive)
+    // Try SmartCard connection
     let conn = extract_smartcard_connection(connection).map_err(|_| {
-        PyTypeError::new_err("Expected a SmartCardConnection, OtpConnection, or FidoConnection")
+        pyo3::exceptions::PyTypeError::new_err(
+            "Expected a SmartCardConnection, OtpConnection, or FidoConnection",
+        )
     })?;
-    let (info, _conn) = device::read_info_ccid(conn).map_err(device_err)?;
-    device_info_to_dict(py, &info)
+    match device::read_info_ccid(conn) {
+        Ok((info, conn)) => {
+            restore_smartcard_connection(connection, conn)?;
+            device_info_to_dict(py, &info)
+        }
+        Err(e) => Err(device_err(e)),
+    }
 }
 
 /// Get the product name for a device given its info dict.

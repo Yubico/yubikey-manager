@@ -43,9 +43,9 @@ class ScardSmartCardConnection(SmartCardConnection):
     def __init__(self, reader_name):
         # PcscConnection.open() handles exclusive→shared fallback and
         # killing scdaemon/yubikey-agent if they block access.
-        self.connection = PcscConnection.open(reader_name)
+        self._native = PcscConnection.open(reader_name)
         self._transport = (
-            TRANSPORT.USB if self.connection.transport == "usb" else TRANSPORT.NFC
+            TRANSPORT.USB if self._native.transport == "usb" else TRANSPORT.NFC
         )
 
     @property
@@ -53,12 +53,12 @@ class ScardSmartCardConnection(SmartCardConnection):
         return self._transport
 
     def close(self):
-        self.connection.disconnect()
+        self._native.disconnect()
 
     def send_and_receive(self, apdu):
         """Sends a command APDU and returns the response data and sw"""
         logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", apdu.hex())
-        resp = self.connection.transmit(apdu)
+        resp = self._native.transmit(apdu)
         data = resp[:-2]
         sw = resp[-2] << 8 | resp[-1]
         logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s SW=%04x", data.hex(), sw)

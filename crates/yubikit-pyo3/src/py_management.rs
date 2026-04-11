@@ -1,10 +1,11 @@
 use pyo3::prelude::*;
 use yubikit::management::{DeviceInfo, ManagementSession};
-use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
+use yubikit::transport::ctaphid::list_fido_devices;
 use yubikit::transport::otphid::HidOtpConnection;
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, PyFidoConn, extract_smartcard_connection, restore_fido_connection,
+    BoxedFidoConnection, BoxedSmartCardConnection, extract_fido_connection, extract_otp_connection,
+    extract_smartcard_connection, restore_fido_connection, restore_otp_connection,
     restore_smartcard_connection, scp_key_params_from_py,
 };
 
@@ -239,10 +240,7 @@ impl ManagementOtpSession {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();
-        let mut conn_wrapper = connection
-            .downcast::<crate::py_hid::OtpConnection>()?
-            .borrow_mut();
-        let hid_conn = conn_wrapper.take_inner()?;
+        let hid_conn = extract_otp_connection(connection)?;
         let inner = ManagementSession::new_otp(hid_conn).map_err(|(e, _)| management_err(e))?;
         Ok(Self {
             inner: Some(inner),
@@ -253,11 +251,7 @@ impl ManagementOtpSession {
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
         if let Some(session) = self.inner.take() {
             let conn = session.into_connection();
-            let py_conn = self.py_connection.bind(py);
-            let mut conn_wrapper = py_conn
-                .downcast::<crate::py_hid::OtpConnection>()?
-                .borrow_mut();
-            conn_wrapper.restore_inner(conn);
+            restore_otp_connection(self.py_connection.bind(py), conn)?;
         }
         Ok(())
     }
@@ -344,18 +338,18 @@ impl ManagementOtpSession {
 
 #[pyclass(name = "ManagementFidoSession", unsendable)]
 pub struct ManagementFidoSession {
-    inner: Option<ManagementSession<HidFidoConnection>>,
+    inner: Option<ManagementSession<BoxedFidoConnection>>,
     py_connection: PyObject,
 }
 
 impl ManagementFidoSession {
-    fn session(&self) -> PyResult<&ManagementSession<HidFidoConnection>> {
+    fn session(&self) -> PyResult<&ManagementSession<BoxedFidoConnection>> {
         self.inner
             .as_ref()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
 
-    fn session_mut(&mut self) -> PyResult<&mut ManagementSession<HidFidoConnection>> {
+    fn session_mut(&mut self) -> PyResult<&mut ManagementSession<BoxedFidoConnection>> {
         self.inner
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
@@ -367,10 +361,7 @@ impl ManagementFidoSession {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();
-        let mut conn_wrapper = connection
-            .downcast::<crate::py_hid::FidoConnection>()?
-            .borrow_mut();
-        let conn = conn_wrapper.take_inner()?;
+        let conn = extract_fido_connection(connection)?;
         let inner = ManagementSession::new_fido(conn).map_err(|(e, _)| management_err(e))?;
         Ok(Self {
             inner: Some(inner),
@@ -381,7 +372,7 @@ impl ManagementFidoSession {
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
         if let Some(session) = self.inner.take() {
             let conn = session.into_connection();
-            restore_fido_connection(self.py_connection.bind(py), PyFidoConn::Native(conn))?;
+            restore_fido_connection(self.py_connection.bind(py), conn)?;
         }
         Ok(())
     }

@@ -382,7 +382,7 @@ class ManagementSession(Session):
                 _NativeManagementOtpSession
                 | _NativeManagementSession
                 | _NativeManagementFidoSession
-            ) = _NativeManagementOtpSession(connection._conn)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            ) = _NativeManagementOtpSession(connection)  # type: ignore[arg-type]
         elif isinstance(connection, SmartCardConnection):
             native = _NativeManagementSession(connection, scp_key_params)
         elif isinstance(connection, FidoConnection):

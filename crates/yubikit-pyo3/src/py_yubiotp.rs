@@ -4,8 +4,8 @@ use yubikit::transport::otphid::HidOtpConnection;
 use yubikit::yubiotp::{self, ConfigSlot, NdefType, Slot, YubiOtpSession};
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, extract_smartcard_connection, restore_smartcard_connection,
-    scp_key_params_from_py,
+    BoxedSmartCardConnection, extract_otp_connection, extract_smartcard_connection,
+    restore_otp_connection, restore_smartcard_connection, scp_key_params_from_py,
 };
 
 fn yubiotp_err<E: std::fmt::Debug + std::fmt::Display>(e: yubiotp::YubiOtpError<E>) -> PyErr {
@@ -235,10 +235,7 @@ impl PyYubiOtpOtpSession {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();
-        let mut conn_wrapper = connection
-            .downcast::<crate::py_hid::OtpConnection>()?
-            .borrow_mut();
-        let conn = conn_wrapper.take_inner()?;
+        let conn = extract_otp_connection(connection)?;
         let session = YubiOtpSession::new_otp(conn).map_err(|(e, _)| yubiotp_err(e))?;
         Ok(Self {
             session: Some(session),
@@ -249,11 +246,7 @@ impl PyYubiOtpOtpSession {
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
         if let Some(session) = self.session.take() {
             let conn = session.into_connection();
-            let py_conn = self.py_connection.bind(py);
-            let mut conn_wrapper = py_conn
-                .downcast::<crate::py_hid::OtpConnection>()?
-                .borrow_mut();
-            conn_wrapper.restore_inner(conn);
+            restore_otp_connection(self.py_connection.bind(py), conn)?;
         }
         Ok(())
     }

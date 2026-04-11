@@ -32,9 +32,12 @@
 //!
 //! - [`extract_smartcard_connection`]: `SmartCardConnection` from Python
 //! - [`extract_fido_connection`]: `FidoConnection` from Python
+//! - [`extract_otp_connection`]: `OtpConnection` from Python
 //!
 //! Each supports a **fast path** (unwrapping a native pyclass) and a
 //! **slow path** (bridging an arbitrary Python object via the GIL).
+//! The fast path also walks into Python wrappers that store the native
+//! pyclass in a `._native` attribute.
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -153,14 +156,22 @@ impl SmartCardConnection for PythonSmartCardConnection {
 
 /// Extract a `BoxedSmartCardConnection` from a Python connection argument.
 ///
-/// **Fast path**: if `obj` is a native `PcscConnection`, take the inner
-/// `PcscSmartCardConnection` directly (no Python call overhead per APDU).
+/// **Fast path**: if `obj` is (or wraps) a native `PcscConnection`, take the
+/// inner `PcscSmartCardConnection` directly (no Python call overhead per APDU).
 ///
 /// **Slow path**: wrap the Python object in a `PythonSmartCardConnection`
 /// bridge that calls `send_and_receive()` via the GIL.
 pub fn extract_smartcard_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedSmartCardConnection> {
-    // Fast path: native PcscConnection
+    // Fast path: direct PyO3 PcscConnection pyclass
     if let Ok(pcsc) = obj.downcast::<PcscConnection>() {
+        let conn = pcsc.borrow_mut().take_inner()?;
+        return Ok(PySmartCardConn::Native(conn));
+    }
+
+    // Fast path: Python wrapper with ._native attribute holding a PcscConnection
+    if let Ok(inner) = obj.getattr("_native")
+        && let Ok(pcsc) = inner.downcast::<PcscConnection>()
+    {
         let conn = pcsc.borrow_mut().take_inner()?;
         return Ok(PySmartCardConn::Native(conn));
     }
@@ -285,14 +296,23 @@ impl FidoConnectionTrait for PythonFidoConnection {
 
 /// Extract a `BoxedFidoConnection` from a Python connection argument.
 ///
-/// **Fast path**: if `obj` is a native `FidoConnection` pyclass, take the
-/// inner `HidFidoConnection` directly (no Python call overhead per command).
+/// **Fast path**: if `obj` is (or wraps) a native `FidoConnection` pyclass,
+/// take the inner `HidFidoConnection` directly (no Python call overhead per
+/// command).
 ///
 /// **Slow path**: wrap the Python object in a `PythonFidoConnection` bridge
 /// that calls `call(cmd, data)` via the GIL.
 pub fn extract_fido_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedFidoConnection> {
-    // Fast path: native FidoConnection
+    // Fast path: direct PyO3 FidoConnection pyclass
     if let Ok(fido) = obj.downcast::<crate::py_hid::FidoConnection>() {
+        let conn = fido.borrow_mut().take_inner()?;
+        return Ok(PyFidoConn::Native(conn));
+    }
+
+    // Fast path: Python wrapper with ._native attribute holding a FidoConnection
+    if let Ok(inner) = obj.getattr("_native")
+        && let Ok(fido) = inner.downcast::<crate::py_hid::FidoConnection>()
+    {
         let conn = fido.borrow_mut().take_inner()?;
         return Ok(PyFidoConn::Native(conn));
     }
@@ -303,7 +323,8 @@ pub fn extract_fido_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedFidoConn
 
 /// Restore a `BoxedSmartCardConnection` back to the Python connection wrapper.
 ///
-/// **Native variant**: restore the `PcscSmartCardConnection` into the pyclass.
+/// **Native variant**: restore the `PcscSmartCardConnection` into the pyclass,
+/// which may be the `py_conn` itself or accessible via `.connection`.
 /// **Bridge variant**: just drop — the Python object was never modified.
 pub fn restore_smartcard_connection(
     py_conn: &Bound<'_, PyAny>,
@@ -311,23 +332,30 @@ pub fn restore_smartcard_connection(
 ) -> PyResult<()> {
     match conn {
         PySmartCardConn::Native(inner) => {
-            let pcsc = py_conn.downcast::<PcscConnection>().map_err(|_| {
-                pyo3::exceptions::PyRuntimeError::new_err(
-                    "Native SmartCard connection but Python object is not PcscConnection",
-                )
-            })?;
-            pcsc.borrow_mut().restore_inner(inner);
+            // Direct PyO3 PcscConnection
+            if let Ok(pcsc) = py_conn.downcast::<PcscConnection>() {
+                pcsc.borrow_mut().restore_inner(inner);
+                return Ok(());
+            }
+            // Python wrapper with ._native attribute
+            if let Ok(attr) = py_conn.getattr("_native")
+                && let Ok(pcsc) = attr.downcast::<PcscConnection>()
+            {
+                pcsc.borrow_mut().restore_inner(inner);
+                return Ok(());
+            }
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Native SmartCard connection but cannot find PcscConnection to restore into",
+            ))
         }
-        PySmartCardConn::Bridge(_) => {
-            // Nothing to restore — the Python connection object is unchanged
-        }
+        PySmartCardConn::Bridge(_) => Ok(()),
     }
-    Ok(())
 }
 
 /// Restore a `BoxedFidoConnection` back to the Python connection wrapper.
 ///
-/// **Native variant**: restore the `HidFidoConnection` into the pyclass.
+/// **Native variant**: restore the `HidFidoConnection` into the pyclass,
+/// which may be the `py_conn` itself or accessible via `._native`.
 /// **Bridge variant**: just drop.
 pub fn restore_fido_connection(
     py_conn: &Bound<'_, PyAny>,
@@ -335,20 +363,72 @@ pub fn restore_fido_connection(
 ) -> PyResult<()> {
     match conn {
         PyFidoConn::Native(inner) => {
-            let fido = py_conn
-                .downcast::<crate::py_hid::FidoConnection>()
-                .map_err(|_| {
-                    pyo3::exceptions::PyRuntimeError::new_err(
-                        "Native FIDO connection but Python object is not FidoConnection",
-                    )
-                })?;
-            fido.borrow_mut().restore_inner(inner);
+            // Direct PyO3 FidoConnection
+            if let Ok(fido) = py_conn.downcast::<crate::py_hid::FidoConnection>() {
+                fido.borrow_mut().restore_inner(inner);
+                return Ok(());
+            }
+            // Python wrapper with ._native attribute
+            if let Ok(attr) = py_conn.getattr("_native")
+                && let Ok(fido) = attr.downcast::<crate::py_hid::FidoConnection>()
+            {
+                fido.borrow_mut().restore_inner(inner);
+                return Ok(());
+            }
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Native FIDO connection but cannot find FidoConnection to restore into",
+            ))
         }
-        PyFidoConn::Bridge(_) => {
-            // Nothing to restore
-        }
+        PyFidoConn::Bridge(_) => Ok(()),
     }
-    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// OtpConnection extract / restore
+// ---------------------------------------------------------------------------
+
+use yubikit::transport::otphid::HidOtpConnection;
+
+/// Extract a `HidOtpConnection` from a Python connection argument.
+///
+/// Checks for the native `OtpConnection` pyclass directly, or inside a
+/// Python wrapper's `._native` attribute. OTP connections always require
+/// the native transport (no bridge/slow path).
+pub fn extract_otp_connection(obj: &Bound<'_, PyAny>) -> PyResult<HidOtpConnection> {
+    // Direct PyO3 OtpConnection pyclass
+    if let Ok(otp) = obj.downcast::<crate::py_hid::OtpConnection>() {
+        return otp.borrow_mut().take_inner();
+    }
+
+    // Python wrapper with ._native attribute holding an OtpConnection
+    if let Ok(inner) = obj.getattr("_native")
+        && let Ok(otp) = inner.downcast::<crate::py_hid::OtpConnection>()
+    {
+        return otp.borrow_mut().take_inner();
+    }
+
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "Expected a native OtpConnection",
+    ))
+}
+
+/// Restore a `HidOtpConnection` back to the Python connection wrapper.
+pub fn restore_otp_connection(py_conn: &Bound<'_, PyAny>, conn: HidOtpConnection) -> PyResult<()> {
+    // Direct PyO3 OtpConnection
+    if let Ok(otp) = py_conn.downcast::<crate::py_hid::OtpConnection>() {
+        otp.borrow_mut().restore_inner(conn);
+        return Ok(());
+    }
+    // Python wrapper with ._native attribute
+    if let Ok(attr) = py_conn.getattr("_native")
+        && let Ok(otp) = attr.downcast::<crate::py_hid::OtpConnection>()
+    {
+        otp.borrow_mut().restore_inner(conn);
+        return Ok(());
+    }
+    Err(pyo3::exceptions::PyRuntimeError::new_err(
+        "Cannot find OtpConnection to restore into",
+    ))
 }
 
 /// Convert a `FidoError` to a Python exception.

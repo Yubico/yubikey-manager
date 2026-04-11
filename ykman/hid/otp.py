@@ -39,16 +39,16 @@ class _NativeOtpConnection(OtpConnection):
 
     def __init__(self, path: str):
         self._path = path
-        self._conn = _NativeOtpConnectionImpl(path)
+        self._native = _NativeOtpConnectionImpl(path)
 
     def close(self) -> None:
-        self._conn.close()
+        self._native.close()
 
     def receive(self) -> bytes:
-        data = bytes(self._conn.get_feature_report())
+        data = bytes(self._native.get_feature_report())
         logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s", data.hex())
         return data
 
     def send(self, data: bytes) -> None:
         logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", data.hex())
-        self._conn.set_feature_report(data)
+        self._native.set_feature_report(data)
