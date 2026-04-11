@@ -155,7 +155,13 @@ fn main() {
                 continue;
             }
         };
-        let ctap2 = Ctap2Session::new(ctap);
+        let ctap2 = match Ctap2Session::new(ctap) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("  Failed to get info: {e}");
+                continue;
+            }
+        };
         run_demo(ctap2, "FIDO HID");
     }
 
@@ -185,7 +191,13 @@ fn main() {
             continue;
         }
 
-        let ctap2 = Ctap2Session::new(ctap);
+        let ctap2 = match Ctap2Session::new(ctap) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("  Failed to get info: {e}");
+                continue;
+            }
+        };
         run_demo(ctap2, &format!("CCID ({reader})"));
     }
 

@@ -1095,10 +1095,10 @@ impl<C: SmartCardConnection> CcidManagement<C> {
 
         // For YubiKey NEO (v3), switch to OTP applet for further commands
         if version.0 == 3 {
-            // Workaround to "de-select" on NEO
-            let _ = protocol
-                .connection_mut()
-                .send_and_receive(&[0xa4, 0x04, 0x00, 0x08]);
+            // Workaround to "de-select" on NEO: take connection out, send raw, rebuild
+            let mut conn = protocol.into_connection();
+            let _ = conn.send_and_receive(&[0xa4, 0x04, 0x00, 0x08]);
+            protocol = SmartCardProtocol::new(conn);
             if let Err(e) = protocol.select(Aid::OTP) {
                 return Err((e, protocol.into_connection()));
             }

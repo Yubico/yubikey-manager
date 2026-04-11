@@ -73,6 +73,9 @@ fn register_sessions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<py_yubiotp::PyYubiOtpOtpSession>()?;
     m.add_class::<py_ctap::PyCtap2Session>()?;
     m.add_class::<py_ctap::PyCtap2FidoSession>()?;
+    m.add_class::<py_ctap::PyPinProtocol>()?;
+    m.add_class::<py_ctap::PyClientPin>()?;
+    m.add_class::<py_ctap::PyClientPinFido>()?;
     parent.add_submodule(&m)?;
 
     let sys = parent.py().import("sys")?;

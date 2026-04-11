@@ -25,12 +25,26 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! CTAP2 protocol session.
+//! CTAP2 protocol session and PIN/UV management.
 //!
 //! Provides [`Ctap2Session`], which wraps a [`CtapSession`] and implements
 //! CTAP2-specific command framing and response parsing.
+//!
+//! Also provides [`ClientPin`] for PIN/UV token operations, and
+//! [`PinProtocol`] (V1/V2) for the underlying cryptographic operations.
 
 use std::collections::BTreeMap;
+
+use aes::Aes256;
+use cbc::{Decryptor as CbcDecryptor, Encryptor as CbcEncryptor};
+use cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use elliptic_curve::sec1::FromEncodedPoint;
+use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
+use p256::elliptic_curve::rand_core::OsRng;
+use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::{EncodedPoint, PublicKey, SecretKey};
+use sha2::{Digest, Sha256};
 
 use crate::cbor::{self, Value};
 use crate::core::Connection;
@@ -41,7 +55,8 @@ use crate::ctap::{CtapError, CtapSession};
 // ---------------------------------------------------------------------------
 
 /// CTAP2 authenticator command identifiers.
-pub mod cmd {
+#[allow(dead_code)]
+mod cmd {
     pub const MAKE_CREDENTIAL: u8 = 0x01;
     pub const GET_ASSERTION: u8 = 0x02;
     pub const GET_INFO: u8 = 0x04;
@@ -211,7 +226,7 @@ impl<E: std::error::Error + Send + Sync + 'static> From<CtapError<E>> for Ctap2E
 // ---------------------------------------------------------------------------
 
 /// 16-byte Authenticator Attestation GUID.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
 pub struct Aaguid([u8; 16]);
 
 impl Aaguid {
@@ -275,7 +290,7 @@ impl std::fmt::Display for Aaguid {
 ///
 /// All fields correspond to the integer-keyed CBOR map returned by the
 /// authenticator. Optional/defaulted fields follow the CTAP 2.3 spec defaults.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Info {
     /// 0x01: List of supported protocol versions (e.g. "FIDO_2_0", "FIDO_2_1").
     pub versions: Vec<String>,
@@ -497,17 +512,25 @@ impl Info {
 /// and responses are parsed as `[status_byte] ++ cbor_data`.
 pub struct Ctap2Session<C: Connection> {
     session: CtapSession<C>,
+    pub(crate) cached_info: Info,
 }
 
 impl<C: Connection + 'static> Ctap2Session<C> {
     /// Create a new `Ctap2Session` wrapping the given [`CtapSession`].
-    pub fn new(session: CtapSession<C>) -> Self {
-        Self { session }
+    ///
+    /// Calls `get_info()` to cache the authenticator's capabilities.
+    pub fn new(session: CtapSession<C>) -> Result<Self, Ctap2Error<C::Error>> {
+        let mut s = Self {
+            session,
+            cached_info: Info::default(),
+        };
+        s.cached_info = s.get_info()?;
+        Ok(s)
     }
 
-    /// Access the underlying [`CtapSession`].
-    pub fn session(&self) -> &CtapSession<C> {
-        &self.session
+    /// The protocol version reported by the authenticator.
+    pub fn version(&self) -> crate::core::Version {
+        self.session.version()
     }
 
     /// Consume the `Ctap2Session`, returning the underlying [`CtapSession`].
@@ -572,6 +595,638 @@ impl<C: Connection + 'static> Ctap2Session<C> {
             .as_map()
             .ok_or_else(|| Ctap2Error::InvalidResponse("Expected CBOR map".into()))?;
         Ok(Info::from_cbor_map(map))
+    }
+
+    /// Send a raw authenticatorClientPIN command and return the parsed CBOR response map.
+    ///
+    /// This is the low-level interface used by [`ClientPin`] for all PIN/UV operations.
+    pub fn client_pin(
+        &mut self,
+        pin_uv_protocol: u32,
+        sub_cmd: u8,
+        key_agreement: Option<&Value>,
+        pin_uv_param: Option<&[u8]>,
+        new_pin_enc: Option<&[u8]>,
+        pin_hash_enc: Option<&[u8]>,
+        permissions: Option<u8>,
+        permissions_rpid: Option<&str>,
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+        // Build CBOR map with integer keys per CTAP2 spec §6.5.4
+        let mut params: Vec<(Value, Value)> = Vec::new();
+        params.push((Value::Int(0x01), Value::Int(pin_uv_protocol as i64)));
+        params.push((Value::Int(0x02), Value::Int(sub_cmd as i64)));
+        if let Some(ka) = key_agreement {
+            params.push((Value::Int(0x03), ka.clone()));
+        }
+        if let Some(param) = pin_uv_param {
+            params.push((Value::Int(0x04), Value::Bytes(param.to_vec())));
+        }
+        if let Some(enc) = new_pin_enc {
+            params.push((Value::Int(0x05), Value::Bytes(enc.to_vec())));
+        }
+        if let Some(enc) = pin_hash_enc {
+            params.push((Value::Int(0x06), Value::Bytes(enc.to_vec())));
+        }
+        if let Some(p) = permissions {
+            params.push((Value::Int(0x09), Value::Int(p as i64)));
+        }
+        if let Some(rpid) = permissions_rpid {
+            params.push((Value::Int(0x0A), Value::Text(rpid.to_string())));
+        }
+
+        let data = cbor::encode(&Value::Map(params));
+        let response = self.send_cbor(cmd::CLIENT_PIN, Some(&data), on_keepalive, cancel)?;
+
+        if response.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+
+        let value = cbor::decode(&response)
+            .map_err(|e| Ctap2Error::InvalidResponse(format!("CBOR decode error: {e}")))?;
+        let map = value
+            .as_map()
+            .ok_or_else(|| Ctap2Error::InvalidResponse("Expected CBOR map".into()))?;
+
+        let mut result = BTreeMap::new();
+        for (k, v) in map {
+            if let Some(key) = k.as_int() {
+                result.insert(key as u32, v.clone());
+            }
+        }
+        Ok(result)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PinProtocol (V1/V2 enum dispatch)
+// ---------------------------------------------------------------------------
+
+/// COSE key agreement map for the CTAP2 PIN protocol ECDH exchange.
+///
+/// Represents the platform's ephemeral EC P-256 public key as a COSE_Key
+/// structure (integer-keyed CBOR map).
+pub type CoseKey = Value;
+
+/// PIN/UV authentication protocol.
+///
+/// Implements the cryptographic operations for CTAP2 PIN/UV protocols.
+/// Uses enum dispatch to support both protocol version 1 and 2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinProtocol {
+    V1,
+    V2,
+}
+
+impl PinProtocol {
+    /// The integer version number as sent to the authenticator.
+    pub fn version(&self) -> u32 {
+        match self {
+            Self::V1 => 1,
+            Self::V2 => 2,
+        }
+    }
+
+    /// Perform ECDH key agreement with the authenticator's public key.
+    ///
+    /// Returns `(platform_cose_key, shared_secret)`. The platform COSE key
+    /// is sent to the authenticator; the shared secret is used locally for
+    /// encrypt/decrypt/authenticate.
+    pub fn encapsulate(&self, peer_cose_key: &CoseKey) -> Result<(CoseKey, Vec<u8>), String> {
+        let peer_map = peer_cose_key.as_map().ok_or("peer key is not a CBOR map")?;
+
+        let x = map_get_bytes(peer_map, -2).ok_or("missing x coordinate (-2)")?;
+        let y = map_get_bytes(peer_map, -3).ok_or("missing y coordinate (-3)")?;
+
+        if x.len() != 32 || y.len() != 32 {
+            return Err("invalid coordinate length".into());
+        }
+
+        // Build uncompressed SEC1 point: 0x04 || x || y
+        let mut uncompressed = vec![0x04];
+        uncompressed.extend_from_slice(x);
+        uncompressed.extend_from_slice(y);
+        let peer_point = EncodedPoint::from_bytes(&uncompressed)
+            .map_err(|e| format!("invalid SEC1 point: {e}"))?;
+        let peer_pk = PublicKey::from_encoded_point(&peer_point)
+            .into_option()
+            .ok_or("invalid P-256 key")?;
+
+        // Generate ephemeral key pair
+        let sk = SecretKey::random(&mut OsRng);
+        let pk = sk.public_key();
+        let pk_point = pk.to_encoded_point(false);
+
+        // ECDH: raw x-coordinate of shared point
+        let shared_point = p256::ecdh::diffie_hellman(sk.to_nonzero_scalar(), peer_pk.as_affine());
+        let z = shared_point.raw_secret_bytes();
+
+        // KDF
+        let shared_secret = self.kdf(z.as_slice());
+
+        // Build platform COSE key
+        let platform_key = Value::Map(vec![
+            (Value::Int(1), Value::Int(2)),   // kty: EC2
+            (Value::Int(3), Value::Int(-25)), // alg: ECDH-ES+HKDF-256 (placeholder per spec)
+            (Value::Int(-1), Value::Int(1)),  // crv: P-256
+            (
+                Value::Int(-2),
+                Value::Bytes(pk_point.x().expect("x").to_vec()),
+            ),
+            (
+                Value::Int(-3),
+                Value::Bytes(pk_point.y().expect("y").to_vec()),
+            ),
+        ]);
+
+        Ok((platform_key, shared_secret))
+    }
+
+    /// Encrypt plaintext using the shared secret.
+    pub fn encrypt(&self, shared_secret: &[u8], plaintext: &[u8]) -> Vec<u8> {
+        match self {
+            Self::V1 => {
+                let iv = [0u8; 16];
+                let enc = CbcEncryptor::<Aes256>::new(shared_secret.into(), &iv.into());
+                enc.encrypt_padded_vec_mut::<cipher::block_padding::NoPadding>(plaintext)
+            }
+            Self::V2 => {
+                let aes_key = &shared_secret[32..];
+                let mut iv = [0u8; 16];
+                getrandom::fill(&mut iv).expect("getrandom failed");
+                let enc = CbcEncryptor::<Aes256>::new(aes_key.into(), &iv.into());
+                let ct = enc.encrypt_padded_vec_mut::<cipher::block_padding::NoPadding>(plaintext);
+                let mut result = iv.to_vec();
+                result.extend_from_slice(&ct);
+                result
+            }
+        }
+    }
+
+    /// Decrypt ciphertext using the shared secret.
+    pub fn decrypt(&self, shared_secret: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, String> {
+        match self {
+            Self::V1 => {
+                let iv = [0u8; 16];
+                let dec = CbcDecryptor::<Aes256>::new(shared_secret.into(), &iv.into());
+                dec.decrypt_padded_vec_mut::<cipher::block_padding::NoPadding>(ciphertext)
+                    .map_err(|e| format!("decryption failed: {e}"))
+            }
+            Self::V2 => {
+                if ciphertext.len() < 16 {
+                    return Err("ciphertext too short for IV".into());
+                }
+                let (iv, ct) = ciphertext.split_at(16);
+                let aes_key = &shared_secret[32..];
+                let dec = CbcDecryptor::<Aes256>::new(aes_key.into(), iv.into());
+                dec.decrypt_padded_vec_mut::<cipher::block_padding::NoPadding>(ct)
+                    .map_err(|e| format!("decryption failed: {e}"))
+            }
+        }
+    }
+
+    /// Compute a MAC (pinUvAuthParam) over the given message.
+    pub fn authenticate(&self, shared_secret: &[u8], message: &[u8]) -> Vec<u8> {
+        match self {
+            Self::V1 => {
+                let mut mac =
+                    Hmac::<Sha256>::new_from_slice(shared_secret).expect("HMAC key length");
+                mac.update(message);
+                mac.finalize().into_bytes()[..16].to_vec()
+            }
+            Self::V2 => {
+                let hmac_key = &shared_secret[..32];
+                let mut mac = Hmac::<Sha256>::new_from_slice(hmac_key).expect("HMAC key length");
+                mac.update(message);
+                mac.finalize().into_bytes().to_vec()
+            }
+        }
+    }
+
+    /// Validate that a returned PIN/UV token has the correct length.
+    pub fn validate_token(&self, token: &[u8]) -> Result<(), String> {
+        match self {
+            Self::V1 => {
+                if token.len() != 16 && token.len() != 32 {
+                    return Err(format!(
+                        "PIN/UV token must be 16 or 32 bytes, got {}",
+                        token.len()
+                    ));
+                }
+            }
+            Self::V2 => {
+                if token.len() != 32 {
+                    return Err(format!(
+                        "PIN/UV token must be 32 bytes, got {}",
+                        token.len()
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn kdf(&self, z: &[u8]) -> Vec<u8> {
+        match self {
+            Self::V1 => {
+                let mut hasher = Sha256::new();
+                hasher.update(z);
+                hasher.finalize().to_vec()
+            }
+            Self::V2 => {
+                let salt = [0u8; 32];
+                let hk = Hkdf::<Sha256>::new(Some(&salt), z);
+                let mut hmac_key = [0u8; 32];
+                hk.expand(b"CTAP2 HMAC key", &mut hmac_key)
+                    .expect("HKDF expand");
+                let hk = Hkdf::<Sha256>::new(Some(&salt), z);
+                let mut aes_key = [0u8; 32];
+                hk.expand(b"CTAP2 AES key", &mut aes_key)
+                    .expect("HKDF expand");
+                let mut result = hmac_key.to_vec();
+                result.extend_from_slice(&aes_key);
+                result
+            }
+        }
+    }
+}
+
+fn map_get_bytes(map: &[(Value, Value)], key: i64) -> Option<&[u8]> {
+    map.iter()
+        .find(|(k, _)| matches!(k, Value::Int(n) if *n == key))
+        .and_then(|(_, v)| v.as_bytes())
+}
+
+// ---------------------------------------------------------------------------
+// ClientPin sub-commands and result keys
+// ---------------------------------------------------------------------------
+
+/// ClientPin sub-command identifiers (§6.5.5).
+mod client_pin_cmd {
+    pub const GET_PIN_RETRIES: u8 = 0x01;
+    pub const GET_KEY_AGREEMENT: u8 = 0x02;
+    pub const SET_PIN: u8 = 0x03;
+    pub const CHANGE_PIN: u8 = 0x04;
+    pub const GET_TOKEN_USING_PIN_LEGACY: u8 = 0x05;
+    pub const GET_TOKEN_USING_UV: u8 = 0x06;
+    pub const GET_UV_RETRIES: u8 = 0x07;
+    pub const GET_TOKEN_USING_PIN: u8 = 0x09;
+}
+
+/// ClientPin response map keys (§6.5.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum ClientPinResult {
+    KeyAgreement = 0x01,
+    PinUvToken = 0x02,
+    PinRetries = 0x03,
+    PowerCycleState = 0x04,
+    UvRetries = 0x05,
+}
+
+/// Permissions that can be associated with a PIN/UV token (§6.5.5.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Permissions(u8);
+
+impl Permissions {
+    pub const MAKE_CREDENTIAL: Self = Self(0x01);
+    pub const GET_ASSERTION: Self = Self(0x02);
+    pub const CREDENTIAL_MGMT: Self = Self(0x04);
+    pub const BIO_ENROLL: Self = Self(0x08);
+    pub const LARGE_BLOB_WRITE: Self = Self(0x10);
+    pub const AUTHENTICATOR_CFG: Self = Self(0x20);
+
+    pub const fn new(bits: u8) -> Self {
+        Self(bits)
+    }
+
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+}
+
+impl std::ops::BitOr for Permissions {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for Permissions {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ClientPin
+// ---------------------------------------------------------------------------
+
+/// CTAP2 Client PIN / UV token management.
+///
+/// Owns a [`Ctap2Session`] and a [`PinProtocol`], providing high-level
+/// PIN/UV operations: setting/changing PINs, getting PIN/UV tokens, and
+/// querying retry counters.
+pub struct ClientPin<C: Connection> {
+    session: Ctap2Session<C>,
+    protocol: PinProtocol,
+}
+
+/// Pad a PIN string per CTAP2 spec: UTF-8, left-padded to ≥64 bytes, 16-byte aligned.
+fn pad_pin(pin: &str) -> Result<Vec<u8>, String> {
+    let pin_bytes = pin.as_bytes();
+    if pin_bytes.len() < 4 {
+        return Err("PIN must be at least 4 bytes".into());
+    }
+    let mut padded = pin_bytes.to_vec();
+    // Pad to at least 64 bytes
+    if padded.len() < 64 {
+        padded.resize(64, 0);
+    }
+    // Extend to 16-byte alignment
+    let remainder = padded.len() % 16;
+    if remainder != 0 {
+        padded.resize(padded.len() + (16 - remainder), 0);
+    }
+    if padded.len() > 255 {
+        return Err("PIN must be at most 255 bytes".into());
+    }
+    Ok(padded)
+}
+
+impl<C: Connection + 'static> ClientPin<C> {
+    /// Create a new `ClientPin` from a `Ctap2Session`, auto-selecting the best
+    /// supported PIN protocol (V2 preferred over V1).
+    ///
+    /// Uses the cached info from the session to determine supported protocols.
+    pub fn new(session: Ctap2Session<C>) -> Result<Self, Ctap2Error<C::Error>> {
+        let protocol = Self::select_protocol(&session.cached_info)?;
+        Ok(Self { session, protocol })
+    }
+
+    /// Create a new `ClientPin` with a specific `PinProtocol`.
+    pub fn new_with_protocol(
+        session: Ctap2Session<C>,
+        protocol: PinProtocol,
+    ) -> Result<Self, Ctap2Error<C::Error>> {
+        Ok(Self { session, protocol })
+    }
+
+    /// The active PIN protocol.
+    pub fn protocol(&self) -> PinProtocol {
+        self.protocol
+    }
+
+    /// Consume this `ClientPin`, returning the underlying `Ctap2Session`.
+    pub fn into_session(self) -> Ctap2Session<C> {
+        self.session
+    }
+
+    /// Get the number of PIN retries remaining.
+    ///
+    /// Returns `(retries, power_cycle_state)`.
+    pub fn get_pin_retries(&mut self) -> Result<(u32, Option<u32>), Ctap2Error<C::Error>> {
+        let resp = self.session.client_pin(
+            self.protocol.version(),
+            client_pin_cmd::GET_PIN_RETRIES,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
+        let retries = resp
+            .get(&(ClientPinResult::PinRetries as u32))
+            .and_then(|v| v.as_int())
+            .ok_or_else(|| Ctap2Error::InvalidResponse("missing pinRetries".into()))?
+            as u32;
+        let pcs = resp
+            .get(&(ClientPinResult::PowerCycleState as u32))
+            .and_then(|v| v.as_int())
+            .map(|n| n as u32);
+        Ok((retries, pcs))
+    }
+
+    /// Get the number of built-in UV retries remaining.
+    pub fn get_uv_retries(&mut self) -> Result<u32, Ctap2Error<C::Error>> {
+        let resp = self.session.client_pin(
+            self.protocol.version(),
+            client_pin_cmd::GET_UV_RETRIES,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
+        let retries = resp
+            .get(&(ClientPinResult::UvRetries as u32))
+            .and_then(|v| v.as_int())
+            .ok_or_else(|| Ctap2Error::InvalidResponse("missing uvRetries".into()))?
+            as u32;
+        Ok(retries)
+    }
+
+    /// Set a PIN on an authenticator that does not have one set.
+    pub fn set_pin(&mut self, pin: &str) -> Result<(), Ctap2Error<C::Error>> {
+        let (key_agreement, shared_secret) = self.get_shared_secret()?;
+
+        let pin_padded = pad_pin(pin).map_err(Ctap2Error::InvalidResponse)?;
+        let new_pin_enc = self.protocol.encrypt(&shared_secret, &pin_padded);
+        let pin_uv_param = self.protocol.authenticate(&shared_secret, &new_pin_enc);
+
+        self.session.client_pin(
+            self.protocol.version(),
+            client_pin_cmd::SET_PIN,
+            Some(&key_agreement),
+            Some(&pin_uv_param),
+            Some(&new_pin_enc),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
+        log::info!("PIN has been set");
+        Ok(())
+    }
+
+    /// Change the PIN on an authenticator that already has one.
+    pub fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> Result<(), Ctap2Error<C::Error>> {
+        let (key_agreement, shared_secret) = self.get_shared_secret()?;
+
+        let pin_hash = &Sha256::digest(old_pin.as_bytes())[..16];
+        let pin_hash_enc = self.protocol.encrypt(&shared_secret, pin_hash);
+        let new_pin_padded = pad_pin(new_pin).map_err(Ctap2Error::InvalidResponse)?;
+        let new_pin_enc = self.protocol.encrypt(&shared_secret, &new_pin_padded);
+
+        // pinUvParam = authenticate(shared_secret, newPinEnc || pinHashEnc)
+        let mut auth_msg = new_pin_enc.clone();
+        auth_msg.extend_from_slice(&pin_hash_enc);
+        let pin_uv_param = self.protocol.authenticate(&shared_secret, &auth_msg);
+
+        self.session.client_pin(
+            self.protocol.version(),
+            client_pin_cmd::CHANGE_PIN,
+            Some(&key_agreement),
+            Some(&pin_uv_param),
+            Some(&new_pin_enc),
+            Some(&pin_hash_enc),
+            None,
+            None,
+            None,
+            None,
+        )?;
+        log::info!("PIN has been changed");
+        Ok(())
+    }
+
+    /// Get a PIN/UV token using the PIN.
+    ///
+    /// If `permissions` is provided and the authenticator supports pinUvAuthToken,
+    /// uses the new `getPinToken` command (0x09); otherwise falls back to the
+    /// legacy command (0x05).
+    pub fn get_pin_token(
+        &mut self,
+        pin: &str,
+        permissions: Option<Permissions>,
+        permissions_rpid: Option<&str>,
+    ) -> Result<Vec<u8>, Ctap2Error<C::Error>> {
+        let (key_agreement, shared_secret) = self.get_shared_secret()?;
+
+        let pin_hash = &Sha256::digest(pin.as_bytes())[..16];
+        let pin_hash_enc = self.protocol.encrypt(&shared_secret, pin_hash);
+
+        let (sub_cmd, perms, rpid) = if self.is_token_supported() && permissions.is_some() {
+            (
+                client_pin_cmd::GET_TOKEN_USING_PIN,
+                permissions.map(|p| p.bits()),
+                permissions_rpid,
+            )
+        } else {
+            (client_pin_cmd::GET_TOKEN_USING_PIN_LEGACY, None, None)
+        };
+
+        let resp = self.session.client_pin(
+            self.protocol.version(),
+            sub_cmd,
+            Some(&key_agreement),
+            None,
+            None,
+            Some(&pin_hash_enc),
+            perms,
+            rpid,
+            None,
+            None,
+        )?;
+
+        let token_enc = resp
+            .get(&(ClientPinResult::PinUvToken as u32))
+            .and_then(|v| v.as_bytes())
+            .ok_or_else(|| Ctap2Error::InvalidResponse("missing pinUvToken".into()))?;
+
+        let token = self
+            .protocol
+            .decrypt(&shared_secret, token_enc)
+            .map_err(Ctap2Error::InvalidResponse)?;
+        self.protocol
+            .validate_token(&token)
+            .map_err(Ctap2Error::InvalidResponse)?;
+
+        Ok(token)
+    }
+
+    /// Get a PIN/UV token using built-in user verification (biometrics, etc.).
+    pub fn get_uv_token(
+        &mut self,
+        permissions: Option<Permissions>,
+        permissions_rpid: Option<&str>,
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Vec<u8>, Ctap2Error<C::Error>> {
+        let (key_agreement, shared_secret) = self.get_shared_secret()?;
+
+        let resp = self.session.client_pin(
+            self.protocol.version(),
+            client_pin_cmd::GET_TOKEN_USING_UV,
+            Some(&key_agreement),
+            None,
+            None,
+            None,
+            permissions.map(|p| p.bits()),
+            permissions_rpid,
+            on_keepalive,
+            cancel,
+        )?;
+
+        let token_enc = resp
+            .get(&(ClientPinResult::PinUvToken as u32))
+            .and_then(|v| v.as_bytes())
+            .ok_or_else(|| Ctap2Error::InvalidResponse("missing pinUvToken".into()))?;
+
+        let token = self
+            .protocol
+            .decrypt(&shared_secret, token_enc)
+            .map_err(Ctap2Error::InvalidResponse)?;
+        self.protocol
+            .validate_token(&token)
+            .map_err(Ctap2Error::InvalidResponse)?;
+
+        Ok(token)
+    }
+
+    /// Whether the cached info indicates `clientPin` support.
+    pub fn is_supported(&self) -> bool {
+        self.session.cached_info.options.contains_key("clientPin")
+    }
+
+    /// Whether the cached info indicates `pinUvAuthToken` support.
+    pub fn is_token_supported(&self) -> bool {
+        self.session.cached_info.options.get("pinUvAuthToken") == Some(&true)
+    }
+
+    fn select_protocol(info: &Info) -> Result<PinProtocol, Ctap2Error<C::Error>> {
+        // Prefer V2 over V1
+        for &version in &[2u32, 1] {
+            if info.pin_uv_protocols.contains(&version) {
+                return Ok(match version {
+                    2 => PinProtocol::V2,
+                    _ => PinProtocol::V1,
+                });
+            }
+        }
+        Err(Ctap2Error::InvalidResponse(
+            "No compatible PIN/UV protocol supported".into(),
+        ))
+    }
+
+    fn get_shared_secret(&mut self) -> Result<(CoseKey, Vec<u8>), Ctap2Error<C::Error>> {
+        let resp = self.session.client_pin(
+            self.protocol.version(),
+            client_pin_cmd::GET_KEY_AGREEMENT,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
+
+        let peer_key = resp
+            .get(&(ClientPinResult::KeyAgreement as u32))
+            .ok_or_else(|| Ctap2Error::InvalidResponse("missing keyAgreement".into()))?;
+
+        self.protocol
+            .encapsulate(peer_key)
+            .map_err(|e| Ctap2Error::InvalidResponse(format!("key agreement failed: {e}")))
     }
 }
 
@@ -678,5 +1333,79 @@ mod tests {
             0x32, 0x10,
         ]);
         assert_eq!(format!("{aaguid}"), "01234567-89ab-cdef-fedc-ba9876543210");
+    }
+
+    #[test]
+    fn test_pin_protocol_v1_encrypt_decrypt() {
+        let secret = Sha256::digest(b"test shared secret").to_vec();
+        let plaintext = vec![0x42u8; 32];
+        let ct = PinProtocol::V1.encrypt(&secret, &plaintext);
+        let pt = PinProtocol::V1.decrypt(&secret, &ct).unwrap();
+        assert_eq!(pt, plaintext);
+    }
+
+    #[test]
+    fn test_pin_protocol_v2_encrypt_decrypt() {
+        // V2 shared secret is 64 bytes: 32 HMAC key + 32 AES key
+        let mut secret = vec![0u8; 64];
+        getrandom::fill(&mut secret).unwrap();
+        let plaintext = vec![0x42u8; 64];
+        let ct = PinProtocol::V2.encrypt(&secret, &plaintext);
+        // V2 ciphertext has 16-byte IV prefix
+        assert_eq!(ct.len(), 16 + plaintext.len());
+        let pt = PinProtocol::V2.decrypt(&secret, &ct).unwrap();
+        assert_eq!(pt, plaintext);
+    }
+
+    #[test]
+    fn test_pin_protocol_v1_authenticate() {
+        let key = vec![0xAA; 32];
+        let msg = b"hello";
+        let mac = PinProtocol::V1.authenticate(&key, msg);
+        assert_eq!(mac.len(), 16); // V1 truncates to 16
+    }
+
+    #[test]
+    fn test_pin_protocol_v2_authenticate() {
+        let key = vec![0u8; 64]; // 32 HMAC + 32 AES
+        let msg = b"hello";
+        let mac = PinProtocol::V2.authenticate(&key, msg);
+        assert_eq!(mac.len(), 32); // V2 returns full 32 bytes
+    }
+
+    #[test]
+    fn test_pin_protocol_v1_validate_token() {
+        assert!(PinProtocol::V1.validate_token(&[0; 16]).is_ok());
+        assert!(PinProtocol::V1.validate_token(&[0; 32]).is_ok());
+        assert!(PinProtocol::V1.validate_token(&[0; 8]).is_err());
+    }
+
+    #[test]
+    fn test_pin_protocol_v2_validate_token() {
+        assert!(PinProtocol::V2.validate_token(&[0; 32]).is_ok());
+        assert!(PinProtocol::V2.validate_token(&[0; 16]).is_err());
+    }
+
+    #[test]
+    fn test_pad_pin() {
+        // Normal pin
+        let padded = pad_pin("1234").unwrap();
+        assert_eq!(padded.len(), 64);
+        assert_eq!(&padded[..4], b"1234");
+        assert!(padded[4..].iter().all(|&b| b == 0));
+
+        // Too short
+        assert!(pad_pin("123").is_err());
+
+        // Long pin (64 bytes) → 64 already aligned
+        let long = "a".repeat(64);
+        let padded = pad_pin(&long).unwrap();
+        assert_eq!(padded.len(), 64);
+    }
+
+    #[test]
+    fn test_pin_protocol_version() {
+        assert_eq!(PinProtocol::V1.version(), 1);
+        assert_eq!(PinProtocol::V2.version(), 2);
     }
 }

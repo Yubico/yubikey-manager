@@ -12,6 +12,7 @@ cbc = { version = "0.1", features = ["alloc"] }
 cmac = "0.7"
 cipher = "0.4"
 getrandom = "0.3"
+hkdf = "0.12"
 hmac = "0.12"
 log = { version = "0.4", features = ["max_level_trace", "release_max_level_trace"] }
 pbkdf2 = { version = "0.12", features = ["hmac"] }

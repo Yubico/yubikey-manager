@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyList};
 use yubikit::cbor;
 use yubikit::ctap::CtapSession;
-use yubikit::ctap2::{Ctap2Error, Ctap2Session, Info};
+use yubikit::ctap2::{ClientPin, Ctap2Error, Ctap2Session, Info, Permissions, PinProtocol};
 
 use crate::py_bridge::{
     BoxedFidoConnection, BoxedSmartCardConnection, extract_fido_connection,
@@ -181,7 +181,31 @@ fn cbor_value_to_py(py: Python<'_>, value: &cbor::Value) -> PyResult<PyObject> {
 
 #[pyclass(name = "Ctap2Session", unsendable)]
 pub struct PyCtap2Session {
-    session: Ctap2Session<BoxedSmartCardConnection>,
+    session: Option<Ctap2Session<BoxedSmartCardConnection>>,
+}
+
+impl PyCtap2Session {
+    fn get_session(&self) -> PyResult<&Ctap2Session<BoxedSmartCardConnection>> {
+        self.session
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("Session has been consumed by ClientPin"))
+    }
+
+    fn get_session_mut(&mut self) -> PyResult<&mut Ctap2Session<BoxedSmartCardConnection>> {
+        self.session
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("Session has been consumed by ClientPin"))
+    }
+
+    pub fn take_session(&mut self) -> PyResult<Ctap2Session<BoxedSmartCardConnection>> {
+        self.session
+            .take()
+            .ok_or_else(|| PyRuntimeError::new_err("Session has been consumed by ClientPin"))
+    }
+
+    pub fn restore_session(&mut self, session: Ctap2Session<BoxedSmartCardConnection>) {
+        self.session = Some(session);
+    }
 }
 
 #[pymethods]
@@ -203,14 +227,14 @@ impl PyCtap2Session {
             return Err(PyRuntimeError::new_err("Device does not support CTAP2"));
         }
         Ok(Self {
-            session: Ctap2Session::new(ctap),
+            session: Some(Ctap2Session::new(ctap).map_err(ctap2_err)?),
         })
     }
 
     #[getter]
-    fn version(&self) -> (u8, u8, u8) {
-        let v = self.session.session().version();
-        (v.0, v.1, v.2)
+    fn version(&self) -> PyResult<(u8, u8, u8)> {
+        let v = self.get_session()?.version();
+        Ok((v.0, v.1, v.2))
     }
 
     #[pyo3(signature = (event=None, on_keepalive=None))]
@@ -231,13 +255,13 @@ impl PyCtap2Session {
         } else {
             None
         };
-        self.session
+        self.get_session_mut()?
             .selection(keepalive_ref, cancel_ref)
             .map_err(ctap2_err)
     }
 
     fn get_info<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
-        let info = self.session.get_info().map_err(ctap2_err)?;
+        let info = self.get_session_mut()?.get_info().map_err(ctap2_err)?;
         info_to_py(py, &info)
     }
 
@@ -263,7 +287,7 @@ impl PyCtap2Session {
             None
         };
         let response = self
-            .session
+            .get_session_mut()?
             .send_cbor(cmd, data, keepalive_ref, cancel_ref)
             .map_err(ctap2_err)?;
         Ok(PyBytes::new(py, &response))
@@ -276,7 +300,31 @@ impl PyCtap2Session {
 
 #[pyclass(name = "Ctap2FidoSession", unsendable)]
 pub struct PyCtap2FidoSession {
-    session: Ctap2Session<BoxedFidoConnection>,
+    session: Option<Ctap2Session<BoxedFidoConnection>>,
+}
+
+impl PyCtap2FidoSession {
+    fn get_session(&self) -> PyResult<&Ctap2Session<BoxedFidoConnection>> {
+        self.session
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("Session has been consumed by ClientPin"))
+    }
+
+    fn get_session_mut(&mut self) -> PyResult<&mut Ctap2Session<BoxedFidoConnection>> {
+        self.session
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("Session has been consumed by ClientPin"))
+    }
+
+    pub fn take_session(&mut self) -> PyResult<Ctap2Session<BoxedFidoConnection>> {
+        self.session
+            .take()
+            .ok_or_else(|| PyRuntimeError::new_err("Session has been consumed by ClientPin"))
+    }
+
+    pub fn restore_session(&mut self, session: Ctap2Session<BoxedFidoConnection>) {
+        self.session = Some(session);
+    }
 }
 
 #[pymethods]
@@ -289,14 +337,14 @@ impl PyCtap2FidoSession {
             return Err(PyRuntimeError::new_err("Device does not support CTAP2"));
         }
         Ok(Self {
-            session: Ctap2Session::new(ctap),
+            session: Some(Ctap2Session::new(ctap).map_err(ctap2_err)?),
         })
     }
 
     #[getter]
-    fn version(&self) -> (u8, u8, u8) {
-        let v = self.session.session().version();
-        (v.0, v.1, v.2)
+    fn version(&self) -> PyResult<(u8, u8, u8)> {
+        let v = self.get_session()?.version();
+        Ok((v.0, v.1, v.2))
     }
 
     #[pyo3(signature = (event=None, on_keepalive=None))]
@@ -317,13 +365,13 @@ impl PyCtap2FidoSession {
         } else {
             None
         };
-        self.session
+        self.get_session_mut()?
             .selection(keepalive_ref, cancel_ref)
             .map_err(ctap2_err)
     }
 
     fn get_info<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
-        let info = self.session.get_info().map_err(ctap2_err)?;
+        let info = self.get_session_mut()?.get_info().map_err(ctap2_err)?;
         info_to_py(py, &info)
     }
 
@@ -349,9 +397,229 @@ impl PyCtap2FidoSession {
             None
         };
         let response = self
-            .session
+            .get_session_mut()?
             .send_cbor(cmd, data, keepalive_ref, cancel_ref)
             .map_err(ctap2_err)?;
         Ok(PyBytes::new(py, &response))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PinProtocol PyO3 wrapper
+// ---------------------------------------------------------------------------
+
+#[pyclass(name = "PinProtocol", unsendable)]
+pub struct PyPinProtocol {
+    inner: PinProtocol,
+}
+
+#[pymethods]
+impl PyPinProtocol {
+    #[new]
+    fn new(version: u32) -> PyResult<Self> {
+        let inner = match version {
+            1 => PinProtocol::V1,
+            2 => PinProtocol::V2,
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Unsupported PIN protocol version: {version}"
+                )));
+            }
+        };
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn version(&self) -> u32 {
+        self.inner.version()
+    }
+}
+
+impl PyPinProtocol {
+    pub fn protocol(&self) -> PinProtocol {
+        self.inner
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SmartCard-backed ClientPin
+// ---------------------------------------------------------------------------
+
+#[pyclass(name = "ClientPin", unsendable)]
+pub struct PyClientPin {
+    inner: ClientPin<BoxedSmartCardConnection>,
+}
+
+#[pymethods]
+impl PyClientPin {
+    #[new]
+    #[pyo3(signature = (session, protocol=None))]
+    fn new(session: &mut PyCtap2Session, protocol: Option<&PyPinProtocol>) -> PyResult<Self> {
+        let ctap2 = session.take_session()?;
+        let inner = if let Some(proto) = protocol {
+            ClientPin::new_with_protocol(ctap2, proto.protocol()).map_err(ctap2_err)?
+        } else {
+            ClientPin::new(ctap2).map_err(ctap2_err)?
+        };
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn protocol(&self) -> PyPinProtocol {
+        PyPinProtocol {
+            inner: self.inner.protocol(),
+        }
+    }
+
+    fn get_pin_retries(&mut self) -> PyResult<(u32, Option<u32>)> {
+        self.inner.get_pin_retries().map_err(ctap2_err)
+    }
+
+    fn get_uv_retries(&mut self) -> PyResult<u32> {
+        self.inner.get_uv_retries().map_err(ctap2_err)
+    }
+
+    fn set_pin(&mut self, pin: &str) -> PyResult<()> {
+        self.inner.set_pin(pin).map_err(ctap2_err)
+    }
+
+    fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> PyResult<()> {
+        self.inner.change_pin(old_pin, new_pin).map_err(ctap2_err)
+    }
+
+    #[pyo3(signature = (pin, permissions=None, permissions_rpid=None))]
+    fn get_pin_token<'py>(
+        &mut self,
+        py: Python<'py>,
+        pin: &str,
+        permissions: Option<u8>,
+        permissions_rpid: Option<&str>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let perms = permissions.map(Permissions::new);
+        let token = self
+            .inner
+            .get_pin_token(pin, perms, permissions_rpid)
+            .map_err(ctap2_err)?;
+        Ok(PyBytes::new(py, &token))
+    }
+
+    #[pyo3(signature = (permissions=None, permissions_rpid=None, event=None, on_keepalive=None))]
+    fn get_uv_token<'py>(
+        &mut self,
+        py: Python<'py>,
+        permissions: Option<u8>,
+        permissions_rpid: Option<&str>,
+        event: Option<PyObject>,
+        on_keepalive: Option<PyObject>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let perms = permissions.map(Permissions::new);
+        let cancel_fn = make_cancel_fn(&event);
+        let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
+        let keepalive_ref: Option<&mut dyn FnMut(u8)> = if on_keepalive.is_some() {
+            Some(&mut keepalive_fn)
+        } else {
+            None
+        };
+        let token = self
+            .inner
+            .get_uv_token(perms, permissions_rpid, keepalive_ref, cancel_ref)
+            .map_err(ctap2_err)?;
+        Ok(PyBytes::new(py, &token))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FIDO HID-backed ClientPin
+// ---------------------------------------------------------------------------
+
+#[pyclass(name = "ClientPinFido", unsendable)]
+pub struct PyClientPinFido {
+    inner: ClientPin<BoxedFidoConnection>,
+}
+
+#[pymethods]
+impl PyClientPinFido {
+    #[new]
+    #[pyo3(signature = (session, protocol=None))]
+    fn new(session: &mut PyCtap2FidoSession, protocol: Option<&PyPinProtocol>) -> PyResult<Self> {
+        let ctap2 = session.take_session()?;
+        let inner = if let Some(proto) = protocol {
+            ClientPin::new_with_protocol(ctap2, proto.protocol()).map_err(ctap2_err)?
+        } else {
+            ClientPin::new(ctap2).map_err(ctap2_err)?
+        };
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn protocol(&self) -> PyPinProtocol {
+        PyPinProtocol {
+            inner: self.inner.protocol(),
+        }
+    }
+    fn get_pin_retries(&mut self) -> PyResult<(u32, Option<u32>)> {
+        self.inner.get_pin_retries().map_err(ctap2_err)
+    }
+
+    fn get_uv_retries(&mut self) -> PyResult<u32> {
+        self.inner.get_uv_retries().map_err(ctap2_err)
+    }
+
+    fn set_pin(&mut self, pin: &str) -> PyResult<()> {
+        self.inner.set_pin(pin).map_err(ctap2_err)
+    }
+
+    fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> PyResult<()> {
+        self.inner.change_pin(old_pin, new_pin).map_err(ctap2_err)
+    }
+
+    #[pyo3(signature = (pin, permissions=None, permissions_rpid=None))]
+    fn get_pin_token<'py>(
+        &mut self,
+        py: Python<'py>,
+        pin: &str,
+        permissions: Option<u8>,
+        permissions_rpid: Option<&str>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let perms = permissions.map(Permissions::new);
+        let token = self
+            .inner
+            .get_pin_token(pin, perms, permissions_rpid)
+            .map_err(ctap2_err)?;
+        Ok(PyBytes::new(py, &token))
+    }
+
+    #[pyo3(signature = (permissions=None, permissions_rpid=None, event=None, on_keepalive=None))]
+    fn get_uv_token<'py>(
+        &mut self,
+        py: Python<'py>,
+        permissions: Option<u8>,
+        permissions_rpid: Option<&str>,
+        event: Option<PyObject>,
+        on_keepalive: Option<PyObject>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let perms = permissions.map(Permissions::new);
+        let cancel_fn = make_cancel_fn(&event);
+        let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
+        let keepalive_ref: Option<&mut dyn FnMut(u8)> = if on_keepalive.is_some() {
+            Some(&mut keepalive_fn)
+        } else {
+            None
+        };
+        let token = self
+            .inner
+            .get_uv_token(perms, permissions_rpid, keepalive_ref, cancel_ref)
+            .map_err(ctap2_err)?;
+        Ok(PyBytes::new(py, &token))
     }
 }

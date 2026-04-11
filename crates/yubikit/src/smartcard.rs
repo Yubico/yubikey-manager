@@ -342,16 +342,6 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         self
     }
 
-    /// Get reference to the underlying connection.
-    pub fn connection(&self) -> &C {
-        &self.connection
-    }
-
-    /// Get mutable reference to the underlying connection.
-    pub fn connection_mut(&mut self) -> &mut C {
-        &mut self.connection
-    }
-
     /// Consume the protocol and return the underlying connection.
     pub fn into_connection(self) -> C {
         self.connection
