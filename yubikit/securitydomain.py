@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from enum import IntEnum, unique
+from types import TracebackType
 from typing import Mapping, Sequence
 
 from cryptography import x509
@@ -69,6 +70,20 @@ class SecurityDomainSession:
         self._native = native
         self._version = Version(*native.version)
         logger.debug("SecurityDomain session initialized")
+
+    def __enter__(self) -> SecurityDomainSession:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the session."""
 
     def authenticate(self, key_params: ScpKeyParams) -> None:
         """Initialize SCP and authenticate the session.

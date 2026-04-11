@@ -25,12 +25,14 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import annotations
+
 import logging
 import struct
-import warnings
 from enum import IntEnum, IntFlag, unique
 from hashlib import sha1
 from threading import Event
+from types import TracebackType
 from typing import Any, Callable, TypeVar
 
 from _yubikit_native.sessions import (
@@ -659,15 +661,19 @@ class YubiOtpSession:
             f"state={self.get_config_state()}"
         )
 
-    def close(self) -> None:
-        """Close the underlying connection.
+    def __enter__(self) -> YubiOtpSession:
+        return self
 
-        :deprecated: call .close() on the underlying connection instead.
-        """
-        warnings.warn(
-            "Deprecated: call .close() on the underlying connection instead.",
-            DeprecationWarning,
-        )
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the session."""
 
     @property
     def version(self) -> Version:

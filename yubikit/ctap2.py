@@ -101,6 +101,20 @@ class Ctap2Session:
             f"connection={type(connection).__name__}, version={self.version}"
         )
 
+    def __enter__(self) -> Ctap2Session:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the session."""
+
     @property
     def version(self) -> Version:
         return self._version

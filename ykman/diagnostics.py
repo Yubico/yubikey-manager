@@ -194,24 +194,26 @@ def fido_info():
                         }
                     )
                     try:
-                        session = Ctap2Session(conn)
-                        info = session.get_info()
-                        ctap_data: dict[str, Any] = {"Ctap2Info": info}
-                        options = info.get("options", {})
-                        if options.get("clientPin"):
-                            with ClientPin(session) as client_pin:
-                                ctap_data["PIN retries"] = client_pin.get_pin_retries()
-
-                                bio_enroll = options.get("bioEnroll")
-                                if bio_enroll:
-                                    ctap_data["Fingerprint retries"] = (
-                                        client_pin.get_uv_retries()
+                        with Ctap2Session(conn) as session:
+                            info = session.get_info()
+                            ctap_data: dict[str, Any] = {"Ctap2Info": info}
+                            options = info.get("options", {})
+                            if options.get("clientPin"):
+                                with ClientPin(session) as client_pin:
+                                    ctap_data["PIN retries"] = (
+                                        client_pin.get_pin_retries()
                                     )
-                                elif bio_enroll is False:
-                                    ctap_data["Fingerprints"] = "Not configured"
-                        else:
-                            ctap_data["PIN"] = "Not configured"
-                        dev_info.append(ctap_data)
+
+                                    bio_enroll = options.get("bioEnroll")
+                                    if bio_enroll:
+                                        ctap_data["Fingerprint retries"] = (
+                                            client_pin.get_uv_retries()
+                                        )
+                                    elif bio_enroll is False:
+                                        ctap_data["Fingerprints"] = "Not configured"
+                            else:
+                                ctap_data["PIN"] = "Not configured"
+                            dev_info.append(ctap_data)
                     except (ValueError, CtapError) as e:
                         dev_info.append(f"Couldn't get CTAP2 info: {e!r}")
                 yubikeys[f"{dev!r}"] = dev_info

@@ -32,6 +32,7 @@ import struct
 from dataclasses import dataclass
 from enum import IntEnum, unique
 from functools import total_ordering
+from types import TracebackType
 from typing import NamedTuple
 
 from cryptography.hazmat.backends import default_backend
@@ -177,6 +178,20 @@ class HsmAuthSession:
         self._version = Version(*native.version)
 
         logger.debug(f"YubiHSM Auth session initialized (version={self.version})")
+
+    def __enter__(self) -> HsmAuthSession:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the session."""
 
     @property
     def version(self) -> Version:

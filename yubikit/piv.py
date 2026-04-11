@@ -35,6 +35,7 @@ import zlib
 from dataclasses import astuple, dataclass
 from datetime import date
 from enum import Enum, IntEnum, unique
+from types import TracebackType
 from typing import TYPE_CHECKING, TypeAlias, overload
 
 from cryptography import x509
@@ -676,6 +677,20 @@ class PivSession:
         self._max_pin_retries = 3
 
         logger.debug(f"PIV session initialized (version={self.version})")
+
+    def __enter__(self) -> PivSession:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the session."""
 
     @property
     def version(self) -> Version:

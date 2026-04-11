@@ -33,6 +33,7 @@ import os
 import struct
 from dataclasses import dataclass
 from enum import Enum, IntEnum, IntFlag, unique
+from types import TracebackType
 from typing import (
     ClassVar,
     Mapping,
@@ -982,6 +983,20 @@ class OpenPgpSession:
         )
 
         logger.debug(f"OpenPGP session initialized (version={self.version})")
+
+    def __enter__(self) -> OpenPgpSession:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the session."""
 
     @property
     def aid(self) -> OpenPgpAid:

@@ -28,9 +28,9 @@
 from __future__ import annotations
 
 import logging
-import warnings
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag, unique
+from types import TracebackType
 from typing import Any, Mapping
 
 from _yubikit_native.sessions import (
@@ -407,15 +407,19 @@ class ManagementSession:
             f"connection={type(connection).__name__}, version={self.version}"
         )
 
-    def close(self) -> None:
-        """Close the underlying connection.
+    def __enter__(self) -> ManagementSession:
+        return self
 
-        :deprecated: call .close() on the underlying connection instead.
-        """
-        warnings.warn(
-            "Deprecated: call .close() on the underlying connection instead.",
-            DeprecationWarning,
-        )
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the session."""
 
     @property
     def version(self) -> Version:

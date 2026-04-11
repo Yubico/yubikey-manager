@@ -16,35 +16,32 @@ from yubikit.yubiotp import SLOT, YubiOtpSession
 
 device = s.single()
 
-session = YubiOtpSession(device.otp())
-print(f"YubiKey version: {session.version}")
+with YubiOtpSession(device.otp()) as session:
+    print(f"YubiKey version: {session.version}")
 
-event = threading.Event()
+    event = threading.Event()
 
+    def on_keepalive(status: int) -> None:
+        if status == 2:  # STATUS_UPNEEDED
+            print("Touch your YubiKey...")
+        else:
+            print(f"Keepalive status: {status}")
 
-def on_keepalive(status: int) -> None:
-    if status == 2:  # STATUS_UPNEEDED
-        print("Touch your YubiKey...")
-    else:
-        print(f"Keepalive status: {status}")
+    def cancel_after_delay() -> None:
+        event.wait(5)
+        if not event.is_set():
+            print("Cancelling...")
+            event.set()
 
+    cancel_thread = threading.Thread(target=cancel_after_delay, daemon=True)
+    cancel_thread.start()
 
-def cancel_after_delay() -> None:
-    event.wait(5)
-    if not event.is_set():
-        print("Cancelling...")
-        event.set()
+    challenge = b"\x00" * 8
 
-
-cancel_thread = threading.Thread(target=cancel_after_delay, daemon=True)
-cancel_thread.start()
-
-challenge = b"\x00" * 8
-
-try:
-    result = session.calculate_hmac_sha1(
-        SLOT.ONE, challenge, event=event, on_keepalive=on_keepalive
-    )
-    print(f"Response: {result.hex()}")
-except Exception as e:
-    print(f"Error: {e}")
+    try:
+        result = session.calculate_hmac_sha1(
+            SLOT.ONE, challenge, event=event, on_keepalive=on_keepalive
+        )
+        print(f"Response: {result.hex()}")
+    except Exception as e:
+        print(f"Error: {e}")

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import IntEnum, unique
 from functools import total_ordering
 from time import time
+from types import TracebackType
 from typing import Mapping
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -150,6 +151,20 @@ class OathSession:
         logger.debug(
             f"OATH session initialized (version={self.version}, has_key={self.has_key})"
         )
+
+    def __enter__(self) -> OathSession:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the session."""
 
     @property
     def version(self) -> Version:
