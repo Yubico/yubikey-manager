@@ -40,12 +40,14 @@ import logging
 from types import TracebackType
 from typing import Any
 
-from _yubikit_native.sessions import Ctap2FidoSession as _Ctap2FidoSession
-from _yubikit_native.sessions import Ctap2Session as _Ctap2Session
 from _yubikit_native.sessions import ClientPin as _ClientPin
 from _yubikit_native.sessions import ClientPinFido as _ClientPinFido
 from _yubikit_native.sessions import CredentialManagement as _CredentialManagement
-from _yubikit_native.sessions import CredentialManagementFido as _CredentialManagementFido
+from _yubikit_native.sessions import (
+    CredentialManagementFido as _CredentialManagementFido,
+)
+from _yubikit_native.sessions import Ctap2FidoSession as _Ctap2FidoSession
+from _yubikit_native.sessions import Ctap2Session as _Ctap2Session
 from _yubikit_native.sessions import PinProtocol as _PinProtocol
 
 from .core import Version
@@ -89,7 +91,7 @@ class Ctap2Session:
         elif isinstance(connection, FidoConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            self._native = _Ctap2FidoSession(connection._native)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            self._native = _Ctap2FidoSession(connection)
         else:
             raise TypeError("Unsupported connection type")
 
@@ -160,13 +162,7 @@ class ClientPin:
 
     def close(self) -> None:
         """Restore the session so it can be reused."""
-        native = self._session._native
-        if isinstance(self._native, _ClientPin):
-            assert isinstance(native, _Ctap2Session)
-            self._native.close(native)
-        else:
-            assert isinstance(native, _Ctap2FidoSession)
-            self._native.close(native)
+        self._native.close(self._session._native)  # type: ignore[arg-type]
 
     @property
     def protocol(self) -> PinProtocol:
@@ -201,7 +197,9 @@ class ClientPin:
         event: object | None = None,
         on_keepalive: object | None = None,
     ) -> bytes:
-        return self._native.get_uv_token(permissions, permissions_rpid, event, on_keepalive)
+        return self._native.get_uv_token(
+            permissions, permissions_rpid, event, on_keepalive
+        )
 
 
 class CredentialManagement:
@@ -247,13 +245,7 @@ class CredentialManagement:
 
     def close(self) -> None:
         """Restore the session so it can be reused."""
-        native = self._session._native
-        if isinstance(self._native, _CredentialManagement):
-            assert isinstance(native, _Ctap2Session)
-            self._native.close(native)
-        else:
-            assert isinstance(native, _Ctap2FidoSession)
-            self._native.close(native)
+        self._native.close(self._session._native)  # type: ignore[arg-type]
 
     @property
     def is_update_supported(self) -> bool:

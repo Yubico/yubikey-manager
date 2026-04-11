@@ -85,6 +85,7 @@ def main() -> None:
 
     pin = getpass.getpass("  Enter PIN: ")
 
+    conn: FidoConnection | SmartCardConnection
     if dev.supports_connection(FidoConnection):  # type: ignore[arg-type]
         print("  Using FIDO HID transport")
         conn = dev.open_connection(FidoConnection)  # type: ignore[arg-type]

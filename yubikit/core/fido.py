@@ -25,12 +25,13 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import abc
 import logging
 import struct
 from threading import Event
-from typing import Callable, Iterator
+from typing import Callable
 
-from fido2.ctap import STATUS, CtapDevice, CtapError
+from fido2.ctap import STATUS, CtapError
 from fido2.hid import CAPABILITY, CTAPHID
 
 from yubikit.core import Version
@@ -47,14 +48,33 @@ from . import USB_INTERFACE, Connection
 logger = logging.getLogger(__name__)
 
 
-# Make CtapDevice a Connection
-FidoConnection = CtapDevice
-FidoConnection.usb_interface = USB_INTERFACE.FIDO  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
-Connection.register(FidoConnection)
+class FidoConnection(Connection, metaclass=abc.ABCMeta):
+    """Abstract FIDO connection — send CTAP HID commands."""
+
+    usb_interface = USB_INTERFACE.FIDO
+
+    @abc.abstractmethod
+    def call(
+        self,
+        cmd: int,
+        data: bytes = b"",
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
+    ) -> bytes:
+        """Send a CTAP HID command and return the response."""
+
+    @property
+    @abc.abstractmethod
+    def device_version(self) -> tuple[int, int, int]:
+        """The firmware version reported by the device."""
+
+    @property
+    @abc.abstractmethod
+    def capabilities(self) -> int:
+        """CTAP HID capability flags."""
 
 
-# Use SmartCardConnection for FIDO access, allowing usage of SCP
-class SmartCardCtapDevice(CtapDevice, Connection):
+class SmartCardCtapDevice(FidoConnection):
     usb_interface = USB_INTERFACE.CCID
 
     def __init__(
@@ -63,6 +83,7 @@ class SmartCardCtapDevice(CtapDevice, Connection):
         scp_key_params: ScpKeyParams | None = None,
     ):
         self._capabilities = CAPABILITY(0)
+        self._device_version = (0, 0, 0)
 
         self.protocol = SmartCardProtocol(connection)
         resp = self.protocol.select(AID.FIDO)
@@ -85,8 +106,12 @@ class SmartCardCtapDevice(CtapDevice, Connection):
         logger.debug("FIDO session initialized")
 
     @property
-    def capabilities(self) -> CAPABILITY:
-        return self._capabilities
+    def device_version(self) -> tuple[int, int, int]:
+        return self._device_version
+
+    @property
+    def capabilities(self) -> int:
+        return int(self._capabilities)
 
     def close(self) -> None:
         self.protocol.close()
@@ -96,7 +121,7 @@ class SmartCardCtapDevice(CtapDevice, Connection):
         cmd: int,
         data: bytes = b"",
         event: Event | None = None,
-        on_keepalive: Callable[[STATUS], None] | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes:
         match cmd:
             case CTAPHID.MSG:
@@ -135,7 +160,3 @@ class SmartCardCtapDevice(CtapDevice, Connection):
                 logger.debug("Keyboard interrupt, cancelling...")
                 self.protocol.send_apdu(cla, ins, 0x11, p2)
             raise
-
-    @classmethod
-    def list_devices(cls) -> Iterator[CtapDevice]:
-        return iter([])  # Not implemented

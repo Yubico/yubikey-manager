@@ -73,7 +73,7 @@ def read_info(conn: Connection, pid: PID | None = None) -> DeviceInfo:
     elif isinstance(conn, OtpConnection):
         native_conn = conn._conn  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     elif isinstance(conn, FidoConnection):
-        native_conn = conn._native  # ty: ignore[unresolved-attribute]
+        native_conn = conn
     else:
         raise TypeError("Invalid connection type")
 

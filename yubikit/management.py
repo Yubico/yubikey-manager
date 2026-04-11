@@ -389,7 +389,7 @@ class ManagementSession:
         elif isinstance(connection, FidoConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            native = _NativeManagementFidoSession(connection._native)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            native = _NativeManagementFidoSession(connection)
         else:
             raise TypeError("Unsupported connection type")
 
