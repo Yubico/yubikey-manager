@@ -19,11 +19,12 @@ use yubikit::transport::pcsc::{PcscSmartCardConnection, list_readers};
 
 const CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
 
-fn run_selection<C, E>(mut session: Ctap2Session<C>, transport: &str)
+fn run_demo<C, E>(mut session: Ctap2Session<C>, transport: &str)
 where
     C: yubikit::core::Connection<Error = E> + 'static,
     E: std::error::Error + Send + Sync + 'static,
 {
+    // --- selection ---
     println!("  Starting selection over {transport}...");
     println!("  Touch the YubiKey to confirm (auto-cancel in {CANCEL_TIMEOUT:?})");
 
@@ -43,17 +44,64 @@ where
 
     handle.join().unwrap();
 
-    match &result {
-        Ok(()) => println!("  ✓ Selection succeeded (user touched the device)"),
+    let selection_ok = match &result {
+        Ok(()) => {
+            println!("  ✓ Selection succeeded (user touched the device)");
+            true
+        }
         Err(Ctap2Error::StatusError(CtapStatus::KeepaliveCancel)) => {
-            println!("  ✗ Selection was cancelled (timeout)")
+            println!("  ✗ Selection was cancelled (timeout)");
+            false
         }
         Err(Ctap2Error::StatusError(CtapStatus::InvalidCommand)) => {
-            println!("  ⚠ Selection not supported (CTAP 2.1+ required)")
+            println!("  ⚠ Selection not supported (CTAP 2.1+ required)");
+            true // still call get_info
         }
-        Err(e) => println!("  ✗ Selection failed: {e}"),
+        Err(e) => {
+            println!("  ✗ Selection failed: {e}");
+            false
+        }
+    };
+
+    // --- get_info ---
+    if selection_ok {
+        println!("  Calling get_info...");
+        match session.get_info() {
+            Ok(info) => print_info(&info),
+            Err(e) => println!("  ✗ get_info failed: {e}"),
+        }
     }
+
     println!();
+}
+
+fn print_info(info: &yubikit::ctap2::Info) {
+    println!("  Authenticator Info:");
+    println!("    Versions:    {:?}", info.versions);
+    println!("    AAGUID:      {}", info.aaguid);
+    if !info.extensions.is_empty() {
+        println!("    Extensions:  {:?}", info.extensions);
+    }
+    if !info.options.is_empty() {
+        println!("    Options:     {:?}", info.options);
+    }
+    println!("    Max msg:     {} bytes", info.max_msg_size);
+    if !info.pin_uv_protocols.is_empty() {
+        println!("    PIN/UV:      {:?}", info.pin_uv_protocols);
+    }
+    if let Some(fw) = info.firmware_version {
+        println!("    Firmware:    {fw}");
+    }
+    if !info.transports.is_empty() {
+        println!("    Transports:  {:?}", info.transports);
+    }
+    if !info.algorithms.is_empty() {
+        let algs: Vec<_> = info.algorithms.iter().map(|a| a.alg).collect();
+        println!("    Algorithms:  {:?}", algs);
+    }
+    if let Some(n) = info.remaining_disc_creds {
+        println!("    Remaining discoverable credentials: {n}");
+    }
 }
 
 fn is_yubico_reader(reader: &str) -> bool {
@@ -108,7 +156,7 @@ fn main() {
             }
         };
         let ctap2 = Ctap2Session::new(ctap);
-        run_selection(ctap2, "FIDO HID");
+        run_demo(ctap2, "FIDO HID");
     }
 
     // CCID / SmartCard
@@ -138,7 +186,7 @@ fn main() {
         }
 
         let ctap2 = Ctap2Session::new(ctap);
-        run_selection(ctap2, &format!("CCID ({reader})"));
+        run_demo(ctap2, &format!("CCID ({reader})"));
     }
 
     if !found_any {

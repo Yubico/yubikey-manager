@@ -30,6 +30,9 @@
 //! Provides [`Ctap2Session`], which wraps a [`CtapSession`] and implements
 //! CTAP2-specific command framing and response parsing.
 
+use std::collections::BTreeMap;
+
+use crate::cbor::{self, Value};
 use crate::core::Connection;
 use crate::ctap::{CtapError, CtapSession};
 
@@ -204,7 +207,287 @@ impl<E: std::error::Error + Send + Sync + 'static> From<CtapError<E>> for Ctap2E
 }
 
 // ---------------------------------------------------------------------------
-// Ctap2Session
+// Aaguid
+// ---------------------------------------------------------------------------
+
+/// 16-byte Authenticator Attestation GUID.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct Aaguid([u8; 16]);
+
+impl Aaguid {
+    pub const NONE: Aaguid = Aaguid([0u8; 16]);
+
+    pub fn new(data: [u8; 16]) -> Self {
+        Self(data)
+    }
+
+    pub fn from_slice(data: &[u8]) -> Option<Self> {
+        data.try_into().ok().map(Self)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
+    }
+
+    pub fn is_none(&self) -> bool {
+        self.0 == [0u8; 16]
+    }
+}
+
+impl std::fmt::Debug for Aaguid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Format as UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        let b = &self.0;
+        write!(
+            f,
+            "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            b[0],
+            b[1],
+            b[2],
+            b[3],
+            b[4],
+            b[5],
+            b[6],
+            b[7],
+            b[8],
+            b[9],
+            b[10],
+            b[11],
+            b[12],
+            b[13],
+            b[14],
+            b[15],
+        )
+    }
+}
+
+impl std::fmt::Display for Aaguid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self, f)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Info (authenticatorGetInfo response)
+// ---------------------------------------------------------------------------
+
+/// Parsed response from the authenticatorGetInfo command (§6.4).
+///
+/// All fields correspond to the integer-keyed CBOR map returned by the
+/// authenticator. Optional/defaulted fields follow the CTAP 2.3 spec defaults.
+#[derive(Debug, Clone)]
+pub struct Info {
+    /// 0x01: List of supported protocol versions (e.g. "FIDO_2_0", "FIDO_2_1").
+    pub versions: Vec<String>,
+    /// 0x02: List of supported extensions.
+    pub extensions: Vec<String>,
+    /// 0x03: The AAGUID of the authenticator.
+    pub aaguid: Aaguid,
+    /// 0x04: Map of supported options and their values.
+    pub options: BTreeMap<String, bool>,
+    /// 0x05: Maximum message size supported by the authenticator (default 1024).
+    pub max_msg_size: usize,
+    /// 0x06: List of supported PIN/UV auth protocol versions.
+    pub pin_uv_protocols: Vec<u32>,
+    /// 0x07: Maximum number of credentials in a credential ID list.
+    pub max_creds_in_list: Option<usize>,
+    /// 0x08: Maximum credential ID length in bytes.
+    pub max_cred_id_length: Option<usize>,
+    /// 0x09: List of supported transports.
+    pub transports: Vec<String>,
+    /// 0x0A: List of supported algorithms for credential generation.
+    pub algorithms: Vec<PublicKeyCredentialParameters>,
+    /// 0x0B: Maximum size of the serialized large-blob array.
+    pub max_large_blob: Option<usize>,
+    /// 0x0C: Whether the authenticator requires a PIN change.
+    pub force_pin_change: bool,
+    /// 0x0D: Current minimum PIN length in Unicode code points (default 4).
+    pub min_pin_length: usize,
+    /// 0x0E: Firmware version of the authenticator.
+    pub firmware_version: Option<u64>,
+    /// 0x0F: Maximum credBlob length in bytes.
+    pub max_cred_blob_length: Option<usize>,
+    /// 0x10: Maximum number of RP IDs for setMinPINLength.
+    pub max_rpids_for_min_pin: Option<usize>,
+    /// 0x11: Preferred number of platform UV attempts before falling back.
+    pub preferred_platform_uv_attempts: Option<usize>,
+    /// 0x12: Bit field of supported UV modalities.
+    pub uv_modality: Option<u32>,
+    /// 0x13: Map of certification type to certification level.
+    pub certifications: BTreeMap<String, Value>,
+    /// 0x14: Estimated number of additional discoverable credentials that can be stored.
+    pub remaining_disc_creds: Option<u32>,
+    /// 0x15: List of vendor prototype config command identifiers.
+    pub vendor_prototype_config_commands: Vec<u32>,
+    /// 0x16: List of supported attestation formats (default ["packed"]).
+    pub attestation_formats: Vec<String>,
+    /// 0x17: Number of UV attempts since last PIN entry.
+    pub uv_count_since_pin: Option<u32>,
+    /// 0x18: Whether reset requires a long (10 second) touch.
+    pub long_touch_for_reset: bool,
+    /// 0x19: Encrypted device identifier (opaque, regenerated each getInfo call).
+    pub enc_identifier: Option<Vec<u8>>,
+    /// 0x1A: List of transports that must be used for reset.
+    pub transports_for_reset: Vec<String>,
+    /// 0x1B: Whether the authenticator enforces a PIN complexity policy beyond minPINLength.
+    pub pin_complexity_policy: Option<bool>,
+    /// 0x1C: URL with more information about the enforced PIN complexity policy.
+    pub pin_complexity_policy_url: Option<String>,
+    /// 0x1D: Maximum PIN length in Unicode code points (default 63 if absent).
+    pub max_pin_length: Option<usize>,
+    /// 0x1E: Encrypted credential store state (opaque, regenerated each getInfo call).
+    pub enc_cred_store_state: Option<Vec<u8>>,
+    /// 0x1F: List of supported authenticatorConfig subcommand values.
+    pub config_commands: Vec<u32>,
+}
+
+/// A supported algorithm for credential generation (COSE algorithm parameters).
+#[derive(Debug, Clone)]
+pub struct PublicKeyCredentialParameters {
+    /// Credential type, typically "public-key".
+    pub credential_type: String,
+    /// COSE algorithm identifier.
+    pub alg: i64,
+}
+
+impl Info {
+    /// Parse an `Info` from a CBOR map with integer keys.
+    pub fn from_cbor_map(map: &[(Value, Value)]) -> Self {
+        let get = |key: i64| -> Option<&Value> {
+            map.iter()
+                .find(|(k, _)| matches!(k, Value::Int(n) if *n == key))
+                .map(|(_, v)| v)
+        };
+
+        let get_strings = |key: i64| -> Vec<String> {
+            get(key)
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_text().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        let get_uint =
+            |key: i64| -> Option<u64> { get(key).and_then(|v| v.as_int()).map(|n| n as u64) };
+
+        let get_bool = |key: i64| -> Option<bool> { get(key).and_then(|v| v.as_bool()) };
+
+        let get_uint_vec = |key: i64| -> Vec<u32> {
+            get(key)
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_int().map(|n| n as u32))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        let get_string_map = |key: i64| -> BTreeMap<String, Value> {
+            get(key)
+                .and_then(|v| v.as_map())
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(|(k, v)| k.as_text().map(|s| (s.to_string(), v.clone())))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        let aaguid = get(0x03)
+            .and_then(|v| v.as_bytes())
+            .and_then(Aaguid::from_slice)
+            .unwrap_or(Aaguid::NONE);
+
+        let options = get(0x04)
+            .and_then(|v| v.as_map())
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|(k, v)| {
+                        k.as_text()
+                            .and_then(|key| v.as_bool().map(|val| (key.to_string(), val)))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let algorithms = get(0x0A)
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| {
+                        let map = v.as_map()?;
+                        let credential_type = map
+                            .iter()
+                            .find(|(k, _)| k.as_text() == Some("type"))
+                            .and_then(|(_, v)| v.as_text())
+                            .unwrap_or("public-key")
+                            .to_string();
+                        let alg = map
+                            .iter()
+                            .find(|(k, _)| k.as_text() == Some("alg"))
+                            .and_then(|(_, v)| v.as_int())?;
+                        Some(PublicKeyCredentialParameters {
+                            credential_type,
+                            alg,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let attestation_formats = {
+            let fmts = get_strings(0x16);
+            if fmts.is_empty() {
+                vec!["packed".to_string()]
+            } else {
+                fmts
+            }
+        };
+
+        Info {
+            versions: get_strings(0x01),
+            extensions: get_strings(0x02),
+            aaguid,
+            options,
+            max_msg_size: get_uint(0x05).unwrap_or(1024) as usize,
+            pin_uv_protocols: get_uint_vec(0x06),
+            max_creds_in_list: get_uint(0x07).map(|n| n as usize),
+            max_cred_id_length: get_uint(0x08).map(|n| n as usize),
+            transports: get_strings(0x09),
+            algorithms,
+            max_large_blob: get_uint(0x0B).map(|n| n as usize),
+            force_pin_change: get_bool(0x0C).unwrap_or(false),
+            min_pin_length: get_uint(0x0D).unwrap_or(4) as usize,
+            firmware_version: get_uint(0x0E),
+            max_cred_blob_length: get_uint(0x0F).map(|n| n as usize),
+            max_rpids_for_min_pin: get_uint(0x10).map(|n| n as usize),
+            preferred_platform_uv_attempts: get_uint(0x11).map(|n| n as usize),
+            uv_modality: get_uint(0x12).map(|n| n as u32),
+            certifications: get_string_map(0x13),
+            remaining_disc_creds: get_uint(0x14).map(|n| n as u32),
+            vendor_prototype_config_commands: get_uint_vec(0x15),
+            attestation_formats,
+            uv_count_since_pin: get_uint(0x17).map(|n| n as u32),
+            long_touch_for_reset: get_bool(0x18).unwrap_or(false),
+            enc_identifier: get(0x19).and_then(|v| v.as_bytes()).map(|b| b.to_vec()),
+            transports_for_reset: get_strings(0x1A),
+            pin_complexity_policy: get_bool(0x1B),
+            pin_complexity_policy_url: get(0x1C)
+                .and_then(|v| v.as_bytes())
+                .and_then(|b| std::str::from_utf8(b).ok())
+                .map(|s| s.to_string()),
+            max_pin_length: get_uint(0x1D).map(|n| n as usize),
+            enc_cred_store_state: get(0x1E).and_then(|v| v.as_bytes()).map(|b| b.to_vec()),
+            config_commands: get_uint_vec(0x1F),
+        }
+    }
+}
 // ---------------------------------------------------------------------------
 
 /// CTAP2 protocol session.
@@ -275,5 +558,125 @@ impl<C: Connection + 'static> Ctap2Session<C> {
     ) -> Result<(), Ctap2Error<C::Error>> {
         self.send_cbor(cmd::SELECTION, None, on_keepalive, cancel)?;
         Ok(())
+    }
+
+    /// authenticatorGetInfo command.
+    ///
+    /// Returns information about the authenticator's capabilities,
+    /// supported protocol versions, extensions, and configuration.
+    pub fn get_info(&mut self) -> Result<Info, Ctap2Error<C::Error>> {
+        let response = self.send_cbor(cmd::GET_INFO, None, None, None)?;
+        let value = cbor::decode(&response)
+            .map_err(|e| Ctap2Error::InvalidResponse(format!("CBOR decode error: {e}")))?;
+        let map = value
+            .as_map()
+            .ok_or_else(|| Ctap2Error::InvalidResponse("Expected CBOR map".into()))?;
+        Ok(Info::from_cbor_map(map))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cbor::Value;
+
+    /// Build a minimal GetInfo CBOR map for testing.
+    fn minimal_info_map() -> Value {
+        Value::Map(vec![
+            (
+                Value::Int(0x01),
+                Value::Array(vec![
+                    Value::Text("FIDO_2_0".into()),
+                    Value::Text("FIDO_2_1".into()),
+                ]),
+            ),
+            (
+                Value::Int(0x02),
+                Value::Array(vec![Value::Text("hmac-secret".into())]),
+            ),
+            (Value::Int(0x03), Value::Bytes(vec![0xAA; 16])),
+            (
+                Value::Int(0x04),
+                Value::Map(vec![
+                    (Value::Text("rk".into()), Value::Bool(true)),
+                    (Value::Text("up".into()), Value::Bool(true)),
+                    (Value::Text("plat".into()), Value::Bool(false)),
+                ]),
+            ),
+            (Value::Int(0x05), Value::Int(2048)),
+            (
+                Value::Int(0x06),
+                Value::Array(vec![Value::Int(2), Value::Int(1)]),
+            ),
+            (Value::Int(0x07), Value::Int(8)),
+            (Value::Int(0x08), Value::Int(128)),
+            (
+                Value::Int(0x0A),
+                Value::Array(vec![Value::Map(vec![
+                    (Value::Text("alg".into()), Value::Int(-7)),
+                    (Value::Text("type".into()), Value::Text("public-key".into())),
+                ])]),
+            ),
+            (Value::Int(0x0D), Value::Int(6)),
+            (Value::Int(0x0E), Value::Int(328965)),
+            (Value::Int(0x14), Value::Int(25)),
+        ])
+    }
+
+    #[test]
+    fn test_info_from_cbor_map() {
+        let map = minimal_info_map();
+        let entries = map.as_map().unwrap();
+        let info = Info::from_cbor_map(entries);
+
+        assert_eq!(info.versions, vec!["FIDO_2_0", "FIDO_2_1"]);
+        assert_eq!(info.extensions, vec!["hmac-secret"]);
+        assert_eq!(info.aaguid, Aaguid::new([0xAA; 16]));
+        assert_eq!(info.options.get("rk"), Some(&true));
+        assert_eq!(info.options.get("plat"), Some(&false));
+        assert_eq!(info.max_msg_size, 2048);
+        assert_eq!(info.pin_uv_protocols, vec![2, 1]);
+        assert_eq!(info.max_creds_in_list, Some(8));
+        assert_eq!(info.max_cred_id_length, Some(128));
+        assert_eq!(info.algorithms.len(), 1);
+        assert_eq!(info.algorithms[0].alg, -7);
+        assert_eq!(info.algorithms[0].credential_type, "public-key");
+        assert_eq!(info.min_pin_length, 6);
+        assert_eq!(info.firmware_version, Some(328965));
+        assert_eq!(info.remaining_disc_creds, Some(25));
+        // Defaults
+        assert!(!info.force_pin_change);
+        assert!(!info.long_touch_for_reset);
+        assert_eq!(info.attestation_formats, vec!["packed"]);
+    }
+
+    #[test]
+    fn test_info_defaults() {
+        let info = Info::from_cbor_map(&[
+            (
+                Value::Int(0x01),
+                Value::Array(vec![Value::Text("U2F_V2".into())]),
+            ),
+            (Value::Int(0x03), Value::Bytes(vec![0; 16])),
+        ]);
+
+        assert_eq!(info.versions, vec!["U2F_V2"]);
+        assert_eq!(info.aaguid, Aaguid::NONE);
+        assert_eq!(info.max_msg_size, 1024);
+        assert_eq!(info.min_pin_length, 4);
+        assert!(info.extensions.is_empty());
+        assert!(info.options.is_empty());
+        assert!(info.pin_uv_protocols.is_empty());
+        assert_eq!(info.max_creds_in_list, None);
+        assert_eq!(info.firmware_version, None);
+    }
+
+    #[test]
+    fn test_aaguid_display() {
+        let aaguid = Aaguid::new([
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54,
+            0x32, 0x10,
+        ]);
+        assert_eq!(format!("{aaguid}"), "01234567-89ab-cdef-fedc-ba9876543210");
     }
 }
