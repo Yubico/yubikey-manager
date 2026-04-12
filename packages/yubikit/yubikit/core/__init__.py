@@ -226,22 +226,15 @@ class CancelledException(Exception):
 class YubiKeyDevice(abc.ABC):
     """YubiKey device reference"""
 
-    def __init__(
-        self, transport: TRANSPORT, fingerprint: Hashable, pid: PID | None = None
-    ):
-        self._transport = transport
-        self._fingerprint = fingerprint
-        self._pid = pid
-
     @property
+    @abc.abstractmethod
     def transport(self) -> TRANSPORT:
         """Get the transport used to communicate with this YubiKey"""
-        return self._transport
 
     @property
+    @abc.abstractmethod
     def pid(self) -> PID | None:
         """Return the PID of the YubiKey, if available."""
-        return self._pid
 
     def supports_connection(self, connection_type: type[Connection]) -> bool:
         """Check if a YubiKeyDevice supports a specific Connection type"""
@@ -255,11 +248,11 @@ class YubiKeyDevice(abc.ABC):
         raise ValueError("Unsupported Connection type")
 
     @property
+    @abc.abstractmethod
     def fingerprint(self) -> Hashable:
         """Used to identify that device references from different enumerations represent
         the same physical YubiKey. This fingerprint is not stable between sessions, or
         after un-plugging, and re-plugging a device."""
-        return self._fingerprint
 
     @abc.abstractmethod
     def reinsert(

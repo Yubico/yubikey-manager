@@ -194,14 +194,27 @@ class _NativeYubiKeyDevice(YubiKeyDevice):
     """YubiKey device backed by native Rust enumeration."""
 
     def __init__(self, native_dev: _NativeYubiKeyDeviceInfo, info: DeviceInfo):
-        pid = PID(native_dev.pid) if native_dev.pid else None
-        fingerprint = (
+        self._pid = PID(native_dev.pid) if native_dev.pid else None
+        self._fingerprint = (
             native_dev.reader_name or native_dev.hid_path or native_dev.fido_path or ""
         )
-        transport = TRANSPORT.NFC if native_dev.transport == "nfc" else TRANSPORT.USB
-        super().__init__(transport, fingerprint, pid)
+        self._transport = (
+            TRANSPORT.NFC if native_dev.transport == "nfc" else TRANSPORT.USB
+        )
         self._native = native_dev
         self._info = info
+
+    @property
+    def transport(self) -> TRANSPORT:
+        return self._transport
+
+    @property
+    def pid(self) -> PID | None:
+        return self._pid
+
+    @property
+    def fingerprint(self) -> str:
+        return self._fingerprint
 
     @property
     def reader_name(self) -> str | None:
