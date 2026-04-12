@@ -32,7 +32,7 @@ import logging
 import re
 from contextlib import contextmanager
 from enum import Enum, IntEnum, IntFlag, unique
-from threading import Timer
+from threading import Event, Timer
 from types import TracebackType
 from typing import (
     Callable,
@@ -214,17 +214,34 @@ class PID(IntEnum):
 T_Connection = TypeVar("T_Connection", bound=Connection)
 
 
+class REINSERT_STATUS(Enum):
+    REMOVE = 1
+    REINSERT = 2
+
+
+class CancelledException(Exception):
+    """Raised when the caller cancels an operation."""
+
+
 class YubiKeyDevice(abc.ABC):
     """YubiKey device reference"""
 
-    def __init__(self, transport: TRANSPORT, fingerprint: Hashable):
+    def __init__(
+        self, transport: TRANSPORT, fingerprint: Hashable, pid: PID | None = None
+    ):
         self._transport = transport
         self._fingerprint = fingerprint
+        self._pid = pid
 
     @property
     def transport(self) -> TRANSPORT:
         """Get the transport used to communicate with this YubiKey"""
         return self._transport
+
+    @property
+    def pid(self) -> PID | None:
+        """Return the PID of the YubiKey, if available."""
+        return self._pid
 
     def supports_connection(self, connection_type: type[Connection]) -> bool:
         """Check if a YubiKeyDevice supports a specific Connection type"""
@@ -244,6 +261,25 @@ class YubiKeyDevice(abc.ABC):
         after un-plugging, and re-plugging a device."""
         return self._fingerprint
 
+    @abc.abstractmethod
+    def reinsert(
+        self,
+        reinsert_cb: Callable[[REINSERT_STATUS], None] | None = None,
+        event: Event | None = None,
+    ) -> None:
+        """Wait for the user to remove and reinsert the YubiKey.
+
+        This may be required to perform certain operations, such as FIDO reset.
+
+        This method will attempt to verify that the same YubiKey is reinserted,
+        but it will only fail when this is definitely not the case (eg. if the serial
+        number does not match).
+
+        :param reinsert_cb: Callback to indicate the the YubiKey has been removed,
+        and should be reinserted.
+        :param event: Optional event to cancel (throws CancelledException).
+        """
+
     def __eq__(self, other):
         return isinstance(other, type(self)) and self.fingerprint == other.fingerprint
 
@@ -251,7 +287,11 @@ class YubiKeyDevice(abc.ABC):
         return hash(self.fingerprint)
 
     def __repr__(self):
-        return f"{type(self).__name__}(fingerprint={self.fingerprint!r})"
+        return "%s(pid=%04x, fingerprint=%r)" % (
+            type(self).__name__,
+            self.pid or 0,
+            self.fingerprint,
+        )
 
 
 class CommandError(Exception):

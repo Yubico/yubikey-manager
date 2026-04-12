@@ -29,11 +29,11 @@
 from time import sleep
 from typing import Generator
 
-from yubikit.core import TRANSPORT
+from yubikit.core import TRANSPORT, YubiKeyDevice
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
-from yubikit.device import YkmanDevice, list_all_devices, scan_devices
+from yubikit.device import list_all_devices, scan_devices
 from yubikit.management import DeviceInfo
 from yubikit.support import get_name, read_info
 
@@ -59,7 +59,7 @@ Example usage:
 
 
 class ScriptingDevice:
-    """Scripting-friendly proxy for YkmanDevice.
+    """Scripting-friendly proxy for YubiKeyDevice.
 
     This wrapper adds some helpful utility methods useful for scripting.
     """
@@ -100,7 +100,7 @@ class ScriptingDevice:
         return self.open_connection(FidoConnection)
 
 
-YkmanDevice.register(ScriptingDevice)
+YubiKeyDevice.register(ScriptingDevice)
 
 
 def single(*, prompt=True) -> ScriptingDevice:
@@ -166,7 +166,7 @@ def multi(
                 return  # Stop waiting
 
 
-def _get_reader(reader) -> YkmanDevice:
+def _get_reader(reader) -> YubiKeyDevice:
     readers = [
         d
         for d, _info in list_all_devices([SmartCardConnection])

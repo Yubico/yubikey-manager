@@ -1,12 +1,14 @@
-# Re-export public API from yubikit.device for backward compatibility.
-from yubikit.device import (  # noqa: F401
+# Re-export public API from yubikit for backward compatibility.
+from yubikit.core import (  # noqa: F401
     REINSERT_STATUS,
     CancelledException,
-    NativeFidoConnection,
-    ScardSmartCardConnection,
-    YkmanDevice,
+    YubiKeyDevice,
+)
+from yubikit.device import (  # noqa: F401
     list_all_devices,
     list_readers,
     read_info,
     scan_devices,
 )
+
+YkmanDevice = YubiKeyDevice

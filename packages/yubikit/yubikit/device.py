@@ -31,20 +31,25 @@ Device enumeration and native connection implementations for YubiKeys.
 
 from __future__ import annotations
 
-import abc
 import logging
-from enum import Enum
 from threading import Event
-from typing import Callable, Hashable, Iterable, Iterator, Mapping, TypeAlias
+from typing import Callable, Iterable, Iterator, Mapping, TypeAlias
 
-from _yubikit_native.device import NativeYubiKeyDevice
+from _yubikit_native.device import NativeYubiKeyDevice as _NativeYubiKeyDeviceInfo
 from _yubikit_native.device import list_devices as _native_list_devices
 from _yubikit_native.device import scan_devices as _native_scan_devices
 from _yubikit_native.hid import FidoConnection as _NativeFidoHidConnection
 from _yubikit_native.hid import OtpConnection as _NativeOtpConnectionImpl
 from _yubikit_native.pcsc import PcscConnection
 from _yubikit_native.pcsc import list_readers as _native_list_readers
-from yubikit.core import PID, TRANSPORT, Connection, YubiKeyDevice
+from yubikit.core import (
+    PID,
+    REINSERT_STATUS,
+    TRANSPORT,
+    CancelledException,
+    Connection,
+    YubiKeyDevice,
+)
 from yubikit.core.fido import FidoConnection, SmartCardCtapDevice
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
@@ -58,7 +63,7 @@ logger = logging.getLogger(__name__)
 # --- Connection implementations ---
 
 
-class NativeFidoConnection(FidoConnection):
+class _NativeFidoConnection(FidoConnection):
     """FIDO connection backed by the native Rust CTAP HID transport."""
 
     def __init__(self, path: str, pid: int):
@@ -88,7 +93,7 @@ class NativeFidoConnection(FidoConnection):
         self._native.close()
 
     @classmethod
-    def list_devices(cls) -> Iterator[NativeFidoConnection]:
+    def list_devices(cls) -> Iterator[_NativeFidoConnection]:
         from _yubikit_native.hid import list_fido_devices as _native_list_fido_devices
 
         for dev in _native_list_fido_devices():
@@ -118,7 +123,7 @@ class _NativeOtpConnection(OtpConnection):
 YK_READER_NAME = "yubico yubikey"
 
 
-class ScardSmartCardConnection(SmartCardConnection):
+class _NativeSmartCardConnection(SmartCardConnection):
     def __init__(self, reader_name):
         self._native = PcscConnection.open(reader_name)
         self._transport = (
@@ -150,60 +155,6 @@ def list_readers():
 
 
 # --- Device enumeration ---
-
-
-class REINSERT_STATUS(Enum):
-    REMOVE = 1
-    REINSERT = 2
-
-
-class CancelledException(Exception):
-    """Raised when the caller cancels an operation."""
-
-
-class YkmanDevice(YubiKeyDevice):
-    """YubiKey device reference, with optional PID"""
-
-    def __init__(self, transport: TRANSPORT, fingerprint: Hashable, pid: PID | None):
-        super(YkmanDevice, self).__init__(transport, fingerprint)
-        self._pid = pid
-
-    @property
-    def pid(self) -> PID | None:
-        """Return the PID of the YubiKey, if available."""
-        return self._pid
-
-    def reinsert(
-        self,
-        reinsert_cb: Callable[[REINSERT_STATUS], None] | None = None,
-        event: Event | None = None,
-    ) -> None:
-        """Wait for the user to remove and reinsert the YubiKey.
-
-        This may be required to perform certain operations, such as FIDO reset.
-
-        This method will attempt to verify that the same YubiKey is reinserted,
-        but it will only fail when this is definitely not the case (eg. if the serial
-        number does not match).
-
-        :param reinsert_cb: Callback to indicate the the YubiKey has been removed,
-        and should be reinserted.
-        :param event: Optional event to cancel (throws CancelledException).
-        """
-        self._do_reinsert(reinsert_cb or (lambda _: None), event or Event())
-
-    @abc.abstractmethod
-    def _do_reinsert(
-        self, reinsert_cb: Callable[[REINSERT_STATUS], None], event: Event
-    ) -> None:
-        pass
-
-    def __repr__(self):
-        return "%s(pid=%04x, fingerprint=%r)" % (
-            type(self).__name__,
-            self.pid or 0,
-            self.fingerprint,
-        )
 
 
 _T_CONNECTION: TypeAlias = type[Connection] | type[FidoConnection]
@@ -239,10 +190,10 @@ def scan_devices() -> tuple[Mapping[PID, int], int]:
     return merged, state
 
 
-class _NativeCompositeDevice(YkmanDevice):
+class _NativeYubiKeyDevice(YubiKeyDevice):
     """YubiKey device backed by native Rust enumeration."""
 
-    def __init__(self, native_dev: NativeYubiKeyDevice, info: DeviceInfo):
+    def __init__(self, native_dev: _NativeYubiKeyDeviceInfo, info: DeviceInfo):
         pid = PID(native_dev.pid) if native_dev.pid else None
         fingerprint = (
             native_dev.reader_name or native_dev.hid_path or native_dev.fido_path or ""
@@ -270,32 +221,36 @@ class _NativeCompositeDevice(YkmanDevice):
         if issubclass(connection_type, SmartCardConnection):
             reader = self._native.reader_name
             if reader is not None:
-                return ScardSmartCardConnection(reader)
+                return _NativeSmartCardConnection(reader)
         if issubclass(connection_type, FidoConnection):
             fido_path = self._native.fido_path
             if fido_path is not None and self.pid is not None:
                 if issubclass(connection_type, SmartCardCtapDevice):
                     reader = self._native.reader_name
                     if reader is not None:
-                        return SmartCardCtapDevice(ScardSmartCardConnection(reader))
-                return NativeFidoConnection(fido_path, self.pid)
+                        return SmartCardCtapDevice(_NativeSmartCardConnection(reader))
+                return _NativeFidoConnection(fido_path, self.pid)
         if issubclass(connection_type, OtpConnection):
             hid_path = self._native.hid_path
             if hid_path is not None:
                 return _NativeOtpConnection(hid_path)
         raise ValueError(f"Unsupported connection type: {connection_type}")
 
-    def _do_reinsert(
-        self, reinsert_cb: Callable[[REINSERT_STATUS], None], event: Event
+    def reinsert(
+        self,
+        reinsert_cb: Callable[[REINSERT_STATUS], None] | None = None,
+        event: Event | None = None,
     ) -> None:
+        cb = reinsert_cb or (lambda _: None)
+        ev = event or Event()
         status_map = {
             "remove": REINSERT_STATUS.REMOVE,
             "reinsert": REINSERT_STATUS.REINSERT,
         }
         try:
             self._native.reinsert(
-                lambda s: reinsert_cb(status_map[s]),
-                lambda: event.is_set(),
+                lambda s: cb(status_map[s]),
+                lambda: ev.is_set(),
             )
         except RuntimeError as e:
             msg = str(e)
@@ -306,8 +261,8 @@ class _NativeCompositeDevice(YkmanDevice):
             raise
 
 
-def _device_info_from_native_dev(native_dev: NativeYubiKeyDevice) -> DeviceInfo:
-    """Convert a NativeYubiKeyDevice's info dict to a DeviceInfo."""
+def _device_info_from_native_dev(native_dev: _NativeYubiKeyDeviceInfo) -> DeviceInfo:
+    """Convert a native device's info dict to a DeviceInfo."""
     from yubikit.management import _device_info_from_native
 
     return _device_info_from_native(native_dev.info())
@@ -315,7 +270,7 @@ def _device_info_from_native_dev(native_dev: NativeYubiKeyDevice) -> DeviceInfo:
 
 def list_all_devices(
     connection_types: Iterable[_T_CONNECTION] = _DEFAULT_CONNECTION_TYPES,
-) -> list[tuple[YkmanDevice, DeviceInfo]]:
+) -> list[tuple[YubiKeyDevice, DeviceInfo]]:
     """Connect to all attached YubiKeys and read device info from them.
 
     :param connection_types: An iterable of YubiKey connection types.
@@ -329,8 +284,8 @@ def list_all_devices(
     if not transports:
         return []
 
-    results: list[tuple[YkmanDevice, DeviceInfo]] = []
+    results: list[tuple[YubiKeyDevice, DeviceInfo]] = []
     for native_dev in _native_list_devices(transports):
         info = _device_info_from_native_dev(native_dev)
-        results.append((_NativeCompositeDevice(native_dev, info), info))
+        results.append((_NativeYubiKeyDevice(native_dev, info), info))
     return results
