@@ -105,6 +105,27 @@ fn get_ctap_status<E: std::error::Error + Send + Sync + 'static>(
     }
 }
 
+fn format_pin_error<E: std::error::Error + Send + Sync + 'static>(
+    client_pin: &mut ClientPin<impl Connection + 'static>,
+    context: &str,
+    e: &Ctap2Error<E>,
+) -> CliError {
+    match get_ctap_status(e) {
+        Some(CtapStatus::PinInvalid) => {
+            if let Ok((retries, _)) = client_pin.get_pin_retries() {
+                CliError(format!("Wrong PIN, {retries} attempt(s) remaining."))
+            } else {
+                CliError(format!("{context}: {e}"))
+            }
+        }
+        Some(CtapStatus::PinBlocked) => CliError("PIN is blocked.".into()),
+        Some(CtapStatus::PinAuthBlocked) => CliError(
+            "PIN authentication is currently blocked. Remove and re-insert the YubiKey.".into(),
+        ),
+        _ => CliError(format!("{context}: {e}")),
+    }
+}
+
 fn require_pin_from_info(
     info: &Info,
     pin: Option<&str>,
@@ -131,7 +152,7 @@ fn get_pin_token_inner<C: Connection + 'static>(
 ) -> Result<(Vec<u8>, PinProtocol), CliError> {
     let token = client_pin
         .get_pin_token(pin, Some(permissions), None)
-        .map_err(|e| CliError(format!("PIN authentication failed: {e}")))?;
+        .map_err(|e| format_pin_error(client_pin, "PIN authentication failed", &e))?;
     Ok((token, client_pin.protocol()))
 }
 
@@ -459,7 +480,7 @@ pub fn run_access_change_pin(
             };
             client_pin
                 .change_pin(&current_pin, &new)
-                .map_err(|e| CliError(format!("Failed to change PIN: {e}")))?;
+                .map_err(|e| format_pin_error(&mut client_pin, "Failed to change PIN", &e))?;
             println!("PIN has been changed.");
         } else {
             // Set new PIN
@@ -501,7 +522,7 @@ pub fn run_access_verify_pin(
         // Get a PIN token to verify the PIN
         client_pin
             .get_pin_token(&pin_str, None, None)
-            .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
+            .map_err(|e| format_pin_error(&mut client_pin, "PIN verification failed", &e))?;
 
         println!("PIN verified.");
         Ok(())
