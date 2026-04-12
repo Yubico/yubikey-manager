@@ -26,8 +26,11 @@ dependencies = [
 Homepage = "https://github.com/Yubico/yubikey-manager"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
 
-[tool.hatch.build.targets.wheel]
-packages = ["ykman"]
+[tool.maturin]
+bindings = "bin"
+manifest-path = "../../crates/ykman-cli/Cargo.toml"
+python-packages = ["ykman"]
+strip = true

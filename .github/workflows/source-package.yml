@@ -44,11 +44,10 @@ jobs:
         run: |
           export SOURCE_DATE_EPOCH=$(git show --no-patch --format=%ct)
           uv build --package yubikit --sdist
-          uv build --package yubikey-manager
+          uv build --package yubikey-manager --sdist
           mkdir artifacts
           mv dist/yubikit-*.tar.gz artifacts/
           mv dist/yubikey_manager-*.tar.gz artifacts/
-          mv dist/yubikey_manager-*.whl artifacts/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6

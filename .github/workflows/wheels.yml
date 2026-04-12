@@ -12,11 +12,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -26,8 +21,11 @@ jobs:
           command: sdist
           args: --manifest-path packages/yubikit/pyproject.toml --out dist
 
-      - name: Build sdist and wheel (yubikey-manager)
-        run: uv build --package yubikey-manager --out dist
+      - name: Build sdist (yubikey-manager)
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --manifest-path packages/ykman/pyproject.toml --out dist
 
       - name: Upload sdist
         uses: actions/upload-artifact@v6
@@ -88,4 +86,49 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: yubikit-wheels-${{ matrix.os }}-${{ matrix.target }}
+          path: dist/*.whl
+
+  ykman-wheels:
+    runs-on: ${{ matrix.os }}
+    name: ykman wheels - ${{ matrix.os }} ${{ matrix.target }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64
+            container: quay.io/pypa/manylinux_2_28_x86_64
+          - os: ubuntu-22.04-arm
+            target: aarch64
+            container: quay.io/pypa/manylinux_2_28_aarch64
+          - os: macos-latest
+            target: universal2-apple-darwin
+          - os: windows-latest
+            target: x64
+          - os: windows-11-arm
+            target: aarch64
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        if: "startsWith(matrix.os, 'ubuntu')"
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq libpcsclite-dev libudev-dev
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --manifest-path packages/ykman/pyproject.toml --release --out dist --find-interpreter
+          manylinux: manylinux_2_28
+          container: ${{ matrix.container }}
+          before-script-linux: ${{ matrix.container && 'dnf install -y pcsc-lite-devel systemd-devel' || '' }}
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: ykman-wheels-${{ matrix.os }}-${{ matrix.target }}
           path: dist/*.whl
