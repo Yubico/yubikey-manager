@@ -88,9 +88,11 @@ impl<C: Connection + 'static> BioEnrollment<C> {
         pin_token: Vec<u8>,
     ) -> Result<Self, Ctap2Error<C::Error>> {
         let info = &session.cached_info;
-        let has_bio = info.options.get("bioEnroll") == Some(&true);
+        // bioEnroll option present means the feature is supported.
+        // Its value (true/false) indicates whether fingerprints are currently enrolled.
+        let has_bio = info.options.contains_key("bioEnroll");
         let has_preview = info.versions.contains(&"FIDO_2_1_PRE".to_string())
-            && info.options.get("userVerificationMgmtPreview") == Some(&true);
+            && info.options.contains_key("userVerificationMgmtPreview");
 
         if !has_bio && !has_preview {
             return Err(Ctap2Error::InvalidResponse(
