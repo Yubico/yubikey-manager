@@ -28,7 +28,6 @@ import click
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import NameOID
-
 from ykman import scripting as s
 from ykman.piv import sign_certificate_builder
 from yubikit.piv import (

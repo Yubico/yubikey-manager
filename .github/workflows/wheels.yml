@@ -130,7 +130,7 @@ jobs:
           args: --release --out dist --find-interpreter
           manylinux: manylinux_2_28
           container: ${{ matrix.container }}
-          before-script-linux: ${{ matrix.container && 'dnf install -y pcsc-lite-devel systemd-devel' || '' }}
+          before-script-linux: ${{ matrix.container && 'dnf install -y pcsc-lite-devel systemd-devel dbus-devel' || '' }}
           working-directory: packages/ykman
 
       - name: Upload wheels
