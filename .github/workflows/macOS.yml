@@ -5,9 +5,9 @@ on: [push, pull_request]
 permissions: read-all
 
 jobs:
-  rust-cli:
+  build:
     runs-on: macos-latest
-    name: Rust CLI (universal)
+    name: Build (universal)
 
     steps:
       - uses: actions/checkout@v6
@@ -21,84 +21,14 @@ jobs:
         run: |
           cargo build --release -p ykman-cli --target aarch64-apple-darwin
           cargo build --release -p ykman-cli --target x86_64-apple-darwin
-          mkdir -p rust-dist
+          mkdir -p dist/ykman
           lipo -create \
             target/aarch64-apple-darwin/release/ykman \
             target/x86_64-apple-darwin/release/ykman \
-            -output rust-dist/ykman
-          rust-dist/ykman --version
-
-      - name: Upload Rust build
-        uses: actions/upload-artifact@v6
-        with:
-          name: ykman-rust-macos
-          path: rust-dist
-
-  build:
-
-    runs-on: macos-latest
-
-    env:
-      MACOSX_DEPLOYMENT_TARGET: "11.0"
-      CFLAGS: -arch x86_64 -arch arm64
-      ARCHFLAGS: -arch x86_64 -arch arm64
-      MATURIN_PEP517_ARGS: --target universal2-apple-darwin
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version-file: ".python-version"
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin aarch64-apple-darwin
-
-      - name: Install the project
-        run: uv sync --locked
-
-      - name: Run pre-commit hooks
-        run: |
-          uv tool install pre-commit
-          pre-commit run --all-files --verbose
-
-      # Adapted from https://github.com/sabnzbd/sabnzbd/blob/develop/.github/workflows/build_release.yml#L80
-      - name: Explicitly use universal versions
-        run: |
-          # Export exact versions
-          uv pip freeze  > requirements.txt
-          grep cryptography requirements.txt > cryptography.txt
-          grep cffi requirements.txt > source-reqs.txt
-          # Remove non-universal packages
-          uv pip uninstall cryptography cffi
-          # Build cffi from source to get universal build
-          uv pip install --upgrade -r source-reqs.txt --no-binary :all:
-          # Explicitly install pre-build universal build of cryptography
-          pip download -r cryptography.txt --platform macosx_10_12_universal2 --only-binary :all: --no-deps --dest .
-          uv pip install -r cryptography.txt --no-cache-dir --no-index --find-links .
-
-      - name: PyInstaller
-        run: |
-          uv run pyinstaller ykman.spec
+            -output dist/ykman/ykman
           dist/ykman/ykman --version
-          [[ -z "$(dist/ykman/ykman --version | grep -E "not found|missing")" ]]
-
-      - name: Simplify Python bundle
-        working-directory: ./dist/ykman/_internal
-        run: |
-          mv $(readlink Python) Python
-          rm -rf Python.framework
 
       - name: Copy scripts
-        shell: bash
         run: cp -r resources/macos dist/scripts
 
       - name: Build installer

@@ -8,4 +8,4 @@ jobs:
         action: windows
         description: YubiKey Manager
         files:
-          - ykman-builds-windows/ykman-installer-windows/ykman.msi
+          - ykman-builds-windows/ykman.msi

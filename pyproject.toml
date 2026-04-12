@@ -28,7 +28,6 @@ dependencies = [
 dev = [
     "pytest>=8.0,<10",
     "makefun>=1.9.5,<2",
-    "pyinstaller>=6.10,<7",
     "sphinx>=7.4,<8",
     "sphinx-rtd-theme>=3,<4",
     "sphinx-autoapi>=3.3.3,<4",

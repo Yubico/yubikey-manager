@@ -54,6 +54,9 @@ keyring = { version = "3", features = ["windows-native"] }
 [target.'cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))'.dependencies]
 keyring = "3"
 
+[build-dependencies]
+winresource = "0.1"
+
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
