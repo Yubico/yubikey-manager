@@ -1412,8 +1412,9 @@ enum HsmauthCredAction {
         label: String,
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
+        /// Management password
         #[arg(short, long)]
-        management_key: Option<String>,
+        management_password: Option<String>,
         #[arg(short, long)]
         touch: bool,
     },
@@ -1428,8 +1429,9 @@ enum HsmauthCredAction {
         generate: bool,
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
+        /// Management password
         #[arg(short, long)]
-        management_key: Option<String>,
+        management_password: Option<String>,
         #[arg(short, long)]
         touch: bool,
     },
@@ -1440,16 +1442,18 @@ enum HsmauthCredAction {
         derivation_password: String,
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
+        /// Management password
         #[arg(short, long)]
-        management_key: Option<String>,
+        management_password: Option<String>,
         #[arg(short, long)]
         touch: bool,
     },
     /// Delete credential
     Delete {
         label: String,
+        /// Management password
         #[arg(short, long)]
-        management_key: Option<String>,
+        management_password: Option<String>,
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -1460,7 +1464,7 @@ enum HsmauthCredAction {
         credential_password: Option<String>,
         /// New credential password
         #[arg(short, long)]
-        new_credential_password: String,
+        new_credential_password: Option<String>,
     },
     /// Import an asymmetric credential
     Import {
@@ -1477,7 +1481,7 @@ enum HsmauthCredAction {
         credential_password: Option<String>,
         /// Management password
         #[arg(short, long)]
-        management_key: Option<String>,
+        management_password: Option<String>,
         /// Require touch
         #[arg(short, long)]
         touch: bool,
@@ -2866,14 +2870,14 @@ fn run() -> Result<(), CliError> {
                     HsmauthCredAction::Generate {
                         label,
                         credential_password,
-                        management_key,
+                        management_password,
                         touch,
                     } => hsmauth::run_credentials_generate(
                         &dev,
                         &scp_params,
                         &label,
                         credential_password.as_deref(),
-                        management_key.as_deref(),
+                        management_password.as_deref(),
                         touch,
                     ),
                     HsmauthCredAction::Symmetric {
@@ -2882,7 +2886,7 @@ fn run() -> Result<(), CliError> {
                         mac_key,
                         generate,
                         credential_password,
-                        management_key,
+                        management_password,
                         touch,
                     } => hsmauth::run_credentials_symmetric(
                         &dev,
@@ -2892,14 +2896,14 @@ fn run() -> Result<(), CliError> {
                         mac_key.as_deref(),
                         generate,
                         credential_password.as_deref(),
-                        management_key.as_deref(),
+                        management_password.as_deref(),
                         touch,
                     ),
                     HsmauthCredAction::Derive {
                         label,
                         derivation_password,
                         credential_password,
-                        management_key,
+                        management_password,
                         touch,
                     } => hsmauth::run_credentials_derive(
                         &dev,
@@ -2907,18 +2911,18 @@ fn run() -> Result<(), CliError> {
                         &label,
                         &derivation_password,
                         credential_password.as_deref(),
-                        management_key.as_deref(),
+                        management_password.as_deref(),
                         touch,
                     ),
                     HsmauthCredAction::Delete {
                         label,
-                        management_key,
+                        management_password,
                         force,
                     } => hsmauth::run_credentials_delete(
                         &dev,
                         &scp_params,
                         &label,
-                        management_key.as_deref(),
+                        management_password.as_deref(),
                         force,
                     ),
                     HsmauthCredAction::ChangePassword {
@@ -2930,7 +2934,7 @@ fn run() -> Result<(), CliError> {
                         &scp_params,
                         &label,
                         credential_password.as_deref(),
-                        &new_credential_password,
+                        new_credential_password.as_deref(),
                     ),
                     HsmauthCredAction::Export {
                         label,
@@ -2944,7 +2948,7 @@ fn run() -> Result<(), CliError> {
                         private_key,
                         password,
                         credential_password,
-                        management_key,
+                        management_password,
                         touch,
                     } => hsmauth::run_credentials_import(
                         &dev,
@@ -2953,7 +2957,7 @@ fn run() -> Result<(), CliError> {
                         &private_key,
                         password.as_deref(),
                         credential_password.as_deref(),
-                        management_key.as_deref(),
+                        management_password.as_deref(),
                         touch,
                     ),
                 },

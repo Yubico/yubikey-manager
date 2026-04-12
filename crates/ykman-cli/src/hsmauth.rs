@@ -8,7 +8,7 @@ use crate::cli_enums::CliFormat;
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::{CliError, write_file_or_stdout};
 
-const DEFAULT_MANAGEMENT_KEY: &[u8] = &[0u8; 16];
+const MANAGEMENT_KEY_LEN: usize = 16;
 
 fn open_session<'a>(
     dev: &'a YubiKeyDevice,
@@ -43,12 +43,71 @@ fn confirm(msg: &str) -> bool {
     matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
-fn parse_mgmt_key(s: Option<&str>) -> Result<Vec<u8>, CliError> {
-    match s {
-        Some(k) => {
-            hex::decode(k).map_err(|_| CliError("Management key must be hex-encoded.".into()))
+/// Parse a management password: UTF-8 string (≤16 bytes, null-padded) or hex (32 chars).
+fn parse_management_password(value: &str) -> Result<Vec<u8>, CliError> {
+    let encoded = value.as_bytes();
+    if encoded.len() <= MANAGEMENT_KEY_LEN {
+        let mut key = vec![0u8; MANAGEMENT_KEY_LEN];
+        key[..encoded.len()].copy_from_slice(encoded);
+        return Ok(key);
+    }
+    if encoded.len() == MANAGEMENT_KEY_LEN * 2
+        && let Ok(bytes) = hex::decode(value)
+    {
+        return Ok(bytes);
+    }
+    Err(CliError(
+        "Management password must be at most 16 characters, or 32 hex digits.".into(),
+    ))
+}
+
+/// Get the management password: from CLI arg, or prompt.
+fn require_management_password(management_password: Option<&str>) -> Result<Vec<u8>, CliError> {
+    match management_password {
+        Some(p) => parse_management_password(p),
+        None => {
+            let p = crate::util::prompt_secret("Enter management password")?;
+            parse_management_password(&p)
         }
-        None => Ok(DEFAULT_MANAGEMENT_KEY.to_vec()),
+    }
+}
+
+/// Get the credential password: from CLI arg, or prompt (with confirmation).
+fn require_credential_password(credential_password: Option<&str>) -> Result<[u8; 16], CliError> {
+    match credential_password {
+        Some(p) => Ok(credential_password_from_str(p)),
+        None => {
+            let p1 = crate::util::prompt_secret("Enter credential password")?;
+            let p2 = crate::util::prompt_secret("Confirm credential password")?;
+            if p1 != p2 {
+                return Err(CliError("Passwords do not match.".into()));
+            }
+            Ok(credential_password_from_str(&p1))
+        }
+    }
+}
+
+/// Map HsmAuthError to user-friendly messages, matching Python's handle_credential_error.
+fn format_credential_error(e: &yubikit::hsmauth::HsmAuthError, default_msg: &str) -> String {
+    use yubikit::hsmauth::HsmAuthError;
+    use yubikit::smartcard::SmartCardError;
+    match e {
+        HsmAuthError::InvalidPin(retries) => {
+            if *retries > 0 {
+                format!("Wrong management password, {retries} attempt(s) remaining.")
+            } else {
+                "Management password is blocked.".into()
+            }
+        }
+        HsmAuthError::Connection(SmartCardError::Apdu { sw, .. }) => match *sw {
+            0x6983 => "A credential with the provided label already exists.".into(),
+            0x6A84 => "No space left on the YubiKey for YubiHSM Auth credentials.".into(),
+            0x6A82 => "Credential with the provided label was not found.".into(),
+            0x6982 => "The device was not touched.".into(),
+            0x6985 => "Password does not meet complexity requirement.".into(),
+            _ => default_msg.into(),
+        },
+        _ => default_msg.into(),
     }
 }
 
@@ -108,15 +167,18 @@ pub fn run_credentials_generate(
     management_key: Option<&str>,
     touch: bool,
 ) -> Result<(), CliError> {
-    let mgmt = parse_mgmt_key(management_key)?;
-    let pw = credential_password
-        .map(credential_password_from_str)
-        .unwrap_or([0u8; 16]);
+    let mgmt = require_management_password(management_key)?;
+    let pw = require_credential_password(credential_password)?;
 
     let mut session = open_session(dev, scp_params)?;
     session
         .generate_credential_asymmetric(&mgmt, label, &pw, touch)
-        .map_err(|e| CliError(format!("Failed to generate credential: {e}")))?;
+        .map_err(|e| {
+            CliError(format_credential_error(
+                &e,
+                "Failed to generate credential.",
+            ))
+        })?;
     eprintln!("Asymmetric credential generated: {label}");
     Ok(())
 }
@@ -131,11 +193,11 @@ pub fn run_credentials_delete(
     if !force && !confirm(&format!("Delete credential '{label}'?")) {
         return Err(CliError("Aborted.".into()));
     }
-    let mgmt = parse_mgmt_key(management_key)?;
+    let mgmt = require_management_password(management_key)?;
     let mut session = open_session(dev, scp_params)?;
     session
         .delete_credential(&mgmt, label)
-        .map_err(|e| CliError(format!("Failed to delete credential: {e}")))?;
+        .map_err(|e| CliError(format_credential_error(&e, "Failed to delete credential.")))?;
     eprintln!("Credential deleted: {label}");
     Ok(())
 }
@@ -151,10 +213,8 @@ pub fn run_credentials_symmetric(
     management_key: Option<&str>,
     touch: bool,
 ) -> Result<(), CliError> {
-    let mgmt = parse_mgmt_key(management_key)?;
-    let pw = credential_password
-        .map(credential_password_from_str)
-        .unwrap_or([0u8; 16]);
+    let mgmt = require_management_password(management_key)?;
+    let pw = require_credential_password(credential_password)?;
 
     let (enc, mac) = if generate {
         let mut e = [0u8; 16];
@@ -179,7 +239,7 @@ pub fn run_credentials_symmetric(
     let mut session = open_session(dev, scp_params)?;
     session
         .put_credential_symmetric(&mgmt, label, &enc, &mac, &pw, touch)
-        .map_err(|e| CliError(format!("Failed to store credential: {e}")))?;
+        .map_err(|e| CliError(format_credential_error(&e, "Failed to store credential.")))?;
     eprintln!("Symmetric credential stored: {label}");
     if generate {
         println!("ENC key: {}", hex::encode(&enc));
@@ -197,15 +257,13 @@ pub fn run_credentials_derive(
     management_key: Option<&str>,
     touch: bool,
 ) -> Result<(), CliError> {
-    let mgmt = parse_mgmt_key(management_key)?;
-    let pw = credential_password
-        .map(credential_password_from_str)
-        .unwrap_or([0u8; 16]);
+    let mgmt = require_management_password(management_key)?;
+    let pw = require_credential_password(credential_password)?;
 
     let mut session = open_session(dev, scp_params)?;
     session
         .put_credential_derived(&mgmt, label, derivation_password, &pw, touch)
-        .map_err(|e| CliError(format!("Failed to derive credential: {e}")))?;
+        .map_err(|e| CliError(format_credential_error(&e, "Failed to derive credential.")))?;
     eprintln!("Derived credential stored: {label}");
     Ok(())
 }
@@ -215,17 +273,31 @@ pub fn run_credentials_change_password(
     scp_params: &ScpParams,
     label: &str,
     credential_password: Option<&str>,
-    new_credential_password: &str,
+    new_credential_password: Option<&str>,
 ) -> Result<(), CliError> {
-    let old_pw = credential_password
-        .map(credential_password_from_str)
-        .unwrap_or([0u8; 16]);
-    let new_pw = credential_password_from_str(new_credential_password);
+    let old_pw = match credential_password {
+        Some(p) => credential_password_from_str(p),
+        None => {
+            let p = crate::util::prompt_secret("Enter current credential password")?;
+            credential_password_from_str(&p)
+        }
+    };
+    let new_pw = match new_credential_password {
+        Some(p) => credential_password_from_str(p),
+        None => {
+            let p1 = crate::util::prompt_secret("Enter new credential password")?;
+            let p2 = crate::util::prompt_secret("Confirm new credential password")?;
+            if p1 != p2 {
+                return Err(CliError("Passwords do not match.".into()));
+            }
+            credential_password_from_str(&p1)
+        }
+    };
 
     let mut session = open_session(dev, scp_params)?;
     session
         .change_credential_password(label, &old_pw, &new_pw)
-        .map_err(|e| CliError(format!("Failed to change password: {e}")))?;
+        .map_err(|e| CliError(format_credential_error(&e, "Failed to change password.")))?;
     eprintln!("Credential password changed for: {label}");
     Ok(())
 }
@@ -241,14 +313,8 @@ pub fn run_credentials_import(
     management_key: Option<&str>,
     touch: bool,
 ) -> Result<(), CliError> {
-    let mgmt = parse_mgmt_key(management_key)?;
-    let cred_pw = match credential_password {
-        Some(p) => credential_password_from_str(p),
-        None => {
-            let p = crate::util::prompt_secret("Enter credential password")?;
-            credential_password_from_str(&p)
-        }
-    };
+    let mgmt = require_management_password(management_key)?;
+    let cred_pw = require_credential_password(credential_password)?;
 
     let data = crate::util::read_file_or_stdin(private_key_file)?;
 
@@ -258,7 +324,12 @@ pub fn run_credentials_import(
     let mut session = open_session(dev, scp_params)?;
     session
         .put_credential_asymmetric(&mgmt, label, &secret_key, &cred_pw, touch)
-        .map_err(|e| CliError(format!("Failed to import asymmetric credential: {e}")))?;
+        .map_err(|e| {
+            CliError(format_credential_error(
+                &e,
+                "Failed to import asymmetric credential.",
+            ))
+        })?;
     eprintln!("Asymmetric credential imported.");
     Ok(())
 }
@@ -324,7 +395,7 @@ pub fn run_credentials_export(
     let mut session = open_session(dev, scp_params)?;
     let public_key = session
         .get_public_key(label)
-        .map_err(|e| CliError(format!("Failed to get public key: {e}")))?;
+        .map_err(|e| CliError(format_credential_error(&e, "Failed to get public key.")))?;
 
     // Export as SubjectPublicKeyInfo
     use base64::Engine;
@@ -393,29 +464,43 @@ pub fn run_access_change_management_key(
     new_management_key: Option<&str>,
     generate: bool,
 ) -> Result<(), CliError> {
-    let _old_mgmt = parse_mgmt_key(management_key)?;
+    // Resolve old key: prompt if not given
+    let old_mgmt = match management_key {
+        Some(k) => parse_management_password(k)?,
+        None => {
+            let p = crate::util::prompt_secret("Enter your current management password")?;
+            parse_management_password(&p)?
+        }
+    };
 
     let new_key = if generate {
         let mut k = [0u8; 16];
         getrandom::fill(&mut k).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
         k.to_vec()
     } else if let Some(k) = new_management_key {
-        hex::decode(k).map_err(|_| CliError("Management key must be hex-encoded.".into()))?
+        parse_management_password(k)?
     } else {
-        return Err(CliError(
-            "Provide --new-management-key or --generate.".into(),
-        ));
+        let p1 = crate::util::prompt_secret("Enter a new management password")?;
+        let p2 = crate::util::prompt_secret("Confirm new management password")?;
+        if p1 != p2 {
+            return Err(CliError("Passwords do not match.".into()));
+        }
+        parse_management_password(&p1)?
     };
 
-    let old_mgmt = parse_mgmt_key(management_key)?;
     let mut session = open_session(dev, scp_params)?;
     session
         .put_management_key(&old_mgmt, &new_key)
-        .map_err(|e| CliError(format!("Failed to change management key: {e}")))?;
+        .map_err(|e| {
+            CliError(format_credential_error(
+                &e,
+                "Failed to change management password.",
+            ))
+        })?;
     if generate {
-        eprintln!("Management key changed: {}", hex::encode(&new_key));
+        eprintln!("Management password changed: {}", hex::encode(&new_key));
     } else {
-        eprintln!("Management key changed.");
+        eprintln!("Management password changed.");
     }
     Ok(())
 }
