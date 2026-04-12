@@ -25,29 +25,185 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import logging
-from threading import Event
-from typing import Callable, Iterable, Mapping, TypeAlias
+"""
+Device enumeration and native connection implementations for YubiKeys.
+"""
 
-from yubikit.core import PID, TRANSPORT, Connection
-from yubikit.core.fido import FidoConnection, SmartCardCtapDevice
-from yubikit.core.otp import OtpConnection
-from yubikit.core.smartcard import SmartCardConnection
-from yubikit.management import (
-    DeviceInfo,
-)
-from yubikit.support import read_info  # noqa: F401 - re-exported
+from __future__ import annotations
+
+import abc
+import logging
+from enum import Enum
+from threading import Event
+from typing import Callable, Hashable, Iterable, Iterator, Mapping, TypeAlias
 
 from _yubikit_native.device import NativeYubiKeyDevice
 from _yubikit_native.device import list_devices as _native_list_devices
 from _yubikit_native.device import scan_devices as _native_scan_devices
-
-from .base import REINSERT_STATUS, CancelledException, YkmanDevice
-from .hid.fido import NativeFidoConnection
-from .hid.otp import _NativeOtpConnection
-from .pcsc import ScardSmartCardConnection
+from _yubikit_native.hid import FidoConnection as _NativeFidoHidConnection
+from _yubikit_native.hid import OtpConnection as _NativeOtpConnectionImpl
+from _yubikit_native.pcsc import PcscConnection
+from _yubikit_native.pcsc import list_readers as _native_list_readers
+from yubikit.core import PID, TRANSPORT, Connection, YubiKeyDevice
+from yubikit.core.fido import FidoConnection, SmartCardCtapDevice
+from yubikit.core.otp import OtpConnection
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.logging import LOG_LEVEL
+from yubikit.management import DeviceInfo
+from yubikit.support import read_info  # noqa: F401 - re-exported
 
 logger = logging.getLogger(__name__)
+
+
+# --- Connection implementations ---
+
+
+class NativeFidoConnection(FidoConnection):
+    """FIDO connection backed by the native Rust CTAP HID transport."""
+
+    def __init__(self, path: str, pid: int):
+        self._native = _NativeFidoHidConnection(path, pid)
+        self._device_version = self._native.device_version
+        self._capabilities = self._native.capabilities
+        self._path = path
+
+    @property
+    def capabilities(self) -> int:
+        return self._capabilities
+
+    @property
+    def device_version(self) -> tuple[int, int, int]:
+        return self._device_version
+
+    def call(
+        self,
+        cmd: int,
+        data: bytes = b"",
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
+    ) -> bytes:
+        return bytes(self._native.call(cmd, data))
+
+    def close(self) -> None:
+        self._native.close()
+
+    @classmethod
+    def list_devices(cls) -> Iterator[NativeFidoConnection]:
+        from _yubikit_native.hid import list_fido_devices as _native_list_fido_devices
+
+        for dev in _native_list_fido_devices():
+            yield cls(dev.path, dev.pid)
+
+
+class _NativeOtpConnection(OtpConnection):
+    """OTP connection backed by the Rust HID implementation."""
+
+    def __init__(self, path: str):
+        self._path = path
+        self._native = _NativeOtpConnectionImpl(path)
+
+    def close(self) -> None:
+        self._native.close()
+
+    def receive(self) -> bytes:
+        data = bytes(self._native.get_feature_report())
+        logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s", data.hex())
+        return data
+
+    def send(self, data: bytes) -> None:
+        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", data.hex())
+        self._native.set_feature_report(data)
+
+
+YK_READER_NAME = "yubico yubikey"
+
+
+class ScardSmartCardConnection(SmartCardConnection):
+    def __init__(self, reader_name):
+        self._native = PcscConnection.open(reader_name)
+        self._transport = (
+            TRANSPORT.USB if self._native.transport == "usb" else TRANSPORT.NFC
+        )
+
+    @property
+    def transport(self):
+        return self._transport
+
+    def close(self):
+        self._native.disconnect()
+
+    def send_and_receive(self, apdu):
+        """Sends a command APDU and returns the response data and sw"""
+        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", apdu.hex())
+        resp = self._native.transmit(apdu)
+        data = resp[:-2]
+        sw = resp[-2] << 8 | resp[-1]
+        logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s SW=%04x", data.hex(), sw)
+        return bytes(data), sw
+
+
+def list_readers():
+    try:
+        return _native_list_readers()
+    except OSError:
+        return []
+
+
+# --- Device enumeration ---
+
+
+class REINSERT_STATUS(Enum):
+    REMOVE = 1
+    REINSERT = 2
+
+
+class CancelledException(Exception):
+    """Raised when the caller cancels an operation."""
+
+
+class YkmanDevice(YubiKeyDevice):
+    """YubiKey device reference, with optional PID"""
+
+    def __init__(self, transport: TRANSPORT, fingerprint: Hashable, pid: PID | None):
+        super(YkmanDevice, self).__init__(transport, fingerprint)
+        self._pid = pid
+
+    @property
+    def pid(self) -> PID | None:
+        """Return the PID of the YubiKey, if available."""
+        return self._pid
+
+    def reinsert(
+        self,
+        reinsert_cb: Callable[[REINSERT_STATUS], None] | None = None,
+        event: Event | None = None,
+    ) -> None:
+        """Wait for the user to remove and reinsert the YubiKey.
+
+        This may be required to perform certain operations, such as FIDO reset.
+
+        This method will attempt to verify that the same YubiKey is reinserted,
+        but it will only fail when this is definitely not the case (eg. if the serial
+        number does not match).
+
+        :param reinsert_cb: Callback to indicate the the YubiKey has been removed,
+        and should be reinserted.
+        :param event: Optional event to cancel (throws CancelledException).
+        """
+        self._do_reinsert(reinsert_cb or (lambda _: None), event or Event())
+
+    @abc.abstractmethod
+    def _do_reinsert(
+        self, reinsert_cb: Callable[[REINSERT_STATUS], None], event: Event
+    ) -> None:
+        pass
+
+    def __repr__(self):
+        return "%s(pid=%04x, fingerprint=%r)" % (
+            type(self).__name__,
+            self.pid or 0,
+            self.fingerprint,
+        )
 
 
 _T_CONNECTION: TypeAlias = type[Connection] | type[FidoConnection]

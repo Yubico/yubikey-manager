@@ -992,8 +992,8 @@ wheels = [
 
 [[package]]
 name = "yubikey-manager"
-version = "5.9.1.dev0"
-source = { editable = "packages/yubikey-manager" }
+version = "6.0.0.dev0"
+source = { editable = "packages/ykman" }
 dependencies = [
     { name = "click" },
     { name = "keyring" },
@@ -1013,7 +1013,7 @@ requires-dist = [
 
 [[package]]
 name = "yubikey-manager-workspace"
-version = "5.9.1.dev0"
+version = "6.0.0.dev0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
@@ -1036,13 +1036,13 @@ dev = [
     { name = "sphinx", specifier = ">=7.4,<8" },
     { name = "sphinx-autoapi", specifier = ">=3.3.3,<4" },
     { name = "sphinx-rtd-theme", specifier = ">=3,<4" },
-    { name = "yubikey-manager", editable = "packages/yubikey-manager" },
+    { name = "yubikey-manager", editable = "packages/ykman" },
     { name = "yubikit", editable = "packages/yubikit" },
 ]
 
 [[package]]
 name = "yubikit"
-version = "5.9.1.dev0"
+version = "6.0.0.dev0"
 source = { editable = "packages/yubikit" }
 dependencies = [
     { name = "cryptography" },

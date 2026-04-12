@@ -1,6 +1,6 @@
 [package]
 name = "ykman-cli"
-version = "0.1.0"
+version = "6.0.0-dev.0"
 edition = "2024"
 description = "YubiKey Manager CLI (Rust)"
 license = "BSD-2-Clause"

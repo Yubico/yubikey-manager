@@ -1,6 +1,6 @@
 [project]
 name = "yubikey-manager-workspace"
-version = "5.9.1-dev.0"
+version = "6.0.0-dev.0"
 description = "Workspace for yubikit and yubikey-manager."
 requires-python = ">=3.10, <4"
 

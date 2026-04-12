@@ -33,11 +33,9 @@ from yubikit.core import TRANSPORT
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.device import YkmanDevice, list_all_devices, scan_devices
 from yubikit.management import DeviceInfo
 from yubikit.support import get_name, read_info
-
-from .base import YkmanDevice
-from .device import list_all_devices, scan_devices
 
 """
 Various helpers intended to simplify scripting.

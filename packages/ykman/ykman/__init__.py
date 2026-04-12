@@ -1,4 +1,4 @@
-# Copyright (c) 2020 Yubico AB
+# Copyright (c) 2015 Yubico AB
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -25,31 +25,4 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import logging
-
-from yubikit.core.otp import OtpConnection
-from yubikit.logging import LOG_LEVEL
-
-from _yubikit_native.hid import OtpConnection as _NativeOtpConnectionImpl
-
-logger = logging.getLogger(__name__)
-
-
-class _NativeOtpConnection(OtpConnection):
-    """OTP connection backed by the Rust HID implementation."""
-
-    def __init__(self, path: str):
-        self._path = path
-        self._native = _NativeOtpConnectionImpl(path)
-
-    def close(self) -> None:
-        self._native.close()
-
-    def receive(self) -> bytes:
-        data = bytes(self._native.get_feature_report())
-        logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s", data.hex())
-        return data
-
-    def send(self, data: bytes) -> None:
-        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", data.hex())
-        self._native.set_feature_report(data)
+__version__ = "6.0.0-dev.0"

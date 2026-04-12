@@ -274,13 +274,8 @@ class NotSupportedError(ValueError):
     """Attempting an action that is not supported on this YubiKey"""
 
 
-class InvalidPinError(CommandError, ValueError):
-    """An incorrect PIN/PUK was used, with the number of attempts now remaining.
-
-    WARNING: This exception currently inherits from ValueError for
-    backwards-compatibility reasons. This will no longer be the case with the next major
-    version of the library.
-    """
+class InvalidPinError(CommandError):
+    """An incorrect PIN/PUK was used, with the number of attempts now remaining."""
 
     def __init__(self, attempts_remaining: int, message: str | None = None):
         super().__init__(message or f"Invalid PIN/PUK, {attempts_remaining} remaining")
