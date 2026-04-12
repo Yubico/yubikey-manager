@@ -195,7 +195,7 @@ intersphinx_mapping = {
 
 
 # Custom config
-autoapi_dirs = ["../yubikit", "../ykman"]
+autoapi_dirs = ["../packages/yubikit/yubikit", "../packages/ykman/ykman"]
 autoapi_options = [
     "members",
     "undoc-members",
