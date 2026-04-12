@@ -16,7 +16,6 @@ classifiers = [
 ]
 dependencies = [
   "cryptography (>=3.0, <49)",
-  "fido2 (>=2.0, <3)",
 ]
 
 [build-system]

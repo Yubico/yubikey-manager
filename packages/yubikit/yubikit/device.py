@@ -50,7 +50,7 @@ from yubikit.core import (
     Connection,
     YubiKeyDevice,
 )
-from yubikit.core.fido import FidoConnection, SmartCardCtapDevice
+from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.logging import LOG_LEVEL
@@ -238,10 +238,6 @@ class _NativeYubiKeyDevice(YubiKeyDevice):
         if issubclass(connection_type, FidoConnection):
             fido_path = self._native.fido_path
             if fido_path is not None and self.pid is not None:
-                if issubclass(connection_type, SmartCardCtapDevice):
-                    reader = self._native.reader_name
-                    if reader is not None:
-                        return SmartCardCtapDevice(_NativeSmartCardConnection(reader))
                 return _NativeFidoConnection(fido_path, self.pid)
         if issubclass(connection_type, OtpConnection):
             hid_path = self._native.hid_path
