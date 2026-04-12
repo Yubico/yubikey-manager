@@ -40,6 +40,12 @@ hidapi = { version = "2", default-features = false, features = ["linux-static-hi
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 hidapi = { version = "2" }
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_HumanInterfaceDevice",
+] }
+
 [dev-dependencies]
 ecdsa = { version = "0.16", features = ["verifying"] }
 elliptic-curve = { version = "0.13", features = ["pkcs8", "sec1"] }

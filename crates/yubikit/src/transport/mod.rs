@@ -28,3 +28,5 @@
 pub mod ctaphid;
 pub mod otphid;
 pub mod pcsc;
+#[cfg(windows)]
+pub mod setupdi;

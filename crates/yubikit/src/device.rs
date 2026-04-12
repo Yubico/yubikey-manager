@@ -57,11 +57,11 @@ use crate::management::{
 use crate::otp::OtpConnection;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 use crate::transport::ctaphid::{FidoDeviceInfo, HidFidoConnection, list_fido_devices};
-#[cfg(windows)]
-use crate::transport::otphid::list_all_hid_devices;
 use crate::transport::otphid::{HidDeviceInfo, HidError, HidOtpConnection, list_otp_devices};
 pub use crate::transport::pcsc::list_readers;
 use crate::transport::pcsc::{PcscError, PcscSmartCardConnection, is_reader_usb};
+#[cfg(windows)]
+use crate::transport::setupdi::list_setupdi_devices;
 use crate::yubiotp::YubiOtpSession;
 
 // ---------------------------------------------------------------------------
@@ -569,6 +569,31 @@ fn pid_from_interfaces(interfaces: UsbInterface, is_neo: bool) -> Option<u16> {
     }
 }
 
+/// Derive USB interface flags from a Yubico USB Product ID.
+pub fn usb_interfaces_from_pid(pid: u16) -> UsbInterface {
+    match pid {
+        // NEO PIDs
+        0x0110 => UsbInterface::OTP,
+        0x0111 => UsbInterface::OTP | UsbInterface::CCID,
+        0x0112 => UsbInterface::CCID,
+        0x0113 => UsbInterface::FIDO,
+        0x0114 => UsbInterface::OTP | UsbInterface::FIDO,
+        0x0115 => UsbInterface::FIDO | UsbInterface::CCID,
+        0x0116 => UsbInterface::OTP | UsbInterface::FIDO | UsbInterface::CCID,
+        // YK4+ PIDs
+        0x0401 => UsbInterface::OTP,
+        0x0402 => UsbInterface::FIDO,
+        0x0403 => UsbInterface::OTP | UsbInterface::FIDO,
+        0x0404 => UsbInterface::CCID,
+        0x0405 => UsbInterface::OTP | UsbInterface::CCID,
+        0x0406 => UsbInterface::FIDO | UsbInterface::CCID,
+        0x0407 => UsbInterface::OTP | UsbInterface::FIDO | UsbInterface::CCID,
+        // SKY
+        0x0120 => UsbInterface::FIDO,
+        _ => UsbInterface(0),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Device enumeration
 // ---------------------------------------------------------------------------
@@ -626,16 +651,14 @@ pub fn scan_usb_devices() -> (HashMap<u16, usize>, u64) {
     }
 
     // On Windows, non-admin users cannot open FIDO devices. Supplement
-    // the scan with a raw HID enumeration so those devices still show up.
+    // the scan with SetupDi enumeration so those devices still show up.
     #[cfg(windows)]
     {
-        if let Ok(all_hid) = list_all_hid_devices() {
-            for dev in all_hid {
-                // Only add PIDs not already found via normal enumeration
-                if !counts.contains_key(&dev.pid) {
-                    *counts.entry(dev.pid).or_insert(0) += 1;
-                    fingerprints.push(dev.path);
-                }
+        for dev in list_setupdi_devices() {
+            // Only add PIDs not already found via normal enumeration
+            if !counts.contains_key(&dev.pid) {
+                *counts.entry(dev.pid).or_insert(0) += 1;
+                fingerprints.push(dev.path);
             }
         }
     }
@@ -933,6 +956,20 @@ fn merge_devices(base: &mut Vec<YubiKeyDevice>, incoming: Vec<YubiKeyDevice>) {
 /// Check if a USB PID belongs to a Security Key (SKY).
 fn is_sky_pid(pid: u16) -> bool {
     pid == 0x0120
+}
+
+/// Get a basic device name from a USB Product ID.
+///
+/// Returns "Security Key" for SKY PIDs, "YubiKey NEO" for NEO PIDs,
+/// or "YubiKey" for all other Yubico PIDs.
+pub fn name_from_pid(pid: u16) -> &'static str {
+    if is_sky_pid(pid) {
+        "Security Key"
+    } else if (0x0110..=0x0116).contains(&pid) {
+        "YubiKey NEO"
+    } else {
+        "YubiKey"
+    }
 }
 
 /// Build a minimal synthetic [`DeviceInfo`] for an OTP HID device.

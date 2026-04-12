@@ -3,7 +3,7 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 use yubikit::core::{Transport, Version, set_override_version};
-use yubikit::device::{YubiKeyDevice, list_devices};
+use yubikit::device::{YubiKeyDevice, list_devices, scan_usb_devices};
 use yubikit::management::{Capability, ReleaseType, UsbInterface};
 
 mod apdu;
@@ -1589,7 +1589,19 @@ fn select_device(
     serial: Option<u32>,
 ) -> Result<YubiKeyDevice, CliError> {
     match (serial, devices.len()) {
-        (None, 0) => Err(CliError("No YubiKey detected!".into())),
+        (None, 0) => {
+            // Check for FIDO-blocked devices that scan can see but list cannot open
+            let (scan_pids, _) = scan_usb_devices();
+            if !scan_pids.is_empty() {
+                Err(CliError(
+                    "A YubiKey was detected, but FIDO access on Windows requires \
+                     running as Administrator."
+                        .into(),
+                ))
+            } else {
+                Err(CliError("No YubiKey detected!".into()))
+            }
+        }
         (None, 1) => Ok(devices.into_iter().next().unwrap()),
         (None, n) => {
             let mut msg = format!("Multiple YubiKeys detected ({n}):");
