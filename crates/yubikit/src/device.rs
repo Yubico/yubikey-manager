@@ -320,6 +320,34 @@ impl YubiKeyDevice {
         }
     }
 
+    /// Re-read the device info by opening a temporary connection.
+    ///
+    /// Tries SmartCard (CCID), then OTP, then FIDO.
+    /// Returns `true` if the info was successfully refreshed.
+    pub fn refresh_info(&mut self) -> bool {
+        if let Some(reader) = self.reader_name.as_deref()
+            && let Ok(conn) = PcscSmartCardConnection::open(reader)
+            && let Ok((info, _conn)) = read_info_ccid(conn)
+        {
+            self.info = info;
+            return true;
+        }
+        if let Some(path) = self.hid_path.clone()
+            && let Ok(conn) = HidOtpConnection::new(&path)
+            && let Ok((info, _conn)) = read_info_otp(conn)
+        {
+            self.info = info;
+            return true;
+        }
+        if let Ok(conn) = self.open_fido()
+            && let Ok((info, _conn)) = read_info_fido(conn)
+        {
+            self.info = info;
+            return true;
+        }
+        false
+    }
+
     /// Wait for the user to remove and reinsert this YubiKey.
     ///
     /// On success, updates this device's transport paths and info.

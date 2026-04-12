@@ -496,7 +496,7 @@ impl fmt::Display for Mode {
 // ---------------------------------------------------------------------------
 
 /// Management settings for YubiKey which can be configured by the user.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DeviceConfig {
     pub enabled_capabilities: HashMap<Transport, Capability>,
     pub auto_eject_timeout: Option<u16>,
@@ -569,7 +569,7 @@ impl DeviceConfig {
 // ---------------------------------------------------------------------------
 
 /// Full device information readable from a YubiKey.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DeviceInfo {
     pub config: DeviceConfig,
     pub serial: Option<u32>,
