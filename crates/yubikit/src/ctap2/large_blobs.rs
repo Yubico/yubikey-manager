@@ -32,6 +32,7 @@ use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
+use zeroize::Zeroizing;
 
 use crate::cbor::{self, Value};
 use crate::core::Connection;
@@ -47,11 +48,16 @@ use super::{Ctap2Error, cmd};
 pub struct LargeBlobs<C: Connection> {
     session: Ctap2Session<C>,
     protocol: PinProtocol,
-    pin_token: Vec<u8>,
+    pin_token: Zeroizing<Vec<u8>>,
     max_fragment_length: usize,
 }
 
 impl<C: Connection + 'static> LargeBlobs<C> {
+    /// Whether the authenticator supports large blobs.
+    pub fn is_supported(info: &super::Info) -> bool {
+        info.options.get("largeBlobs") == Some(&true)
+    }
+
     /// Create a new `LargeBlobs` from a `Ctap2Session` and a PIN token.
     ///
     /// The PIN token must have the `LARGE_BLOB_WRITE` permission for write
@@ -61,18 +67,17 @@ impl<C: Connection + 'static> LargeBlobs<C> {
         protocol: PinProtocol,
         pin_token: Vec<u8>,
     ) -> Result<Self, Ctap2Error<C::Error>> {
-        let info = &session.cached_info;
-        if info.max_large_blob.is_none() {
+        if !Self::is_supported(&session.cached_info) {
             return Err(Ctap2Error::InvalidResponse(
                 "Authenticator does not support largeBlobs".into(),
             ));
         }
-        let max_msg = info.max_msg_size;
+        let max_msg = session.cached_info.max_msg_size;
         let max_fragment_length = max_msg.saturating_sub(64);
         Ok(Self {
             session,
             protocol,
-            pin_token,
+            pin_token: Zeroizing::new(pin_token),
             max_fragment_length,
         })
     }

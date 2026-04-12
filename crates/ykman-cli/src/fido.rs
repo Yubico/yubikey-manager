@@ -27,15 +27,13 @@
 
 //! FIDO CLI commands.
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use yubikit::cbor::Value;
 use yubikit::core::{Connection, Transport};
 use yubikit::ctap::CtapSession;
 use yubikit::ctap2::{
-    BioEnrollment, BioResult, ClientPin, Config, CredentialManagement, Ctap2Error, Ctap2Session,
-    CtapStatus, Info, Permissions, PinProtocol, TemplateInfo,
+    BioEnrollment, ClientPin, Config, CredentialManagement, Ctap2Error, Ctap2Session, CtapStatus,
+    Info, Permissions, PinProtocol,
 };
 use yubikit::device::{ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
@@ -665,21 +663,19 @@ pub fn run_credentials_list(
 
         // Collect all credentials
         let mut all_creds: Vec<(String, Vec<u8>, Vec<u8>, String, String)> = Vec::new();
-        for rp_resp in &rps {
-            let rp_id = cbor_u32_map_get_text(rp_resp, 3, "id").unwrap_or_default();
-            let rp_id_hash = cbor_u32_map_get_bytes(rp_resp, 4).unwrap_or_default();
+        for rp_info in &rps {
+            let rp_id = rp_info.rp.id.clone();
+            let rp_id_hash = rp_info.rp_id_hash.clone();
 
             let creds = credman
                 .enumerate_creds(&rp_id_hash)
                 .map_err(|e| CliError(format!("Failed to enumerate credentials: {e}")))?;
 
-            for cred_resp in &creds {
-                let user_name = cbor_u32_map_get_text(cred_resp, 6, "name").unwrap_or_default();
-                let display_name =
-                    cbor_u32_map_get_text(cred_resp, 6, "displayName").unwrap_or_default();
-                let user_id = cbor_u32_map_get_nested_bytes(cred_resp, 6, "id").unwrap_or_default();
-                let cred_id_bytes =
-                    cbor_u32_map_get_nested_bytes(cred_resp, 7, "id").unwrap_or_default();
+            for cred in &creds {
+                let user_name = cred.user.name.clone().unwrap_or_default();
+                let display_name = cred.user.display_name.clone().unwrap_or_default();
+                let user_id = cred.user.id.clone();
+                let cred_id_bytes = cred.credential_id.id.clone();
 
                 all_creds.push((
                     rp_id.clone(),
@@ -790,24 +786,25 @@ pub fn run_credentials_delete(
             .map_err(|e| CliError(format!("Failed to enumerate RPs: {e}")))?;
 
         let mut hits = Vec::new();
-        for rp_resp in &rps {
-            let rp_id = cbor_u32_map_get_text(rp_resp, 3, "id").unwrap_or_default();
-            let rp_id_hash = cbor_u32_map_get_bytes(rp_resp, 4).unwrap_or_default();
+        for rp_info in &rps {
+            let rp_id = rp_info.rp.id.clone();
 
-            let creds = credman.enumerate_creds(&rp_id_hash).unwrap_or_default();
-            for cred_resp in &creds {
-                let user_name = cbor_u32_map_get_text(cred_resp, 6, "name").unwrap_or_default();
-                let display_name =
-                    cbor_u32_map_get_text(cred_resp, 6, "displayName").unwrap_or_default();
-                let cred_id_bytes =
-                    cbor_u32_map_get_nested_bytes(cred_resp, 7, "id").unwrap_or_default();
-                let cred_id_hex = hex::encode(&cred_id_bytes);
+            let creds = credman
+                .enumerate_creds(&rp_info.rp_id_hash)
+                .unwrap_or_default();
+            for cred in &creds {
+                let user_name = cred.user.name.clone().unwrap_or_default();
+                let display_name = cred.user.display_name.clone().unwrap_or_default();
+                let cred_id_hex = hex::encode(&cred.credential_id.id);
 
                 if cred_id_hex.starts_with(&search) {
-                    // Build the credentialID CBOR value for deletion
-                    if let Some(v) = cred_resp.get(&7).cloned() {
-                        hits.push((rp_id.clone(), user_name, display_name, cred_id_hex, v));
-                    }
+                    hits.push((
+                        rp_id.clone(),
+                        user_name,
+                        display_name,
+                        cred_id_hex,
+                        cred.credential_id.clone(),
+                    ));
                 }
             }
         }
@@ -815,7 +812,7 @@ pub fn run_credentials_delete(
         match hits.len() {
             0 => Err(CliError("No matches, nothing to be done.".to_string())),
             1 => {
-                let (rp_id, user_name, display_name, cred_id_hex, cred_id_val) = &hits[0];
+                let (rp_id, user_name, display_name, cred_id_hex, cred_id) = &hits[0];
                 if !force {
                     eprint!("Delete {rp_id} {user_name} {display_name} ({cred_id_hex})? [y/N] ");
                     let mut answer = String::new();
@@ -828,7 +825,7 @@ pub fn run_credentials_delete(
                 }
                 println!("Deleting credential, DO NOT REMOVE YOUR YUBIKEY!");
                 credman
-                    .delete_cred(cred_id_val)
+                    .delete_cred(cred_id)
                     .map_err(|e| CliError(format!("Failed to delete credential: {e}")))?;
                 println!("Credential deleted.");
                 Ok(())
@@ -878,24 +875,24 @@ pub fn run_credentials_update(
             .map_err(|e| CliError(format!("Failed to enumerate RPs: {e}")))?;
 
         let mut hits = Vec::new();
-        for rp_resp in &rps {
-            let rp_id = cbor_u32_map_get_text(rp_resp, 3, "id").unwrap_or_default();
-            let rp_id_hash = cbor_u32_map_get_bytes(rp_resp, 4).unwrap_or_default();
+        for rp_info in &rps {
+            let rp_id = rp_info.rp.id.clone();
 
-            let creds = credman.enumerate_creds(&rp_id_hash).unwrap_or_default();
-            for cred_resp in &creds {
-                let user_name = cbor_u32_map_get_text(cred_resp, 6, "name").unwrap_or_default();
-                let cred_id_bytes =
-                    cbor_u32_map_get_nested_bytes(cred_resp, 7, "id").unwrap_or_default();
-                let cred_id_hex = hex::encode(&cred_id_bytes);
+            let creds = credman
+                .enumerate_creds(&rp_info.rp_id_hash)
+                .unwrap_or_default();
+            for cred in &creds {
+                let user_name = cred.user.name.clone().unwrap_or_default();
+                let cred_id_hex = hex::encode(&cred.credential_id.id);
 
                 if cred_id_hex.starts_with(&search) {
-                    // We need the credentialID value and the current user map
-                    let cred_id_val = cred_resp.get(&7).cloned();
-                    let user_val = cred_resp.get(&6).cloned();
-                    if let (Some(cid), Some(user)) = (cred_id_val, user_val) {
-                        hits.push((rp_id.clone(), user_name, cred_id_hex, cid, user));
-                    }
+                    hits.push((
+                        rp_id.clone(),
+                        user_name,
+                        cred_id_hex,
+                        cred.credential_id.clone(),
+                        cred.user.clone(),
+                    ));
                 }
             }
         }
@@ -903,61 +900,20 @@ pub fn run_credentials_update(
         match hits.len() {
             0 => Err(CliError("No matches, nothing to be done.".to_string())),
             1 => {
-                let (rp_id, user_name, _cred_id_hex, cred_id_val, user_val) = &hits[0];
+                let (rp_id, user_name, _cred_id_hex, cred_id, user) = &hits[0];
 
-                // Build updated user map from existing, overriding specified fields
-                let mut user_entries: Vec<(Value, Value)> = Vec::new();
-                if let Value::Map(entries) = user_val {
-                    for (k, v) in entries {
-                        let key_name = k.as_text().unwrap_or("");
-                        match key_name {
-                            "name" => {
-                                if let Some(n) = name {
-                                    user_entries.push((k.clone(), Value::Text(n.to_string())));
-                                } else {
-                                    user_entries.push((k.clone(), v.clone()));
-                                }
-                            }
-                            "displayName" => {
-                                if let Some(dn) = display_name {
-                                    user_entries.push((k.clone(), Value::Text(dn.to_string())));
-                                } else {
-                                    user_entries.push((k.clone(), v.clone()));
-                                }
-                            }
-                            _ => {
-                                user_entries.push((k.clone(), v.clone()));
-                            }
-                        }
-                    }
+                // Build updated user entity from existing, overriding specified fields
+                let mut updated_user = user.clone();
+                if let Some(n) = name {
+                    updated_user.name = Some(n.to_string());
                 }
-
-                // Add fields that weren't in the original map
-                let has_name = user_entries
-                    .iter()
-                    .any(|(k, _)| k.as_text() == Some("name"));
-                let has_display_name = user_entries
-                    .iter()
-                    .any(|(k, _)| k.as_text() == Some("displayName"));
-                if let Some(n) = name
-                    && !has_name
-                {
-                    user_entries.push((Value::Text("name".into()), Value::Text(n.to_string())));
+                if let Some(dn) = display_name {
+                    updated_user.display_name = Some(dn.to_string());
                 }
-                if let Some(dn) = display_name
-                    && !has_display_name
-                {
-                    user_entries.push((
-                        Value::Text("displayName".into()),
-                        Value::Text(dn.to_string()),
-                    ));
-                }
-
-                let updated_user = Value::Map(user_entries);
 
                 println!("Updating credential for {} (user: {})", rp_id, user_name);
                 credman
-                    .update_user_info(cred_id_val, &updated_user)
+                    .update_user_info(cred_id, &updated_user)
                     .map_err(|e| CliError(format!("Failed to update credential: {e}")))?;
                 println!("Credential updated.");
                 Ok(())
@@ -992,13 +948,7 @@ pub fn run_fingerprints_list(
             .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
         let enrollments = match bio.enumerate_enrollments() {
-            Ok(resp) => {
-                // Extract template infos array (key 0x07)
-                match resp.get(&(BioResult::TemplateInfos as u32)) {
-                    Some(Value::Array(infos)) => infos.clone(),
-                    _ => vec![],
-                }
-            }
+            Ok(templates) => templates,
             Err(Ctap2Error::StatusError(CtapStatus::InvalidOption)) => vec![],
             Err(e) => return Err(CliError(format!("Failed to enumerate fingerprints: {e}"))),
         };
@@ -1006,25 +956,12 @@ pub fn run_fingerprints_list(
         if enrollments.is_empty() {
             println!("No fingerprints registered.");
         } else {
-            for info in &enrollments {
-                if let Value::Map(entries) = info {
-                    let id = entries
-                        .iter()
-                        .find(|(k, _)| matches!(k, Value::Int(n) if *n == TemplateInfo::Id as i64))
-                        .and_then(|(_, v)| v.as_bytes())
-                        .map(hex::encode)
-                        .unwrap_or_default();
-                    let name = entries
-                        .iter()
-                        .find(
-                            |(k, _)| matches!(k, Value::Int(n) if *n == TemplateInfo::Name as i64),
-                        )
-                        .and_then(|(_, v)| v.as_text());
-                    if let Some(name) = name {
-                        println!("ID: {id} ({name})");
-                    } else {
-                        println!("ID: {id}");
-                    }
+            for template in &enrollments {
+                let id = hex::encode(&template.id);
+                if let Some(name) = &template.name {
+                    println!("ID: {id} ({name})");
+                } else {
+                    println!("ID: {id}");
                 }
             }
         }
@@ -1071,15 +1008,8 @@ pub fn run_fingerprints_add(
             .enroll_begin(None, Some(&mut |_| {}), Some(&is_cancelled))
             .map_err(|e| map_enroll_error(e, "Enrollment failed"))?;
 
-        let template_id = resp
-            .get(&(BioResult::TemplateId as u32))
-            .and_then(|v| v.as_bytes())
-            .map(|b| b.to_vec())
-            .ok_or_else(|| CliError("Missing template ID in enrollment response".to_string()))?;
-        let remaining = resp
-            .get(&(BioResult::RemainingSamples as u32))
-            .and_then(|v| v.as_int())
-            .unwrap_or(0) as u32;
+        let template_id = resp.template_id.clone();
+        let remaining = resp.remaining_samples;
 
         if remaining > 0 {
             eprintln!("{remaining} more scans needed.");
@@ -1096,10 +1026,7 @@ pub fn run_fingerprints_add(
                 Some(&is_cancelled),
             ) {
                 Ok(resp) => {
-                    scans_remaining = resp
-                        .get(&(BioResult::RemainingSamples as u32))
-                        .and_then(|v| v.as_int())
-                        .unwrap_or(0) as u32;
+                    scans_remaining = resp.remaining_samples;
                     if scans_remaining > 0 {
                         eprintln!("{scans_remaining} more scans needed.");
                     }
@@ -1302,40 +1229,6 @@ pub fn run_config_enable_ep_attestation(
         println!("Enterprise Attestation enabled.");
         Ok(())
     })
-}
-
-// --- CBOR map helper functions for BTreeMap<u32, Value> ---
-
-fn cbor_u32_map_get_text(map: &BTreeMap<u32, Value>, key: u32, field: &str) -> Option<String> {
-    let entity = map.get(&key)?;
-    if let Value::Map(entries) = entity {
-        for (k, v) in entries {
-            if k.as_text() == Some(field) {
-                return v.as_text().map(|s| s.to_string());
-            }
-        }
-    }
-    None
-}
-
-fn cbor_u32_map_get_bytes(map: &BTreeMap<u32, Value>, key: u32) -> Option<Vec<u8>> {
-    map.get(&key)?.as_bytes().map(|b| b.to_vec())
-}
-
-fn cbor_u32_map_get_nested_bytes(
-    map: &BTreeMap<u32, Value>,
-    key: u32,
-    field: &str,
-) -> Option<Vec<u8>> {
-    let entity = map.get(&key)?;
-    if let Value::Map(entries) = entity {
-        for (k, v) in entries {
-            if k.as_text() == Some(field) {
-                return v.as_bytes().map(|b| b.to_vec());
-            }
-        }
-    }
-    None
 }
 
 /// Escape a field for CSV output. Quotes the field if it contains commas,

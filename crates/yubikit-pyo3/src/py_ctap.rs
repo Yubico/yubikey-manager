@@ -6,8 +6,9 @@ use pyo3::types::{PyBool, PyBytes, PyDict, PyList};
 use yubikit::cbor;
 use yubikit::ctap::CtapSession;
 use yubikit::ctap2::{
-    BioEnrollment, ClientPin, Config, CredentialManagement, Ctap2Error, Ctap2Session, Info,
-    LargeBlobs, Permissions, PinProtocol,
+    BioEnrollment, ClientPin, Config, CredentialInfo, CredentialManagement, Ctap2Error,
+    Ctap2Session, Info, LargeBlobs, Permissions, PinProtocol, PublicKeyCredentialDescriptor,
+    PublicKeyCredentialUserEntity, RpInfo,
 };
 
 use crate::py_bridge::{
@@ -137,7 +138,7 @@ fn algorithms_to_py(py: Python<'_>, info: &Info) -> PyResult<PyObject> {
     let list = PyList::empty(py);
     for alg in &info.algorithms {
         let d = PyDict::new(py);
-        d.set_item("type", &alg.credential_type)?;
+        d.set_item("type", &alg.type_)?;
         d.set_item("alg", alg.alg)?;
         list.append(d)?;
     }
@@ -175,32 +176,6 @@ fn cbor_value_to_py(py: Python<'_>, value: &cbor::Value) -> PyResult<PyObject> {
             }
             Ok(dict.into())
         }
-    }
-}
-
-fn py_to_cbor_value(obj: &Bound<'_, PyAny>) -> PyResult<cbor::Value> {
-    if let Ok(val) = obj.extract::<i64>() {
-        Ok(cbor::Value::Int(val))
-    } else if let Ok(val) = obj.extract::<bool>() {
-        Ok(cbor::Value::Bool(val))
-    } else if let Ok(val) = obj.extract::<Vec<u8>>() {
-        Ok(cbor::Value::Bytes(val))
-    } else if let Ok(val) = obj.extract::<String>() {
-        Ok(cbor::Value::Text(val))
-    } else if let Ok(list) = obj.downcast::<PyList>() {
-        let mut arr = Vec::new();
-        for item in list.iter() {
-            arr.push(py_to_cbor_value(&item)?);
-        }
-        Ok(cbor::Value::Array(arr))
-    } else if let Ok(dict) = obj.downcast::<PyDict>() {
-        let mut entries = Vec::new();
-        for (k, v) in dict.iter() {
-            entries.push((py_to_cbor_value(&k)?, py_to_cbor_value(&v)?));
-        }
-        Ok(cbor::Value::Map(entries))
-    } else {
-        Err(PyValueError::new_err("Cannot convert to CBOR value"))
     }
 }
 
@@ -765,26 +740,115 @@ impl PyClientPinFido {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: BTreeMap<u32, Value> → Python dict
+// Helper: typed CTAP2 results → Python dicts
 // ---------------------------------------------------------------------------
 
-fn cbor_result_to_py(py: Python<'_>, map: &BTreeMap<u32, cbor::Value>) -> PyResult<PyObject> {
+fn rp_info_to_py(py: Python<'_>, info: &RpInfo) -> PyResult<PyObject> {
     let dict = PyDict::new(py);
-    for (k, v) in map {
-        dict.set_item(k, cbor_value_to_py(py, v)?)?;
+    let rp_dict = PyDict::new(py);
+    rp_dict.set_item("id", &info.rp.id)?;
+    if let Some(name) = &info.rp.name {
+        rp_dict.set_item("name", name)?;
+    }
+    dict.set_item(3u32, rp_dict)?;
+    dict.set_item(4u32, PyBytes::new(py, &info.rp_id_hash))?;
+    Ok(dict.into())
+}
+
+fn credential_info_to_py(py: Python<'_>, info: &CredentialInfo) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    let user_dict = PyDict::new(py);
+    user_dict.set_item("id", PyBytes::new(py, &info.user.id))?;
+    if let Some(name) = &info.user.name {
+        user_dict.set_item("name", name)?;
+    }
+    if let Some(dn) = &info.user.display_name {
+        user_dict.set_item("displayName", dn)?;
+    }
+    dict.set_item(6u32, user_dict)?;
+    let cred_dict = PyDict::new(py);
+    cred_dict.set_item("type", &info.credential_id.type_)?;
+    cred_dict.set_item("id", PyBytes::new(py, &info.credential_id.id))?;
+    dict.set_item(7u32, cred_dict)?;
+    dict.set_item(8u32, cbor_value_to_py(py, &info.public_key)?)?;
+    if let Some(cp) = info.cred_protect {
+        dict.set_item(0x0Au32, cp)?;
+    }
+    if let Some(lbk) = &info.large_blob_key {
+        dict.set_item(0x0Bu32, PyBytes::new(py, lbk))?;
+    }
+    if let Some(tp) = info.third_party_payment {
+        dict.set_item(0x0Cu32, tp)?;
     }
     Ok(dict.into())
 }
 
-fn cbor_result_list_to_py(
+fn py_to_credential_descriptor(obj: &Bound<'_, PyAny>) -> PyResult<PublicKeyCredentialDescriptor> {
+    let dict = obj.downcast::<PyDict>()?;
+    let type_ = dict
+        .get_item("type")?
+        .map(|v| v.extract::<String>())
+        .transpose()?
+        .unwrap_or_else(|| "public-key".to_string());
+    let id = dict
+        .get_item("id")?
+        .ok_or_else(|| PyValueError::new_err("credential descriptor missing 'id'"))?
+        .extract::<Vec<u8>>()?;
+    Ok(PublicKeyCredentialDescriptor {
+        type_,
+        id,
+        transports: None,
+    })
+}
+
+fn py_to_user_entity(obj: &Bound<'_, PyAny>) -> PyResult<PublicKeyCredentialUserEntity> {
+    let dict = obj.downcast::<PyDict>()?;
+    let id = dict
+        .get_item("id")?
+        .ok_or_else(|| PyValueError::new_err("user entity missing 'id'"))?
+        .extract::<Vec<u8>>()?;
+    let name = dict
+        .get_item("name")?
+        .map(|v| v.extract::<String>())
+        .transpose()?;
+    let display_name = dict
+        .get_item("displayName")?
+        .map(|v| v.extract::<String>())
+        .transpose()?;
+    Ok(PublicKeyCredentialUserEntity {
+        id,
+        name,
+        display_name,
+    })
+}
+
+fn enroll_sample_result_to_py(
     py: Python<'_>,
-    items: &[BTreeMap<u32, cbor::Value>],
+    result: &yubikit::ctap2::EnrollSampleResult,
 ) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item(4u32, PyBytes::new(py, &result.template_id))?;
+    dict.set_item(5u32, result.last_sample_status)?;
+    dict.set_item(6u32, result.remaining_samples)?;
+    Ok(dict.into())
+}
+
+fn fingerprint_templates_to_py(
+    py: Python<'_>,
+    templates: &[yubikit::ctap2::FingerprintTemplate],
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
     let list = PyList::empty(py);
-    for item in items {
-        list.append(cbor_result_to_py(py, item)?)?;
+    for t in templates {
+        let entry = PyDict::new(py);
+        entry.set_item(1u32, PyBytes::new(py, &t.id))?;
+        if let Some(name) = &t.name {
+            entry.set_item(2u32, name)?;
+        }
+        list.append(entry)?;
     }
-    Ok(list.into())
+    dict.set_item(7u32, list)?;
+    Ok(dict.into())
 }
 
 // ---------------------------------------------------------------------------
@@ -844,7 +908,11 @@ impl PyCredentialManagement {
 
     fn enumerate_rps<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
         let rps = self.get_mut()?.enumerate_rps().map_err(ctap2_err)?;
-        cbor_result_list_to_py(py, &rps)
+        let list = PyList::empty(py);
+        for rp in &rps {
+            list.append(rp_info_to_py(py, rp)?)?;
+        }
+        Ok(list.into())
     }
 
     fn enumerate_creds<'py>(&mut self, py: Python<'py>, rp_id_hash: &[u8]) -> PyResult<PyObject> {
@@ -852,12 +920,16 @@ impl PyCredentialManagement {
             .get_mut()?
             .enumerate_creds(rp_id_hash)
             .map_err(ctap2_err)?;
-        cbor_result_list_to_py(py, &creds)
+        let list = PyList::empty(py);
+        for cred in &creds {
+            list.append(credential_info_to_py(py, cred)?)?;
+        }
+        Ok(list.into())
     }
 
     fn delete_cred(&mut self, credential_id: &Bound<'_, PyAny>) -> PyResult<()> {
-        let value = py_to_cbor_value(credential_id)?;
-        self.get_mut()?.delete_cred(&value).map_err(ctap2_err)
+        let desc = py_to_credential_descriptor(credential_id)?;
+        self.get_mut()?.delete_cred(&desc).map_err(ctap2_err)
     }
 
     fn update_user_info(
@@ -865,8 +937,8 @@ impl PyCredentialManagement {
         credential_id: &Bound<'_, PyAny>,
         user: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        let cred = py_to_cbor_value(credential_id)?;
-        let user = py_to_cbor_value(user)?;
+        let cred = py_to_credential_descriptor(credential_id)?;
+        let user = py_to_user_entity(user)?;
         self.get_mut()?
             .update_user_info(&cred, &user)
             .map_err(ctap2_err)
@@ -930,7 +1002,11 @@ impl PyCredentialManagementFido {
 
     fn enumerate_rps<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
         let rps = self.get_mut()?.enumerate_rps().map_err(ctap2_err)?;
-        cbor_result_list_to_py(py, &rps)
+        let list = PyList::empty(py);
+        for rp in &rps {
+            list.append(rp_info_to_py(py, rp)?)?;
+        }
+        Ok(list.into())
     }
 
     fn enumerate_creds<'py>(&mut self, py: Python<'py>, rp_id_hash: &[u8]) -> PyResult<PyObject> {
@@ -938,12 +1014,16 @@ impl PyCredentialManagementFido {
             .get_mut()?
             .enumerate_creds(rp_id_hash)
             .map_err(ctap2_err)?;
-        cbor_result_list_to_py(py, &creds)
+        let list = PyList::empty(py);
+        for cred in &creds {
+            list.append(credential_info_to_py(py, cred)?)?;
+        }
+        Ok(list.into())
     }
 
     fn delete_cred(&mut self, credential_id: &Bound<'_, PyAny>) -> PyResult<()> {
-        let value = py_to_cbor_value(credential_id)?;
-        self.get_mut()?.delete_cred(&value).map_err(ctap2_err)
+        let desc = py_to_credential_descriptor(credential_id)?;
+        self.get_mut()?.delete_cred(&desc).map_err(ctap2_err)
     }
 
     fn update_user_info(
@@ -951,8 +1031,8 @@ impl PyCredentialManagementFido {
         credential_id: &Bound<'_, PyAny>,
         user: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        let cred = py_to_cbor_value(credential_id)?;
-        let user = py_to_cbor_value(user)?;
+        let cred = py_to_credential_descriptor(credential_id)?;
+        let user = py_to_user_entity(user)?;
         self.get_mut()?
             .update_user_info(&cred, &user)
             .map_err(ctap2_err)
@@ -1130,7 +1210,10 @@ impl PyBioEnrollment {
             .get_mut()?
             .get_fingerprint_sensor_info()
             .map_err(ctap2_err)?;
-        cbor_result_to_py(py, &info)
+        let dict = PyDict::new(py);
+        dict.set_item(2u32, info.fingerprint_kind)?;
+        dict.set_item(3u32, info.max_capture_samples_required_for_enroll)?;
+        Ok(dict.into())
     }
 
     #[pyo3(signature = (timeout=None, event=None, on_keepalive=None))]
@@ -1157,7 +1240,7 @@ impl PyBioEnrollment {
             .get_mut()?
             .enroll_begin(timeout, keepalive_ref, cancel_ref)
             .map_err(ctap2_err)?;
-        cbor_result_to_py(py, &result)
+        enroll_sample_result_to_py(py, &result)
     }
 
     #[pyo3(signature = (template_id, timeout=None, event=None, on_keepalive=None))]
@@ -1185,7 +1268,7 @@ impl PyBioEnrollment {
             .get_mut()?
             .enroll_capture_next(template_id, timeout, keepalive_ref, cancel_ref)
             .map_err(ctap2_err)?;
-        cbor_result_to_py(py, &result)
+        enroll_sample_result_to_py(py, &result)
     }
 
     fn enroll_cancel(&mut self) -> PyResult<()> {
@@ -1193,8 +1276,8 @@ impl PyBioEnrollment {
     }
 
     fn enumerate_enrollments<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
-        let result = self.get_mut()?.enumerate_enrollments().map_err(ctap2_err)?;
-        cbor_result_to_py(py, &result)
+        let templates = self.get_mut()?.enumerate_enrollments().map_err(ctap2_err)?;
+        fingerprint_templates_to_py(py, &templates)
     }
 
     fn set_name(&mut self, template_id: &[u8], name: &str) -> PyResult<()> {
@@ -1255,7 +1338,10 @@ impl PyBioEnrollmentFido {
             .get_mut()?
             .get_fingerprint_sensor_info()
             .map_err(ctap2_err)?;
-        cbor_result_to_py(py, &info)
+        let dict = PyDict::new(py);
+        dict.set_item(2u32, info.fingerprint_kind)?;
+        dict.set_item(3u32, info.max_capture_samples_required_for_enroll)?;
+        Ok(dict.into())
     }
 
     #[pyo3(signature = (timeout=None, event=None, on_keepalive=None))]
@@ -1282,7 +1368,7 @@ impl PyBioEnrollmentFido {
             .get_mut()?
             .enroll_begin(timeout, keepalive_ref, cancel_ref)
             .map_err(ctap2_err)?;
-        cbor_result_to_py(py, &result)
+        enroll_sample_result_to_py(py, &result)
     }
 
     #[pyo3(signature = (template_id, timeout=None, event=None, on_keepalive=None))]
@@ -1310,7 +1396,7 @@ impl PyBioEnrollmentFido {
             .get_mut()?
             .enroll_capture_next(template_id, timeout, keepalive_ref, cancel_ref)
             .map_err(ctap2_err)?;
-        cbor_result_to_py(py, &result)
+        enroll_sample_result_to_py(py, &result)
     }
 
     fn enroll_cancel(&mut self) -> PyResult<()> {
@@ -1318,8 +1404,8 @@ impl PyBioEnrollmentFido {
     }
 
     fn enumerate_enrollments<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
-        let result = self.get_mut()?.enumerate_enrollments().map_err(ctap2_err)?;
-        cbor_result_to_py(py, &result)
+        let templates = self.get_mut()?.enumerate_enrollments().map_err(ctap2_err)?;
+        fingerprint_templates_to_py(py, &templates)
     }
 
     fn set_name(&mut self, template_id: &[u8], name: &str) -> PyResult<()> {

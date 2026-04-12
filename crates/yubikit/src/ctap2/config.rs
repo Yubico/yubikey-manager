@@ -25,6 +25,8 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+use zeroize::Zeroizing;
+
 use crate::cbor::{self, Value};
 use crate::core::Connection;
 
@@ -47,10 +49,15 @@ mod config_cmd {
 pub struct Config<C: Connection> {
     session: Ctap2Session<C>,
     protocol: Option<PinProtocol>,
-    pin_token: Option<Vec<u8>>,
+    pin_token: Option<Zeroizing<Vec<u8>>>,
 }
 
 impl<C: Connection + 'static> Config<C> {
+    /// Whether the authenticator supports authenticator config.
+    pub fn is_supported(info: &super::Info) -> bool {
+        info.options.get("authnrCfg") == Some(&true)
+    }
+
     /// Create a new `Config` from a `Ctap2Session` and a PIN token.
     ///
     /// The PIN token must have the `AUTHENTICATOR_CFG` permission.
@@ -59,8 +66,7 @@ impl<C: Connection + 'static> Config<C> {
         protocol: PinProtocol,
         pin_token: Vec<u8>,
     ) -> Result<Self, Ctap2Error<C::Error>> {
-        let info = &session.cached_info;
-        if info.options.get("authnrCfg") != Some(&true) {
+        if !Self::is_supported(&session.cached_info) {
             return Err(Ctap2Error::InvalidResponse(
                 "Authenticator does not support authenticatorConfig".into(),
             ));
@@ -68,7 +74,7 @@ impl<C: Connection + 'static> Config<C> {
         Ok(Self {
             session,
             protocol: Some(protocol),
-            pin_token: Some(pin_token),
+            pin_token: Some(Zeroizing::new(pin_token)),
         })
     }
 
@@ -76,8 +82,7 @@ impl<C: Connection + 'static> Config<C> {
     ///
     /// Used when no PIN is set on the authenticator but config commands are needed.
     pub fn new_unauthenticated(session: Ctap2Session<C>) -> Result<Self, Ctap2Error<C::Error>> {
-        let info = &session.cached_info;
-        if info.options.get("authnrCfg") != Some(&true) {
+        if !Self::is_supported(&session.cached_info) {
             return Err(Ctap2Error::InvalidResponse(
                 "Authenticator does not support authenticatorConfig".into(),
             ));

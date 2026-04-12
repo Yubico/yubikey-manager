@@ -203,6 +203,7 @@ impl PinProtocol {
     }
 
     fn kdf(&self, z: &[u8]) -> Vec<u8> {
+        use zeroize::Zeroize;
         match self {
             Self::V1 => {
                 let mut hasher = Sha256::new();
@@ -221,6 +222,8 @@ impl PinProtocol {
                     .expect("HKDF expand");
                 let mut result = hmac_key.to_vec();
                 result.extend_from_slice(&aes_key);
+                hmac_key.zeroize();
+                aes_key.zeroize();
                 result
             }
         }

@@ -40,19 +40,29 @@ mod credential_management;
 mod large_blobs;
 mod pin_protocol;
 mod session;
+pub mod types;
 
 use std::collections::BTreeMap;
+
+use hkdf::Hkdf;
+use sha2::Sha256;
 
 use crate::cbor::Value;
 use crate::ctap::CtapError;
 
-pub use bio_enrollment::{BioEnrollment, BioResult, TemplateInfo};
-pub use client_pin::{ClientPin, ClientPinResult, Permissions};
+pub use bio_enrollment::BioEnrollment;
+pub use client_pin::{ClientPin, Permissions};
 pub use config::Config;
-pub use credential_management::{CredMgmtResult, CredentialManagement};
+pub use credential_management::CredentialManagement;
 pub use large_blobs::LargeBlobs;
 pub use pin_protocol::{CoseKey, PinProtocol};
 pub use session::Ctap2Session;
+pub use types::{
+    AssertionResponse, AttestationResponse, AuthenticatorOptions, CredentialInfo,
+    EnrollSampleResult, FingerprintSensorInfo, FingerprintTemplate, PublicKeyCredentialDescriptor,
+    PublicKeyCredentialParameters, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
+    RpInfo,
+};
 
 // ---------------------------------------------------------------------------
 // CTAP2 command bytes
@@ -360,15 +370,6 @@ pub struct Info {
     pub config_commands: Vec<u32>,
 }
 
-/// A supported algorithm for credential generation (COSE algorithm parameters).
-#[derive(Debug, Clone)]
-pub struct PublicKeyCredentialParameters {
-    /// Credential type, typically "public-key".
-    pub credential_type: String,
-    /// COSE algorithm identifier.
-    pub alg: i64,
-}
-
 impl Info {
     /// Parse an `Info` from a CBOR map with integer keys.
     pub fn from_cbor_map(map: &[(Value, Value)]) -> Self {
@@ -439,23 +440,7 @@ impl Info {
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|v| {
-                        let map = v.as_map()?;
-                        let credential_type = map
-                            .iter()
-                            .find(|(k, _)| k.as_text() == Some("type"))
-                            .and_then(|(_, v)| v.as_text())
-                            .unwrap_or("public-key")
-                            .to_string();
-                        let alg = map
-                            .iter()
-                            .find(|(k, _)| k.as_text() == Some("alg"))
-                            .and_then(|(_, v)| v.as_int())?;
-                        Some(PublicKeyCredentialParameters {
-                            credential_type,
-                            alg,
-                        })
-                    })
+                    .filter_map(PublicKeyCredentialParameters::from_value)
                     .collect()
             })
             .unwrap_or_default();
@@ -505,6 +490,55 @@ impl Info {
             enc_cred_store_state: get(0x1E).and_then(|v| v.as_bytes()).map(|b| b.to_vec()),
             config_commands: get_uint_vec(0x1F),
         }
+    }
+
+    /// Decrypt the encrypted device identifier using a persistent PIN/UV auth token.
+    ///
+    /// The identifier is encrypted by the authenticator and changes with each
+    /// `getInfo` call, but decrypts to a stable value using the same persistent
+    /// token. Returns `None` if the authenticator did not provide an encrypted
+    /// identifier.
+    pub fn get_identifier(&self, pin_token: &[u8]) -> Option<Vec<u8>> {
+        self.decrypt_field(self.enc_identifier.as_deref(), b"encIdentifier", pin_token)
+    }
+
+    /// Decrypt the encrypted credential store state using a persistent PIN/UV auth token.
+    ///
+    /// The state value changes when credentials are added or removed, allowing
+    /// the client to detect changes without re-enumerating. Returns `None` if
+    /// the authenticator did not provide an encrypted credential store state.
+    pub fn get_cred_store_state(&self, pin_token: &[u8]) -> Option<Vec<u8>> {
+        self.decrypt_field(
+            self.enc_cred_store_state.as_deref(),
+            b"encCredStoreState",
+            pin_token,
+        )
+    }
+
+    /// Decrypt an encrypted Info field using HKDF-SHA256 + AES-256-CBC.
+    fn decrypt_field(
+        &self,
+        encrypted: Option<&[u8]>,
+        info_label: &[u8],
+        pin_token: &[u8],
+    ) -> Option<Vec<u8>> {
+        let encrypted = encrypted?;
+        if encrypted.len() < 16 {
+            return None;
+        }
+
+        let salt = [0u8; 32];
+        let hk = Hkdf::<Sha256>::new(Some(&salt), pin_token);
+        let mut key = [0u8; 16];
+        hk.expand(info_label, &mut key).ok()?;
+
+        let (iv, ct) = encrypted.split_at(16);
+        use aes::Aes128;
+        use cbc::Decryptor as CbcDecryptor;
+        use cipher::{BlockDecryptMut, KeyIvInit};
+        let dec = CbcDecryptor::<Aes128>::new((&key).into(), iv.into());
+        dec.decrypt_padded_vec_mut::<cipher::block_padding::NoPadding>(ct)
+            .ok()
     }
 }
 
@@ -573,7 +607,7 @@ mod tests {
         assert_eq!(info.max_cred_id_length, Some(128));
         assert_eq!(info.algorithms.len(), 1);
         assert_eq!(info.algorithms[0].alg, -7);
-        assert_eq!(info.algorithms[0].credential_type, "public-key");
+        assert_eq!(info.algorithms[0].type_, "public-key");
         assert_eq!(info.min_pin_length, 6);
         assert_eq!(info.firmware_version, Some(328965));
         assert_eq!(info.remaining_disc_creds, Some(25));

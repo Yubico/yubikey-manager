@@ -26,6 +26,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 use sha2::{Digest, Sha256};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::core::Connection;
 
@@ -48,7 +49,7 @@ mod client_pin_cmd {
 /// ClientPin response map keys (§6.5.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
-pub enum ClientPinResult {
+enum ClientPinResult {
     KeyAgreement = 0x01,
     PinUvToken = 0x02,
     PinRetries = 0x03,
@@ -67,6 +68,7 @@ impl Permissions {
     pub const BIO_ENROLL: Self = Self(0x08);
     pub const LARGE_BLOB_WRITE: Self = Self(0x10);
     pub const AUTHENTICATOR_CFG: Self = Self(0x20);
+    pub const PERSISTENT_CREDENTIAL_MGMT: Self = Self(0x40);
 
     pub const fn new(bits: u8) -> Self {
         Self(bits)
@@ -101,7 +103,7 @@ pub struct ClientPin<C: Connection> {
 }
 
 /// Pad a PIN string per CTAP2 spec: UTF-8, left-padded to ≥64 bytes, 16-byte aligned.
-fn pad_pin(pin: &str) -> Result<Vec<u8>, String> {
+fn pad_pin(pin: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     let pin_bytes = pin.as_bytes();
     if pin_bytes.len() < 4 {
         return Err("PIN must be at least 4 bytes".into());
@@ -119,7 +121,7 @@ fn pad_pin(pin: &str) -> Result<Vec<u8>, String> {
     if padded.len() > 255 {
         return Err("PIN must be at most 255 bytes".into());
     }
-    Ok(padded)
+    Ok(Zeroizing::new(padded))
 }
 
 impl<C: Connection + 'static> ClientPin<C> {
@@ -228,8 +230,9 @@ impl<C: Connection + 'static> ClientPin<C> {
     pub fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> Result<(), Ctap2Error<C::Error>> {
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
-        let pin_hash = &Sha256::digest(old_pin.as_bytes())[..16];
-        let pin_hash_enc = self.protocol.encrypt(&shared_secret, pin_hash);
+        let mut pin_hash_full = Sha256::digest(old_pin.as_bytes());
+        let pin_hash_enc = self.protocol.encrypt(&shared_secret, &pin_hash_full[..16]);
+        pin_hash_full.zeroize();
         let new_pin_padded = pad_pin(new_pin).map_err(Ctap2Error::InvalidResponse)?;
         let new_pin_enc = self.protocol.encrypt(&shared_secret, &new_pin_padded);
 
@@ -267,18 +270,20 @@ impl<C: Connection + 'static> ClientPin<C> {
     ) -> Result<Vec<u8>, Ctap2Error<C::Error>> {
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
-        let pin_hash = &Sha256::digest(pin.as_bytes())[..16];
-        let pin_hash_enc = self.protocol.encrypt(&shared_secret, pin_hash);
+        let mut pin_hash_full = Sha256::digest(pin.as_bytes());
+        let pin_hash_enc = self.protocol.encrypt(&shared_secret, &pin_hash_full[..16]);
+        pin_hash_full.zeroize();
 
-        let (sub_cmd, perms, rpid) = if self.is_token_supported() && permissions.is_some() {
-            (
-                client_pin_cmd::GET_TOKEN_USING_PIN,
-                permissions.map(|p| p.bits()),
-                permissions_rpid,
-            )
-        } else {
-            (client_pin_cmd::GET_TOKEN_USING_PIN_LEGACY, None, None)
-        };
+        let (sub_cmd, perms, rpid) =
+            if Self::is_token_supported(&self.session.cached_info) && permissions.is_some() {
+                (
+                    client_pin_cmd::GET_TOKEN_USING_PIN,
+                    permissions.map(|p| p.bits()),
+                    permissions_rpid,
+                )
+            } else {
+                (client_pin_cmd::GET_TOKEN_USING_PIN_LEGACY, None, None)
+            };
 
         let resp = self.session.client_pin(
             self.protocol.version(),
@@ -348,14 +353,14 @@ impl<C: Connection + 'static> ClientPin<C> {
         Ok(token)
     }
 
-    /// Whether the cached info indicates `clientPin` support.
-    pub fn is_supported(&self) -> bool {
-        self.session.cached_info.options.contains_key("clientPin")
+    /// Whether the authenticator supports `clientPin`.
+    pub fn is_supported(info: &Info) -> bool {
+        info.options.contains_key("clientPin")
     }
 
-    /// Whether the cached info indicates `pinUvAuthToken` support.
-    pub fn is_token_supported(&self) -> bool {
-        self.session.cached_info.options.get("pinUvAuthToken") == Some(&true)
+    /// Whether the authenticator supports `pinUvAuthToken`.
+    pub fn is_token_supported(info: &Info) -> bool {
+        info.options.get("pinUvAuthToken") == Some(&true)
     }
 
     fn select_protocol(info: &Info) -> Result<PinProtocol, Ctap2Error<C::Error>> {

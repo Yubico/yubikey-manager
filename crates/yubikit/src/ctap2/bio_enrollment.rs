@@ -27,11 +27,14 @@
 
 use std::collections::BTreeMap;
 
+use zeroize::Zeroizing;
+
 use crate::cbor::{self, Value};
 use crate::core::Connection;
 
 use super::pin_protocol::PinProtocol;
 use super::session::Ctap2Session;
+use super::types::{EnrollSampleResult, FingerprintSensorInfo, FingerprintTemplate};
 use super::{Ctap2Error, cmd};
 
 /// Fingerprint bio-enrollment sub-command identifiers (§6.7).
@@ -45,28 +48,15 @@ mod bio_cmd {
     pub const GET_SENSOR_INFO: u8 = 0x07;
 }
 
-/// BioEnrollment response map keys (§6.7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum BioResult {
-    Modality = 0x01,
-    FingerprintKind = 0x02,
-    MaxSamplesRequired = 0x03,
-    TemplateId = 0x04,
-    LastSampleStatus = 0x05,
-    RemainingSamples = 0x06,
-    TemplateInfos = 0x07,
-    MaxTemplateFriendlyName = 0x08,
+/// Response map key constants for internal parsing.
+mod result_key {
+    pub const TEMPLATE_INFOS: u32 = 0x07;
 }
 
-/// Template info map keys inside `TemplateInfos` entries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum TemplateInfo {
-    Id = 0x01,
-    Name = 0x02,
-}
-
+/// CTAP2 BioEnrollment operations (§6.7).
+///
+/// Provides fingerprint enrollment, enumeration, naming, and removal.
+/// Owns a [`Ctap2Session`] and a [`PinProtocol`] for authenticated commands.
 /// CTAP2 BioEnrollment operations (§6.7).
 ///
 /// Provides fingerprint enrollment, enumeration, naming, and removal.
@@ -74,11 +64,23 @@ pub enum TemplateInfo {
 pub struct BioEnrollment<C: Connection> {
     session: Ctap2Session<C>,
     protocol: PinProtocol,
-    pin_token: Vec<u8>,
+    pin_token: Zeroizing<Vec<u8>>,
     use_legacy: bool,
 }
 
 impl<C: Connection + 'static> BioEnrollment<C> {
+    /// Whether the authenticator supports bio enrollment.
+    ///
+    /// Returns `true` if the standard `bioEnroll` option is present, or if the
+    /// device supports the `userVerificationMgmtPreview` prototype.
+    pub fn is_supported(info: &super::Info) -> bool {
+        if info.options.contains_key("bioEnroll") {
+            return true;
+        }
+        info.versions.contains(&"FIDO_2_1_PRE".to_string())
+            && info.options.contains_key("userVerificationMgmtPreview")
+    }
+
     /// Create a new `BioEnrollment` from a `Ctap2Session` and a PIN token.
     ///
     /// The PIN token must have the `BIO_ENROLL` permission.
@@ -88,24 +90,19 @@ impl<C: Connection + 'static> BioEnrollment<C> {
         pin_token: Vec<u8>,
     ) -> Result<Self, Ctap2Error<C::Error>> {
         let info = &session.cached_info;
-        // bioEnroll option present means the feature is supported.
-        // Its value (true/false) indicates whether fingerprints are currently enrolled.
-        let has_bio = info.options.contains_key("bioEnroll");
-        let has_preview = info.versions.contains(&"FIDO_2_1_PRE".to_string())
-            && info.options.contains_key("userVerificationMgmtPreview");
-
-        if !has_bio && !has_preview {
+        if !Self::is_supported(info) {
             return Err(Ctap2Error::InvalidResponse(
                 "Authenticator does not support bioEnrollment".into(),
             ));
         }
 
-        let use_legacy = !has_bio && has_preview;
+        let has_bio = info.options.contains_key("bioEnroll");
+        let use_legacy = !has_bio;
 
         Ok(Self {
             session,
             protocol,
-            pin_token,
+            pin_token: Zeroizing::new(pin_token),
             use_legacy,
         })
     }
@@ -185,37 +182,41 @@ impl<C: Connection + 'static> BioEnrollment<C> {
     /// Get fingerprint sensor info (type and max samples).
     pub fn get_fingerprint_sensor_info(
         &mut self,
-    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
-        self.call(
+    ) -> Result<FingerprintSensorInfo, Ctap2Error<C::Error>> {
+        let resp = self.call(
             Some(0x01),
             Some(bio_cmd::GET_SENSOR_INFO),
             None,
             false,
             None,
             None,
-        )
+        )?;
+        FingerprintSensorInfo::from_int_map(&resp)
+            .ok_or_else(|| Ctap2Error::InvalidResponse("invalid fingerprint sensor info".into()))
     }
 
     /// Begin a new fingerprint enrollment.
     ///
-    /// Returns the response map containing `TemplateId`, `LastSampleStatus`,
-    /// and `RemainingSamples`.
+    /// Returns the enrollment sample result containing template ID,
+    /// last sample status, and remaining samples.
     pub fn enroll_begin(
         &mut self,
         timeout: Option<u32>,
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+    ) -> Result<EnrollSampleResult, Ctap2Error<C::Error>> {
         let sub_params =
             timeout.map(|t| Value::Map(vec![(Value::Int(0x03), Value::Int(t as i64))]));
-        self.call(
+        let resp = self.call(
             Some(0x01),
             Some(bio_cmd::ENROLL_BEGIN),
             sub_params.as_ref(),
             true,
             on_keepalive,
             cancel,
-        )
+        )?;
+        EnrollSampleResult::from_int_map(&resp)
+            .ok_or_else(|| Ctap2Error::InvalidResponse("invalid enroll result".into()))
     }
 
     /// Capture next fingerprint sample during enrollment.
@@ -225,20 +226,22 @@ impl<C: Connection + 'static> BioEnrollment<C> {
         timeout: Option<u32>,
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+    ) -> Result<EnrollSampleResult, Ctap2Error<C::Error>> {
         let mut sub_entries = vec![(Value::Int(0x01), Value::Bytes(template_id.to_vec()))];
         if let Some(t) = timeout {
             sub_entries.push((Value::Int(0x03), Value::Int(t as i64)));
         }
         let sub_params = Value::Map(sub_entries);
-        self.call(
+        let resp = self.call(
             Some(0x01),
             Some(bio_cmd::ENROLL_CAPTURE_NEXT),
             Some(&sub_params),
             true,
             on_keepalive,
             cancel,
-        )
+        )?;
+        EnrollSampleResult::from_int_map(&resp)
+            .ok_or_else(|| Ctap2Error::InvalidResponse("invalid enroll result".into()))
     }
 
     /// Cancel an ongoing enrollment.
@@ -255,17 +258,27 @@ impl<C: Connection + 'static> BioEnrollment<C> {
     }
 
     /// Enumerate all enrolled fingerprints.
-    ///
-    /// Returns a response map containing `TemplateInfos`.
-    pub fn enumerate_enrollments(&mut self) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
-        self.call(
+    pub fn enumerate_enrollments(
+        &mut self,
+    ) -> Result<Vec<FingerprintTemplate>, Ctap2Error<C::Error>> {
+        let resp = self.call(
             Some(0x01),
             Some(bio_cmd::ENUMERATE_ENROLLMENTS),
             None,
             true,
             None,
             None,
-        )
+        )?;
+        let infos = resp
+            .get(&result_key::TEMPLATE_INFOS)
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(FingerprintTemplate::from_template_info)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(infos)
     }
 
     /// Set a friendly name for a fingerprint template.

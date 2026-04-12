@@ -27,11 +27,16 @@
 
 use std::collections::BTreeMap;
 
+use zeroize::Zeroizing;
+
 use crate::cbor::{self, Value};
 use crate::core::Connection;
 
 use super::pin_protocol::PinProtocol;
 use super::session::Ctap2Session;
+use super::types::{
+    CredentialInfo, PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity, RpInfo,
+};
 use super::{Ctap2Error, cmd};
 
 /// CredentialManagement sub-command identifiers (§6.8).
@@ -45,23 +50,18 @@ mod cred_mgmt_cmd {
     pub const UPDATE_USER_INFO: u8 = 0x07;
 }
 
-/// CredentialManagement response map keys (§6.8).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum CredMgmtResult {
-    ExistingCredCount = 0x01,
-    MaxRemainingCount = 0x02,
-    Rp = 0x03,
-    RpIdHash = 0x04,
-    TotalRps = 0x05,
-    User = 0x06,
-    CredentialId = 0x07,
-    PublicKey = 0x08,
-    TotalCredentials = 0x09,
-    CredProtect = 0x0A,
-    LargeBlobKey = 0x0B,
+/// Response map key constants for internal parsing.
+mod result_key {
+    pub const EXISTING_CRED_COUNT: u32 = 0x01;
+    pub const MAX_REMAINING_COUNT: u32 = 0x02;
+    pub const TOTAL_RPS: u32 = 0x05;
+    pub const TOTAL_CREDENTIALS: u32 = 0x09;
 }
 
+/// CTAP2 CredentialManagement operations (§6.8).
+///
+/// Provides credential enumeration, deletion, and user info updates.
+/// Owns a [`Ctap2Session`] and a [`PinProtocol`] for authenticated commands.
 /// CTAP2 CredentialManagement operations (§6.8).
 ///
 /// Provides credential enumeration, deletion, and user info updates.
@@ -69,11 +69,29 @@ pub enum CredMgmtResult {
 pub struct CredentialManagement<C: Connection> {
     session: Ctap2Session<C>,
     protocol: PinProtocol,
-    pin_token: Vec<u8>,
+    pin_token: Zeroizing<Vec<u8>>,
     use_legacy: bool,
 }
 
 impl<C: Connection + 'static> CredentialManagement<C> {
+    /// Whether the authenticator supports credential management.
+    ///
+    /// Returns `true` if the standard `credMgmt` option is set, or if the
+    /// device supports the `credentialMgmtPreview` prototype.
+    pub fn is_supported(info: &super::Info) -> bool {
+        if info.options.get("credMgmt") == Some(&true) {
+            return true;
+        }
+        info.versions.contains(&"FIDO_2_1_PRE".to_string())
+            && info.options.get("credentialMgmtPreview") == Some(&true)
+    }
+
+    /// Whether the authenticator supports read-only credential management
+    /// (enumeration with PIN/UV auth for the credential management read-only permission).
+    pub fn is_readonly_supported(info: &super::Info) -> bool {
+        info.options.get("perCredMgmtRO") == Some(&true)
+    }
+
     /// Create a new `CredentialManagement` from a `Ctap2Session` and a PIN token.
     ///
     /// The PIN token must have the `CREDENTIAL_MGMT` permission.
@@ -86,22 +104,18 @@ impl<C: Connection + 'static> CredentialManagement<C> {
         pin_token: Vec<u8>,
     ) -> Result<Self, Ctap2Error<C::Error>> {
         let info = &session.cached_info;
-        let has_cred_mgmt = info.options.get("credMgmt") == Some(&true);
-        let has_preview = info.versions.contains(&"FIDO_2_1_PRE".to_string())
-            && info.options.get("credentialMgmtPreview") == Some(&true);
-
-        if !has_cred_mgmt && !has_preview {
+        if !Self::is_supported(info) {
             return Err(Ctap2Error::InvalidResponse(
                 "Authenticator does not support credentialManagement".into(),
             ));
         }
 
-        let use_legacy = !has_cred_mgmt && has_preview;
+        let use_legacy = info.options.get("credMgmt") != Some(&true);
 
         Ok(Self {
             session,
             protocol,
-            pin_token,
+            pin_token: Zeroizing::new(pin_token),
             use_legacy,
         })
     }
@@ -178,13 +192,13 @@ impl<C: Connection + 'static> CredentialManagement<C> {
     pub fn get_metadata(&mut self) -> Result<(u32, u32), Ctap2Error<C::Error>> {
         let resp = self.call(cred_mgmt_cmd::GET_CREDS_METADATA, None, true)?;
         let existing = resp
-            .get(&(CredMgmtResult::ExistingCredCount as u32))
+            .get(&result_key::EXISTING_CRED_COUNT)
             .and_then(|v| v.as_int())
             .ok_or_else(|| {
                 Ctap2Error::InvalidResponse("missing existingResidentCredentialsCount".into())
             })? as u32;
         let remaining = resp
-            .get(&(CredMgmtResult::MaxRemainingCount as u32))
+            .get(&result_key::MAX_REMAINING_COUNT)
             .and_then(|v| v.as_int())
             .ok_or_else(|| {
                 Ctap2Error::InvalidResponse(
@@ -195,10 +209,10 @@ impl<C: Connection + 'static> CredentialManagement<C> {
     }
 
     /// Enumerate all relying parties with stored credentials.
-    pub fn enumerate_rps(&mut self) -> Result<Vec<BTreeMap<u32, Value>>, Ctap2Error<C::Error>> {
+    pub fn enumerate_rps(&mut self) -> Result<Vec<RpInfo>, Ctap2Error<C::Error>> {
         let first = self.call(cred_mgmt_cmd::ENUMERATE_RPS_BEGIN, None, true)?;
         let total = first
-            .get(&(CredMgmtResult::TotalRps as u32))
+            .get(&result_key::TOTAL_RPS)
             .and_then(|v| v.as_int())
             .unwrap_or(0) as usize;
 
@@ -206,24 +220,23 @@ impl<C: Connection + 'static> CredentialManagement<C> {
             return Ok(Vec::new());
         }
 
-        let mut results = Vec::with_capacity(total);
-        results.push(first);
+        let mut maps = Vec::with_capacity(total);
+        maps.push(first);
         for _ in 1..total {
-            let next = self.call(cred_mgmt_cmd::ENUMERATE_RPS_NEXT, None, false)?;
-            results.push(next);
+            maps.push(self.call(cred_mgmt_cmd::ENUMERATE_RPS_NEXT, None, false)?);
         }
-        Ok(results)
+        Ok(maps.iter().filter_map(RpInfo::from_int_map).collect())
     }
 
     /// Enumerate all credentials for a given RP ID hash.
     pub fn enumerate_creds(
         &mut self,
         rp_id_hash: &[u8],
-    ) -> Result<Vec<BTreeMap<u32, Value>>, Ctap2Error<C::Error>> {
+    ) -> Result<Vec<CredentialInfo>, Ctap2Error<C::Error>> {
         let params = Value::Map(vec![(Value::Int(0x01), Value::Bytes(rp_id_hash.to_vec()))]);
         let first = self.call(cred_mgmt_cmd::ENUMERATE_CREDS_BEGIN, Some(&params), true)?;
         let total = first
-            .get(&(CredMgmtResult::TotalCredentials as u32))
+            .get(&result_key::TOTAL_CREDENTIALS)
             .and_then(|v| v.as_int())
             .unwrap_or(0) as usize;
 
@@ -231,18 +244,23 @@ impl<C: Connection + 'static> CredentialManagement<C> {
             return Ok(Vec::new());
         }
 
-        let mut results = Vec::with_capacity(total);
-        results.push(first);
+        let mut maps = Vec::with_capacity(total);
+        maps.push(first);
         for _ in 1..total {
-            let next = self.call(cred_mgmt_cmd::ENUMERATE_CREDS_NEXT, None, false)?;
-            results.push(next);
+            maps.push(self.call(cred_mgmt_cmd::ENUMERATE_CREDS_NEXT, None, false)?);
         }
-        Ok(results)
+        Ok(maps
+            .iter()
+            .filter_map(CredentialInfo::from_int_map)
+            .collect())
     }
 
     /// Delete a credential by its credential ID.
-    pub fn delete_cred(&mut self, credential_id: &Value) -> Result<(), Ctap2Error<C::Error>> {
-        let params = Value::Map(vec![(Value::Int(0x02), credential_id.clone())]);
+    pub fn delete_cred(
+        &mut self,
+        credential_id: &PublicKeyCredentialDescriptor,
+    ) -> Result<(), Ctap2Error<C::Error>> {
+        let params = Value::Map(vec![(Value::Int(0x02), credential_id.to_value())]);
         self.call(cred_mgmt_cmd::DELETE_CREDENTIAL, Some(&params), true)?;
         Ok(())
     }
@@ -252,8 +270,8 @@ impl<C: Connection + 'static> CredentialManagement<C> {
     /// Only supported with the standard (non-preview) command variant.
     pub fn update_user_info(
         &mut self,
-        credential_id: &Value,
-        user: &Value,
+        credential_id: &PublicKeyCredentialDescriptor,
+        user: &PublicKeyCredentialUserEntity,
     ) -> Result<(), Ctap2Error<C::Error>> {
         if self.use_legacy {
             return Err(Ctap2Error::InvalidResponse(
@@ -261,8 +279,8 @@ impl<C: Connection + 'static> CredentialManagement<C> {
             ));
         }
         let params = Value::Map(vec![
-            (Value::Int(0x02), credential_id.clone()),
-            (Value::Int(0x03), user.clone()),
+            (Value::Int(0x02), credential_id.to_value()),
+            (Value::Int(0x03), user.to_value()),
         ]);
         self.call(cred_mgmt_cmd::UPDATE_USER_INFO, Some(&params), true)?;
         Ok(())
