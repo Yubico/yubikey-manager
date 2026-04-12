@@ -7,7 +7,6 @@ from datetime import datetime
 from typing import Any
 
 from fido2.ctap import CtapError
-
 from yubikit.core import _override_version
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection

@@ -2,6 +2,13 @@ version = 1
 revision = 3
 requires-python = ">=3.10, <4"
 
+[manifest]
+members = [
+    "yubikey-manager",
+    "yubikey-manager-workspace",
+    "yubikit",
+]
+
 [[package]]
 name = "alabaster"
 version = "0.7.16"
@@ -986,15 +993,28 @@ wheels = [
 [[package]]
 name = "yubikey-manager"
 version = "5.9.1.dev0"
-source = { editable = "." }
+source = { editable = "packages/yubikey-manager" }
 dependencies = [
     { name = "click" },
-    { name = "cryptography" },
-    { name = "fido2" },
     { name = "keyring" },
     { name = "python-pskc" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "yubikit" },
 ]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.0,<9" },
+    { name = "keyring", specifier = ">=23.4,<26" },
+    { name = "python-pskc", specifier = ">=1.3,<2" },
+    { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=223" },
+    { name = "yubikit", editable = "packages/yubikit" },
+]
+
+[[package]]
+name = "yubikey-manager-workspace"
+version = "5.9.1.dev0"
+source = { virtual = "." }
 
 [package.dev-dependencies]
 dev = [
@@ -1003,17 +1023,11 @@ dev = [
     { name = "sphinx" },
     { name = "sphinx-autoapi" },
     { name = "sphinx-rtd-theme" },
+    { name = "yubikey-manager" },
+    { name = "yubikit" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.0,<9" },
-    { name = "cryptography", specifier = ">=3.0,<49" },
-    { name = "fido2", specifier = ">=2.0,<3" },
-    { name = "keyring", specifier = ">=23.4,<26" },
-    { name = "python-pskc", specifier = ">=1.3,<2" },
-    { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=223" },
-]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1022,6 +1036,23 @@ dev = [
     { name = "sphinx", specifier = ">=7.4,<8" },
     { name = "sphinx-autoapi", specifier = ">=3.3.3,<4" },
     { name = "sphinx-rtd-theme", specifier = ">=3,<4" },
+    { name = "yubikey-manager", editable = "packages/yubikey-manager" },
+    { name = "yubikit", editable = "packages/yubikit" },
+]
+
+[[package]]
+name = "yubikit"
+version = "5.9.1.dev0"
+source = { editable = "packages/yubikit" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "fido2" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cryptography", specifier = ">=3.0,<49" },
+    { name = "fido2", specifier = ">=2.0,<3" },
 ]
 
 [[package]]

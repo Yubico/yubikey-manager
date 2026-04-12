@@ -7,26 +7,37 @@ permissions: read-all
 jobs:
   sdist:
     runs-on: ubuntu-latest
-    name: Build source distribution
+    name: Build source distributions
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build sdist
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build sdist (yubikit)
         uses: PyO3/maturin-action@v1
         with:
           command: sdist
-          args: --out dist
+          args: --manifest-path packages/yubikit/pyproject.toml --out dist
+
+      - name: Build sdist and wheel (yubikey-manager)
+        run: uv build --package yubikey-manager --out dist
 
       - name: Upload sdist
         uses: actions/upload-artifact@v6
         with:
           name: ykman-sdist
-          path: dist/*.tar.gz
+          path: dist/*
 
-  wheels:
+  yubikit-wheels:
     runs-on: ${{ matrix.os }}
-    name: Wheels - ${{ matrix.os }} ${{ matrix.target }}
+    name: yubikit wheels - ${{ matrix.os }} ${{ matrix.target }}
 
     strategy:
       fail-fast: false
@@ -68,7 +79,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist ${{ matrix.interpreter && format('--interpreter {0}', matrix.interpreter) || '--find-interpreter' }}
+          args: --manifest-path packages/yubikit/pyproject.toml --release --out dist ${{ matrix.interpreter && format('--interpreter {0}', matrix.interpreter) || '--find-interpreter' }}
           manylinux: manylinux_2_28
           container: ${{ matrix.container }}
           before-script-linux: ${{ matrix.container && 'dnf install -y pcsc-lite-devel systemd-devel' || '' }}
@@ -76,5 +87,5 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
-          name: ykman-wheels-${{ matrix.os }}-${{ matrix.target }}
+          name: yubikit-wheels-${{ matrix.os }}-${{ matrix.target }}
           path: dist/*.whl

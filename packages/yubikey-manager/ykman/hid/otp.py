@@ -1,4 +1,4 @@
-# Copyright (c) 2015 Yubico AB
+# Copyright (c) 2020 Yubico AB
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -25,42 +25,31 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import ctypes
 import logging
-import os
-import platform
-import sys
-import warnings
-from datetime import datetime
 
-from ykman import __version__ as ykman_version
-from ykman.logging import init_logging
-from ykman.util import get_windows_version
+from yubikit.core.otp import OtpConnection
 from yubikit.logging import LOG_LEVEL
+
+from _yubikit_native.hid import OtpConnection as _NativeOtpConnectionImpl
 
 logger = logging.getLogger(__name__)
 
 
-def log_sys_info(log):
-    log(f"ykman: {ykman_version}")
-    log(f"Python: {sys.version}")
-    log(f"Platform: {sys.platform}")
-    log(f"Arch: {platform.machine()}")
-    if sys.platform == "win32":
-        log(f"Windows version: {get_windows_version()}")
-        is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
-    else:
-        is_admin = os.getuid() == 0
-    log(f"Running as admin: {is_admin}")
-    log("System date: %s", datetime.today().strftime("%Y-%m-%d"))
+class _NativeOtpConnection(OtpConnection):
+    """OTP connection backed by the Rust HID implementation."""
 
+    def __init__(self, path: str):
+        self._path = path
+        self._native = _NativeOtpConnectionImpl(path)
 
-def setup(log_level_name, log_file=None):
-    warnings.warn(
-        "logging_setup.setup is deprecated, use logging.init_loging instead",
-        DeprecationWarning,
-    )
+    def close(self) -> None:
+        self._native.close()
 
-    log_level = LOG_LEVEL[log_level_name.upper()]
-    init_logging(log_level, log_file=log_file, replace=log_file is None)
-    log_sys_info(logger.debug)
+    def receive(self) -> bytes:
+        data = bytes(self._native.get_feature_report())
+        logger.log(LOG_LEVEL.TRAFFIC, "RECV: %s", data.hex())
+        return data
+
+    def send(self, data: bytes) -> None:
+        logger.log(LOG_LEVEL.TRAFFIC, "SEND: %s", data.hex())
+        self._native.set_feature_report(data)

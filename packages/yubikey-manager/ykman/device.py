@@ -29,9 +29,6 @@ import logging
 from threading import Event
 from typing import Callable, Iterable, Mapping, TypeAlias
 
-from _yubikit_native.device import NativeYubiKeyDevice
-from _yubikit_native.device import list_devices as _native_list_devices
-from _yubikit_native.device import scan_devices as _native_scan_devices
 from yubikit.core import PID, TRANSPORT, Connection
 from yubikit.core.fido import FidoConnection, SmartCardCtapDevice
 from yubikit.core.otp import OtpConnection
@@ -40,6 +37,10 @@ from yubikit.management import (
     DeviceInfo,
 )
 from yubikit.support import read_info  # noqa: F401 - re-exported
+
+from _yubikit_native.device import NativeYubiKeyDevice
+from _yubikit_native.device import list_devices as _native_list_devices
+from _yubikit_native.device import scan_devices as _native_scan_devices
 
 from .base import REINSERT_STATUS, CancelledException, YkmanDevice
 from .hid.fido import NativeFidoConnection

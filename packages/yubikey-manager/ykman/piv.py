@@ -44,7 +44,6 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa,
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.x509.oid import NameOID
-
 from yubikit.core import BadResponseError, NotSupportedError, Tlv
 from yubikit.core.smartcard import SW, ApduError
 from yubikit.piv import (

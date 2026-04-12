@@ -4,9 +4,10 @@ import logging
 from threading import Event
 from typing import Callable, Iterator
 
+from yubikit.core.fido import FidoConnection  # noqa: F401
+
 from _yubikit_native.hid import FidoConnection as _NativeFidoConnection
 from _yubikit_native.hid import list_fido_devices as _native_list_fido_devices
-from yubikit.core.fido import FidoConnection  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

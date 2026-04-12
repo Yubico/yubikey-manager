@@ -16,11 +16,12 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.abspath("../"))
+sys.path.insert(0, os.path.abspath("../packages/yubikit"))
+sys.path.insert(0, os.path.abspath("../packages/yubikey-manager"))
 
 
 def get_version():
-    with open("../ykman/__init__.py", "r") as f:
+    with open("../packages/yubikey-manager/ykman/__init__.py", "r") as f:
         match = re.search(r"(?m)^__version__\s*=\s*['\"](.+)['\"]$", f.read())
         return match.group(1)
 

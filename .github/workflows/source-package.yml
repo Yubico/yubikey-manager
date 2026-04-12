@@ -40,12 +40,13 @@ jobs:
       - name: Run unit tests
         run: uv run pytest
 
-      - name: Create source package
+      - name: Create source packages
         run: |
-          # poetry will by default set all timestamps to 0, which Debian doesn't allow
           export SOURCE_DATE_EPOCH=$(git show --no-patch --format=%ct)
-          uv build
+          uv build --package yubikit --sdist
+          uv build --package yubikey-manager
           mkdir artifacts
+          mv dist/yubikit-*.tar.gz artifacts/
           mv dist/yubikey_manager-*.tar.gz artifacts/
           mv dist/yubikey_manager-*.whl artifacts/
 

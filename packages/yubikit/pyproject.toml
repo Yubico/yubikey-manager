@@ -1,0 +1,29 @@
+[project]
+name = "yubikit"
+version = "5.9.1-dev.0"
+description = "Python library for managing YubiKey configuration."
+authors = [
+  { name = "Dain Nilsson", email = "dain@yubico.com" }
+]
+requires-python = ">=3.10, <4"
+license = "BSD-2-Clause"
+keywords = ["yubikey", "yubiotp", "piv", "fido"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "Topic :: Security :: Cryptography",
+  "Topic :: Utilities"
+]
+dependencies = [
+  "cryptography (>=3.0, <49)",
+  "fido2 (>=2.0, <3)",
+]
+
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+manifest-path = "../../crates/yubikit-pyo3/Cargo.toml"
+module-name = "_yubikit_native"
+python-packages = ["yubikit"]
