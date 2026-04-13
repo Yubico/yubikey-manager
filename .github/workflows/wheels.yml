@@ -5,45 +5,15 @@ on: [push, pull_request]
 permissions: read-all
 
 jobs:
-  sdist:
-    runs-on: ubuntu-latest
-    name: Build source distributions
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build sdist (yubikit)
-        uses: PyO3/maturin-action@v1
-        with:
-          command: sdist
-          args: --out dist
-          working-directory: packages/yubikit
-
-      - name: Build sdist (yubikey-manager)
-        uses: PyO3/maturin-action@v1
-        with:
-          command: sdist
-          args: --out dist
-          working-directory: packages/ykman
-
-      - name: Upload sdist
-        uses: actions/upload-artifact@v6
-        with:
-          name: ykman-sdist
-          path: |
-            packages/yubikit/dist/*
-            packages/ykman/dist/*
-
-  yubikit-wheels:
+  wheels:
     runs-on: ${{ matrix.os }}
-    name: yubikit wheels - ${{ matrix.os }} ${{ matrix.target }}
+    name: ${{ matrix.package }} wheels - ${{ matrix.os }} ${{ matrix.target }}
 
     strategy:
       fail-fast: false
       matrix:
+        package: [yubikit, ykman]
+        os: [ubuntu-latest, ubuntu-22.04-arm, macos-latest, windows-latest, windows-11-arm]
         include:
           - os: ubuntu-latest
             target: x86_64
@@ -53,14 +23,21 @@ jobs:
             container: quay.io/pypa/manylinux_2_28_aarch64
           - os: macos-latest
             target: universal2-apple-darwin
-            python-versions: "3.10\n3.11\n3.12\n3.13\n3.14"
           - os: windows-latest
             target: x64
-            python-versions: "3.10\n3.11\n3.12\n3.13\n3.14"
           - os: windows-11-arm
             target: aarch64
-            interpreter: 3.11 3.12 3.13 3.14
+          # yubikit needs explicit Python versions on non-Linux platforms
+          - package: yubikit
+            os: macos-latest
+            python-versions: "3.10\n3.11\n3.12\n3.13\n3.14"
+          - package: yubikit
+            os: windows-latest
+            python-versions: "3.10\n3.11\n3.12\n3.13\n3.14"
+          - package: yubikit
+            os: windows-11-arm
             python-versions: "3.11\n3.12\n3.13\n3.14"
+            interpreter: 3.11 3.12 3.13 3.14
 
     steps:
       - uses: actions/checkout@v6
@@ -72,7 +49,7 @@ jobs:
           python-version: ${{ matrix.python-versions }}
 
       - name: Install dependencies
-        if: "startsWith(matrix.os, 'ubuntu')"
+        if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update -qq
           sudo apt-get install -qq libpcsclite-dev libudev-dev
@@ -84,57 +61,14 @@ jobs:
           args: --release --out dist ${{ matrix.interpreter && format('--interpreter {0}', matrix.interpreter) || '--find-interpreter' }}
           manylinux: manylinux_2_28
           container: ${{ matrix.container }}
-          before-script-linux: ${{ matrix.container && 'dnf install -y pcsc-lite-devel systemd-devel' || '' }}
-          working-directory: packages/yubikit
+          before-script-linux: >-
+            ${{ matrix.container && (matrix.package == 'ykman'
+              && 'dnf install -y pcsc-lite-devel systemd-devel dbus-devel'
+              || 'dnf install -y pcsc-lite-devel systemd-devel') || '' }}
+          working-directory: packages/${{ matrix.package }}
 
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
-          name: yubikit-wheels-${{ matrix.os }}-${{ matrix.target }}
-          path: packages/yubikit/dist/*.whl
-
-  ykman-wheels:
-    runs-on: ${{ matrix.os }}
-    name: ykman wheels - ${{ matrix.os }} ${{ matrix.target }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64
-            container: quay.io/pypa/manylinux_2_28_x86_64
-          - os: ubuntu-22.04-arm
-            target: aarch64
-            container: quay.io/pypa/manylinux_2_28_aarch64
-          - os: macos-latest
-            target: universal2-apple-darwin
-          - os: windows-latest
-            target: x64
-          - os: windows-11-arm
-            target: aarch64
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install dependencies
-        if: "startsWith(matrix.os, 'ubuntu')"
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -qq libpcsclite-dev libudev-dev
-
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          args: --release --out dist --find-interpreter
-          manylinux: manylinux_2_28
-          container: ${{ matrix.container }}
-          before-script-linux: ${{ matrix.container && 'dnf install -y pcsc-lite-devel systemd-devel dbus-devel' || '' }}
-          working-directory: packages/ykman
-
-      - name: Upload wheels
-        uses: actions/upload-artifact@v6
-        with:
-          name: ykman-wheels-${{ matrix.os }}-${{ matrix.target }}
-          path: packages/ykman/dist/*.whl
+          name: ${{ matrix.package }}-wheels-${{ matrix.os }}-${{ matrix.target }}
+          path: packages/${{ matrix.package }}/dist/*.whl

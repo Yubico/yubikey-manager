@@ -19,7 +19,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.10"
+          python-version: "3.13"
 
       - name: Install dependencies
         run: |
@@ -49,39 +49,11 @@ jobs:
           mv dist/yubikit-*.tar.gz artifacts/
           mv dist/yubikey_manager-*.tar.gz artifacts/
 
-      - name: Upload artifact
+      - name: Upload source packages
         uses: actions/upload-artifact@v6
         with:
           name: yubikey-manager-source-package
           path: artifacts
-
-  docs:
-    runs-on: ubuntu-latest
-    name: Build sphinx documentation
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: 3.13
-
-      - name: Install python dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -qq swig libpcsclite-dev libudev-dev libdbus-1-dev
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install the project
-        run: uv sync --locked
 
       - name: Build sphinx documentation
         run: uv run make -C docs/ html
