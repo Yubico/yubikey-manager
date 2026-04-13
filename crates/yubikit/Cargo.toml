@@ -9,6 +9,7 @@ license = "BSD-2-Clause"
 aes = "0.8"
 aes-gcm = "0.10"
 base32 = "0.5"
+base64 = "0.22"
 cbc = { version = "0.1", features = ["alloc"] }
 cmac = "0.7"
 cipher = "0.4"

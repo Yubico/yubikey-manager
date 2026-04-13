@@ -25,23 +25,21 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-pub mod cbor;
-pub mod core;
-pub mod ctap;
-pub mod ctap2;
-pub mod device;
-pub mod fido;
-pub mod hsmauth;
-pub mod logging;
-pub mod management;
-pub mod oath;
-pub mod openpgp;
-pub mod otp;
-pub mod piv;
-pub mod scp;
-pub mod securitydomain;
-pub mod smartcard;
-pub mod tlv;
-pub mod transport;
-pub mod webauthn;
-pub mod yubiotp;
+//! WebAuthn client implementation.
+//!
+//! Provides [`WebAuthnClient`] for performing WebAuthn registration and
+//! authentication ceremonies using a CTAP2 authenticator, along with the
+//! WebAuthn types needed for the public API.
+
+mod client;
+pub mod types;
+
+pub use client::{ClientDataCollector, ClientError, UserInteraction, WebAuthnClient};
+pub use types::{
+    AttestationConveyancePreference, AuthenticationResponse, AuthenticatorAssertionResponse,
+    AuthenticatorAttachment, AuthenticatorAttestationResponse, AuthenticatorSelectionCriteria,
+    CollectedClientData, PublicKeyCredentialCreationOptions, PublicKeyCredentialDescriptor,
+    PublicKeyCredentialHint, PublicKeyCredentialParameters, PublicKeyCredentialRequestOptions,
+    PublicKeyCredentialRpEntity, PublicKeyCredentialType, PublicKeyCredentialUserEntity,
+    RegistrationResponse, ResidentKeyRequirement, UserVerificationRequirement,
+};
