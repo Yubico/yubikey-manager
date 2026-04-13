@@ -25,8 +25,6 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::BTreeMap;
-
 use zeroize::Zeroizing;
 
 use crate::cbor::{self, Value};
@@ -50,7 +48,7 @@ mod bio_cmd {
 
 /// Response map key constants for internal parsing.
 mod result_key {
-    pub const TEMPLATE_INFOS: u32 = 0x07;
+    pub const TEMPLATE_INFOS: i64 = 0x07;
 }
 
 /// CTAP2 BioEnrollment operations (§6.7).
@@ -128,7 +126,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
         auth: bool,
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+    ) -> Result<Value, Ctap2Error<C::Error>> {
         let mut params: Vec<(Value, Value)> = Vec::new();
         if let Some(m) = modality {
             params.push((Value::Int(0x01), Value::Int(m as i64)));
@@ -156,27 +154,8 @@ impl<C: Connection + 'static> BioEnrollment<C> {
         }
 
         let data = cbor::encode(&Value::Map(params));
-        let response =
-            self.session
-                .send_cbor(self.cmd_byte(), Some(&data), on_keepalive, cancel)?;
-
-        if response.is_empty() {
-            return Ok(BTreeMap::new());
-        }
-
-        let value = cbor::decode(&response)
-            .map_err(|e| Ctap2Error::InvalidResponse(format!("CBOR decode error: {e}")))?;
-        let map = value
-            .as_map()
-            .ok_or_else(|| Ctap2Error::InvalidResponse("Expected CBOR map".into()))?;
-
-        let mut result = BTreeMap::new();
-        for (k, v) in map {
-            if let Some(key) = k.as_int() {
-                result.insert(key as u32, v.clone());
-            }
-        }
-        Ok(result)
+        self.session
+            .send_cbor(self.cmd_byte(), Some(&data), on_keepalive, cancel)
     }
 
     /// Get fingerprint sensor info (type and max samples).
@@ -191,7 +170,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
             None,
             None,
         )?;
-        FingerprintSensorInfo::from_int_map(&resp)
+        FingerprintSensorInfo::from_cbor(&resp)
             .ok_or_else(|| Ctap2Error::InvalidResponse("invalid fingerprint sensor info".into()))
     }
 
@@ -215,7 +194,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
             on_keepalive,
             cancel,
         )?;
-        EnrollSampleResult::from_int_map(&resp)
+        EnrollSampleResult::from_cbor(&resp)
             .ok_or_else(|| Ctap2Error::InvalidResponse("invalid enroll result".into()))
     }
 
@@ -240,7 +219,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
             on_keepalive,
             cancel,
         )?;
-        EnrollSampleResult::from_int_map(&resp)
+        EnrollSampleResult::from_cbor(&resp)
             .ok_or_else(|| Ctap2Error::InvalidResponse("invalid enroll result".into()))
     }
 
@@ -270,11 +249,11 @@ impl<C: Connection + 'static> BioEnrollment<C> {
             None,
         )?;
         let infos = resp
-            .get(&result_key::TEMPLATE_INFOS)
+            .map_get_int(result_key::TEMPLATE_INFOS)
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(FingerprintTemplate::from_template_info)
+                    .filter_map(FingerprintTemplate::from_cbor)
                     .collect()
             })
             .unwrap_or_default();

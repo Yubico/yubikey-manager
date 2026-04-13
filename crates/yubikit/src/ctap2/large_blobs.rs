@@ -105,24 +105,13 @@ impl<C: Connection + 'static> LargeBlobs<C> {
             ];
 
             let encoded = cbor::encode(&Value::Map(params));
-            let response = self
+            let value = self
                 .session
                 .send_cbor(cmd::LARGE_BLOBS, Some(&encoded), None, None)?;
 
-            if response.is_empty() {
-                break;
-            }
-
-            let value = cbor::decode(&response)
-                .map_err(|e| Ctap2Error::InvalidResponse(format!("CBOR decode error: {e}")))?;
-            let map = value
-                .as_map()
-                .ok_or_else(|| Ctap2Error::InvalidResponse("Expected CBOR map".into()))?;
-
-            let fragment = map
-                .iter()
-                .find(|(k, _)| k.as_int() == Some(0x01))
-                .and_then(|(_, v)| v.as_bytes())
+            let fragment = value
+                .map_get_int(0x01)
+                .and_then(|v| v.as_bytes())
                 .ok_or_else(|| {
                     Ctap2Error::InvalidResponse(
                         "Missing config (0x01) in largeBlobs response".into(),

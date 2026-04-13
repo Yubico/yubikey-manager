@@ -25,8 +25,6 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::BTreeMap;
-
 use crate::cbor::{self, Value};
 use crate::core::Connection;
 use crate::ctap::CtapSession;
@@ -78,15 +76,16 @@ impl<C: Connection + 'static> Ctap2Session<C> {
     /// Send a CTAP2 CBOR command and parse the status + response.
     ///
     /// Frames the request as `[cmd_byte] ++ data` and sends it via the
-    /// underlying transport. Parses the response status byte and returns
-    /// the remaining response data on success.
+    /// underlying transport. Parses the response status byte, decodes the
+    /// CBOR payload and returns the parsed `Value` on success.
+    /// Returns `Value::Null` when the response contains no CBOR data.
     pub fn send_cbor(
         &mut self,
         cmd_byte: u8,
         data: Option<&[u8]>,
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Vec<u8>, Ctap2Error<C::Error>> {
+    ) -> Result<Value, Ctap2Error<C::Error>> {
         let mut request = vec![cmd_byte];
         if let Some(payload) = data {
             request.extend_from_slice(payload);
@@ -103,7 +102,12 @@ impl<C: Connection + 'static> Ctap2Session<C> {
             return Err(Ctap2Error::StatusError(status));
         }
 
-        Ok(response[1..].to_vec())
+        if response.len() == 1 {
+            return Ok(Value::Map(Vec::new()));
+        }
+
+        cbor::decode(&response[1..])
+            .map_err(|e| Ctap2Error::InvalidResponse(format!("CBOR decode error: {e}")))
     }
 
     /// authenticatorReset command.
@@ -138,9 +142,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
     /// Returns information about the authenticator's capabilities,
     /// supported protocol versions, extensions, and configuration.
     pub fn get_info(&mut self) -> Result<Info, Ctap2Error<C::Error>> {
-        let response = self.send_cbor(cmd::GET_INFO, None, None, None)?;
-        let value = cbor::decode(&response)
-            .map_err(|e| Ctap2Error::InvalidResponse(format!("CBOR decode error: {e}")))?;
+        let value = self.send_cbor(cmd::GET_INFO, None, None, None)?;
         let map = value
             .as_map()
             .ok_or_else(|| Ctap2Error::InvalidResponse("Expected CBOR map".into()))?;
@@ -180,20 +182,19 @@ impl<C: Connection + 'static> Ctap2Session<C> {
 
         let data = build_args_map(&[
             Some(Value::Bytes(client_data_hash.to_vec())), // 0x01
-            Some(rp.to_value()),                           // 0x02
-            Some(user.to_value()),                         // 0x03
+            Some(rp.to_cbor()),                            // 0x02
+            Some(user.to_cbor()),                          // 0x03
             Some(encode_pub_key_cred_params(pub_key_cred_params)), // 0x04
             exclude_list.map(encode_allow_exclude_list),   // 0x05
             extensions,                                    // 0x06
-            options.and_then(|o| o.to_value()),            // 0x07
+            options.and_then(|o| o.to_cbor()),             // 0x07
             pin_uv_param.map(|b| Value::Bytes(b.to_vec())), // 0x08
             pin_uv_protocol.map(|p| Value::Int(p as i64)), // 0x09
             enterprise_attestation.map(|e| Value::Int(e as i64)), // 0x0A
         ]);
 
-        let response = self.send_cbor(cmd::MAKE_CREDENTIAL, Some(&data), on_keepalive, cancel)?;
-        let map = Self::parse_int_map(&response)?;
-        AttestationResponse::from_int_map(map).map_err(Ctap2Error::InvalidResponse)
+        let value = self.send_cbor(cmd::MAKE_CREDENTIAL, Some(&data), on_keepalive, cancel)?;
+        AttestationResponse::from_cbor(&value).map_err(Ctap2Error::InvalidResponse)
     }
 
     /// authenticatorGetAssertion command (§6.2).
@@ -228,14 +229,13 @@ impl<C: Connection + 'static> Ctap2Session<C> {
             Some(Value::Bytes(client_data_hash.to_vec())),  // 0x02
             allow_list.map(encode_allow_exclude_list),      // 0x03
             extensions,                                     // 0x04
-            options.and_then(|o| o.to_value()),             // 0x05
+            options.and_then(|o| o.to_cbor()),              // 0x05
             pin_uv_param.map(|b| Value::Bytes(b.to_vec())), // 0x06
             pin_uv_protocol.map(|p| Value::Int(p as i64)),  // 0x07
         ]);
 
-        let response = self.send_cbor(cmd::GET_ASSERTION, Some(&data), on_keepalive, cancel)?;
-        let map = Self::parse_int_map(&response)?;
-        AssertionResponse::from_int_map(map).map_err(Ctap2Error::InvalidResponse)
+        let value = self.send_cbor(cmd::GET_ASSERTION, Some(&data), on_keepalive, cancel)?;
+        AssertionResponse::from_cbor(&value).map_err(Ctap2Error::InvalidResponse)
     }
 
     /// authenticatorGetNextAssertion command (§6.2.3).
@@ -244,33 +244,11 @@ impl<C: Connection + 'static> Ctap2Session<C> {
     /// credentials matched (numberOfCredentials > 1). Must be called
     /// immediately after `get_assertion` without any other commands.
     pub fn get_next_assertion(&mut self) -> Result<AssertionResponse, Ctap2Error<C::Error>> {
-        let response = self.send_cbor(cmd::GET_NEXT_ASSERTION, None, None, None)?;
-        let map = Self::parse_int_map(&response)?;
-        AssertionResponse::from_int_map(map).map_err(Ctap2Error::InvalidResponse)
+        let value = self.send_cbor(cmd::GET_NEXT_ASSERTION, None, None, None)?;
+        AssertionResponse::from_cbor(&value).map_err(Ctap2Error::InvalidResponse)
     }
 
-    /// Parse a CBOR response into an integer-keyed BTreeMap.
-    fn parse_int_map(response: &[u8]) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
-        if response.is_empty() {
-            return Ok(BTreeMap::new());
-        }
-
-        let value = cbor::decode(response)
-            .map_err(|e| Ctap2Error::InvalidResponse(format!("CBOR decode error: {e}")))?;
-        let map = value
-            .as_map()
-            .ok_or_else(|| Ctap2Error::InvalidResponse("Expected CBOR map".into()))?;
-
-        let mut result = BTreeMap::new();
-        for (k, v) in map {
-            if let Some(key) = k.as_int() {
-                result.insert(key as u32, v.clone());
-            }
-        }
-        Ok(result)
-    }
-
-    /// Send a raw authenticatorClientPIN command and return the parsed CBOR response map.
+    /// Send a raw authenticatorClientPIN command and return the parsed CBOR response.
     ///
     /// This is the low-level interface used by [`ClientPin`] for all PIN/UV operations.
     pub(crate) fn client_pin(
@@ -285,7 +263,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         permissions_rpid: Option<&str>,
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+    ) -> Result<Value, Ctap2Error<C::Error>> {
         // Build CBOR map with integer keys per CTAP2 spec §6.5.4
         let mut params: Vec<(Value, Value)> = Vec::new();
         params.push((Value::Int(0x01), Value::Int(pin_uv_protocol as i64)));
@@ -310,8 +288,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         }
 
         let data = cbor::encode(&Value::Map(params));
-        let response = self.send_cbor(cmd::CLIENT_PIN, Some(&data), on_keepalive, cancel)?;
-        Self::parse_int_map(&response)
+        self.send_cbor(cmd::CLIENT_PIN, Some(&data), on_keepalive, cancel)
     }
 }
 

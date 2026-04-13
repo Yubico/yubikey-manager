@@ -301,10 +301,11 @@ impl PyCtap2Session {
         } else {
             None
         };
-        let response = self
+        let value = self
             .get_session_mut()?
             .send_cbor(cmd, data, keepalive_ref, cancel_ref)
             .map_err(ctap2_err)?;
+        let response = cbor::encode(&value);
         Ok(PyBytes::new(py, &response))
     }
 
@@ -437,10 +438,11 @@ impl PyCtap2FidoSession {
         } else {
             None
         };
-        let response = self
+        let value = self
             .get_session_mut()?
             .send_cbor(cmd, data, keepalive_ref, cancel_ref)
             .map_err(ctap2_err)?;
+        let response = cbor::encode(&value);
         Ok(PyBytes::new(py, &response))
     }
 

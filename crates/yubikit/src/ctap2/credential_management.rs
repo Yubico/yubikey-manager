@@ -25,8 +25,6 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::BTreeMap;
-
 use zeroize::Zeroizing;
 
 use crate::cbor::{self, Value};
@@ -52,10 +50,10 @@ mod cred_mgmt_cmd {
 
 /// Response map key constants for internal parsing.
 mod result_key {
-    pub const EXISTING_CRED_COUNT: u32 = 0x01;
-    pub const MAX_REMAINING_COUNT: u32 = 0x02;
-    pub const TOTAL_RPS: u32 = 0x05;
-    pub const TOTAL_CREDENTIALS: u32 = 0x09;
+    pub const EXISTING_CRED_COUNT: i64 = 0x01;
+    pub const MAX_REMAINING_COUNT: i64 = 0x02;
+    pub const TOTAL_RPS: i64 = 0x05;
+    pub const TOTAL_CREDENTIALS: i64 = 0x09;
 }
 
 /// CTAP2 CredentialManagement operations (§6.8).
@@ -145,7 +143,7 @@ impl<C: Connection + 'static> CredentialManagement<C> {
         sub_cmd: u8,
         sub_cmd_params: Option<&Value>,
         auth: bool,
-    ) -> Result<BTreeMap<u32, Value>, Ctap2Error<C::Error>> {
+    ) -> Result<Value, Ctap2Error<C::Error>> {
         let mut params: Vec<(Value, Value)> = Vec::new();
         params.push((Value::Int(0x01), Value::Int(sub_cmd as i64)));
         if let Some(p) = sub_cmd_params {
@@ -163,27 +161,8 @@ impl<C: Connection + 'static> CredentialManagement<C> {
         }
 
         let data = cbor::encode(&Value::Map(params));
-        let response = self
-            .session
-            .send_cbor(self.cmd_byte(), Some(&data), None, None)?;
-
-        if response.is_empty() {
-            return Ok(BTreeMap::new());
-        }
-
-        let value = cbor::decode(&response)
-            .map_err(|e| Ctap2Error::InvalidResponse(format!("CBOR decode error: {e}")))?;
-        let map = value
-            .as_map()
-            .ok_or_else(|| Ctap2Error::InvalidResponse("Expected CBOR map".into()))?;
-
-        let mut result = BTreeMap::new();
-        for (k, v) in map {
-            if let Some(key) = k.as_int() {
-                result.insert(key as u32, v.clone());
-            }
-        }
-        Ok(result)
+        self.session
+            .send_cbor(self.cmd_byte(), Some(&data), None, None)
     }
 
     /// Get credential storage metadata.
@@ -192,13 +171,13 @@ impl<C: Connection + 'static> CredentialManagement<C> {
     pub fn get_metadata(&mut self) -> Result<(u32, u32), Ctap2Error<C::Error>> {
         let resp = self.call(cred_mgmt_cmd::GET_CREDS_METADATA, None, true)?;
         let existing = resp
-            .get(&result_key::EXISTING_CRED_COUNT)
+            .map_get_int(result_key::EXISTING_CRED_COUNT)
             .and_then(|v| v.as_int())
             .ok_or_else(|| {
                 Ctap2Error::InvalidResponse("missing existingResidentCredentialsCount".into())
             })? as u32;
         let remaining = resp
-            .get(&result_key::MAX_REMAINING_COUNT)
+            .map_get_int(result_key::MAX_REMAINING_COUNT)
             .and_then(|v| v.as_int())
             .ok_or_else(|| {
                 Ctap2Error::InvalidResponse(
@@ -212,7 +191,7 @@ impl<C: Connection + 'static> CredentialManagement<C> {
     pub fn enumerate_rps(&mut self) -> Result<Vec<RpInfo>, Ctap2Error<C::Error>> {
         let first = self.call(cred_mgmt_cmd::ENUMERATE_RPS_BEGIN, None, true)?;
         let total = first
-            .get(&result_key::TOTAL_RPS)
+            .map_get_int(result_key::TOTAL_RPS)
             .and_then(|v| v.as_int())
             .unwrap_or(0) as usize;
 
@@ -220,12 +199,12 @@ impl<C: Connection + 'static> CredentialManagement<C> {
             return Ok(Vec::new());
         }
 
-        let mut maps = Vec::with_capacity(total);
-        maps.push(first);
+        let mut values = Vec::with_capacity(total);
+        values.push(first);
         for _ in 1..total {
-            maps.push(self.call(cred_mgmt_cmd::ENUMERATE_RPS_NEXT, None, false)?);
+            values.push(self.call(cred_mgmt_cmd::ENUMERATE_RPS_NEXT, None, false)?);
         }
-        Ok(maps.iter().filter_map(RpInfo::from_int_map).collect())
+        Ok(values.iter().filter_map(RpInfo::from_cbor).collect())
     }
 
     /// Enumerate all credentials for a given RP ID hash.
@@ -236,7 +215,7 @@ impl<C: Connection + 'static> CredentialManagement<C> {
         let params = Value::Map(vec![(Value::Int(0x01), Value::Bytes(rp_id_hash.to_vec()))]);
         let first = self.call(cred_mgmt_cmd::ENUMERATE_CREDS_BEGIN, Some(&params), true)?;
         let total = first
-            .get(&result_key::TOTAL_CREDENTIALS)
+            .map_get_int(result_key::TOTAL_CREDENTIALS)
             .and_then(|v| v.as_int())
             .unwrap_or(0) as usize;
 
@@ -244,14 +223,14 @@ impl<C: Connection + 'static> CredentialManagement<C> {
             return Ok(Vec::new());
         }
 
-        let mut maps = Vec::with_capacity(total);
-        maps.push(first);
+        let mut values = Vec::with_capacity(total);
+        values.push(first);
         for _ in 1..total {
-            maps.push(self.call(cred_mgmt_cmd::ENUMERATE_CREDS_NEXT, None, false)?);
+            values.push(self.call(cred_mgmt_cmd::ENUMERATE_CREDS_NEXT, None, false)?);
         }
-        Ok(maps
+        Ok(values
             .iter()
-            .filter_map(CredentialInfo::from_int_map)
+            .filter_map(CredentialInfo::from_cbor)
             .collect())
     }
 
@@ -260,7 +239,7 @@ impl<C: Connection + 'static> CredentialManagement<C> {
         &mut self,
         credential_id: &PublicKeyCredentialDescriptor,
     ) -> Result<(), Ctap2Error<C::Error>> {
-        let params = Value::Map(vec![(Value::Int(0x02), credential_id.to_value())]);
+        let params = Value::Map(vec![(Value::Int(0x02), credential_id.to_cbor())]);
         self.call(cred_mgmt_cmd::DELETE_CREDENTIAL, Some(&params), true)?;
         Ok(())
     }
@@ -279,8 +258,8 @@ impl<C: Connection + 'static> CredentialManagement<C> {
             ));
         }
         let params = Value::Map(vec![
-            (Value::Int(0x02), credential_id.to_value()),
-            (Value::Int(0x03), user.to_value()),
+            (Value::Int(0x02), credential_id.to_cbor()),
+            (Value::Int(0x03), user.to_cbor()),
         ]);
         self.call(cred_mgmt_cmd::UPDATE_USER_INFO, Some(&params), true)?;
         Ok(())

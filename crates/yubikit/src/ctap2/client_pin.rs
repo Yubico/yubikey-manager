@@ -169,12 +169,12 @@ impl<C: Connection + 'static> ClientPin<C> {
             None,
         )?;
         let retries = resp
-            .get(&(ClientPinResult::PinRetries as u32))
+            .map_get_int(ClientPinResult::PinRetries as i64)
             .and_then(|v| v.as_int())
             .ok_or_else(|| Ctap2Error::InvalidResponse("missing pinRetries".into()))?
             as u32;
         let pcs = resp
-            .get(&(ClientPinResult::PowerCycleState as u32))
+            .map_get_int(ClientPinResult::PowerCycleState as i64)
             .and_then(|v| v.as_int())
             .map(|n| n as u32);
         Ok((retries, pcs))
@@ -195,7 +195,7 @@ impl<C: Connection + 'static> ClientPin<C> {
             None,
         )?;
         let retries = resp
-            .get(&(ClientPinResult::UvRetries as u32))
+            .map_get_int(ClientPinResult::UvRetries as i64)
             .and_then(|v| v.as_int())
             .ok_or_else(|| Ctap2Error::InvalidResponse("missing uvRetries".into()))?
             as u32;
@@ -299,7 +299,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         )?;
 
         let token_enc = resp
-            .get(&(ClientPinResult::PinUvToken as u32))
+            .map_get_int(ClientPinResult::PinUvToken as i64)
             .and_then(|v| v.as_bytes())
             .ok_or_else(|| Ctap2Error::InvalidResponse("missing pinUvToken".into()))?;
 
@@ -338,7 +338,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         )?;
 
         let token_enc = resp
-            .get(&(ClientPinResult::PinUvToken as u32))
+            .map_get_int(ClientPinResult::PinUvToken as i64)
             .and_then(|v| v.as_bytes())
             .ok_or_else(|| Ctap2Error::InvalidResponse("missing pinUvToken".into()))?;
 
@@ -393,7 +393,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         )?;
 
         let peer_key = resp
-            .get(&(ClientPinResult::KeyAgreement as u32))
+            .map_get_int(ClientPinResult::KeyAgreement as i64)
             .ok_or_else(|| Ctap2Error::InvalidResponse("missing keyAgreement".into()))?;
 
         self.protocol

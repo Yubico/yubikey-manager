@@ -440,7 +440,7 @@ impl Info {
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(PublicKeyCredentialParameters::from_value)
+                    .filter_map(PublicKeyCredentialParameters::from_cbor)
                     .collect()
             })
             .unwrap_or_default();

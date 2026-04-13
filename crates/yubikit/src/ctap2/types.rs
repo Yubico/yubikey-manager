@@ -29,9 +29,7 @@
 //!
 //! Typed representations of CTAP2 CBOR structures, replacing raw
 //! `Value` in public APIs. Each type provides CBOR serialization
-//! and deserialization via `to_value()` / `from_value()`.
-
-use std::collections::BTreeMap;
+//! and deserialization via `to_cbor()` / `from_cbor()`.
 
 use crate::cbor::Value;
 
@@ -56,7 +54,7 @@ impl PublicKeyCredentialRpEntity {
         }
     }
 
-    pub fn to_value(&self) -> Value {
+    pub(crate) fn to_cbor(&self) -> Value {
         let mut entries = vec![(Value::Text("id".into()), Value::Text(self.id.clone()))];
         if let Some(name) = &self.name {
             entries.push((Value::Text("name".into()), Value::Text(name.clone())));
@@ -64,7 +62,7 @@ impl PublicKeyCredentialRpEntity {
         Value::Map(entries)
     }
 
-    pub fn from_value(value: &Value) -> Option<Self> {
+    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
         let id = value.map_get_text("id")?.as_text()?.to_string();
         let name = value
             .map_get_text("name")
@@ -91,7 +89,7 @@ impl PublicKeyCredentialUserEntity {
         }
     }
 
-    pub fn to_value(&self) -> Value {
+    pub(crate) fn to_cbor(&self) -> Value {
         let mut entries = vec![(Value::Text("id".into()), Value::Bytes(self.id.clone()))];
         if let Some(name) = &self.name {
             entries.push((Value::Text("name".into()), Value::Text(name.clone())));
@@ -102,7 +100,7 @@ impl PublicKeyCredentialUserEntity {
         Value::Map(entries)
     }
 
-    pub fn from_value(value: &Value) -> Option<Self> {
+    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
         let id = value
             .map_get_text("id")
             .and_then(|v| v.as_bytes())
@@ -140,7 +138,7 @@ impl PublicKeyCredentialDescriptor {
         }
     }
 
-    pub fn to_value(&self) -> Value {
+    pub(crate) fn to_cbor(&self) -> Value {
         let mut entries = vec![
             (Value::Text("type".into()), Value::Text(self.type_.clone())),
             (Value::Text("id".into()), Value::Bytes(self.id.clone())),
@@ -154,7 +152,7 @@ impl PublicKeyCredentialDescriptor {
         Value::Map(entries)
     }
 
-    pub fn from_value(value: &Value) -> Option<Self> {
+    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
         let type_ = value
             .map_get_text("type")
             .and_then(|v| v.as_text())
@@ -200,14 +198,14 @@ impl PublicKeyCredentialParameters {
         Self::new(-7)
     }
 
-    pub fn to_value(&self) -> Value {
+    pub(crate) fn to_cbor(&self) -> Value {
         Value::Map(vec![
             (Value::Text("type".into()), Value::Text(self.type_.clone())),
             (Value::Text("alg".into()), Value::Int(self.alg)),
         ])
     }
 
-    pub fn from_value(value: &Value) -> Option<Self> {
+    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
         let type_ = value
             .map_get_text("type")
             .and_then(|v| v.as_text())
@@ -234,7 +232,7 @@ pub struct AuthenticatorOptions {
 }
 
 impl AuthenticatorOptions {
-    pub fn to_value(&self) -> Option<Value> {
+    pub(crate) fn to_cbor(&self) -> Option<Value> {
         let mut entries = Vec::new();
         if let Some(rk) = self.rk {
             entries.push((Value::Text("rk".into()), Value::Bool(rk)));
@@ -276,24 +274,27 @@ pub struct AttestationResponse {
 }
 
 impl AttestationResponse {
-    pub(crate) fn from_int_map(map: BTreeMap<u32, Value>) -> Result<Self, String> {
-        let fmt = map
-            .get(&0x01)
+    pub(crate) fn from_cbor(value: &Value) -> Result<Self, String> {
+        let fmt = value
+            .map_get_int(0x01)
             .and_then(|v| v.as_text())
             .ok_or("missing fmt (0x01)")?
             .to_string();
-        let auth_data = map
-            .get(&0x02)
+        let auth_data = value
+            .map_get_int(0x02)
             .and_then(|v| v.as_bytes())
             .ok_or("missing authData (0x02)")?
             .to_vec();
-        let att_stmt = map.get(&0x03).cloned().unwrap_or(Value::Map(Vec::new()));
-        let ep_att = map.get(&0x04).and_then(|v| v.as_bool());
-        let large_blob_key = map
-            .get(&0x05)
+        let att_stmt = value
+            .map_get_int(0x03)
+            .cloned()
+            .unwrap_or(Value::Map(Vec::new()));
+        let ep_att = value.map_get_int(0x04).and_then(|v| v.as_bool());
+        let large_blob_key = value
+            .map_get_int(0x05)
             .and_then(|v| v.as_bytes())
             .map(|b| b.to_vec());
-        let unsigned_extension_outputs = map.get(&0x06).cloned();
+        let unsigned_extension_outputs = value.map_get_int(0x06).cloned();
         Ok(Self {
             fmt,
             auth_data,
@@ -329,27 +330,30 @@ pub struct AssertionResponse {
 }
 
 impl AssertionResponse {
-    pub(crate) fn from_int_map(map: BTreeMap<u32, Value>) -> Result<Self, String> {
-        let credential = map
-            .get(&0x01)
-            .and_then(PublicKeyCredentialDescriptor::from_value);
-        let auth_data = map
-            .get(&0x02)
+    pub(crate) fn from_cbor(value: &Value) -> Result<Self, String> {
+        let credential = value
+            .map_get_int(0x01)
+            .and_then(PublicKeyCredentialDescriptor::from_cbor);
+        let auth_data = value
+            .map_get_int(0x02)
             .and_then(|v| v.as_bytes())
             .ok_or("missing authData (0x02)")?
             .to_vec();
-        let signature = map
-            .get(&0x03)
+        let signature = value
+            .map_get_int(0x03)
             .and_then(|v| v.as_bytes())
             .ok_or("missing signature (0x03)")?
             .to_vec();
-        let user = map
-            .get(&0x04)
-            .and_then(PublicKeyCredentialUserEntity::from_value);
-        let number_of_credentials = map.get(&0x05).and_then(|v| v.as_int()).map(|n| n as u32);
-        let user_selected = map.get(&0x06).and_then(|v| v.as_bool());
-        let large_blob_key = map
-            .get(&0x07)
+        let user = value
+            .map_get_int(0x04)
+            .and_then(PublicKeyCredentialUserEntity::from_cbor);
+        let number_of_credentials = value
+            .map_get_int(0x05)
+            .and_then(|v| v.as_int())
+            .map(|n| n as u32);
+        let user_selected = value.map_get_int(0x06).and_then(|v| v.as_bool());
+        let large_blob_key = value
+            .map_get_int(0x07)
             .and_then(|v| v.as_bytes())
             .map(|b| b.to_vec());
         Ok(Self {
@@ -378,12 +382,12 @@ pub struct RpInfo {
 }
 
 impl RpInfo {
-    pub(crate) fn from_int_map(map: &BTreeMap<u32, Value>) -> Option<Self> {
-        let rp = map
-            .get(&0x03)
-            .and_then(PublicKeyCredentialRpEntity::from_value)?;
-        let rp_id_hash = map
-            .get(&0x04)
+    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
+        let rp = value
+            .map_get_int(0x03)
+            .and_then(PublicKeyCredentialRpEntity::from_cbor)?;
+        let rp_id_hash = value
+            .map_get_int(0x04)
             .and_then(|v| v.as_bytes())
             .map(|b| b.to_vec())?;
         Some(Self { rp, rp_id_hash })
@@ -408,20 +412,23 @@ pub struct CredentialInfo {
 }
 
 impl CredentialInfo {
-    pub(crate) fn from_int_map(map: &BTreeMap<u32, Value>) -> Option<Self> {
-        let user = map
-            .get(&0x06)
-            .and_then(PublicKeyCredentialUserEntity::from_value)?;
-        let credential_id = map
-            .get(&0x07)
-            .and_then(PublicKeyCredentialDescriptor::from_value)?;
-        let public_key = map.get(&0x08)?.clone();
-        let cred_protect = map.get(&0x0A).and_then(|v| v.as_int()).map(|n| n as u32);
-        let large_blob_key = map
-            .get(&0x0B)
+    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
+        let user = value
+            .map_get_int(0x06)
+            .and_then(PublicKeyCredentialUserEntity::from_cbor)?;
+        let credential_id = value
+            .map_get_int(0x07)
+            .and_then(PublicKeyCredentialDescriptor::from_cbor)?;
+        let public_key = value.map_get_int(0x08)?.clone();
+        let cred_protect = value
+            .map_get_int(0x0A)
+            .and_then(|v| v.as_int())
+            .map(|n| n as u32);
+        let large_blob_key = value
+            .map_get_int(0x0B)
             .and_then(|v| v.as_bytes())
             .map(|b| b.to_vec());
-        let third_party_payment = map.get(&0x0C).and_then(|v| v.as_bool());
+        let third_party_payment = value.map_get_int(0x0C).and_then(|v| v.as_bool());
         Some(Self {
             user,
             credential_id,
@@ -447,10 +454,10 @@ pub struct FingerprintSensorInfo {
 }
 
 impl FingerprintSensorInfo {
-    pub(crate) fn from_int_map(map: &BTreeMap<u32, Value>) -> Option<Self> {
-        let fingerprint_kind = map.get(&0x02).and_then(|v| v.as_int())? as u32;
+    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
+        let fingerprint_kind = value.map_get_int(0x02).and_then(|v| v.as_int())? as u32;
         let max_capture_samples_required_for_enroll =
-            map.get(&0x03).and_then(|v| v.as_int())? as u32;
+            value.map_get_int(0x03).and_then(|v| v.as_int())? as u32;
         Some(Self {
             fingerprint_kind,
             max_capture_samples_required_for_enroll,
@@ -470,13 +477,13 @@ pub struct EnrollSampleResult {
 }
 
 impl EnrollSampleResult {
-    pub(crate) fn from_int_map(map: &BTreeMap<u32, Value>) -> Option<Self> {
-        let template_id = map
-            .get(&0x04)
+    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
+        let template_id = value
+            .map_get_int(0x04)
             .and_then(|v| v.as_bytes())
             .map(|b| b.to_vec())?;
-        let last_sample_status = map.get(&0x05).and_then(|v| v.as_int())? as u32;
-        let remaining_samples = map.get(&0x06).and_then(|v| v.as_int())? as u32;
+        let last_sample_status = value.map_get_int(0x05).and_then(|v| v.as_int())? as u32;
+        let remaining_samples = value.map_get_int(0x06).and_then(|v| v.as_int())? as u32;
         Some(Self {
             template_id,
             last_sample_status,
@@ -495,7 +502,7 @@ pub struct FingerprintTemplate {
 }
 
 impl FingerprintTemplate {
-    pub(crate) fn from_template_info(value: &Value) -> Option<Self> {
+    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
         let id = value
             .map_get_int(0x01)
             .and_then(|v| v.as_bytes())
@@ -513,13 +520,13 @@ impl FingerprintTemplate {
 // ---------------------------------------------------------------------------
 
 /// Encode a list of credential descriptors as a CBOR array.
-pub fn encode_allow_exclude_list(list: &[PublicKeyCredentialDescriptor]) -> Value {
-    Value::Array(list.iter().map(|d| d.to_value()).collect())
+pub(crate) fn encode_allow_exclude_list(list: &[PublicKeyCredentialDescriptor]) -> Value {
+    Value::Array(list.iter().map(|d| d.to_cbor()).collect())
 }
 
 /// Encode a list of credential parameters as a CBOR array.
-pub fn encode_pub_key_cred_params(params: &[PublicKeyCredentialParameters]) -> Value {
-    Value::Array(params.iter().map(|p| p.to_value()).collect())
+pub(crate) fn encode_pub_key_cred_params(params: &[PublicKeyCredentialParameters]) -> Value {
+    Value::Array(params.iter().map(|p| p.to_cbor()).collect())
 }
 
 #[cfg(test)]
@@ -532,8 +539,8 @@ mod tests {
             id: "example.com".into(),
             name: Some("Example".into()),
         };
-        let val = rp.to_value();
-        let rp2 = PublicKeyCredentialRpEntity::from_value(&val).unwrap();
+        let val = rp.to_cbor();
+        let rp2 = PublicKeyCredentialRpEntity::from_cbor(&val).unwrap();
         assert_eq!(rp, rp2);
     }
 
@@ -544,8 +551,8 @@ mod tests {
             name: Some("alice".into()),
             display_name: Some("Alice".into()),
         };
-        let val = user.to_value();
-        let user2 = PublicKeyCredentialUserEntity::from_value(&val).unwrap();
+        let val = user.to_cbor();
+        let user2 = PublicKeyCredentialUserEntity::from_cbor(&val).unwrap();
         assert_eq!(user, user2);
     }
 
@@ -556,23 +563,23 @@ mod tests {
             id: vec![0xAA, 0xBB, 0xCC],
             transports: Some(vec!["usb".into(), "nfc".into()]),
         };
-        let val = desc.to_value();
-        let desc2 = PublicKeyCredentialDescriptor::from_value(&val).unwrap();
+        let val = desc.to_cbor();
+        let desc2 = PublicKeyCredentialDescriptor::from_cbor(&val).unwrap();
         assert_eq!(desc, desc2);
     }
 
     #[test]
     fn test_credential_params_roundtrip() {
         let params = PublicKeyCredentialParameters::es256();
-        let val = params.to_value();
-        let params2 = PublicKeyCredentialParameters::from_value(&val).unwrap();
+        let val = params.to_cbor();
+        let params2 = PublicKeyCredentialParameters::from_cbor(&val).unwrap();
         assert_eq!(params, params2);
     }
 
     #[test]
     fn test_options_empty() {
         let opts = AuthenticatorOptions::default();
-        assert!(opts.to_value().is_none());
+        assert!(opts.to_cbor().is_none());
     }
 
     #[test]
@@ -581,18 +588,19 @@ mod tests {
             rk: Some(true),
             ..Default::default()
         };
-        let val = opts.to_value().unwrap();
+        let val = opts.to_cbor().unwrap();
         let map = val.as_map().unwrap();
         assert_eq!(map.len(), 1);
     }
 
     #[test]
     fn test_attestation_response_parse() {
-        let mut map = BTreeMap::new();
-        map.insert(0x01, Value::Text("none".into()));
-        map.insert(0x02, Value::Bytes(vec![0x00; 37]));
-        map.insert(0x03, Value::Map(vec![]));
-        let resp = AttestationResponse::from_int_map(map).unwrap();
+        let value = Value::Map(vec![
+            (Value::Int(0x01), Value::Text("none".into())),
+            (Value::Int(0x02), Value::Bytes(vec![0x00; 37])),
+            (Value::Int(0x03), Value::Map(vec![])),
+        ]);
+        let resp = AttestationResponse::from_cbor(&value).unwrap();
         assert_eq!(resp.fmt, "none");
         assert_eq!(resp.auth_data.len(), 37);
         assert!(resp.ep_att.is_none());
@@ -600,11 +608,12 @@ mod tests {
 
     #[test]
     fn test_assertion_response_parse() {
-        let mut map = BTreeMap::new();
-        map.insert(0x02, Value::Bytes(vec![0x00; 37]));
-        map.insert(0x03, Value::Bytes(vec![0xAA; 64]));
-        map.insert(0x05, Value::Int(3));
-        let resp = AssertionResponse::from_int_map(map).unwrap();
+        let value = Value::Map(vec![
+            (Value::Int(0x02), Value::Bytes(vec![0x00; 37])),
+            (Value::Int(0x03), Value::Bytes(vec![0xAA; 64])),
+            (Value::Int(0x05), Value::Int(3)),
+        ]);
+        let resp = AssertionResponse::from_cbor(&value).unwrap();
         assert!(resp.credential.is_none());
         assert_eq!(resp.auth_data.len(), 37);
         assert_eq!(resp.signature.len(), 64);
@@ -613,21 +622,23 @@ mod tests {
 
     #[test]
     fn test_fingerprint_sensor_info_parse() {
-        let mut map = BTreeMap::new();
-        map.insert(0x02, Value::Int(1));
-        map.insert(0x03, Value::Int(4));
-        let info = FingerprintSensorInfo::from_int_map(&map).unwrap();
+        let value = Value::Map(vec![
+            (Value::Int(0x02), Value::Int(1)),
+            (Value::Int(0x03), Value::Int(4)),
+        ]);
+        let info = FingerprintSensorInfo::from_cbor(&value).unwrap();
         assert_eq!(info.fingerprint_kind, 1);
         assert_eq!(info.max_capture_samples_required_for_enroll, 4);
     }
 
     #[test]
     fn test_enroll_sample_result_parse() {
-        let mut map = BTreeMap::new();
-        map.insert(0x04, Value::Bytes(vec![0x01, 0x02]));
-        map.insert(0x05, Value::Int(0));
-        map.insert(0x06, Value::Int(3));
-        let result = EnrollSampleResult::from_int_map(&map).unwrap();
+        let value = Value::Map(vec![
+            (Value::Int(0x04), Value::Bytes(vec![0x01, 0x02])),
+            (Value::Int(0x05), Value::Int(0)),
+            (Value::Int(0x06), Value::Int(3)),
+        ]);
+        let result = EnrollSampleResult::from_cbor(&value).unwrap();
         assert_eq!(result.template_id, vec![0x01, 0x02]);
         assert_eq!(result.last_sample_status, 0);
         assert_eq!(result.remaining_samples, 3);
@@ -646,7 +657,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .filter_map(FingerprintTemplate::from_template_info)
+            .filter_map(FingerprintTemplate::from_cbor)
             .collect();
         assert_eq!(templates.len(), 2);
         assert_eq!(templates[0].id, vec![0x01]);
@@ -657,40 +668,42 @@ mod tests {
 
     #[test]
     fn test_rp_info_parse() {
-        let mut map = BTreeMap::new();
-        map.insert(
-            0x03,
-            Value::Map(vec![(
-                Value::Text("id".into()),
-                Value::Text("example.com".into()),
-            )]),
-        );
-        map.insert(0x04, Value::Bytes(vec![0xAA; 32]));
-        let info = RpInfo::from_int_map(&map).unwrap();
+        let value = Value::Map(vec![
+            (
+                Value::Int(0x03),
+                Value::Map(vec![(
+                    Value::Text("id".into()),
+                    Value::Text("example.com".into()),
+                )]),
+            ),
+            (Value::Int(0x04), Value::Bytes(vec![0xAA; 32])),
+        ]);
+        let info = RpInfo::from_cbor(&value).unwrap();
         assert_eq!(info.rp.id, "example.com");
         assert_eq!(info.rp_id_hash.len(), 32);
     }
 
     #[test]
     fn test_credential_info_parse() {
-        let mut map = BTreeMap::new();
-        map.insert(
-            0x06,
-            Value::Map(vec![(
-                Value::Text("id".into()),
-                Value::Bytes(vec![0x01, 0x02]),
-            )]),
-        );
-        map.insert(
-            0x07,
-            Value::Map(vec![
-                (Value::Text("type".into()), Value::Text("public-key".into())),
-                (Value::Text("id".into()), Value::Bytes(vec![0xCC, 0xDD])),
-            ]),
-        );
-        map.insert(0x08, Value::Map(vec![])); // empty COSE key for test
-        map.insert(0x0A, Value::Int(2));
-        let info = CredentialInfo::from_int_map(&map).unwrap();
+        let value = Value::Map(vec![
+            (
+                Value::Int(0x06),
+                Value::Map(vec![(
+                    Value::Text("id".into()),
+                    Value::Bytes(vec![0x01, 0x02]),
+                )]),
+            ),
+            (
+                Value::Int(0x07),
+                Value::Map(vec![
+                    (Value::Text("type".into()), Value::Text("public-key".into())),
+                    (Value::Text("id".into()), Value::Bytes(vec![0xCC, 0xDD])),
+                ]),
+            ),
+            (Value::Int(0x08), Value::Map(vec![])), // empty COSE key for test
+            (Value::Int(0x0A), Value::Int(2)),
+        ]);
+        let info = CredentialInfo::from_cbor(&value).unwrap();
         assert_eq!(info.user.id, vec![0x01, 0x02]);
         assert_eq!(info.credential_id.id, vec![0xCC, 0xDD]);
         assert_eq!(info.cred_protect, Some(2));
