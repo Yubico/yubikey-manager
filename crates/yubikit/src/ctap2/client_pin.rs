@@ -47,14 +47,12 @@ mod client_pin_cmd {
 }
 
 /// ClientPin response map keys (§6.5.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-enum ClientPinResult {
-    KeyAgreement = 0x01,
-    PinUvToken = 0x02,
-    PinRetries = 0x03,
-    PowerCycleState = 0x04,
-    UvRetries = 0x05,
+mod client_pin_result_key {
+    pub const KEY_AGREEMENT: i64 = 0x01;
+    pub const PIN_UV_TOKEN: i64 = 0x02;
+    pub const PIN_RETRIES: i64 = 0x03;
+    pub const POWER_CYCLE_STATE: i64 = 0x04;
+    pub const UV_RETRIES: i64 = 0x05;
 }
 
 /// Permissions that can be associated with a PIN/UV token (§6.5.5.7).
@@ -169,12 +167,12 @@ impl<C: Connection + 'static> ClientPin<C> {
             None,
         )?;
         let retries = resp
-            .map_get_int(ClientPinResult::PinRetries as i64)
+            .map_get_int(client_pin_result_key::PIN_RETRIES)
             .and_then(|v| v.as_int())
             .ok_or_else(|| Ctap2Error::InvalidResponse("missing pinRetries".into()))?
             as u32;
         let pcs = resp
-            .map_get_int(ClientPinResult::PowerCycleState as i64)
+            .map_get_int(client_pin_result_key::POWER_CYCLE_STATE)
             .and_then(|v| v.as_int())
             .map(|n| n as u32);
         Ok((retries, pcs))
@@ -195,7 +193,7 @@ impl<C: Connection + 'static> ClientPin<C> {
             None,
         )?;
         let retries = resp
-            .map_get_int(ClientPinResult::UvRetries as i64)
+            .map_get_int(client_pin_result_key::UV_RETRIES)
             .and_then(|v| v.as_int())
             .ok_or_else(|| Ctap2Error::InvalidResponse("missing uvRetries".into()))?
             as u32;
@@ -299,7 +297,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         )?;
 
         let token_enc = resp
-            .map_get_int(ClientPinResult::PinUvToken as i64)
+            .map_get_int(client_pin_result_key::PIN_UV_TOKEN)
             .and_then(|v| v.as_bytes())
             .ok_or_else(|| Ctap2Error::InvalidResponse("missing pinUvToken".into()))?;
 
@@ -338,7 +336,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         )?;
 
         let token_enc = resp
-            .map_get_int(ClientPinResult::PinUvToken as i64)
+            .map_get_int(client_pin_result_key::PIN_UV_TOKEN)
             .and_then(|v| v.as_bytes())
             .ok_or_else(|| Ctap2Error::InvalidResponse("missing pinUvToken".into()))?;
 
@@ -393,7 +391,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         )?;
 
         let peer_key = resp
-            .map_get_int(ClientPinResult::KeyAgreement as i64)
+            .map_get_int(client_pin_result_key::KEY_AGREEMENT)
             .ok_or_else(|| Ctap2Error::InvalidResponse("missing keyAgreement".into()))?;
 
         self.protocol

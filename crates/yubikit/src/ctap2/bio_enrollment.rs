@@ -33,7 +33,7 @@ use crate::core::Connection;
 use super::pin_protocol::PinProtocol;
 use super::session::Ctap2Session;
 use super::types::{EnrollSampleResult, FingerprintSensorInfo, FingerprintTemplate};
-use super::{Ctap2Error, cmd};
+use super::{Ctap2Error, build_args_map, ctap2_cmd};
 
 /// Fingerprint bio-enrollment sub-command identifiers (§6.7).
 mod bio_cmd {
@@ -47,7 +47,7 @@ mod bio_cmd {
 }
 
 /// Response map key constants for internal parsing.
-mod result_key {
+mod bio_result_key {
     pub const TEMPLATE_INFOS: i64 = 0x07;
 }
 
@@ -112,9 +112,9 @@ impl<C: Connection + 'static> BioEnrollment<C> {
 
     fn cmd_byte(&self) -> u8 {
         if self.use_legacy {
-            cmd::BIO_ENROLLMENT_PRE
+            ctap2_cmd::BIO_ENROLLMENT_PRE
         } else {
-            cmd::BIO_ENROLLMENT
+            ctap2_cmd::BIO_ENROLLMENT
         }
     }
 
@@ -127,17 +127,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Value, Ctap2Error<C::Error>> {
-        let mut params: Vec<(Value, Value)> = Vec::new();
-        if let Some(m) = modality {
-            params.push((Value::Int(0x01), Value::Int(m as i64)));
-        }
-        if let Some(sc) = sub_cmd {
-            params.push((Value::Int(0x02), Value::Int(sc as i64)));
-        }
-        if let Some(p) = sub_cmd_params {
-            params.push((Value::Int(0x03), p.clone()));
-        }
-        if auth {
+        let (protocol_ver, pin_uv_param) = if auth {
             let mut msg: Vec<u8> = Vec::new();
             if let Some(m) = modality {
                 msg.push(m);
@@ -148,12 +138,22 @@ impl<C: Connection + 'static> BioEnrollment<C> {
             if let Some(p) = sub_cmd_params {
                 msg.extend_from_slice(&cbor::encode(p));
             }
-            let pin_uv_param = self.protocol.authenticate(&self.pin_token, &msg);
-            params.push((Value::Int(0x04), Value::Int(self.protocol.version() as i64)));
-            params.push((Value::Int(0x05), Value::Bytes(pin_uv_param)));
-        }
+            let param = self.protocol.authenticate(&self.pin_token, &msg);
+            (
+                Some(Value::Int(self.protocol.version() as i64)),
+                Some(Value::Bytes(param)),
+            )
+        } else {
+            (None, None)
+        };
 
-        let data = cbor::encode(&Value::Map(params));
+        let data = build_args_map(&[
+            modality.map(|m| Value::Int(m as i64)),  // 0x01
+            sub_cmd.map(|sc| Value::Int(sc as i64)), // 0x02
+            sub_cmd_params.cloned(),                 // 0x03
+            protocol_ver,                            // 0x04
+            pin_uv_param,                            // 0x05
+        ]);
         self.session
             .send_cbor(self.cmd_byte(), Some(&data), on_keepalive, cancel)
     }
@@ -249,7 +249,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
             None,
         )?;
         let infos = resp
-            .map_get_int(result_key::TEMPLATE_INFOS)
+            .map_get_int(bio_result_key::TEMPLATE_INFOS)
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()

@@ -35,7 +35,7 @@ use super::session::Ctap2Session;
 use super::types::{
     CredentialInfo, PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity, RpInfo,
 };
-use super::{Ctap2Error, cmd};
+use super::{Ctap2Error, build_args_map, ctap2_cmd};
 
 /// CredentialManagement sub-command identifiers (§6.8).
 mod cred_mgmt_cmd {
@@ -49,7 +49,7 @@ mod cred_mgmt_cmd {
 }
 
 /// Response map key constants for internal parsing.
-mod result_key {
+mod cred_mgmt_result_key {
     pub const EXISTING_CRED_COUNT: i64 = 0x01;
     pub const MAX_REMAINING_COUNT: i64 = 0x02;
     pub const TOTAL_RPS: i64 = 0x05;
@@ -132,9 +132,9 @@ impl<C: Connection + 'static> CredentialManagement<C> {
 
     fn cmd_byte(&self) -> u8 {
         if self.use_legacy {
-            cmd::CREDENTIAL_MGMT_PRE
+            ctap2_cmd::CREDENTIAL_MGMT_PRE
         } else {
-            cmd::CREDENTIAL_MGMT
+            ctap2_cmd::CREDENTIAL_MGMT
         }
     }
 
@@ -144,23 +144,26 @@ impl<C: Connection + 'static> CredentialManagement<C> {
         sub_cmd_params: Option<&Value>,
         auth: bool,
     ) -> Result<Value, Ctap2Error<C::Error>> {
-        let mut params: Vec<(Value, Value)> = Vec::new();
-        params.push((Value::Int(0x01), Value::Int(sub_cmd as i64)));
-        if let Some(p) = sub_cmd_params {
-            params.push((Value::Int(0x02), p.clone()));
-        }
-        if auth {
-            // pinUvAuthParam = authenticate(pinToken, [subCmd] ++ serialize(subCmdParams))
+        let (protocol_ver, pin_uv_param) = if auth {
             let mut msg = vec![sub_cmd];
             if let Some(p) = sub_cmd_params {
                 msg.extend_from_slice(&cbor::encode(p));
             }
-            let pin_uv_param = self.protocol.authenticate(&self.pin_token, &msg);
-            params.push((Value::Int(0x03), Value::Int(self.protocol.version() as i64)));
-            params.push((Value::Int(0x04), Value::Bytes(pin_uv_param)));
-        }
+            let param = self.protocol.authenticate(&self.pin_token, &msg);
+            (
+                Some(Value::Int(self.protocol.version() as i64)),
+                Some(Value::Bytes(param)),
+            )
+        } else {
+            (None, None)
+        };
 
-        let data = cbor::encode(&Value::Map(params));
+        let data = build_args_map(&[
+            Some(Value::Int(sub_cmd as i64)), // 0x01
+            sub_cmd_params.cloned(),          // 0x02
+            protocol_ver,                     // 0x03
+            pin_uv_param,                     // 0x04
+        ]);
         self.session
             .send_cbor(self.cmd_byte(), Some(&data), None, None)
     }
@@ -171,13 +174,13 @@ impl<C: Connection + 'static> CredentialManagement<C> {
     pub fn get_metadata(&mut self) -> Result<(u32, u32), Ctap2Error<C::Error>> {
         let resp = self.call(cred_mgmt_cmd::GET_CREDS_METADATA, None, true)?;
         let existing = resp
-            .map_get_int(result_key::EXISTING_CRED_COUNT)
+            .map_get_int(cred_mgmt_result_key::EXISTING_CRED_COUNT)
             .and_then(|v| v.as_int())
             .ok_or_else(|| {
                 Ctap2Error::InvalidResponse("missing existingResidentCredentialsCount".into())
             })? as u32;
         let remaining = resp
-            .map_get_int(result_key::MAX_REMAINING_COUNT)
+            .map_get_int(cred_mgmt_result_key::MAX_REMAINING_COUNT)
             .and_then(|v| v.as_int())
             .ok_or_else(|| {
                 Ctap2Error::InvalidResponse(
@@ -191,7 +194,7 @@ impl<C: Connection + 'static> CredentialManagement<C> {
     pub fn enumerate_rps(&mut self) -> Result<Vec<RpInfo>, Ctap2Error<C::Error>> {
         let first = self.call(cred_mgmt_cmd::ENUMERATE_RPS_BEGIN, None, true)?;
         let total = first
-            .map_get_int(result_key::TOTAL_RPS)
+            .map_get_int(cred_mgmt_result_key::TOTAL_RPS)
             .and_then(|v| v.as_int())
             .unwrap_or(0) as usize;
 
@@ -215,7 +218,7 @@ impl<C: Connection + 'static> CredentialManagement<C> {
         let params = Value::Map(vec![(Value::Int(0x01), Value::Bytes(rp_id_hash.to_vec()))]);
         let first = self.call(cred_mgmt_cmd::ENUMERATE_CREDS_BEGIN, Some(&params), true)?;
         let total = first
-            .map_get_int(result_key::TOTAL_CREDENTIALS)
+            .map_get_int(cred_mgmt_result_key::TOTAL_CREDENTIALS)
             .and_then(|v| v.as_int())
             .unwrap_or(0) as usize;
 

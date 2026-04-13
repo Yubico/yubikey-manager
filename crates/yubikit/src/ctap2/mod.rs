@@ -47,7 +47,7 @@ use std::collections::BTreeMap;
 use hkdf::Hkdf;
 use sha2::Sha256;
 
-use crate::cbor::Value;
+use crate::cbor::{self, Value};
 use crate::ctap::CtapError;
 
 pub use bio_enrollment::BioEnrollment;
@@ -70,7 +70,7 @@ pub use types::{
 
 /// CTAP2 authenticator command identifiers.
 #[allow(dead_code)]
-pub(crate) mod cmd {
+pub(crate) mod ctap2_cmd {
     pub const MAKE_CREDENTIAL: u8 = 0x01;
     pub const GET_ASSERTION: u8 = 0x02;
     pub const GET_INFO: u8 = 0x04;
@@ -84,6 +84,19 @@ pub(crate) mod cmd {
     pub const CONFIG: u8 = 0x0D;
     pub const BIO_ENROLLMENT_PRE: u8 = 0x40;
     pub const CREDENTIAL_MGMT_PRE: u8 = 0x41;
+}
+
+/// Build a CBOR map with sequential integer keys (1, 2, 3, ...) from positional args.
+///
+/// `None` entries are skipped (their key position is still consumed).
+pub(crate) fn build_args_map(args: &[Option<Value>]) -> Vec<u8> {
+    let mut params: Vec<(Value, Value)> = Vec::new();
+    for (i, arg) in args.iter().enumerate() {
+        if let Some(val) = arg {
+            params.push((Value::Int((i + 1) as i64), val.clone()));
+        }
+    }
+    cbor::encode(&Value::Map(params))
 }
 
 // ---------------------------------------------------------------------------

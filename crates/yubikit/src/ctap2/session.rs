@@ -33,7 +33,7 @@ use super::types::{
     AssertionResponse, AttestationResponse, AuthenticatorOptions, PublicKeyCredentialDescriptor,
     PublicKeyCredentialParameters, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
 };
-use super::{Ctap2Error, CtapStatus, Info, cmd};
+use super::{Ctap2Error, CtapStatus, Info, build_args_map, ctap2_cmd};
 
 /// CTAP2 protocol session.
 ///
@@ -119,7 +119,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<(), Ctap2Error<C::Error>> {
-        self.send_cbor(cmd::RESET, None, on_keepalive, cancel)?;
+        self.send_cbor(ctap2_cmd::RESET, None, on_keepalive, cancel)?;
         Ok(())
     }
 
@@ -133,7 +133,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<(), Ctap2Error<C::Error>> {
-        self.send_cbor(cmd::SELECTION, None, on_keepalive, cancel)?;
+        self.send_cbor(ctap2_cmd::SELECTION, None, on_keepalive, cancel)?;
         Ok(())
     }
 
@@ -142,7 +142,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
     /// Returns information about the authenticator's capabilities,
     /// supported protocol versions, extensions, and configuration.
     pub fn get_info(&mut self) -> Result<Info, Ctap2Error<C::Error>> {
-        let value = self.send_cbor(cmd::GET_INFO, None, None, None)?;
+        let value = self.send_cbor(ctap2_cmd::GET_INFO, None, None, None)?;
         let map = value
             .as_map()
             .ok_or_else(|| Ctap2Error::InvalidResponse("Expected CBOR map".into()))?;
@@ -193,7 +193,12 @@ impl<C: Connection + 'static> Ctap2Session<C> {
             enterprise_attestation.map(|e| Value::Int(e as i64)), // 0x0A
         ]);
 
-        let value = self.send_cbor(cmd::MAKE_CREDENTIAL, Some(&data), on_keepalive, cancel)?;
+        let value = self.send_cbor(
+            ctap2_cmd::MAKE_CREDENTIAL,
+            Some(&data),
+            on_keepalive,
+            cancel,
+        )?;
         AttestationResponse::from_cbor(&value).map_err(Ctap2Error::InvalidResponse)
     }
 
@@ -234,7 +239,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
             pin_uv_protocol.map(|p| Value::Int(p as i64)),  // 0x07
         ]);
 
-        let value = self.send_cbor(cmd::GET_ASSERTION, Some(&data), on_keepalive, cancel)?;
+        let value = self.send_cbor(ctap2_cmd::GET_ASSERTION, Some(&data), on_keepalive, cancel)?;
         AssertionResponse::from_cbor(&value).map_err(Ctap2Error::InvalidResponse)
     }
 
@@ -244,7 +249,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
     /// credentials matched (numberOfCredentials > 1). Must be called
     /// immediately after `get_assertion` without any other commands.
     pub fn get_next_assertion(&mut self) -> Result<AssertionResponse, Ctap2Error<C::Error>> {
-        let value = self.send_cbor(cmd::GET_NEXT_ASSERTION, None, None, None)?;
+        let value = self.send_cbor(ctap2_cmd::GET_NEXT_ASSERTION, None, None, None)?;
         AssertionResponse::from_cbor(&value).map_err(Ctap2Error::InvalidResponse)
     }
 
@@ -264,43 +269,18 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Value, Ctap2Error<C::Error>> {
-        // Build CBOR map with integer keys per CTAP2 spec §6.5.4
-        let mut params: Vec<(Value, Value)> = Vec::new();
-        params.push((Value::Int(0x01), Value::Int(pin_uv_protocol as i64)));
-        params.push((Value::Int(0x02), Value::Int(sub_cmd as i64)));
-        if let Some(ka) = key_agreement {
-            params.push((Value::Int(0x03), ka.clone()));
-        }
-        if let Some(param) = pin_uv_param {
-            params.push((Value::Int(0x04), Value::Bytes(param.to_vec())));
-        }
-        if let Some(enc) = new_pin_enc {
-            params.push((Value::Int(0x05), Value::Bytes(enc.to_vec())));
-        }
-        if let Some(enc) = pin_hash_enc {
-            params.push((Value::Int(0x06), Value::Bytes(enc.to_vec())));
-        }
-        if let Some(p) = permissions {
-            params.push((Value::Int(0x09), Value::Int(p as i64)));
-        }
-        if let Some(rpid) = permissions_rpid {
-            params.push((Value::Int(0x0A), Value::Text(rpid.to_string())));
-        }
-
-        let data = cbor::encode(&Value::Map(params));
-        self.send_cbor(cmd::CLIENT_PIN, Some(&data), on_keepalive, cancel)
+        let data = build_args_map(&[
+            Some(Value::Int(pin_uv_protocol as i64)),             // 0x01
+            Some(Value::Int(sub_cmd as i64)),                     // 0x02
+            key_agreement.cloned(),                               // 0x03
+            pin_uv_param.map(|b| Value::Bytes(b.to_vec())),       // 0x04
+            new_pin_enc.map(|b| Value::Bytes(b.to_vec())),        // 0x05
+            pin_hash_enc.map(|b| Value::Bytes(b.to_vec())),       // 0x06
+            None,                                                 // 0x07 (unused)
+            None,                                                 // 0x08 (unused)
+            permissions.map(|p| Value::Int(p as i64)),            // 0x09
+            permissions_rpid.map(|s| Value::Text(s.to_string())), // 0x0A
+        ]);
+        self.send_cbor(ctap2_cmd::CLIENT_PIN, Some(&data), on_keepalive, cancel)
     }
-}
-
-/// Build a CBOR map with sequential integer keys (1, 2, 3, ...) from positional args.
-///
-/// `None` entries are skipped (their key position is still consumed).
-fn build_args_map(args: &[Option<Value>]) -> Vec<u8> {
-    let mut params: Vec<(Value, Value)> = Vec::new();
-    for (i, arg) in args.iter().enumerate() {
-        if let Some(val) = arg {
-            params.push((Value::Int((i + 1) as i64), val.clone()));
-        }
-    }
-    cbor::encode(&Value::Map(params))
 }

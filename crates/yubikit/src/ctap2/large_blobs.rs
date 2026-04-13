@@ -39,7 +39,7 @@ use crate::core::Connection;
 
 use super::pin_protocol::PinProtocol;
 use super::session::Ctap2Session;
-use super::{Ctap2Error, cmd};
+use super::{Ctap2Error, ctap2_cmd};
 
 /// CTAP2 Large Blobs operations (§6.10).
 ///
@@ -105,9 +105,9 @@ impl<C: Connection + 'static> LargeBlobs<C> {
             ];
 
             let encoded = cbor::encode(&Value::Map(params));
-            let value = self
-                .session
-                .send_cbor(cmd::LARGE_BLOBS, Some(&encoded), None, None)?;
+            let value =
+                self.session
+                    .send_cbor(ctap2_cmd::LARGE_BLOBS, Some(&encoded), None, None)?;
 
             let fragment = value
                 .map_get_int(0x01)
@@ -182,7 +182,7 @@ impl<C: Connection + 'static> LargeBlobs<C> {
 
             let encoded = cbor::encode(&Value::Map(params));
             self.session
-                .send_cbor(cmd::LARGE_BLOBS, Some(&encoded), None, None)?;
+                .send_cbor(ctap2_cmd::LARGE_BLOBS, Some(&encoded), None, None)?;
 
             offset = end;
         }

@@ -32,7 +32,7 @@ use crate::core::Connection;
 
 use super::pin_protocol::PinProtocol;
 use super::session::Ctap2Session;
-use super::{Ctap2Error, cmd};
+use super::{Ctap2Error, build_args_map, ctap2_cmd};
 
 /// Config sub-command identifiers (§6.11).
 mod config_cmd {
@@ -104,27 +104,32 @@ impl<C: Connection + 'static> Config<C> {
         sub_cmd: u8,
         sub_cmd_params: Option<&Value>,
     ) -> Result<(), Ctap2Error<C::Error>> {
-        let mut params: Vec<(Value, Value)> = Vec::new();
-        params.push((Value::Int(0x01), Value::Int(sub_cmd as i64)));
-        if let Some(p) = sub_cmd_params {
-            params.push((Value::Int(0x02), p.clone()));
-        }
-        if let (Some(protocol), Some(pin_token)) = (&self.protocol, &self.pin_token) {
-            // Auth message: 0xff*32 || 0x0d || subCmd || serialize(subCmdParams)
-            let mut msg = vec![0xff; 32];
-            msg.push(cmd::CONFIG);
-            msg.push(sub_cmd);
-            if let Some(p) = sub_cmd_params {
-                msg.extend_from_slice(&cbor::encode(p));
-            }
-            let pin_uv_param = protocol.authenticate(pin_token, &msg);
-            params.push((Value::Int(0x03), Value::Int(protocol.version() as i64)));
-            params.push((Value::Int(0x04), Value::Bytes(pin_uv_param)));
-        }
+        let (protocol_ver, pin_uv_param) =
+            if let (Some(protocol), Some(pin_token)) = (&self.protocol, &self.pin_token) {
+                // Auth message: 0xff*32 || 0x0d || subCmd || serialize(subCmdParams)
+                let mut msg = vec![0xff; 32];
+                msg.push(ctap2_cmd::CONFIG);
+                msg.push(sub_cmd);
+                if let Some(p) = sub_cmd_params {
+                    msg.extend_from_slice(&cbor::encode(p));
+                }
+                let param = protocol.authenticate(pin_token, &msg);
+                (
+                    Some(Value::Int(protocol.version() as i64)),
+                    Some(Value::Bytes(param)),
+                )
+            } else {
+                (None, None)
+            };
 
-        let data = cbor::encode(&Value::Map(params));
+        let data = build_args_map(&[
+            Some(Value::Int(sub_cmd as i64)), // 0x01
+            sub_cmd_params.cloned(),          // 0x02
+            protocol_ver,                     // 0x03
+            pin_uv_param,                     // 0x04
+        ]);
         self.session
-            .send_cbor(cmd::CONFIG, Some(&data), None, None)?;
+            .send_cbor(ctap2_cmd::CONFIG, Some(&data), None, None)?;
         Ok(())
     }
 
