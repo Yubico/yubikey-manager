@@ -30,9 +30,7 @@
 use crate::cbor;
 use crate::core::Connection;
 use crate::ctap2::types::AuthenticatorOptions;
-use crate::ctap2::{
-    ClientPin, Ctap2Error, Ctap2Session, CtapStatus, Info, Permissions, PinProtocol,
-};
+use crate::ctap2::{ClientPin, Ctap2Error, Ctap2Session, CtapStatus, Permissions, PinProtocol};
 
 use super::extensions::{self, prf};
 use super::types::{
@@ -138,11 +136,6 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
     /// Consume the client and return the underlying session.
     pub fn into_session(self) -> Ctap2Session<C> {
         self.session.expect("session already taken")
-    }
-
-    /// Reference to the cached authenticator info.
-    pub fn info(&self) -> &Info {
-        self.session().info()
     }
 
     fn session(&self) -> &Ctap2Session<C> {

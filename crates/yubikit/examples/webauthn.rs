@@ -25,7 +25,7 @@ use yubikit::webauthn::{
 };
 
 fn main() {
-    let mut client = open_client();
+    let (mut client, _info) = open_client();
 
     // -- Registration --
     println!("\n━━━ Registration ━━━");

@@ -29,9 +29,8 @@ use yubikit::webauthn::{
 };
 
 fn main() {
-    let mut client = open_client();
+    let (mut client, info) = open_client();
 
-    let info = client.info().clone();
     if !info.extensions.iter().any(|e| e == "hmac-secret") {
         eprintln!("Authenticator does not support hmac-secret / PRF.");
         std::process::exit(1);

@@ -6,7 +6,7 @@
 use std::io::{self, Write};
 
 use yubikit::ctap::CtapSession;
-use yubikit::ctap2::{Ctap2Session, Permissions};
+use yubikit::ctap2::{Ctap2Session, Info, Permissions};
 use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::webauthn::{
     ClientDataCollector, CollectedClientData, PublicKeyCredentialCreationOptions,
@@ -96,8 +96,12 @@ pub fn hex(bytes: &[u8]) -> String {
 
 /// Discover a FIDO HID device and create a [`WebAuthnClient`].
 ///
+/// Returns the client and the authenticator [`Info`].
 /// Prints device information and exits the process if no device is found.
-pub fn open_client() -> WebAuthnClient<HidFidoConnection, ConsoleInteraction, SimpleCollector> {
+pub fn open_client() -> (
+    WebAuthnClient<HidFidoConnection, ConsoleInteraction, SimpleCollector>,
+    Info,
+) {
     let devices = list_fido_devices().expect("failed to list HID devices");
     let dev = devices.first().unwrap_or_else(|| {
         eprintln!("No FIDO HID devices found. Insert a security key and try again.");
@@ -115,6 +119,10 @@ pub fn open_client() -> WebAuthnClient<HidFidoConnection, ConsoleInteraction, Si
         }
     };
     let session = Ctap2Session::new(ctap).expect("CTAP2 init failed");
+    let info = session.info().clone();
 
-    WebAuthnClient::new(session, ConsoleInteraction, SimpleCollector)
+    (
+        WebAuthnClient::new(session, ConsoleInteraction, SimpleCollector),
+        info,
+    )
 }

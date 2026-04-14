@@ -25,9 +25,8 @@ use yubikit::webauthn::{
 };
 
 fn main() {
-    let mut client = open_client();
+    let (mut client, info) = open_client();
 
-    let info = client.info().clone();
     if !info.extensions.iter().any(|e| e == "credBlob") {
         eprintln!("Authenticator does not support credBlob.");
         std::process::exit(1);

@@ -25,9 +25,8 @@ use yubikit::webauthn::{
 };
 
 fn main() {
-    let mut client = open_client();
+    let (mut client, info) = open_client();
 
-    let info = client.info().clone();
     let has_min_pin = info.extensions.iter().any(|e| e == "minPinLength");
     println!("✓ credProps: always available (client-side)");
     println!(

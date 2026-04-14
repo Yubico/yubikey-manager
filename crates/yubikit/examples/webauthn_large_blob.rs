@@ -28,9 +28,8 @@ use yubikit::webauthn::{
 };
 
 fn main() {
-    let mut client = open_client();
+    let (mut client, info) = open_client();
 
-    let info = client.info().clone();
     if info.options.get("largeBlobs") != Some(&true) {
         eprintln!("Authenticator does not support largeBlobs.");
         std::process::exit(1);
