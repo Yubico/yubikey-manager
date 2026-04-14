@@ -6,75 +6,48 @@ permissions: read-all
 
 jobs:
   build:
+    runs-on: ${{ matrix.os }}
+    name: Build - ${{ matrix.os }}
 
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: ykman-builds-windows-x64
+          - os: windows-11-arm
+            artifact: ykman-builds-windows-arm64
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version-file: ".python-version"
-
-      - name: Install the project
-        run: uv sync --locked
-
-      - name: Run pre-commit hooks
-        run: |
-          uv tool install pre-commit
-          pre-commit run --all-files --verbose
-
-      - name: Run unit tests
-        run: uv run pytest -v
-
-      - name: Build
-        run: uv build
-
-      - name: Install from tar.gz
+      - name: Build Rust CLI
         shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install dist/*.tar.gz
-          ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-          pip uninstall -y yubikey-manager
-
-      - name: Install from wheel
-        shell: bash
-        run: |
-          pip install dist/*.whl
-          ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-          pip uninstall -y yubikey-manager
-
-      - name: PyInstaller
-        shell: bash
-        run: |
-          uv run pyinstaller ykman.spec
+          cargo build --release -p ykman-cli
+          mkdir -p dist/ykman
+          cp target/release/ykman.exe dist/ykman/
           dist/ykman/ykman.exe --version
-          [[ -z "$(dist/ykman/ykman.exe --version | grep -E "not found|missing")" ]]
 
       - name: Copy scripts
         shell: bash
         run: cp -r resources/win dist/scripts
 
       - name: Build installer
+        if: matrix.os == 'windows-latest'
         working-directory: ./dist
         run: .\scripts\make_msi.ps1
 
       - name: Upload build
         uses: actions/upload-artifact@v6
         with:
-          name: ykman-builds-windows
+          name: ${{ matrix.artifact }}
           path: dist
 
-  sign-exe-dll:
+  sign-exe:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [build]
     runs-on: ubuntu-latest
@@ -93,6 +66,7 @@ jobs:
       - name: download artifacts
         uses: actions/download-artifact@v5
         with:
+          name: ykman-builds-windows-x64
           path: ykman-builds-windows
 
       - name: docker login
@@ -109,7 +83,7 @@ jobs:
           echo "${GAC}" > scribe_sa.json
           echo "GOOGLE_APPLICATION_CREDENTIALS=/scribe/scribe_sa.json" >> $GITHUB_ENV
 
-      - name: run scribe sign exe and dlls
+      - name: run scribe sign exe
         run: >
           docker run
           --user $(id -u):$(id -g)
@@ -123,7 +97,7 @@ jobs:
           --synchronous
           --download-artifacts
 
-      - name: unpack signed exe and dlls
+      - name: unpack signed exe
         run: |
           mkdir -p signed
           mv scribe-download/*/sign-source/1.zip signed/
@@ -133,8 +107,6 @@ jobs:
           rm 1.zip
           cd ..
           cp signed/ykman.exe ykman-builds-windows/ykman/ykman.exe
-          cp signed/pythoncom314.dll ykman-builds-windows/ykman/_internal/pywin32_system32/pythoncom314.dll
-          cp signed/pywintypes314.dll ykman-builds-windows/ykman/_internal/pywin32_system32/pywintypes314.dll
 
       - name: upload signed artifacts
         uses: actions/upload-artifact@v4
@@ -143,7 +115,7 @@ jobs:
           path: ykman-builds-windows
 
   build-msi:
-    needs: [sign-exe-dll]
+    needs: [sign-exe]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -151,17 +123,18 @@ jobs:
       - name: download artifacts
         uses: actions/download-artifact@v5
         with:
+          name: signed-files
           path: ykman-builds-windows
 
       - name: Build installer
-        working-directory: .\ykman-builds-windows\signed-files\
+        working-directory: .\ykman-builds-windows
         run: .\scripts\make_msi.ps1
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: ykman-installer-windows
-          path: .\ykman-builds-windows\signed-files\
+          path: .\ykman-builds-windows
 
   sign-msi:
     needs: [build-msi]
@@ -173,6 +146,7 @@ jobs:
     - name: download artifacts
       uses: actions/download-artifact@v5
       with:
+        name: ykman-installer-windows
         path: ykman-builds-windows
 
     - name: docker login
@@ -212,24 +186,10 @@ jobs:
         unzip -j 1.zip || true
         rm 1.zip
         cd ..
-        cp signed/ykman.msi ykman-builds-windows/ykman-installer-windows/ykman.msi
+        cp signed/ykman.msi ykman-builds-windows/ykman.msi
 
     - name: upload signed artifacts
       uses: actions/upload-artifact@v4
       with:
         name: signed-files-and-msi
-        path: ykman-builds-windows/ykman-installer-windows
-
-  verify-signatures:
-    needs: [sign-msi]
-    runs-on: windows-latest
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v5
-        with:
-          name: signed-files-and-msi
-          path: ykman-builds-windows/ykman-installer-windows
-
-      - name: Check for unsigned DLLs
-        working-directory: .\ykman-builds-windows\ykman-installer-windows
-        run: .\scripts\verify_dll.ps1
+        path: ykman-builds-windows

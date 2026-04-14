@@ -1,0 +1,19 @@
+[package]
+name = "yubikit-pyo3"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "_yubikit_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+yubikit = { path = "../yubikit" }
+pyo3 = { version = "0.25", features = ["extension-module"] }
+log = "0.4"
+p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+elliptic-curve = { version = "0.13", features = ["sec1"] }
+
+
+[lints]
+workspace = true

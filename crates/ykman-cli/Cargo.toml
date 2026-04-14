@@ -1,0 +1,67 @@
+[package]
+name = "ykman-cli"
+version = "6.0.0-dev.0"
+edition = "2024"
+description = "YubiKey Manager CLI (Rust)"
+license = "BSD-2-Clause"
+
+[lib]
+name = "ykman_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ykman"
+path = "src/main.rs"
+
+[[example]]
+name = "fido_selection"
+path = "examples/fido_selection.rs"
+
+[dependencies]
+yubikit = { path = "../yubikit" }
+clap = { version = "4", features = ["derive"] }
+chrono = "0.4"
+getrandom = "0.3"
+hex = "0.4.3"
+base32 = "0.5"
+base64 = "0.22.1"
+log = { version = "0.4", features = ["std"] }
+elliptic-curve = { version = "0.13", features = ["pkcs8", "sec1"] }
+p256 = { version = "0.13", features = ["pkcs8", "ecdsa"] }
+p384 = { version = "0.13", features = ["pkcs8", "ecdsa"] }
+sha2 = "0.10"
+quick-xml = "0.37"
+rpassword = "7"
+x509-cert = { version = "0.2.5", features = ["pem"] }
+aes-gcm = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+dirs = "6"
+ctrlc = "3.5.2"
+pkcs8 = { version = "0.10.2", features = ["encryption", "pem"] }
+p12-keystore = "0.3.0-rc3"
+
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))'.dependencies]
+keyring = "3"
+
+[build-dependencies]
+winresource = "0.1"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+serial_test = "3"
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -25,12 +25,12 @@ from . import condition
 @pytest.fixture
 @condition.min_version(5, 7, 2)
 def session(ccid_connection):
-    sd = SecurityDomainSession(ccid_connection)
-    # Check for the default keyset and only reset if not present, to save time
-    default_key = KeyRef(0x1, 0xFF)
-    if default_key not in sd.get_key_information():
-        sd.reset()
-    return sd
+    with SecurityDomainSession(ccid_connection) as sd:
+        # Check for the default keyset and only reset if not present, to save time
+        default_key = KeyRef(0x1, 0xFF)
+        if default_key not in sd.get_key_information():
+            sd.reset()
+        yield sd
 
 
 def test_card_recognition_data(session):
@@ -64,20 +64,21 @@ class TestScp03:
             _verify_auth(session)
 
     def test_change_key(self, ccid_connection, session):
-        session.authenticate(Scp03KeyParams())
-        ref = KeyRef(0x1, 0x2)
-        keys = StaticKeys(os.urandom(16), os.urandom(16), os.urandom(16))
-        session.put_key(ref, keys)
+        with session:
+            session.authenticate(Scp03KeyParams())
+            ref = KeyRef(0x1, 0x2)
+            keys = StaticKeys(os.urandom(16), os.urandom(16), os.urandom(16))
+            session.put_key(ref, keys)
 
         # Test new key
-        session = SecurityDomainSession(ccid_connection)
-        session.authenticate(Scp03KeyParams(keys=keys))
-        _verify_auth(session)
+        with SecurityDomainSession(ccid_connection) as session:
+            session.authenticate(Scp03KeyParams(keys=keys))
+            _verify_auth(session)
 
         # Verify default key is removed
-        session = SecurityDomainSession(ccid_connection)
-        with pytest.raises(ValueError):
-            session.authenticate(Scp03KeyParams())
+        with SecurityDomainSession(ccid_connection) as session:
+            with pytest.raises(ValueError):
+                session.authenticate(Scp03KeyParams())
 
 
 def _load_scp11_keys(session, kid, kvn):
@@ -132,78 +133,85 @@ class TestScp11:
             session.authenticate(Scp11KeyParams(ref, chain[0].public_key()))
 
     def test_scp11b_import(self, ccid_connection, session):
-        session.authenticate(Scp03KeyParams())
+        with session:
+            session.authenticate(Scp03KeyParams())
 
-        ref = KeyRef(0x13, 0x2)
-        sk = ec.generate_private_key(ec.SECP256R1(), default_backend())
-        session.put_key(ref, sk)
+            ref = KeyRef(0x13, 0x2)
+            sk = ec.generate_private_key(ec.SECP256R1(), default_backend())
+            session.put_key(ref, sk)
 
-        params = Scp11KeyParams(ref, sk.public_key())
-
-        # Authenticate
-        session = SecurityDomainSession(ccid_connection)
-        session.authenticate(params)
-
-    def test_scp11a_ok(self, ccid_connection, session):
-        session.authenticate(Scp03KeyParams())
-        kvn = 0x3
-        params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
-        # Authenticate
-        session = SecurityDomainSession(ccid_connection)
-        session.authenticate(params)
-
-        # Verify by deleting keys
-        session.delete_key(kvn=kvn)
-
-    def test_scp11a_allowlist(self, ccid_connection, session):
-        session.authenticate(Scp03KeyParams())
-        kvn = 0x3
-        params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
-        serials = [c.serial_number for c in params.certificates]
-        session.store_allowlist(params.oce_ref, serials)
+            params = Scp11KeyParams(ref, sk.public_key())
 
         # Authenticate
-        session = SecurityDomainSession(ccid_connection)
-        session.authenticate(params)
-
-        # Verify by deleting keys
-        session.delete_key(kvn=kvn)
-
-    def test_scp11a_allowlist_blocked(self, ccid_connection, session):
-        session.authenticate(Scp03KeyParams())
-
-        # Replace default SCP03 keys
-        ref = KeyRef(0x1, 0x2)
-        keys = StaticKeys(os.urandom(16), os.urandom(16), os.urandom(16))
-        session.put_key(ref, keys)
-        session.delete_key(kid=ScpKid.SCP11b)
-
-        kvn = 0x3
-        params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
-        serials = [1, 2, 3, 4, 5]
-        session.store_allowlist(params.oce_ref, serials)
-
-        # Fail authentication
-        session = SecurityDomainSession(ccid_connection)
-        with pytest.raises(ApduError):
+        with SecurityDomainSession(ccid_connection) as session:
             session.authenticate(params)
 
-        # Remove allowlist
-        session.authenticate(Scp03KeyParams(keys=keys))
-        session.store_allowlist(params.oce_ref, [])
+    def test_scp11a_ok(self, ccid_connection, session):
+        with session:
+            session.authenticate(Scp03KeyParams())
+            kvn = 0x3
+            params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
 
         # Authenticate
-        session = SecurityDomainSession(ccid_connection)
-        session.authenticate(params)
+        with SecurityDomainSession(ccid_connection) as session:
+            session.authenticate(params)
+
+            # Verify by deleting keys
+            session.delete_key(kvn=kvn)
+
+    def test_scp11a_allowlist(self, ccid_connection, session):
+        with session:
+            session.authenticate(Scp03KeyParams())
+            kvn = 0x3
+            params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
+            serials = [c.serial_number for c in params.certificates]
+            session.store_allowlist(params.oce_ref, serials)
+
+        # Authenticate
+        with SecurityDomainSession(ccid_connection) as session:
+            session.authenticate(params)
+
+            # Verify by deleting keys
+            session.delete_key(kvn=kvn)
+
+    def test_scp11a_allowlist_blocked(self, ccid_connection, session):
+        with session:
+            session.authenticate(Scp03KeyParams())
+
+            # Replace default SCP03 keys
+            ref = KeyRef(0x1, 0x2)
+            keys = StaticKeys(os.urandom(16), os.urandom(16), os.urandom(16))
+            session.put_key(ref, keys)
+            session.delete_key(kid=ScpKid.SCP11b)
+
+            kvn = 0x3
+            params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
+            serials = [1, 2, 3, 4, 5]
+            session.store_allowlist(params.oce_ref, serials)
+
+        # Fail authentication
+        with SecurityDomainSession(ccid_connection) as session:
+            with pytest.raises(ApduError):
+                session.authenticate(params)
+
+            # Remove allowlist
+            session.authenticate(Scp03KeyParams(keys=keys))
+            session.store_allowlist(params.oce_ref, [])
+
+        # Authenticate
+        with SecurityDomainSession(ccid_connection) as session:
+            session.authenticate(params)
 
     def test_scp11c_ok(self, ccid_connection, session):
-        session.authenticate(Scp03KeyParams())
-        kvn = 0x3
-        params = _load_scp11_keys(session, ScpKid.SCP11c, kvn)
-        # Authenticate
-        session = SecurityDomainSession(ccid_connection)
-        session.authenticate(params)
+        with session:
+            session.authenticate(Scp03KeyParams())
+            kvn = 0x3
+            params = _load_scp11_keys(session, ScpKid.SCP11c, kvn)
 
-        # Verify not authenticated
-        with pytest.raises(ApduError):
-            session.delete_key(kvn=kvn)
+        # Authenticate
+        with SecurityDomainSession(ccid_connection) as session:
+            session.authenticate(params)
+
+            # Verify not authenticated
+            with pytest.raises(ApduError):
+                session.delete_key(kvn=kvn)

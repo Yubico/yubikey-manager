@@ -8,7 +8,6 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
-
 from ykman.piv import (
     check_key,
     generate_csr,
@@ -19,7 +18,7 @@ from ykman.piv import (
 )
 from ykman.util import parse_certificates, parse_private_key
 from yubikit.core import TRANSPORT, NotSupportedError
-from yubikit.core.smartcard import AID, ApduError
+from yubikit.core.smartcard import AID, ApduError, SmartCardProtocol
 from yubikit.management import CAPABILITY, RELEASE_TYPE, ManagementSession
 from yubikit.piv import (
     ALGORITHM,
@@ -75,14 +74,15 @@ def scp(info, transport, scp_params):
 @condition.capability(CAPABILITY.PIV)
 def session(ccid_connection, scp, info):
     if CAPABILITY.PIV in info.reset_blocked:
-        mgmt = ManagementSession(ccid_connection)
-        mgmt.device_reset()
+        with ManagementSession(ccid_connection) as mgmt:
+            mgmt.device_reset()
         piv = PivSession(ccid_connection, scp)
     else:
         piv = PivSession(ccid_connection, scp)
         piv.reset()
     yield piv
-    reset_state(piv, scp)
+    piv.close()
+    reset_state(ccid_connection, scp)
 
 
 class Keys(NamedTuple):
@@ -97,7 +97,7 @@ def default_keys():
 
 
 @pytest.fixture
-def keys(session, info, default_keys, scp):
+def keys(session, info, default_keys, scp, ccid_connection):
     if info.pin_complexity:
         new_keys = Keys(
             "12345679" if CAPABILITY.PIV in info.fips_capable else "123458",
@@ -108,7 +108,10 @@ def keys(session, info, default_keys, scp):
         session.change_puk(default_keys.puk, new_keys.puk)
         session.authenticate(default_keys.mgmt)
         session.set_management_key(session.management_key_type, new_keys.mgmt)
-        reset_state(session, scp)
+        # Close session to release connection, reset state, re-initialize
+        session.close()
+        reset_state(ccid_connection, scp)
+        session.__init__(ccid_connection, scp)
 
         yield new_keys
     else:
@@ -119,12 +122,37 @@ def not_roca(version):
     return not ((4, 2, 0) <= version < (4, 3, 5))
 
 
-def reset_state(session, scp_params):
-    session.protocol.connection.connection.disconnect()
-    session.protocol.connection.connection.connect()
-    session.protocol.select(AID.PIV)
-    if scp_params:
-        session.protocol.init_scp(scp_params)
+def reset_state(session_or_connection, scp_params):
+    """Reset PIV session state on the card.
+
+    If given a PivSession, closes it, resets the card, and re-initializes
+    the session. If given a connection, just resets the card.
+    """
+    if isinstance(session_or_connection, PivSession):
+        session = session_or_connection
+        connection = session.connection
+        session.close()
+    else:
+        session = None
+        connection = session_or_connection
+
+    if connection.transport == TRANSPORT.NFC:
+        with SmartCardProtocol(connection) as p:
+            p.select(AID.OATH)
+        with SmartCardProtocol(connection) as p:
+            p.select(AID.PIV)
+            if scp_params:
+                p.init_scp(scp_params)
+    else:
+        connection._native.disconnect()
+        connection._native.connect()
+        with SmartCardProtocol(connection) as p:
+            p.select(AID.PIV)
+            if scp_params:
+                p.init_scp(scp_params)
+
+    if session is not None:
+        session.__init__(connection, scp_params)
 
 
 def assert_mgm_key_is(session, key):

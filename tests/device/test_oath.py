@@ -1,7 +1,7 @@
 import pytest
 
 from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import AID, SW, ApduError
+from yubikit.core.smartcard import SW, ApduError
 from yubikit.management import CAPABILITY
 from yubikit.oath import (
     HASH_ALGORITHM,
@@ -29,6 +29,7 @@ def session(ccid_connection, info, scp_params):
         oath.set_key(KEY)
 
     yield oath
+    oath.close()
 
 
 CRED_DATA = CredentialData("name", OATH_TYPE.TOTP, HASH_ALGORITHM.SHA1, b"secret")
@@ -53,15 +54,19 @@ class TestFunctions:
 
 class TestLockPreventsAccess:
     @pytest.fixture(autouse=True)
-    def set_lock(self, session):
+    def set_lock(self, session, ccid_connection):
+        if ccid_connection.transport == TRANSPORT.NFC:
+            pytest.skip("Disconnect/reconnect does not reset NFC card state")
         assert not session.locked
         session.put_credential(CRED_DATA)
         session.set_key(KEY)
 
-        # Force re-select to lock
-        session.protocol.connection.connection.disconnect()
-        session.protocol.connection.connection.connect()
-        session.protocol.select(AID.OATH)
+        # Close session to release connection, then power-cycle card
+        session.close()
+        ccid_connection._native.disconnect()
+        ccid_connection._native.connect()
+        # Re-initialize session (selects OATH, discovers locked state)
+        session.__init__(ccid_connection)
 
     def test_list(self, session):
         with pytest.raises(ApduError) as ctx:

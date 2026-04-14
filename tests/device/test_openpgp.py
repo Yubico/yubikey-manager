@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
 
 from yubikit.core import TRANSPORT, InvalidPinError
-from yubikit.core.smartcard import AID, ApduError
+from yubikit.core.smartcard import ApduError
 from yubikit.management import CAPABILITY
 from yubikit.openpgp import (
     KEY_REF,
@@ -35,7 +35,8 @@ def session(ccid_connection, info, scp_params):
     else:
         pgp = OpenPgpSession(ccid_connection)
     pgp.reset()
-    return pgp
+    yield pgp
+    pgp.close()
 
 
 class Keys(NamedTuple):
@@ -59,7 +60,7 @@ def not_fips_capable(info):
 
 
 @pytest.fixture
-def keys(session, info, transport, scp_params):
+def keys(session, info, transport, scp_params, ccid_connection):
     if fips_capable(info):
         new_keys = Keys(
             "12345679",
@@ -68,11 +69,15 @@ def keys(session, info, transport, scp_params):
         session.change_pin(DEFAULT_PIN, new_keys.pin)
         session.change_admin(DEFAULT_ADMIN_PIN, new_keys.admin)
 
-        session.protocol.connection.connection.disconnect()
-        session.protocol.connection.connection.connect()
-        session.protocol.select(AID.OPENPGP)
+        # Close session to release connection, then power-cycle card
+        session.close()
+        ccid_connection._native.disconnect()
+        ccid_connection._native.connect()
+        # Re-initialize session (selects OpenPGP applet)
         if transport == TRANSPORT.NFC and scp_params:
-            session.protocol.init_scp(scp_params)
+            session.__init__(ccid_connection, scp_params)
+        else:
+            session.__init__(ccid_connection)
 
         yield new_keys
     else:

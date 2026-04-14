@@ -18,8 +18,7 @@ ykman.pkg
 lib/
 **/_build
 
-# Libraries unpacked by Windows VM
-/libjson-c*.dll
-/libusb-*.dll
-/libykpers-*.dll
-/libyubikey-*.dll
+# Rust
+/target/
+/_yubikit_native/
+security_review.md

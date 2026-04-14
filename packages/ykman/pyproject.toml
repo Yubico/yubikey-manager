@@ -1,0 +1,36 @@
+[project]
+name = "yubikey-manager"
+version = "6.0.0-dev.0"
+description = "Library and CLI for managing your YubiKey configuration."
+authors = [
+  { name = "Dain Nilsson", email = "dain@yubico.com" }
+]
+requires-python = ">=3.10, <4"
+license = "BSD-2-Clause"
+keywords = ["yubikey", "yubiotp", "piv", "fido"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: End Users/Desktop",
+  "Topic :: Security :: Cryptography",
+  "Topic :: Utilities"
+]
+dependencies = [
+  "yubikit>=6.0.0.dev0",
+  "click (>=8.0, <9)",
+  "keyring (>=23.4, <26)",
+  "pywin32 (>=223) ; sys_platform == 'win32'",
+  "python-pskc (>=1.3, <2)",
+]
+
+[project.urls]
+Homepage = "https://github.com/Yubico/yubikey-manager"
+
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+bindings = "bin"
+manifest-path = "../../crates/ykman-cli/Cargo.toml"
+python-packages = ["ykman"]
+strip = true

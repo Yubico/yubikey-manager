@@ -6,47 +6,38 @@ permissions: read-all
 
 jobs:
   build:
+    runs-on: ${{ matrix.os }}
+    name: Build - ${{ matrix.os }}
 
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: ykman-builds-linux-x64
+          - os: ubuntu-22.04-arm
+            artifact: ykman-builds-linux-arm64
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version-file: ".python-version"
-
       - name: Install dependencies
         run: |
-          sudo apt-get install -qq swig libpcsclite-dev
+          sudo apt-get update
+          sudo apt-get install -qq libpcsclite-dev libudev-dev libdbus-1-dev
 
-      - name: Install the project
-        run: uv sync --locked
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Run pre-commit hooks
+      - name: Build Rust CLI
         run: |
-          uv tool install pre-commit
-          pre-commit run --all-files --verbose
-
-      - name: Run unit tests
-        run: uv run pytest
-
-      - name: PyInstaller
-        run: |
-          uv run pyinstaller ykman.spec
-          dist/ykman/ykman --version
-          [[ -z "$(dist/ykman/ykman --version | grep -E "not found|missing")" ]]
-          export REF=$(echo ${GITHUB_REF} | cut -d '/' -f 3)
-          mv dist/ykman dist/ykman-$REF
+          cargo build --release -p ykman-cli
+          mkdir -p dist
+          cp target/release/ykman dist/
+          dist/ykman --version
 
       - name: Upload build
         uses: actions/upload-artifact@v6
         with:
-          name: ykman-builds-ubuntu
+          name: ${{ matrix.artifact }}
           path: dist

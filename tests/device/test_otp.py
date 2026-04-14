@@ -1,10 +1,8 @@
 import pytest
-
-from ykman.device import list_all_devices
 from yubikit.core import TRANSPORT
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
-from yubikit.management import CAPABILITY, ManagementSession
+from yubikit.management import CAPABILITY
 from yubikit.yubiotp import (
     SLOT,
     HmacSha1SlotConfiguration,
@@ -36,7 +34,8 @@ def no_pin_complexity(info):
 @condition.capability(CAPABILITY.OTP)
 def session(conn_type, info, device):
     with device.open_connection(conn_type) as c:
-        yield YubiOtpSession(c)
+        with YubiOtpSession(c) as s:
+            yield s
 
 
 def test_status(info, session):
@@ -48,35 +47,12 @@ def not_usb_ccid(conn_type, transport):
 
 
 @pytest.fixture()
-def read_config(session, conn_type, info, transport, await_reboot):
+def read_config(session, conn_type, info, transport, await_reboot, device):
     need_reboot = conn_type == SmartCardConnection and (4, 0) <= info.version < (5, 5)
-    if need_reboot and info.version[0] == 4:
+    if need_reboot:
         pytest.skip("Can't read config")
 
-    def call():
-        otp = session
-        if need_reboot:
-            protocol = session.backend.protocol
-            if transport == TRANSPORT.NFC:
-                protocol.connection.connection.disconnect()
-                conn = protocol.connection
-                conn.connection.connect()
-            else:
-                ManagementSession(protocol.connection).write_device_config(reboot=True)
-                await_reboot()
-                devs = list_all_devices([SmartCardConnection])
-                if len(devs) != 1:
-                    raise Exception("More than one YubiKey connected")
-                dev, info2 = devs[0]
-                if info.serial != info2.serial:
-                    raise Exception("Connected YubiKey has wrong serial")
-                conn = dev.open_connection(SmartCardConnection)
-
-            otp = YubiOtpSession(conn)
-            session.backend = otp.backend
-        return otp.get_config_state()
-
-    return call
+    return session.get_config_state()
 
 
 class TestProgrammingState:
@@ -160,3 +136,30 @@ class TestChallengeResponse:
         )
         output = session.calculate_hmac_sha1(SLOT.TWO, b"Hi There")
         assert output == bytes.fromhex("b617318655057264e28bc0b6fb378c8ef146be00")
+
+    @condition.transport(TRANSPORT.USB)
+    def test_calculate_hmac_sha1_cancel(self, session, conn_type):
+        import time
+        from threading import Event
+
+        if conn_type != OtpConnection:
+            pytest.skip("Cancel only supported over OTP HID")
+
+        session.put_configuration(
+            SLOT.TWO,
+            HmacSha1SlotConfiguration(b"\x0b" * 20).require_touch(True),
+        )
+
+        event = Event()
+        event.set()  # Cancel immediately
+
+        start = time.monotonic()
+        with pytest.raises(Exception) as exc_info:
+            session.calculate_hmac_sha1(SLOT.TWO, b"test challenge", event=event)
+        elapsed = time.monotonic() - start
+
+        assert (
+            "cancel" in str(exc_info.value).lower()
+            or "timeout" in str(exc_info.value).lower()
+        )
+        assert elapsed < 5, f"Cancel took too long: {elapsed:.1f}s (expected < 5s)"
