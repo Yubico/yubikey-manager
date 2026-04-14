@@ -19,89 +19,14 @@ Usage: uv run python examples/webauthn_prf.py
 from __future__ import annotations
 
 import base64
-import getpass
 import json
 import os
-import sys
 
-from yubikit.core.fido import FidoConnection
-from yubikit.core.smartcard import SmartCardConnection
-from yubikit.device import list_all_devices
-from yubikit.webauthn import ClientDataCollector, UserInteraction, WebAuthnClient
-
-ORIGIN = "https://example.com"
-RP_ID = "example.com"
-
-
-class ConsoleInteraction(UserInteraction):
-    def prompt_up(self) -> None:
-        print("\n👆 Touch your security key...")
-
-    def request_pin(self, permissions: int, rp_id: str | None) -> str | None:
-        try:
-            pin = getpass.getpass("🔑 Enter PIN: ")
-            return pin if pin else None
-        except (EOFError, KeyboardInterrupt):
-            return None
-
-    def request_uv(self, permissions: int, rp_id: str | None) -> bool:
-        print("🔒 Biometric verification requested - proceeding")
-        return True
-
-
-class SimpleCollector(ClientDataCollector):
-    def collect_create(self, options_json: str) -> tuple[bytes, str]:
-        options = json.loads(options_json)
-        rp_id = options.get("rp", {}).get("id", RP_ID)
-        client_data = json.dumps(
-            {
-                "type": "webauthn.create",
-                "challenge": options["challenge"],
-                "origin": ORIGIN,
-                "crossOrigin": False,
-            },
-            separators=(",", ":"),
-        ).encode()
-        return client_data, rp_id
-
-    def collect_get(self, options_json: str) -> tuple[bytes, str]:
-        options = json.loads(options_json)
-        rp_id = options.get("rpId", RP_ID)
-        client_data = json.dumps(
-            {
-                "type": "webauthn.get",
-                "challenge": options["challenge"],
-                "origin": ORIGIN,
-                "crossOrigin": False,
-            },
-            separators=(",", ":"),
-        ).encode()
-        return client_data, rp_id
-
-
-def b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+from example_utils import RP_ID, b64url, open_client
 
 
 def main() -> None:
-    devices = list_all_devices()
-    if not devices:
-        print("No YubiKeys found.", file=sys.stderr)
-        sys.exit(1)
-
-    dev, info = devices[0]
-    print(f"Using: {info.serial or 'Unknown serial'}")
-
-    conn: FidoConnection | SmartCardConnection
-    if dev.supports_connection(FidoConnection):  # type: ignore[arg-type]
-        conn = dev.open_connection(FidoConnection)  # type: ignore[arg-type]
-    elif dev.supports_connection(SmartCardConnection):
-        conn = dev.open_connection(SmartCardConnection)
-    else:
-        print("No usable connection.", file=sys.stderr)
-        sys.exit(1)
-
-    client = WebAuthnClient(conn, ConsoleInteraction(), SimpleCollector())
+    client = open_client()
 
     # -- Registration with PRF enabled --
     print("\n━━━ Registration (PRF) ━━━")
@@ -165,8 +90,8 @@ def main() -> None:
     if secret1:
         print(f"  PRF first: {s1_bytes.hex()} ({len(s1_bytes)} bytes)")
 
-    # -- Second authentication with same salt → same secret --
-    print("\n━━━ Verify determinism (same salt → same secret) ━━━")
+    # -- Second authentication with same salt -> same secret --
+    print("\n━━━ Verify determinism (same salt -> same secret) ━━━")
 
     assertions2 = client.get_assertion(
         json.dumps(
@@ -194,7 +119,7 @@ def main() -> None:
     if secret1 and secret2 and secret1 == secret2:
         print(f"✅ Same salt produced the same secret ({len(s1_bytes)} bytes)")
     else:
-        print("❌ Secrets differ – this is unexpected!")
+        print("❌ Secrets differ - this is unexpected!")
 
     client.close()
     print("\nDone.")

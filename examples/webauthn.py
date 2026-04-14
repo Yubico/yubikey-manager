@@ -19,111 +19,19 @@ Usage: uv run python examples/webauthn.py
 from __future__ import annotations
 
 import base64
-import getpass
 import json
 import os
-import sys
 
-from yubikit.core.fido import FidoConnection
-from yubikit.core.smartcard import SmartCardConnection
-from yubikit.device import list_all_devices
-from yubikit.webauthn import ClientDataCollector, UserInteraction, WebAuthnClient
-
-ORIGIN = "https://example.com"
-RP_ID = "example.com"
-
-
-class ConsoleInteraction(UserInteraction):
-    """Console-based user interaction for PIN/UV prompts."""
-
-    def prompt_up(self) -> None:
-        print("\n👆 Touch your security key...")
-
-    def request_pin(self, permissions: int, rp_id: str | None) -> str | None:
-        try:
-            pin = getpass.getpass("🔑 Enter PIN: ")
-            return pin if pin else None
-        except (EOFError, KeyboardInterrupt):
-            return None
-
-    def request_uv(self, permissions: int, rp_id: str | None) -> bool:
-        print("🔒 Biometric verification requested - proceeding")
-        return True
-
-
-class SimpleCollector(ClientDataCollector):
-    """Simple client data collector for example.com."""
-
-    def collect_create(self, options_json: str) -> tuple[bytes, str]:
-        options = json.loads(options_json)
-        rp_id = options.get("rp", {}).get("id", RP_ID)
-        challenge = options["challenge"]
-        client_data = json.dumps(
-            {
-                "type": "webauthn.create",
-                "challenge": challenge,
-                "origin": ORIGIN,
-                "crossOrigin": False,
-            },
-            separators=(",", ":"),
-        ).encode()
-        return client_data, rp_id
-
-    def collect_get(self, options_json: str) -> tuple[bytes, str]:
-        options = json.loads(options_json)
-        rp_id = options.get("rpId", RP_ID)
-        challenge = options["challenge"]
-        client_data = json.dumps(
-            {
-                "type": "webauthn.get",
-                "challenge": challenge,
-                "origin": ORIGIN,
-                "crossOrigin": False,
-            },
-            separators=(",", ":"),
-        ).encode()
-        return client_data, rp_id
-
-
-def random_challenge() -> bytes:
-    """Generate a random challenge (32 bytes)."""
-    return os.urandom(32)
-
-
-def b64url(data: bytes) -> str:
-    """Base64url-encode without padding."""
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+from example_utils import RP_ID, b64url, open_client
 
 
 def main() -> None:
-    # 1. Find a YubiKey
-    devices = list_all_devices()
-    if not devices:
-        print("No YubiKeys found.", file=sys.stderr)
-        sys.exit(1)
+    client = open_client()
 
-    dev, info = devices[0]
-    print(f"Using: {info.serial or 'Unknown serial'}")
-
-    # 2. Open connection (prefer FIDO HID, fall back to CCID)
-    conn: FidoConnection | SmartCardConnection
-    if dev.supports_connection(FidoConnection):  # type: ignore[arg-type]
-        print("  Using FIDO HID transport")
-        conn = dev.open_connection(FidoConnection)  # type: ignore[arg-type]
-    elif dev.supports_connection(SmartCardConnection):
-        print("  Using CCID transport")
-        conn = dev.open_connection(SmartCardConnection)
-    else:
-        print("  No usable connection available.", file=sys.stderr)
-        sys.exit(1)
-
-    # 3. Create WebAuthn client
-    client = WebAuthnClient(conn, ConsoleInteraction(), SimpleCollector())
-
-    # 4. Registration ceremony
+    # -- Registration --
     print("\n━━━ Registration ━━━")
 
-    challenge = random_challenge()
+    challenge = os.urandom(32)
     create_options = json.dumps(
         {
             "rp": {
@@ -154,10 +62,10 @@ def main() -> None:
     att_obj = base64.urlsafe_b64decode(reg["response"]["attestationObject"] + "==")
     print(f"  Attestation object: {len(att_obj)} bytes")
 
-    # 5. Authentication ceremony
+    # -- Authentication --
     print("\n━━━ Authentication ━━━")
 
-    challenge = random_challenge()
+    challenge = os.urandom(32)
     get_options = json.dumps(
         {
             "challenge": b64url(challenge),
@@ -192,7 +100,6 @@ def main() -> None:
             uh = base64.urlsafe_b64decode(user_handle + "==")
             print(f"    User handle: {uh.hex()}")
 
-    # Release the connection
     client.close()
     print("\nDone.")
 

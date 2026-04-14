@@ -14,135 +14,41 @@
 //
 // ⚠ This example creates credentials on the authenticator.
 
-use std::io::{self, Write};
+#[path = "example_utils.rs"]
+mod example_utils;
+use example_utils::{RP_ID, hex, open_client, random_challenge};
 
-use yubikit::ctap::CtapSession;
-use yubikit::ctap2::{Ctap2Session, Permissions};
-use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::webauthn::extensions::{
     RegistrationExtensionInputs,
     cred_protect::{CredProtectPolicy, RegistrationInput},
 };
 use yubikit::webauthn::{
-    ClientDataCollector, CollectedClientData, PublicKeyCredentialCreationOptions,
-    PublicKeyCredentialParameters, PublicKeyCredentialRequestOptions, PublicKeyCredentialRpEntity,
-    PublicKeyCredentialType, PublicKeyCredentialUserEntity, UserInteraction, WebAuthnClient,
+    PublicKeyCredentialCreationOptions, PublicKeyCredentialParameters, PublicKeyCredentialRpEntity,
+    PublicKeyCredentialType, PublicKeyCredentialUserEntity,
 };
 
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
-struct ConsoleInteraction;
-
-impl UserInteraction for ConsoleInteraction {
-    fn prompt_up(&self) {
-        println!("\n👆 Touch your security key...");
-    }
-    fn request_pin(&self, _permissions: Permissions, _rp_id: Option<&str>) -> Option<String> {
-        print!("🔑 Enter PIN: ");
-        io::stdout().flush().ok();
-        let mut pin = String::new();
-        io::stdin().read_line(&mut pin).ok()?;
-        let pin = pin.trim().to_string();
-        if pin.is_empty() { None } else { Some(pin) }
-    }
-    fn request_uv(&self, _p: Permissions, _rp: Option<&str>) -> bool {
-        true
-    }
-}
-
-const ORIGIN: &str = "https://example.com";
-const RP_ID: &str = "example.com";
-
-struct SimpleCollector;
-
-impl ClientDataCollector for SimpleCollector {
-    fn collect_create(
-        &self,
-        options: &PublicKeyCredentialCreationOptions,
-    ) -> Result<(CollectedClientData, String), String> {
-        let rp_id = options.rp.id.clone().unwrap_or_else(|| RP_ID.to_string());
-        Ok((
-            CollectedClientData::create("webauthn.create", &options.challenge, ORIGIN, false),
-            rp_id,
-        ))
-    }
-    fn collect_get(
-        &self,
-        options: &PublicKeyCredentialRequestOptions,
-    ) -> Result<(CollectedClientData, String), String> {
-        let rp_id = options.rp_id.clone().unwrap_or_else(|| RP_ID.to_string());
-        Ok((
-            CollectedClientData::create("webauthn.get", &options.challenge, ORIGIN, false),
-            rp_id,
-        ))
-    }
-}
-
-fn random_challenge() -> Vec<u8> {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    use std::time::SystemTime;
-    let mut h = DefaultHasher::new();
-    SystemTime::now().hash(&mut h);
-    std::process::id().hash(&mut h);
-    let a = h.finish().to_le_bytes();
-    let mut h2 = DefaultHasher::new();
-    a.hash(&mut h2);
-    42u64.hash(&mut h2);
-    let b = h2.finish().to_le_bytes();
-    [a, b, a, b].concat()
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
 fn main() {
-    let devices = list_fido_devices().expect("failed to list HID devices");
-    let dev = devices.first().unwrap_or_else(|| {
-        eprintln!("No FIDO HID devices found.");
-        std::process::exit(1);
-    });
+    let mut client = open_client();
 
-    println!("Using device: {} (PID=0x{:04X})", dev.path, dev.pid);
-
-    let conn = HidFidoConnection::open(dev).expect("failed to open HID connection");
-    let ctap = match CtapSession::new_fido(conn) {
-        Ok(s) => s,
-        Err((e, _)) => {
-            eprintln!("CTAP session error: {e}");
-            std::process::exit(1);
-        }
-    };
-    let session = Ctap2Session::new(ctap).expect("CTAP2 init failed");
-
-    let info = session.info();
+    let info = client.info().clone();
     if !info.extensions.iter().any(|e| e == "credProtect") {
         eprintln!("Authenticator does not support credProtect.");
         std::process::exit(1);
     }
     println!("✓ credProtect extension supported\n");
 
-    let mut client = WebAuthnClient::new(session, ConsoleInteraction, SimpleCollector);
-
     let policies = [
         (
             CredProtectPolicy::UserVerificationOptional,
-            "Level 1 – userVerificationOptional",
+            "Level 1 - userVerificationOptional",
         ),
         (
             CredProtectPolicy::UserVerificationOptionalWithCredentialIDList,
-            "Level 2 – userVerificationOptionalWithCredentialIDList",
+            "Level 2 - userVerificationOptionalWithCredentialIDList",
         ),
         (
             CredProtectPolicy::UserVerificationRequired,
-            "Level 3 – userVerificationRequired",
+            "Level 3 - userVerificationRequired",
         ),
     ];
 

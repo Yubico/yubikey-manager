@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "YubiKey management library"
 license = "BSD-2-Clause"
+autoexamples = false
 
 [dependencies]
 aes = "0.8"
@@ -61,6 +62,46 @@ sha2 = { version = "0.10", features = ["oid"] }
 [[example]]
 name = "ctap2_selection"
 path = "examples/ctap2_selection.rs"
+
+[[example]]
+name = "device_info"
+path = "examples/device_info.rs"
+
+[[example]]
+name = "list_devices"
+path = "examples/list_devices.rs"
+
+[[example]]
+name = "oath_list"
+path = "examples/oath_list.rs"
+
+[[example]]
+name = "reinsert"
+path = "examples/reinsert.rs"
+
+[[example]]
+name = "webauthn"
+path = "examples/webauthn.rs"
+
+[[example]]
+name = "webauthn_cred_blob"
+path = "examples/webauthn_cred_blob.rs"
+
+[[example]]
+name = "webauthn_cred_protect"
+path = "examples/webauthn_cred_protect.rs"
+
+[[example]]
+name = "webauthn_cred_props"
+path = "examples/webauthn_cred_props.rs"
+
+[[example]]
+name = "webauthn_large_blob"
+path = "examples/webauthn_large_blob.rs"
+
+[[example]]
+name = "webauthn_prf"
+path = "examples/webauthn_prf.rs"
 
 [lints]
 workspace = true
