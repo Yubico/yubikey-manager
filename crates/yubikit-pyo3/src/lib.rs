@@ -41,6 +41,7 @@ mod py_piv;
 mod py_scp;
 mod py_securitydomain;
 mod py_smartcard;
+mod py_webauthn;
 mod py_yubiotp;
 
 use pyo3::prelude::*;
@@ -84,6 +85,8 @@ fn register_sessions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<py_ctap::PyBioEnrollmentFido>()?;
     m.add_class::<py_ctap::PyLargeBlobs>()?;
     m.add_class::<py_ctap::PyLargeBlobsFido>()?;
+    m.add_class::<py_webauthn::PyWebAuthnClient>()?;
+    m.add_class::<py_webauthn::PyWebAuthnCcidClient>()?;
     parent.add_submodule(&m)?;
 
     let sys = parent.py().import("sys")?;
