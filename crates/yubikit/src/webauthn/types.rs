@@ -887,6 +887,63 @@ mod tests {
     }
 
     #[test]
+    fn test_request_options_with_large_blob_write() {
+        let json = r#"{
+            "challenge": "AAAA",
+            "rpId": "example.com",
+            "allowCredentials": [{"type": "public-key", "id": "BBBB"}],
+            "userVerification": "discouraged",
+            "extensions": {
+                "largeBlob": {"write": "aGVsbG8"}
+            }
+        }"#;
+        let opts = PublicKeyCredentialRequestOptions::from_json(json).unwrap();
+        let ext = opts.extensions.unwrap();
+        let lb = ext.large_blob.unwrap();
+        assert_eq!(lb.write.unwrap(), b"hello");
+        assert!(lb.read.is_none());
+    }
+
+    #[test]
+    fn test_request_options_with_large_blob_read() {
+        let json = r#"{
+            "challenge": "AAAA",
+            "rpId": "example.com",
+            "allowCredentials": [{"type": "public-key", "id": "BBBB"}],
+            "userVerification": "discouraged",
+            "extensions": {
+                "largeBlob": {"read": true}
+            }
+        }"#;
+        let opts = PublicKeyCredentialRequestOptions::from_json(json).unwrap();
+        let ext = opts.extensions.unwrap();
+        let lb = ext.large_blob.unwrap();
+        assert_eq!(lb.read, Some(true));
+        assert!(lb.write.is_none());
+    }
+
+    #[test]
+    fn test_creation_options_with_large_blob() {
+        let json = r#"{
+            "rp": {"name": "Test", "id": "example.com"},
+            "user": {"id": "dXNlcg", "name": "test@example.com", "displayName": "Test"},
+            "challenge": "AAAA",
+            "pubKeyCredParams": [{"type": "public-key", "alg": -7}],
+            "authenticatorSelection": {"residentKey": "required"},
+            "extensions": {
+                "largeBlob": {"support": "required"}
+            }
+        }"#;
+        let opts = PublicKeyCredentialCreationOptions::from_json(json).unwrap();
+        let ext = opts.extensions.unwrap();
+        let lb = ext.large_blob.unwrap();
+        assert_eq!(
+            lb.support,
+            super::super::extensions::large_blob::LargeBlobSupport::Required,
+        );
+    }
+
+    #[test]
     fn test_registration_response_to_json() {
         let resp = RegistrationResponse {
             id: vec![0xAA, 0xBB],

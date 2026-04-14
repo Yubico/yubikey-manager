@@ -196,10 +196,6 @@ impl PyWebAuthnClient {
     }
 }
 
-// ---------------------------------------------------------------------------
-// WebAuthnClient for SmartCard (CCID)
-// ---------------------------------------------------------------------------
-
 type SmartCardWebAuthnClient =
     WebAuthnClient<BoxedSmartCardConnection, PyUserInteraction, PyClientDataCollector>;
 

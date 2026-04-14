@@ -805,25 +805,25 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
     ) {
         use crate::ctap2::LargeBlobs;
 
-        let (Some(key), Some(protocol)) = (large_blob_key, protocol) else {
+        let Some(key) = large_blob_key else {
             return (session, None);
         };
 
-        let token = token.unwrap_or(&[]);
+        // For reads we don't need a PIN token, but LargeBlobs::new requires
+        // a protocol.  Use V2 as a default for read-only operations — the
+        // protocol/token are only exercised on writes.
+        let proto = protocol.unwrap_or(PinProtocol::V2);
+        let token_bytes = token.unwrap_or(&[]);
 
-        // LargeBlobs::new only fails if the authenticator doesn't support
-        // largeBlobs, which we've already verified. If it does fail, we lose
-        // the session — this is a programming error, not a runtime one.
-        let mut large_blobs = match LargeBlobs::new(session, protocol, token.to_vec()) {
+        let mut large_blobs = match LargeBlobs::new(session, proto, token_bytes.to_vec()) {
             Ok(lb) => lb,
             Err(_) => {
-                // Can't recover session from Ctap2Error — this path should
-                // be unreachable since we checked support beforehand.
                 unreachable!("LargeBlobs::new failed after support check");
             }
         };
 
         let output = if input.read == Some(true) {
+            // Read does not use the PIN token at all
             match large_blobs.get_blob(key) {
                 Ok(blob) => Some(extensions::large_blob::AuthenticationOutput {
                     blob,

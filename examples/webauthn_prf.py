@@ -45,6 +45,7 @@ class ConsoleInteraction(UserInteraction):
             return None
 
     def request_uv(self, permissions: int, rp_id: str | None) -> bool:
+        print("🔒 Biometric verification requested - proceeding")
         return True
 
 
