@@ -127,17 +127,18 @@ impl<C: Connection + 'static> ClientPin<C> {
     /// supported PIN protocol (V2 preferred over V1).
     ///
     /// Uses the cached info from the session to determine supported protocols.
-    pub fn new(session: Ctap2Session<C>) -> Result<Self, Ctap2Error<C::Error>> {
-        let protocol = Self::select_protocol(&session.cached_info)?;
-        Ok(Self { session, protocol })
+    /// On failure, returns the session alongside the error.
+    #[allow(clippy::result_large_err)]
+    pub fn new(session: Ctap2Session<C>) -> Result<Self, (Ctap2Error<C::Error>, Ctap2Session<C>)> {
+        match Self::select_protocol(&session.cached_info) {
+            Ok(protocol) => Ok(Self { session, protocol }),
+            Err(e) => Err((e, session)),
+        }
     }
 
     /// Create a new `ClientPin` with a specific `PinProtocol`.
-    pub fn new_with_protocol(
-        session: Ctap2Session<C>,
-        protocol: PinProtocol,
-    ) -> Result<Self, Ctap2Error<C::Error>> {
-        Ok(Self { session, protocol })
+    pub fn new_with_protocol(session: Ctap2Session<C>, protocol: PinProtocol) -> Self {
+        Self { session, protocol }
     }
 
     /// The active PIN protocol.

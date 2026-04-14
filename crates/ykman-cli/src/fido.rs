@@ -67,7 +67,7 @@ macro_rules! with_fido_session {
             let ctap = CtapSession::new_fido(conn)
                 .map_err(|(e, _)| CliError(format!("Failed to initialize CTAP: {e}")))?;
             let $session = Ctap2Session::new(ctap)
-                .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+                .map_err(|(e, _)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
             $body
         } else {
             let conn = $dev
@@ -84,7 +84,7 @@ macro_rules! with_fido_session {
             }
             .map_err(|(e, _)| CliError(format!("Failed to initialize CTAP: {e}")))?;
             let $session = Ctap2Session::new(ctap)
-                .map_err(|e| CliError(format!("Failed to initialize CTAP2: {e}")))?;
+                .map_err(|(e, _)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
             $body
         }
     }};
@@ -215,7 +215,7 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
 
             // PIN status
             let mut client_pin = ClientPin::new(ctap2)
-                .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+                .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
             if ctap_info.options.get("clientPin") == Some(&true) {
                 if ctap_info.force_pin_change {
                     println!(
@@ -449,7 +449,7 @@ pub fn run_access_change_pin(
     with_fido_session!(dev, scp_params, |ctap2| {
         let pin_is_set = ctap2.info().options.get("clientPin") == Some(&true);
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
 
         if pin_is_set {
             // Change existing PIN
@@ -515,7 +515,7 @@ pub fn run_access_verify_pin(
     with_fido_session!(dev, scp_params, |ctap2| {
         let pin_str = require_pin_from_info(ctap2.info(), pin, "PIN verification")?;
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
 
         // Get a PIN token to verify the PIN
         client_pin
@@ -546,13 +546,13 @@ pub fn run_access_force_change(
         }
         let pin_str = require_pin_from_info(ctap2.info(), pin, "Force change PIN")?;
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
             get_pin_token_inner(&mut client_pin, &pin_str, Permissions::AUTHENTICATOR_CFG)?;
         let session = client_pin.into_session();
 
         let mut config = Config::new(session, protocol, token)
-            .map_err(|e| CliError(format!("Failed to create config: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create config: {e}")))?;
         config
             .set_min_pin_length(None, None, true)
             .map_err(|e| CliError(format!("Failed to set force change: {e}")))?;
@@ -601,13 +601,13 @@ pub fn run_access_set_min_length(
 
         let pin_str = require_pin_from_info(ctap2.info(), pin, "Set minimum PIN length")?;
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
             get_pin_token_inner(&mut client_pin, &pin_str, Permissions::AUTHENTICATOR_CFG)?;
         let session = client_pin.into_session();
 
         let mut config = Config::new(session, protocol, token)
-            .map_err(|e| CliError(format!("Failed to create config: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create config: {e}")))?;
         let rp_arg = if rp_ids.is_empty() {
             None
         } else {
@@ -644,13 +644,13 @@ pub fn run_credentials_list(
 
         let pin_str = require_pin_from_info(ctap2.info(), pin, "Credential Management")?;
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
             get_pin_token_inner(&mut client_pin, &pin_str, Permissions::CREDENTIAL_MGMT)?;
         let session = client_pin.into_session();
 
         let mut credman = CredentialManagement::new(session, protocol, token)
-            .map_err(|e| CliError(format!("Failed to create credential manager: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create credential manager: {e}")))?;
 
         let rps = credman
             .enumerate_rps()
@@ -771,13 +771,13 @@ pub fn run_credentials_delete(
     with_fido_session!(dev, scp_params, |ctap2| {
         let pin_str = require_pin_from_info(ctap2.info(), pin, "Credential Management")?;
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
             get_pin_token_inner(&mut client_pin, &pin_str, Permissions::CREDENTIAL_MGMT)?;
         let session = client_pin.into_session();
 
         let mut credman = CredentialManagement::new(session, protocol, token)
-            .map_err(|e| CliError(format!("Failed to create credential manager: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create credential manager: {e}")))?;
         let search = credential_id.trim_end_matches('.').to_lowercase();
 
         // Find matching credentials
@@ -854,13 +854,13 @@ pub fn run_credentials_update(
     with_fido_session!(dev, scp_params, |ctap2| {
         let pin_str = require_pin_from_info(ctap2.info(), pin, "Credential Management")?;
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
             get_pin_token_inner(&mut client_pin, &pin_str, Permissions::CREDENTIAL_MGMT)?;
         let session = client_pin.into_session();
 
         let mut credman = CredentialManagement::new(session, protocol, token)
-            .map_err(|e| CliError(format!("Failed to create credential manager: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create credential manager: {e}")))?;
 
         if !credman.is_update_supported() {
             return Err(CliError(
@@ -939,13 +939,13 @@ pub fn run_fingerprints_list(
 
         let pin_str = require_pin_from_info(ctap2.info(), pin, "Biometrics")?;
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
             get_pin_token_inner(&mut client_pin, &pin_str, Permissions::BIO_ENROLL)?;
         let session = client_pin.into_session();
 
         let mut bio = BioEnrollment::new(session, protocol, token)
-            .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
         let enrollments = match bio.enumerate_enrollments() {
             Ok(templates) => templates,
@@ -985,13 +985,13 @@ pub fn run_fingerprints_add(
     with_fido_session!(dev, scp_params, |ctap2| {
         let pin_str = require_pin_from_info(ctap2.info(), pin, "Biometrics")?;
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
             get_pin_token_inner(&mut client_pin, &pin_str, Permissions::BIO_ENROLL)?;
         let session = client_pin.into_session();
 
         let mut bio = BioEnrollment::new(session, protocol, token)
-            .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
         // Set up Ctrl+C handler for cancellation
         let cancel = std::sync::Arc::new(AtomicBool::new(false));
@@ -1076,13 +1076,13 @@ pub fn run_fingerprints_rename(
     with_fido_session!(dev, scp_params, |ctap2| {
         let pin_str = require_pin_from_info(ctap2.info(), pin, "Biometrics")?;
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
             get_pin_token_inner(&mut client_pin, &pin_str, Permissions::BIO_ENROLL)?;
         let session = client_pin.into_session();
 
         let mut bio = BioEnrollment::new(session, protocol, token)
-            .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
         let key = hex::decode(template_id)
             .map_err(|e| CliError(format!("Invalid template ID hex: {e}")))?;
@@ -1104,13 +1104,13 @@ pub fn run_fingerprints_delete(
     with_fido_session!(dev, scp_params, |ctap2| {
         let pin_str = require_pin_from_info(ctap2.info(), pin, "Biometrics")?;
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
             get_pin_token_inner(&mut client_pin, &pin_str, Permissions::BIO_ENROLL)?;
         let session = client_pin.into_session();
 
         let mut bio = BioEnrollment::new(session, protocol, token)
-            .map_err(|e| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
         let key = hex::decode(template_id)
             .map_err(|_| CliError(format!("Invalid template ID hex: {template_id}")))?;
@@ -1157,7 +1157,7 @@ pub fn run_config_toggle_always_uv(
 
         let ctap_info = ctap2.info().clone();
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) = get_optional_pin_token_inner(
             &mut client_pin,
             &ctap_info,
@@ -1171,7 +1171,7 @@ pub fn run_config_toggle_always_uv(
         } else {
             Config::new_unauthenticated(session)
         }
-        .map_err(|e| CliError(format!("Failed to create config: {e}")))?;
+        .map_err(|(e, _)| CliError(format!("Failed to create config: {e}")))?;
         config
             .toggle_always_uv()
             .map_err(|e| CliError(format!("Failed to toggle Always Require UV: {e}")))?;
@@ -1207,7 +1207,7 @@ pub fn run_config_enable_ep_attestation(
 
         let ctap_info = ctap2.info().clone();
         let mut client_pin = ClientPin::new(ctap2)
-            .map_err(|e| CliError(format!("Failed to create ClientPin: {e}")))?;
+            .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) = get_optional_pin_token_inner(
             &mut client_pin,
             &ctap_info,
@@ -1221,7 +1221,7 @@ pub fn run_config_enable_ep_attestation(
         } else {
             Config::new_unauthenticated(session)
         }
-        .map_err(|e| CliError(format!("Failed to create config: {e}")))?;
+        .map_err(|(e, _)| CliError(format!("Failed to create config: {e}")))?;
         config
             .enable_enterprise_attestation()
             .map_err(|e| CliError(format!("Failed to enable Enterprise Attestation: {e}")))?;

@@ -62,14 +62,17 @@ impl<C: Connection + 'static> LargeBlobs<C> {
     ///
     /// The PIN token must have the `LARGE_BLOB_WRITE` permission for write
     /// operations. Read operations do not require authentication.
+    /// On failure, returns the session alongside the error.
+    #[allow(clippy::result_large_err)]
     pub fn new(
         session: Ctap2Session<C>,
         protocol: PinProtocol,
         pin_token: Vec<u8>,
-    ) -> Result<Self, Ctap2Error<C::Error>> {
+    ) -> Result<Self, (Ctap2Error<C::Error>, Ctap2Session<C>)> {
         if !Self::is_supported(&session.cached_info) {
-            return Err(Ctap2Error::InvalidResponse(
-                "Authenticator does not support largeBlobs".into(),
+            return Err((
+                Ctap2Error::InvalidResponse("Authenticator does not support largeBlobs".into()),
+                session,
             ));
         }
         let max_msg = session.cached_info.max_msg_size;

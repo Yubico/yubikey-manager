@@ -61,14 +61,19 @@ impl<C: Connection + 'static> Config<C> {
     /// Create a new `Config` from a `Ctap2Session` and a PIN token.
     ///
     /// The PIN token must have the `AUTHENTICATOR_CFG` permission.
+    /// On failure, returns the session alongside the error.
+    #[allow(clippy::result_large_err)]
     pub fn new(
         session: Ctap2Session<C>,
         protocol: PinProtocol,
         pin_token: Vec<u8>,
-    ) -> Result<Self, Ctap2Error<C::Error>> {
+    ) -> Result<Self, (Ctap2Error<C::Error>, Ctap2Session<C>)> {
         if !Self::is_supported(&session.cached_info) {
-            return Err(Ctap2Error::InvalidResponse(
-                "Authenticator does not support authenticatorConfig".into(),
+            return Err((
+                Ctap2Error::InvalidResponse(
+                    "Authenticator does not support authenticatorConfig".into(),
+                ),
+                session,
             ));
         }
         Ok(Self {
@@ -81,10 +86,17 @@ impl<C: Connection + 'static> Config<C> {
     /// Create a new `Config` without PIN authentication.
     ///
     /// Used when no PIN is set on the authenticator but config commands are needed.
-    pub fn new_unauthenticated(session: Ctap2Session<C>) -> Result<Self, Ctap2Error<C::Error>> {
+    /// On failure, returns the session alongside the error.
+    #[allow(clippy::result_large_err)]
+    pub fn new_unauthenticated(
+        session: Ctap2Session<C>,
+    ) -> Result<Self, (Ctap2Error<C::Error>, Ctap2Session<C>)> {
         if !Self::is_supported(&session.cached_info) {
-            return Err(Ctap2Error::InvalidResponse(
-                "Authenticator does not support authenticatorConfig".into(),
+            return Err((
+                Ctap2Error::InvalidResponse(
+                    "Authenticator does not support authenticatorConfig".into(),
+                ),
+                session,
             ));
         }
         Ok(Self {

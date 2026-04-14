@@ -118,7 +118,13 @@ pub fn open_client() -> (
             std::process::exit(1);
         }
     };
-    let session = Ctap2Session::new(ctap).expect("CTAP2 init failed");
+    let session = match Ctap2Session::new(ctap) {
+        Ok(s) => s,
+        Err((e, _)) => {
+            eprintln!("CTAP2 init failed: {e}");
+            std::process::exit(1);
+        }
+    };
     let info = session.info().clone();
 
     (

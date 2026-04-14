@@ -82,15 +82,18 @@ impl<C: Connection + 'static> BioEnrollment<C> {
     /// Create a new `BioEnrollment` from a `Ctap2Session` and a PIN token.
     ///
     /// The PIN token must have the `BIO_ENROLL` permission.
+    /// On failure, returns the session alongside the error.
+    #[allow(clippy::result_large_err)]
     pub fn new(
         session: Ctap2Session<C>,
         protocol: PinProtocol,
         pin_token: Vec<u8>,
-    ) -> Result<Self, Ctap2Error<C::Error>> {
+    ) -> Result<Self, (Ctap2Error<C::Error>, Ctap2Session<C>)> {
         let info = &session.cached_info;
         if !Self::is_supported(info) {
-            return Err(Ctap2Error::InvalidResponse(
-                "Authenticator does not support bioEnrollment".into(),
+            return Err((
+                Ctap2Error::InvalidResponse("Authenticator does not support bioEnrollment".into()),
+                session,
             ));
         }
 

@@ -95,15 +95,20 @@ impl<C: Connection + 'static> CredentialManagement<C> {
     /// Automatically determines whether to use the standard (0x0A) or
     /// legacy preview (0x41) command byte based on the authenticator's
     /// reported capabilities.
+    /// On failure, returns the session alongside the error.
+    #[allow(clippy::result_large_err)]
     pub fn new(
         session: Ctap2Session<C>,
         protocol: PinProtocol,
         pin_token: Vec<u8>,
-    ) -> Result<Self, Ctap2Error<C::Error>> {
+    ) -> Result<Self, (Ctap2Error<C::Error>, Ctap2Session<C>)> {
         let info = &session.cached_info;
         if !Self::is_supported(info) {
-            return Err(Ctap2Error::InvalidResponse(
-                "Authenticator does not support credentialManagement".into(),
+            return Err((
+                Ctap2Error::InvalidResponse(
+                    "Authenticator does not support credentialManagement".into(),
+                ),
+                session,
             ));
         }
 

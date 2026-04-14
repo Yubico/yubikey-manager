@@ -157,7 +157,7 @@ fn main() {
         };
         let ctap2 = match Ctap2Session::new(ctap) {
             Ok(s) => s,
-            Err(e) => {
+            Err((e, _)) => {
                 eprintln!("  Failed to get info: {e}");
                 continue;
             }
@@ -193,7 +193,7 @@ fn main() {
 
         let ctap2 = match Ctap2Session::new(ctap) {
             Ok(s) => s,
-            Err(e) => {
+            Err((e, _)) => {
                 eprintln!("  Failed to get info: {e}");
                 continue;
             }

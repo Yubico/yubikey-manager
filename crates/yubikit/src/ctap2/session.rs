@@ -52,13 +52,23 @@ impl<C: Connection + 'static> Ctap2Session<C> {
     /// Create a new `Ctap2Session` wrapping the given [`CtapSession`].
     ///
     /// Calls `get_info()` to cache the authenticator's capabilities.
-    pub fn new(session: CtapSession<C>) -> Result<Self, Ctap2Error<C::Error>> {
+    /// On failure, returns the [`CtapSession`] alongside the error so
+    /// it is not lost.
+    pub fn new(session: CtapSession<C>) -> Result<Self, (Ctap2Error<C::Error>, CtapSession<C>)> {
         let mut s = Self {
             session,
             cached_info: Info::default(),
         };
-        s.cached_info = s.get_info()?;
-        Ok(s)
+        match s.get_info() {
+            Ok(info) => {
+                s.cached_info = info;
+                Ok(s)
+            }
+            Err(e) => {
+                let session = s.session;
+                Err((e, session))
+            }
+        }
     }
 
     /// Get a reference to the cached authenticator info.

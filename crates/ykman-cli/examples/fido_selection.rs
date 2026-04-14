@@ -28,7 +28,7 @@ fn run_selection_hid(conn: HidFidoConnection) {
     };
     let mut ctap2 = match Ctap2Session::new(ctap) {
         Ok(c) => c,
-        Err(e) => {
+        Err((e, _)) => {
             eprintln!("Failed to init CTAP2: {e}");
             return;
         }
@@ -56,7 +56,7 @@ fn run_selection_smartcard(conn: PcscSmartCardConnection, reader: &str) {
 
     let mut ctap2 = match Ctap2Session::new(ctap) {
         Ok(c) => c,
-        Err(e) => {
+        Err((e, _)) => {
             eprintln!("Failed to init CTAP2: {e}");
             return;
         }

@@ -996,9 +996,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             ));
         };
 
-        // new_with_protocol is infallible in practice
-        let mut client_pin = ClientPin::new_with_protocol(session, protocol)
-            .expect("ClientPin::new_with_protocol should not fail");
+        let mut client_pin = ClientPin::new_with_protocol(session, protocol);
 
         let protocol = client_pin.protocol();
 

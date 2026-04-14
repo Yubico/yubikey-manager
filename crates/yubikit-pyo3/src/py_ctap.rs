@@ -233,7 +233,7 @@ impl PyCtap2Session {
             return Err(PyRuntimeError::new_err("Device does not support CTAP2"));
         }
         Ok(Self {
-            session: Some(Ctap2Session::new(ctap).map_err(ctap2_err)?),
+            session: Some(Ctap2Session::new(ctap).map_err(|(e, _)| ctap2_err(e))?),
             py_connection,
         })
     }
@@ -370,7 +370,7 @@ impl PyCtap2FidoSession {
             return Err(PyRuntimeError::new_err("Device does not support CTAP2"));
         }
         Ok(Self {
-            session: Some(Ctap2Session::new(ctap).map_err(ctap2_err)?),
+            session: Some(Ctap2Session::new(ctap).map_err(|(e, _)| ctap2_err(e))?),
             py_connection,
         })
     }
@@ -533,9 +533,15 @@ impl PyClientPin {
     fn new(session: &mut PyCtap2Session, protocol: Option<&PyPinProtocol>) -> PyResult<Self> {
         let ctap2 = session.take_session()?;
         let inner = if let Some(proto) = protocol {
-            ClientPin::new_with_protocol(ctap2, proto.protocol()).map_err(ctap2_err)?
+            ClientPin::new_with_protocol(ctap2, proto.protocol())
         } else {
-            ClientPin::new(ctap2).map_err(ctap2_err)?
+            match ClientPin::new(ctap2) {
+                Ok(pin) => pin,
+                Err((e, s)) => {
+                    session.restore_session(s);
+                    return Err(ctap2_err(e));
+                }
+            }
         };
         Ok(Self { inner: Some(inner) })
     }
@@ -652,9 +658,15 @@ impl PyClientPinFido {
     fn new(session: &mut PyCtap2FidoSession, protocol: Option<&PyPinProtocol>) -> PyResult<Self> {
         let ctap2 = session.take_session()?;
         let inner = if let Some(proto) = protocol {
-            ClientPin::new_with_protocol(ctap2, proto.protocol()).map_err(ctap2_err)?
+            ClientPin::new_with_protocol(ctap2, proto.protocol())
         } else {
-            ClientPin::new(ctap2).map_err(ctap2_err)?
+            match ClientPin::new(ctap2) {
+                Ok(pin) => pin,
+                Err((e, s)) => {
+                    session.restore_session(s);
+                    return Err(ctap2_err(e));
+                }
+            }
         };
         Ok(Self { inner: Some(inner) })
     }
@@ -874,8 +886,14 @@ impl PyCredentialManagement {
         pin_token: &[u8],
     ) -> PyResult<Self> {
         let ctap2 = session.take_session()?;
-        let inner = CredentialManagement::new(ctap2, protocol.protocol(), pin_token.to_vec())
-            .map_err(ctap2_err)?;
+        let inner = match CredentialManagement::new(ctap2, protocol.protocol(), pin_token.to_vec())
+        {
+            Ok(cm) => cm,
+            Err((e, s)) => {
+                session.restore_session(s);
+                return Err(ctap2_err(e));
+            }
+        };
         Ok(Self { inner: Some(inner) })
     }
 
@@ -968,8 +986,14 @@ impl PyCredentialManagementFido {
         pin_token: &[u8],
     ) -> PyResult<Self> {
         let ctap2 = session.take_session()?;
-        let inner = CredentialManagement::new(ctap2, protocol.protocol(), pin_token.to_vec())
-            .map_err(ctap2_err)?;
+        let inner = match CredentialManagement::new(ctap2, protocol.protocol(), pin_token.to_vec())
+        {
+            Ok(cm) => cm,
+            Err((e, s)) => {
+                session.restore_session(s);
+                return Err(ctap2_err(e));
+            }
+        };
         Ok(Self { inner: Some(inner) })
     }
 
@@ -1062,8 +1086,13 @@ impl PyConfig {
         pin_token: &[u8],
     ) -> PyResult<Self> {
         let ctap2 = session.take_session()?;
-        let inner =
-            Config::new(ctap2, protocol.protocol(), pin_token.to_vec()).map_err(ctap2_err)?;
+        let inner = match Config::new(ctap2, protocol.protocol(), pin_token.to_vec()) {
+            Ok(cfg) => cfg,
+            Err((e, s)) => {
+                session.restore_session(s);
+                return Err(ctap2_err(e));
+            }
+        };
         Ok(Self { inner: Some(inner) })
     }
 
@@ -1125,8 +1154,13 @@ impl PyConfigFido {
         pin_token: &[u8],
     ) -> PyResult<Self> {
         let ctap2 = session.take_session()?;
-        let inner =
-            Config::new(ctap2, protocol.protocol(), pin_token.to_vec()).map_err(ctap2_err)?;
+        let inner = match Config::new(ctap2, protocol.protocol(), pin_token.to_vec()) {
+            Ok(cfg) => cfg,
+            Err((e, s)) => {
+                session.restore_session(s);
+                return Err(ctap2_err(e));
+            }
+        };
         Ok(Self { inner: Some(inner) })
     }
 
@@ -1188,8 +1222,13 @@ impl PyBioEnrollment {
         pin_token: &[u8],
     ) -> PyResult<Self> {
         let ctap2 = session.take_session()?;
-        let inner = BioEnrollment::new(ctap2, protocol.protocol(), pin_token.to_vec())
-            .map_err(ctap2_err)?;
+        let inner = match BioEnrollment::new(ctap2, protocol.protocol(), pin_token.to_vec()) {
+            Ok(bio) => bio,
+            Err((e, s)) => {
+                session.restore_session(s);
+                return Err(ctap2_err(e));
+            }
+        };
         Ok(Self { inner: Some(inner) })
     }
 
@@ -1316,8 +1355,13 @@ impl PyBioEnrollmentFido {
         pin_token: &[u8],
     ) -> PyResult<Self> {
         let ctap2 = session.take_session()?;
-        let inner = BioEnrollment::new(ctap2, protocol.protocol(), pin_token.to_vec())
-            .map_err(ctap2_err)?;
+        let inner = match BioEnrollment::new(ctap2, protocol.protocol(), pin_token.to_vec()) {
+            Ok(bio) => bio,
+            Err((e, s)) => {
+                session.restore_session(s);
+                return Err(ctap2_err(e));
+            }
+        };
         Ok(Self { inner: Some(inner) })
     }
 
@@ -1444,8 +1488,13 @@ impl PyLargeBlobs {
         pin_token: &[u8],
     ) -> PyResult<Self> {
         let ctap2 = session.take_session()?;
-        let inner =
-            LargeBlobs::new(ctap2, protocol.protocol(), pin_token.to_vec()).map_err(ctap2_err)?;
+        let inner = match LargeBlobs::new(ctap2, protocol.protocol(), pin_token.to_vec()) {
+            Ok(lb) => lb,
+            Err((e, s)) => {
+                session.restore_session(s);
+                return Err(ctap2_err(e));
+            }
+        };
         Ok(Self { inner: Some(inner) })
     }
 
@@ -1521,8 +1570,13 @@ impl PyLargeBlobsFido {
         pin_token: &[u8],
     ) -> PyResult<Self> {
         let ctap2 = session.take_session()?;
-        let inner =
-            LargeBlobs::new(ctap2, protocol.protocol(), pin_token.to_vec()).map_err(ctap2_err)?;
+        let inner = match LargeBlobs::new(ctap2, protocol.protocol(), pin_token.to_vec()) {
+            Ok(lb) => lb,
+            Err((e, s)) => {
+                session.restore_session(s);
+                return Err(ctap2_err(e));
+            }
+        };
         Ok(Self { inner: Some(inner) })
     }
 

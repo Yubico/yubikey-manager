@@ -141,7 +141,7 @@ impl PyWebAuthnClient {
             return Err(PyRuntimeError::new_err("Device does not support CTAP2"));
         }
         let session = Ctap2Session::new(ctap)
-            .map_err(|e| PyOSError::new_err(format!("CTAP2 init failed: {e}")))?;
+            .map_err(|(e, _)| PyOSError::new_err(format!("CTAP2 init failed: {e}")))?;
 
         let interaction = PyUserInteraction {
             obj: user_interaction,
@@ -229,7 +229,7 @@ impl PyWebAuthnCcidClient {
             return Err(PyRuntimeError::new_err("Device does not support CTAP2"));
         }
         let session = Ctap2Session::new(ctap)
-            .map_err(|e| PyOSError::new_err(format!("CTAP2 init failed: {e}")))?;
+            .map_err(|(e, _)| PyOSError::new_err(format!("CTAP2 init failed: {e}")))?;
 
         let interaction = PyUserInteraction {
             obj: user_interaction,
