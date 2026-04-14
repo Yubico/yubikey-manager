@@ -22,8 +22,8 @@ use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::webauthn::{
     ClientDataCollector, CollectedClientData, PublicKeyCredentialCreationOptions,
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
-    PublicKeyCredentialRequestOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
-    UserInteraction, UserVerificationRequirement, WebAuthnClient,
+    PublicKeyCredentialRequestOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialType,
+    PublicKeyCredentialUserEntity, UserInteraction, UserVerificationRequirement, WebAuthnClient,
 };
 
 // ---------------------------------------------------------------------------
@@ -158,8 +158,14 @@ fn main() {
         },
         challenge: random_challenge(),
         pub_key_cred_params: vec![
-            PublicKeyCredentialParameters::es256(),
-            PublicKeyCredentialParameters::new(-8), // EdDSA
+            PublicKeyCredentialParameters {
+                type_: PublicKeyCredentialType::PublicKey,
+                alg: -7, // ES256
+            },
+            PublicKeyCredentialParameters {
+                type_: PublicKeyCredentialType::PublicKey,
+                alg: -8, // EdDSA
+            },
         ],
         timeout: Some(60_000),
         exclude_credentials: None,
@@ -191,7 +197,11 @@ fn main() {
         challenge: random_challenge(),
         timeout: Some(60_000),
         rp_id: Some(RP_ID.to_string()),
-        allow_credentials: Some(vec![PublicKeyCredentialDescriptor::new(reg.id.clone())]),
+        allow_credentials: Some(vec![PublicKeyCredentialDescriptor {
+            type_: PublicKeyCredentialType::PublicKey,
+            id: reg.id.clone(),
+            transports: None,
+        }]),
         user_verification: Some(UserVerificationRequirement::Discouraged),
         hints: None,
         extensions: None,

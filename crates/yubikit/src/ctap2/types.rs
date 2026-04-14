@@ -32,6 +32,7 @@
 //! and deserialization via `to_cbor()` / `from_cbor()`.
 
 use crate::cbor::Value;
+use crate::webauthn::types::{PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity};
 
 use super::pin_protocol::CoseKey;
 
@@ -47,13 +48,6 @@ pub struct PublicKeyCredentialRpEntity {
 }
 
 impl PublicKeyCredentialRpEntity {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            name: None,
-        }
-    }
-
     pub(crate) fn to_cbor(&self) -> Value {
         let mut entries = vec![(Value::Text("id".into()), Value::Text(self.id.clone()))];
         if let Some(name) = &self.name {
@@ -69,150 +63,6 @@ impl PublicKeyCredentialRpEntity {
             .and_then(|v| v.as_text())
             .map(|s| s.to_string());
         Some(Self { id, name })
-    }
-}
-
-/// User entity (§5.4.3 of WebAuthn / §6.1 param 3 of CTAP2).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublicKeyCredentialUserEntity {
-    pub id: Vec<u8>,
-    pub name: Option<String>,
-    pub display_name: Option<String>,
-}
-
-impl PublicKeyCredentialUserEntity {
-    pub fn new(id: Vec<u8>) -> Self {
-        Self {
-            id,
-            name: None,
-            display_name: None,
-        }
-    }
-
-    pub(crate) fn to_cbor(&self) -> Value {
-        let mut entries = vec![(Value::Text("id".into()), Value::Bytes(self.id.clone()))];
-        if let Some(name) = &self.name {
-            entries.push((Value::Text("name".into()), Value::Text(name.clone())));
-        }
-        if let Some(dn) = &self.display_name {
-            entries.push((Value::Text("displayName".into()), Value::Text(dn.clone())));
-        }
-        Value::Map(entries)
-    }
-
-    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
-        let id = value
-            .map_get_text("id")
-            .and_then(|v| v.as_bytes())
-            .map(|b| b.to_vec())?;
-        let name = value
-            .map_get_text("name")
-            .and_then(|v| v.as_text())
-            .map(|s| s.to_string());
-        let display_name = value
-            .map_get_text("displayName")
-            .and_then(|v| v.as_text())
-            .map(|s| s.to_string());
-        Some(Self {
-            id,
-            name,
-            display_name,
-        })
-    }
-}
-
-/// Credential descriptor (§5.8.3 of WebAuthn / §6.1 param 5 entries of CTAP2).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublicKeyCredentialDescriptor {
-    pub type_: String,
-    pub id: Vec<u8>,
-    pub transports: Option<Vec<String>>,
-}
-
-impl PublicKeyCredentialDescriptor {
-    pub fn new(id: Vec<u8>) -> Self {
-        Self {
-            type_: "public-key".into(),
-            id,
-            transports: None,
-        }
-    }
-
-    pub(crate) fn to_cbor(&self) -> Value {
-        let mut entries = vec![
-            (Value::Text("type".into()), Value::Text(self.type_.clone())),
-            (Value::Text("id".into()), Value::Bytes(self.id.clone())),
-        ];
-        if let Some(transports) = &self.transports {
-            entries.push((
-                Value::Text("transports".into()),
-                Value::Array(transports.iter().map(|t| Value::Text(t.clone())).collect()),
-            ));
-        }
-        Value::Map(entries)
-    }
-
-    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
-        let type_ = value
-            .map_get_text("type")
-            .and_then(|v| v.as_text())
-            .unwrap_or("public-key")
-            .to_string();
-        let id = value
-            .map_get_text("id")
-            .and_then(|v| v.as_bytes())
-            .map(|b| b.to_vec())?;
-        let transports = value
-            .map_get_text("transports")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_text().map(|s| s.to_string()))
-                    .collect()
-            });
-        Some(Self {
-            type_,
-            id,
-            transports,
-        })
-    }
-}
-
-/// Algorithm parameter for credential creation (§5.8.2 of WebAuthn).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublicKeyCredentialParameters {
-    pub type_: String,
-    pub alg: i64,
-}
-
-impl PublicKeyCredentialParameters {
-    pub fn new(alg: i64) -> Self {
-        Self {
-            type_: "public-key".into(),
-            alg,
-        }
-    }
-
-    /// ES256 (-7) algorithm parameter.
-    pub fn es256() -> Self {
-        Self::new(-7)
-    }
-
-    pub(crate) fn to_cbor(&self) -> Value {
-        Value::Map(vec![
-            (Value::Text("type".into()), Value::Text(self.type_.clone())),
-            (Value::Text("alg".into()), Value::Int(self.alg)),
-        ])
-    }
-
-    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
-        let type_ = value
-            .map_get_text("type")
-            .and_then(|v| v.as_text())
-            .unwrap_or("public-key")
-            .to_string();
-        let alg = value.map_get_text("alg").and_then(|v| v.as_int())?;
-        Some(Self { type_, alg })
     }
 }
 
@@ -515,20 +365,6 @@ impl FingerprintTemplate {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helper: encode lists for CTAP2 parameters
-// ---------------------------------------------------------------------------
-
-/// Encode a list of credential descriptors as a CBOR array.
-pub(crate) fn encode_allow_exclude_list(list: &[PublicKeyCredentialDescriptor]) -> Value {
-    Value::Array(list.iter().map(|d| d.to_cbor()).collect())
-}
-
-/// Encode a list of credential parameters as a CBOR array.
-pub(crate) fn encode_pub_key_cred_params(params: &[PublicKeyCredentialParameters]) -> Value {
-    Value::Array(params.iter().map(|p| p.to_cbor()).collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,38 +378,6 @@ mod tests {
         let val = rp.to_cbor();
         let rp2 = PublicKeyCredentialRpEntity::from_cbor(&val).unwrap();
         assert_eq!(rp, rp2);
-    }
-
-    #[test]
-    fn test_user_entity_roundtrip() {
-        let user = PublicKeyCredentialUserEntity {
-            id: vec![1, 2, 3, 4],
-            name: Some("alice".into()),
-            display_name: Some("Alice".into()),
-        };
-        let val = user.to_cbor();
-        let user2 = PublicKeyCredentialUserEntity::from_cbor(&val).unwrap();
-        assert_eq!(user, user2);
-    }
-
-    #[test]
-    fn test_credential_descriptor_roundtrip() {
-        let desc = PublicKeyCredentialDescriptor {
-            type_: "public-key".into(),
-            id: vec![0xAA, 0xBB, 0xCC],
-            transports: Some(vec!["usb".into(), "nfc".into()]),
-        };
-        let val = desc.to_cbor();
-        let desc2 = PublicKeyCredentialDescriptor::from_cbor(&val).unwrap();
-        assert_eq!(desc, desc2);
-    }
-
-    #[test]
-    fn test_credential_params_roundtrip() {
-        let params = PublicKeyCredentialParameters::es256();
-        let val = params.to_cbor();
-        let params2 = PublicKeyCredentialParameters::from_cbor(&val).unwrap();
-        assert_eq!(params, params2);
     }
 
     #[test]

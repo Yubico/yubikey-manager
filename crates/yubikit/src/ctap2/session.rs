@@ -30,10 +30,13 @@ use crate::core::Connection;
 use crate::ctap::CtapSession;
 
 use super::types::{
-    AssertionResponse, AttestationResponse, AuthenticatorOptions, PublicKeyCredentialDescriptor,
-    PublicKeyCredentialParameters, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
+    AssertionResponse, AttestationResponse, AuthenticatorOptions, PublicKeyCredentialRpEntity,
 };
 use super::{Ctap2Error, CtapStatus, Info, build_args_map, ctap2_cmd};
+use crate::webauthn::types::{
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, PublicKeyCredentialUserEntity,
+    encode_allow_exclude_list, encode_pub_key_cred_params,
+};
 
 /// CTAP2 protocol session.
 ///
@@ -177,9 +180,6 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<AttestationResponse, Ctap2Error<C::Error>> {
-        use super::types::encode_allow_exclude_list;
-        use super::types::encode_pub_key_cred_params;
-
         let data = build_args_map(&[
             Some(Value::Bytes(client_data_hash.to_vec())), // 0x01
             Some(rp.to_cbor()),                            // 0x02
@@ -227,8 +227,6 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<AssertionResponse, Ctap2Error<C::Error>> {
-        use super::types::encode_allow_exclude_list;
-
         let data = build_args_map(&[
             Some(Value::Text(rp_id.to_string())),           // 0x01
             Some(Value::Bytes(client_data_hash.to_vec())),  // 0x02

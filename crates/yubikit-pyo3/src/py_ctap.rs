@@ -138,7 +138,7 @@ fn algorithms_to_py(py: Python<'_>, info: &Info) -> PyResult<PyObject> {
     let list = PyList::empty(py);
     for alg in &info.algorithms {
         let d = PyDict::new(py);
-        d.set_item("type", &alg.type_)?;
+        d.set_item("type", alg.type_.as_str())?;
         d.set_item("alg", alg.alg)?;
         list.append(d)?;
     }
@@ -769,7 +769,7 @@ fn credential_info_to_py(py: Python<'_>, info: &CredentialInfo) -> PyResult<PyOb
     }
     dict.set_item(6u32, user_dict)?;
     let cred_dict = PyDict::new(py);
-    cred_dict.set_item("type", &info.credential_id.type_)?;
+    cred_dict.set_item("type", info.credential_id.type_.as_str())?;
     cred_dict.set_item("id", PyBytes::new(py, &info.credential_id.id))?;
     dict.set_item(7u32, cred_dict)?;
     dict.set_item(8u32, cbor_value_to_py(py, &info.public_key)?)?;
@@ -787,17 +787,12 @@ fn credential_info_to_py(py: Python<'_>, info: &CredentialInfo) -> PyResult<PyOb
 
 fn py_to_credential_descriptor(obj: &Bound<'_, PyAny>) -> PyResult<PublicKeyCredentialDescriptor> {
     let dict = obj.downcast::<PyDict>()?;
-    let type_ = dict
-        .get_item("type")?
-        .map(|v| v.extract::<String>())
-        .transpose()?
-        .unwrap_or_else(|| "public-key".to_string());
     let id = dict
         .get_item("id")?
         .ok_or_else(|| PyValueError::new_err("credential descriptor missing 'id'"))?
         .extract::<Vec<u8>>()?;
     Ok(PublicKeyCredentialDescriptor {
-        type_,
+        type_: yubikit::webauthn::PublicKeyCredentialType::PublicKey,
         id,
         transports: None,
     })

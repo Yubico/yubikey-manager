@@ -38,8 +38,9 @@ pub use client::{ClientDataCollector, ClientError, UserInteraction, WebAuthnClie
 pub use types::{
     AttestationConveyancePreference, AuthenticationResponse, AuthenticatorAssertionResponse,
     AuthenticatorAttachment, AuthenticatorAttestationResponse, AuthenticatorSelectionCriteria,
-    CollectedClientData, PublicKeyCredentialCreationOptions, PublicKeyCredentialDescriptor,
-    PublicKeyCredentialHint, PublicKeyCredentialParameters, PublicKeyCredentialRequestOptions,
-    PublicKeyCredentialRpEntity, PublicKeyCredentialType, PublicKeyCredentialUserEntity,
-    RegistrationResponse, ResidentKeyRequirement, UserVerificationRequirement,
+    AuthenticatorTransport, CollectedClientData, PublicKeyCredentialCreationOptions,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialHint, PublicKeyCredentialParameters,
+    PublicKeyCredentialRequestOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialType,
+    PublicKeyCredentialUserEntity, RegistrationResponse, ResidentKeyRequirement,
+    UserVerificationRequirement,
 };

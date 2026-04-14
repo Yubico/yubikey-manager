@@ -32,10 +32,9 @@ use crate::core::Connection;
 
 use super::pin_protocol::PinProtocol;
 use super::session::Ctap2Session;
-use super::types::{
-    CredentialInfo, PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity, RpInfo,
-};
+use super::types::{CredentialInfo, RpInfo};
 use super::{Ctap2Error, build_args_map, ctap2_cmd};
+use crate::webauthn::types::{PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity};
 
 /// CredentialManagement sub-command identifiers (§6.8).
 mod cred_mgmt_cmd {

@@ -192,18 +192,8 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             up: None,
         };
 
-        // Convert WebAuthn types to CTAP2 types
+        // Convert WebAuthn RP to CTAP2 (different field requirements)
         let ctap2_rp = options.rp.to_ctap2(&rp_id);
-        let ctap2_user = options.user.to_ctap2();
-        let ctap2_params: Vec<_> = options
-            .pub_key_cred_params
-            .iter()
-            .map(|p| p.to_ctap2())
-            .collect();
-        let ctap2_exclude: Option<Vec<_>> = options
-            .exclude_credentials
-            .as_ref()
-            .map(|creds| creds.iter().map(|c| c.to_ctap2()).collect());
 
         let enterprise_attestation = match options.attestation {
             Some(super::types::AttestationConveyancePreference::Enterprise) => Some(1u32),
@@ -222,9 +212,9 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         let att_resp = match session.make_credential(
             &client_data_hash,
             &ctap2_rp,
-            &ctap2_user,
-            &ctap2_params,
-            ctap2_exclude.as_deref(),
+            &options.user,
+            &options.pub_key_cred_params,
+            options.exclude_credentials.as_deref(),
             None, // extensions (TODO)
             Some(&authenticator_options),
             pin_uv_param.as_deref(),
@@ -304,11 +294,6 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             up: None,
         };
 
-        let ctap2_allow: Option<Vec<_>> = options
-            .allow_credentials
-            .as_ref()
-            .map(|creds| creds.iter().map(|c| c.to_ctap2()).collect());
-
         let mut session = self.take_session();
         let interaction = &self.user_interaction;
         let mut on_keepalive = |status: u8| {
@@ -320,7 +305,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         let first = match session.get_assertion(
             &rp_id,
             &client_data_hash,
-            ctap2_allow.as_deref(),
+            options.allow_credentials.as_deref(),
             None, // extensions (TODO)
             Some(&authenticator_options),
             pin_uv_param.as_deref(),

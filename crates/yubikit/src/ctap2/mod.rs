@@ -50,6 +50,9 @@ use sha2::Sha256;
 use crate::cbor::{self, Value};
 use crate::ctap::CtapError;
 
+pub use crate::webauthn::{
+    PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, PublicKeyCredentialUserEntity,
+};
 pub use bio_enrollment::BioEnrollment;
 pub use client_pin::{ClientPin, Permissions};
 pub use config::Config;
@@ -59,8 +62,7 @@ pub use pin_protocol::{CoseKey, PinProtocol};
 pub use session::Ctap2Session;
 pub use types::{
     AssertionResponse, AttestationResponse, AuthenticatorOptions, CredentialInfo,
-    EnrollSampleResult, FingerprintSensorInfo, FingerprintTemplate, PublicKeyCredentialDescriptor,
-    PublicKeyCredentialParameters, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
+    EnrollSampleResult, FingerprintSensorInfo, FingerprintTemplate, PublicKeyCredentialRpEntity,
     RpInfo,
 };
 
@@ -620,7 +622,10 @@ mod tests {
         assert_eq!(info.max_cred_id_length, Some(128));
         assert_eq!(info.algorithms.len(), 1);
         assert_eq!(info.algorithms[0].alg, -7);
-        assert_eq!(info.algorithms[0].type_, "public-key");
+        assert_eq!(
+            info.algorithms[0].type_,
+            crate::webauthn::PublicKeyCredentialType::PublicKey
+        );
         assert_eq!(info.min_pin_length, 6);
         assert_eq!(info.firmware_version, Some(328965));
         assert_eq!(info.remaining_disc_creds, Some(25));

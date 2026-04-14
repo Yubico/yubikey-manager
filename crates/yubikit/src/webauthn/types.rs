@@ -28,18 +28,65 @@
 //! WebAuthn types for credential creation and assertion ceremonies.
 //!
 //! These types correspond to the WebAuthn Level 3 specification and are used
-//! as the public API for [`super::WebAuthnClient`]. Lower-level CTAP2 types
-//! remain in [`crate::ctap2::types`].
+//! as the public API for [`super::WebAuthnClient`]. They are also used by
+//! [`crate::ctap2`] for CBOR serialization to/from the authenticator.
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+use crate::cbor::Value;
+
+// ---------------------------------------------------------------------------
+// Base64url serde helpers
+// ---------------------------------------------------------------------------
+
+mod base64url {
+    use base64::prelude::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
+        BASE64_URL_SAFE_NO_PAD.encode(bytes).serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let s = String::deserialize(d)?;
+        BASE64_URL_SAFE_NO_PAD
+            .decode(&s)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+mod base64url_opt {
+    use base64::prelude::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error> {
+        match bytes {
+            Some(b) => BASE64_URL_SAFE_NO_PAD.encode(b).serialize(s),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
+        let opt = Option::<String>::deserialize(d)?;
+        match opt {
+            Some(s) => BASE64_URL_SAFE_NO_PAD
+                .decode(&s)
+                .map(Some)
+                .map_err(serde::de::Error::custom),
+            None => Ok(None),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // String enums
 // ---------------------------------------------------------------------------
 
 /// The type of a public key credential (§5.8.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PublicKeyCredentialType {
+    #[serde(rename = "public-key")]
     PublicKey,
 }
 
@@ -47,6 +94,13 @@ impl PublicKeyCredentialType {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::PublicKey => "public-key",
+        }
+    }
+
+    pub(crate) fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "public-key" => Some(Self::PublicKey),
+            _ => None,
         }
     }
 }
@@ -58,7 +112,8 @@ impl std::fmt::Display for PublicKeyCredentialType {
 }
 
 /// Attestation conveyance preference (§5.4.7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum AttestationConveyancePreference {
     /// The RP is not interested in attestation.
     #[default]
@@ -86,7 +141,8 @@ impl AttestationConveyancePreference {
 }
 
 /// User verification requirement (§5.8.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum UserVerificationRequirement {
     Required,
     #[default]
@@ -105,7 +161,8 @@ impl UserVerificationRequirement {
 }
 
 /// Resident key requirement (§5.4.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ResidentKeyRequirement {
     Required,
     #[default]
@@ -124,9 +181,11 @@ impl ResidentKeyRequirement {
 }
 
 /// Authenticator attachment modality (§5.4.5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuthenticatorAttachment {
+    #[serde(rename = "platform")]
     Platform,
+    #[serde(rename = "cross-platform")]
     CrossPlatform,
 }
 
@@ -140,7 +199,8 @@ impl AuthenticatorAttachment {
 }
 
 /// Transport hint for authenticator communication (§5.8.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum AuthenticatorTransport {
     Usb,
     Nfc,
@@ -159,13 +219,27 @@ impl AuthenticatorTransport {
             Self::Internal => "internal",
         }
     }
+
+    pub(crate) fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "usb" => Some(Self::Usb),
+            "nfc" => Some(Self::Nfc),
+            "ble" => Some(Self::Ble),
+            "hybrid" => Some(Self::Hybrid),
+            "internal" => Some(Self::Internal),
+            _ => None,
+        }
+    }
 }
 
 /// Hint to the client about preferred authenticator type (§5.8.7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PublicKeyCredentialHint {
+    #[serde(rename = "security-key")]
     SecurityKey,
+    #[serde(rename = "client-device")]
     ClientDevice,
+    #[serde(rename = "hybrid")]
     Hybrid,
 }
 
@@ -184,20 +258,15 @@ impl PublicKeyCredentialHint {
 // ---------------------------------------------------------------------------
 
 /// Relying Party entity (§5.4.2).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialRpEntity {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 }
 
 impl PublicKeyCredentialRpEntity {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            id: None,
-        }
-    }
-
     /// SHA-256 hash of the RP ID, if set.
     pub fn id_hash(&self) -> Option<[u8; 32]> {
         self.id.as_ref().map(|id| {
@@ -209,59 +278,139 @@ impl PublicKeyCredentialRpEntity {
 }
 
 /// User entity (§5.4.3).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialUserEntity {
+    #[serde(with = "base64url")]
     pub id: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
 }
 
 impl PublicKeyCredentialUserEntity {
-    pub fn new(id: Vec<u8>) -> Self {
-        Self {
-            id,
-            name: None,
-            display_name: None,
+    pub(crate) fn to_cbor(&self) -> Value {
+        let mut entries = vec![(Value::Text("id".into()), Value::Bytes(self.id.clone()))];
+        if let Some(name) = &self.name {
+            entries.push((Value::Text("name".into()), Value::Text(name.clone())));
         }
+        if let Some(dn) = &self.display_name {
+            entries.push((Value::Text("displayName".into()), Value::Text(dn.clone())));
+        }
+        Value::Map(entries)
+    }
+
+    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
+        let id = value
+            .map_get_text("id")
+            .and_then(|v| v.as_bytes())
+            .map(|b| b.to_vec())?;
+        let name = value
+            .map_get_text("name")
+            .and_then(|v| v.as_text())
+            .map(|s| s.to_string());
+        let display_name = value
+            .map_get_text("displayName")
+            .and_then(|v| v.as_text())
+            .map(|s| s.to_string());
+        Some(Self {
+            id,
+            name,
+            display_name,
+        })
     }
 }
 
 /// Algorithm parameter for credential creation (§5.8.2).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialParameters {
+    #[serde(rename = "type")]
     pub type_: PublicKeyCredentialType,
     pub alg: i64,
 }
 
 impl PublicKeyCredentialParameters {
-    pub fn new(alg: i64) -> Self {
-        Self {
-            type_: PublicKeyCredentialType::PublicKey,
-            alg,
-        }
+    pub(crate) fn to_cbor(&self) -> Value {
+        Value::Map(vec![
+            (
+                Value::Text("type".into()),
+                Value::Text(self.type_.as_str().to_string()),
+            ),
+            (Value::Text("alg".into()), Value::Int(self.alg)),
+        ])
     }
 
-    /// ES256 (-7) algorithm parameter.
-    pub fn es256() -> Self {
-        Self::new(-7)
+    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
+        let type_ = value
+            .map_get_text("type")
+            .and_then(|v| v.as_text())
+            .and_then(PublicKeyCredentialType::from_str)
+            .unwrap_or(PublicKeyCredentialType::PublicKey);
+        let alg = value.map_get_text("alg").and_then(|v| v.as_int())?;
+        Some(Self { type_, alg })
     }
 }
 
 /// Credential descriptor (§5.8.3).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialDescriptor {
+    #[serde(rename = "type")]
     pub type_: PublicKeyCredentialType,
+    #[serde(with = "base64url")]
     pub id: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub transports: Option<Vec<AuthenticatorTransport>>,
 }
 
 impl PublicKeyCredentialDescriptor {
-    pub fn new(id: Vec<u8>) -> Self {
-        Self {
-            type_: PublicKeyCredentialType::PublicKey,
-            id,
-            transports: None,
+    pub(crate) fn to_cbor(&self) -> Value {
+        let mut entries = vec![
+            (
+                Value::Text("type".into()),
+                Value::Text(self.type_.as_str().to_string()),
+            ),
+            (Value::Text("id".into()), Value::Bytes(self.id.clone())),
+        ];
+        if let Some(transports) = &self.transports {
+            entries.push((
+                Value::Text("transports".into()),
+                Value::Array(
+                    transports
+                        .iter()
+                        .map(|t| Value::Text(t.as_str().to_string()))
+                        .collect(),
+                ),
+            ));
         }
+        Value::Map(entries)
+    }
+
+    pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
+        let type_ = value
+            .map_get_text("type")
+            .and_then(|v| v.as_text())
+            .and_then(PublicKeyCredentialType::from_str)
+            .unwrap_or(PublicKeyCredentialType::PublicKey);
+        let id = value
+            .map_get_text("id")
+            .and_then(|v| v.as_bytes())
+            .map(|b| b.to_vec())?;
+        let transports = value
+            .map_get_text("transports")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_text().and_then(AuthenticatorTransport::from_str))
+                    .collect()
+            });
+        Some(Self {
+            type_,
+            id,
+            transports,
+        })
     }
 }
 
@@ -270,10 +419,14 @@ impl PublicKeyCredentialDescriptor {
 // ---------------------------------------------------------------------------
 
 /// Criteria for authenticator selection during registration (§5.4.4).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AuthenticatorSelectionCriteria {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub authenticator_attachment: Option<AuthenticatorAttachment>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub resident_key: Option<ResidentKeyRequirement>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub user_verification: Option<UserVerificationRequirement>,
 }
 
@@ -282,31 +435,62 @@ pub struct AuthenticatorSelectionCriteria {
 // ---------------------------------------------------------------------------
 
 /// Options for `navigator.credentials.create()` (§5.4).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialCreationOptions {
     pub rp: PublicKeyCredentialRpEntity,
     pub user: PublicKeyCredentialUserEntity,
+    #[serde(with = "base64url")]
     pub challenge: Vec<u8>,
     pub pub_key_cred_params: Vec<PublicKeyCredentialParameters>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub exclude_credentials: Option<Vec<PublicKeyCredentialDescriptor>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub authenticator_selection: Option<AuthenticatorSelectionCriteria>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<PublicKeyCredentialHint>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub attestation: Option<AttestationConveyancePreference>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub attestation_formats: Option<Vec<String>>,
-    pub extensions: Option<std::collections::HashMap<String, Vec<u8>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<serde_json::Value>,
+}
+
+impl PublicKeyCredentialCreationOptions {
+    /// Deserialize from the WebAuthn JSON format.
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
 }
 
 /// Options for `navigator.credentials.get()` (§5.5).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialRequestOptions {
+    #[serde(with = "base64url")]
     pub challenge: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rp_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_credentials: Option<Vec<PublicKeyCredentialDescriptor>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub user_verification: Option<UserVerificationRequirement>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<PublicKeyCredentialHint>>,
-    pub extensions: Option<std::collections::HashMap<String, Vec<u8>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<serde_json::Value>,
+}
+
+impl PublicKeyCredentialRequestOptions {
+    /// Deserialize from the WebAuthn JSON format.
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -363,37 +547,71 @@ impl CollectedClientData {
 // ---------------------------------------------------------------------------
 
 /// Response from a registration ceremony.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AuthenticatorAttestationResponse {
+    #[serde(rename = "clientDataJSON", with = "base64url")]
     pub client_data_json: Vec<u8>,
+    #[serde(with = "base64url")]
     pub attestation_object: Vec<u8>,
 }
 
 /// Response from an authentication ceremony.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AuthenticatorAssertionResponse {
+    #[serde(rename = "clientDataJSON", with = "base64url")]
     pub client_data_json: Vec<u8>,
+    #[serde(with = "base64url")]
     pub authenticator_data: Vec<u8>,
+    #[serde(with = "base64url")]
     pub signature: Vec<u8>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "base64url_opt",
+        default
+    )]
     pub user_handle: Option<Vec<u8>>,
 }
 
 /// Result of a successful registration ceremony.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RegistrationResponse {
+    #[serde(with = "base64url")]
     pub id: Vec<u8>,
     pub response: AuthenticatorAttestationResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub authenticator_attachment: Option<AuthenticatorAttachment>,
+    #[serde(rename = "type")]
     pub type_: PublicKeyCredentialType,
 }
 
+impl RegistrationResponse {
+    /// Serialize to the WebAuthn JSON format.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+}
+
 /// Result of a successful authentication ceremony.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AuthenticationResponse {
+    #[serde(with = "base64url")]
     pub id: Vec<u8>,
     pub response: AuthenticatorAssertionResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub authenticator_attachment: Option<AuthenticatorAttachment>,
+    #[serde(rename = "type")]
     pub type_: PublicKeyCredentialType,
+}
+
+impl AuthenticationResponse {
+    /// Serialize to the WebAuthn JSON format.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -406,39 +624,25 @@ impl PublicKeyCredentialRpEntity {
         &self,
         effective_rp_id: &str,
     ) -> crate::ctap2::types::PublicKeyCredentialRpEntity {
-        let mut rp = crate::ctap2::types::PublicKeyCredentialRpEntity::new(effective_rp_id);
-        rp.name = Some(self.name.clone());
-        rp
+        crate::ctap2::types::PublicKeyCredentialRpEntity {
+            id: effective_rp_id.to_string(),
+            name: Some(self.name.clone()),
+        }
     }
 }
 
-impl PublicKeyCredentialUserEntity {
-    /// Convert to the CTAP2 user entity.
-    pub(crate) fn to_ctap2(&self) -> crate::ctap2::types::PublicKeyCredentialUserEntity {
-        let mut user = crate::ctap2::types::PublicKeyCredentialUserEntity::new(self.id.clone());
-        user.name = self.name.clone();
-        user.display_name = self.display_name.clone();
-        user
-    }
+// ---------------------------------------------------------------------------
+// Helper: encode lists for CTAP2 parameters
+// ---------------------------------------------------------------------------
+
+/// Encode a list of credential descriptors as a CBOR array.
+pub(crate) fn encode_allow_exclude_list(list: &[PublicKeyCredentialDescriptor]) -> Value {
+    Value::Array(list.iter().map(|d| d.to_cbor()).collect())
 }
 
-impl PublicKeyCredentialParameters {
-    /// Convert to the CTAP2 credential parameters.
-    pub(crate) fn to_ctap2(&self) -> crate::ctap2::types::PublicKeyCredentialParameters {
-        crate::ctap2::types::PublicKeyCredentialParameters::new(self.alg)
-    }
-}
-
-impl PublicKeyCredentialDescriptor {
-    /// Convert to the CTAP2 credential descriptor.
-    pub(crate) fn to_ctap2(&self) -> crate::ctap2::types::PublicKeyCredentialDescriptor {
-        let mut desc = crate::ctap2::types::PublicKeyCredentialDescriptor::new(self.id.clone());
-        desc.transports = self
-            .transports
-            .as_ref()
-            .map(|ts| ts.iter().map(|t| t.as_str().to_string()).collect());
-        desc
-    }
+/// Encode a list of credential parameters as a CBOR array.
+pub(crate) fn encode_pub_key_cred_params(params: &[PublicKeyCredentialParameters]) -> Value {
+    Value::Array(params.iter().map(|p| p.to_cbor()).collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -477,7 +681,10 @@ mod tests {
 
     #[test]
     fn test_rp_entity_id_hash() {
-        let mut rp = PublicKeyCredentialRpEntity::new("Example");
+        let mut rp = PublicKeyCredentialRpEntity {
+            name: "Example".to_string(),
+            id: None,
+        };
         assert!(rp.id_hash().is_none());
 
         rp.id = Some("example.com".to_string());
@@ -487,7 +694,11 @@ mod tests {
 
     #[test]
     fn test_credential_descriptor() {
-        let desc = PublicKeyCredentialDescriptor::new(vec![1, 2, 3]);
+        let desc = PublicKeyCredentialDescriptor {
+            type_: PublicKeyCredentialType::PublicKey,
+            id: vec![1, 2, 3],
+            transports: None,
+        };
         assert_eq!(desc.type_, PublicKeyCredentialType::PublicKey);
         assert_eq!(desc.id, vec![1, 2, 3]);
         assert!(desc.transports.is_none());
@@ -495,7 +706,10 @@ mod tests {
 
     #[test]
     fn test_credential_parameters() {
-        let params = PublicKeyCredentialParameters::es256();
+        let params = PublicKeyCredentialParameters {
+            type_: PublicKeyCredentialType::PublicKey,
+            alg: -7,
+        };
         assert_eq!(params.type_, PublicKeyCredentialType::PublicKey);
         assert_eq!(params.alg, -7);
     }
@@ -536,20 +750,30 @@ mod tests {
     }
 
     #[test]
-    fn test_to_ctap2_user() {
+    fn test_user_entity_cbor_roundtrip() {
         let user = PublicKeyCredentialUserEntity {
             id: vec![1, 2, 3],
             name: Some("alice".to_string()),
             display_name: Some("Alice".to_string()),
         };
-        let ctap2_user = user.to_ctap2();
-        assert_eq!(ctap2_user.id, vec![1, 2, 3]);
-        assert_eq!(ctap2_user.name.as_deref(), Some("alice"));
-        assert_eq!(ctap2_user.display_name.as_deref(), Some("Alice"));
+        let cbor = user.to_cbor();
+        let user2 = PublicKeyCredentialUserEntity::from_cbor(&cbor).unwrap();
+        assert_eq!(user, user2);
     }
 
     #[test]
-    fn test_to_ctap2_descriptor() {
+    fn test_credential_params_cbor_roundtrip() {
+        let params = PublicKeyCredentialParameters {
+            type_: PublicKeyCredentialType::PublicKey,
+            alg: -7,
+        };
+        let cbor = params.to_cbor();
+        let params2 = PublicKeyCredentialParameters::from_cbor(&cbor).unwrap();
+        assert_eq!(params, params2);
+    }
+
+    #[test]
+    fn test_credential_descriptor_cbor_roundtrip() {
         let desc = PublicKeyCredentialDescriptor {
             type_: PublicKeyCredentialType::PublicKey,
             id: vec![0xAA, 0xBB],
@@ -558,12 +782,96 @@ mod tests {
                 AuthenticatorTransport::Nfc,
             ]),
         };
-        let ctap2_desc = desc.to_ctap2();
-        assert_eq!(ctap2_desc.type_, "public-key");
-        assert_eq!(ctap2_desc.id, vec![0xAA, 0xBB]);
+        let cbor = desc.to_cbor();
+        let desc2 = PublicKeyCredentialDescriptor::from_cbor(&cbor).unwrap();
+        assert_eq!(desc, desc2);
+    }
+
+    #[test]
+    fn test_creation_options_from_json() {
+        let json = r#"{
+            "rp": {"name": "Example", "id": "example.com"},
+            "user": {"id": "dXNlci0x", "name": "alice", "displayName": "Alice"},
+            "challenge": "Y2hhbGxlbmdl",
+            "pubKeyCredParams": [{"type": "public-key", "alg": -7}],
+            "timeout": 60000,
+            "authenticatorSelection": {
+                "userVerification": "preferred",
+                "residentKey": "required"
+            }
+        }"#;
+        let opts = PublicKeyCredentialCreationOptions::from_json(json).unwrap();
+        assert_eq!(opts.rp.name, "Example");
+        assert_eq!(opts.rp.id.as_deref(), Some("example.com"));
+        assert_eq!(opts.user.name.as_deref(), Some("alice"));
+        assert_eq!(opts.challenge, b"challenge");
+        assert_eq!(opts.pub_key_cred_params.len(), 1);
+        assert_eq!(opts.pub_key_cred_params[0].alg, -7);
+        assert_eq!(opts.timeout, Some(60000));
+        let sel = opts.authenticator_selection.unwrap();
         assert_eq!(
-            ctap2_desc.transports.as_deref(),
-            Some(&["usb".to_string(), "nfc".to_string()][..])
+            sel.user_verification,
+            Some(UserVerificationRequirement::Preferred)
         );
+        assert_eq!(sel.resident_key, Some(ResidentKeyRequirement::Required));
+    }
+
+    #[test]
+    fn test_request_options_from_json() {
+        let json = r#"{
+            "challenge": "Y2hhbGxlbmdl",
+            "rpId": "example.com",
+            "allowCredentials": [{"type": "public-key", "id": "AABB"}],
+            "userVerification": "discouraged"
+        }"#;
+        let opts = PublicKeyCredentialRequestOptions::from_json(json).unwrap();
+        assert_eq!(opts.challenge, b"challenge");
+        assert_eq!(opts.rp_id.as_deref(), Some("example.com"));
+        assert_eq!(opts.allow_credentials.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            opts.user_verification,
+            Some(UserVerificationRequirement::Discouraged)
+        );
+    }
+
+    #[test]
+    fn test_registration_response_to_json() {
+        let resp = RegistrationResponse {
+            id: vec![0xAA, 0xBB],
+            response: AuthenticatorAttestationResponse {
+                client_data_json: b"{}".to_vec(),
+                attestation_object: vec![0x01, 0x02],
+            },
+            authenticator_attachment: Some(AuthenticatorAttachment::CrossPlatform),
+            type_: PublicKeyCredentialType::PublicKey,
+        };
+        let json = resp.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["id"], "qrs");
+        assert_eq!(parsed["type"], "public-key");
+        assert_eq!(parsed["authenticatorAttachment"], "cross-platform");
+        assert!(parsed["response"]["clientDataJSON"].is_string());
+        assert!(parsed["response"]["attestationObject"].is_string());
+    }
+
+    #[test]
+    fn test_authentication_response_to_json() {
+        let resp = AuthenticationResponse {
+            id: vec![0xCC],
+            response: AuthenticatorAssertionResponse {
+                client_data_json: b"{}".to_vec(),
+                authenticator_data: vec![0x01],
+                signature: vec![0x02, 0x03],
+                user_handle: Some(b"user".to_vec()),
+            },
+            authenticator_attachment: None,
+            type_: PublicKeyCredentialType::PublicKey,
+        };
+        let json = resp.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["id"], "zA");
+        assert_eq!(parsed["type"], "public-key");
+        assert!(parsed["response"]["signature"].is_string());
+        assert!(parsed["response"]["userHandle"].is_string());
     }
 }
