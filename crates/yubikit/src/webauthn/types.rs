@@ -464,6 +464,11 @@ impl PublicKeyCredentialCreationOptions {
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }
+
+    /// Serialize to the WebAuthn JSON format.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
 }
 
 /// Options for `navigator.credentials.get()` (§5.5).
@@ -490,6 +495,11 @@ impl PublicKeyCredentialRequestOptions {
     /// Deserialize from the WebAuthn JSON format.
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
+    }
+
+    /// Serialize to the WebAuthn JSON format.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
     }
 }
 
@@ -527,6 +537,44 @@ impl CollectedClientData {
             origin: origin.to_string(),
             cross_origin,
         }
+    }
+
+    /// Create from raw JSON bytes (as provided by a client data collector).
+    pub fn from_json(json: Vec<u8>) -> Result<Self, String> {
+        use base64::prelude::*;
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&json).map_err(|e| format!("invalid client data JSON: {e}"))?;
+        let obj = parsed
+            .as_object()
+            .ok_or("client data JSON must be an object")?;
+        let type_ = obj
+            .get("type")
+            .and_then(|v| v.as_str())
+            .ok_or("missing 'type' in client data")?
+            .to_string();
+        let challenge_b64 = obj
+            .get("challenge")
+            .and_then(|v| v.as_str())
+            .ok_or("missing 'challenge' in client data")?;
+        let challenge = BASE64_URL_SAFE_NO_PAD
+            .decode(challenge_b64)
+            .map_err(|e| format!("invalid challenge base64: {e}"))?;
+        let origin = obj
+            .get("origin")
+            .and_then(|v| v.as_str())
+            .ok_or("missing 'origin' in client data")?
+            .to_string();
+        let cross_origin = obj
+            .get("crossOrigin")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        Ok(Self {
+            json,
+            type_,
+            challenge,
+            origin,
+            cross_origin,
+        })
     }
 
     /// The raw JSON-serialized client data.

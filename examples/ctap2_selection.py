@@ -1,7 +1,7 @@
 """
 Demonstrates CTAP2 authenticatorSelection and authenticatorGetInfo using yubikit.
 
-Opens CTAP2 sessions over both FIDO HID and SmartCard (CCID) transports,
+Opens a CTAP2 session (preferring FIDO HID, falling back to CCID),
 calls selection() with auto-cancel, then prints authenticator info.
 
 Usage: uv run python examples/ctap2_selection.py
@@ -9,9 +9,10 @@ Usage: uv run python examples/ctap2_selection.py
 
 import threading
 
-from _yubikit_native.hid import FidoConnection, list_fido_devices
-from _yubikit_native.pcsc import PcscConnection, list_readers
-from _yubikit_native.sessions import Ctap2FidoSession, Ctap2Session
+from yubikit.core.fido import FidoConnection
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.ctap2 import Ctap2Session
+from yubikit.device import list_all_devices
 
 CANCEL_TIMEOUT = 5  # seconds
 
@@ -20,7 +21,7 @@ def on_keepalive(status: int) -> None:
     print(f"  [keepalive] status=0x{status:02X}")
 
 
-def run_demo(session: Ctap2Session | Ctap2FidoSession, transport: str) -> None:
+def run_demo(session: Ctap2Session, transport: str) -> None:
     """Run selection + get_info on a CTAP2 session."""
 
     # --- selection ---
@@ -62,7 +63,7 @@ def run_demo(session: Ctap2Session | Ctap2FidoSession, transport: str) -> None:
     print()
 
 
-def print_info(info: dict) -> None:
+def print_info(info: dict) -> None:  # type: ignore[type-arg]
     print("  Authenticator Info:")
     print(f"    Versions:    {info['versions']}")
     print(f"    AAGUID:      {info['aaguid'].hex()}")
@@ -84,74 +85,42 @@ def print_info(info: dict) -> None:
         print(f"    Remaining discoverable credentials: {info['remaining_disc_creds']}")
 
 
-def is_yubico_reader(reader: str) -> bool:
-    return "Yubico" in reader or "YubiKey" in reader
-
-
 def main() -> None:
-    found_any = False
-
-    # Discover FIDO HID devices
-    try:
-        fido_devs = list_fido_devices()
-    except OSError:
-        fido_devs = []
-
-    # Discover CCID readers (filter to Yubico)
-    try:
-        readers = [r for r in list_readers() if is_yubico_reader(r)]
-    except OSError:
-        readers = []
-
-    if not fido_devs and not readers:
+    devices = list_all_devices()
+    if not devices:
         print("No YubiKeys found.")
         return
 
-    # FIDO HID
-    for dev in fido_devs:
-        found_any = True
-        print(f"Found FIDO HID device: {dev.path} (PID=0x{dev.pid:04X})")
+    for dev, info in devices:
+        print(f"Found YubiKey: {info.serial or 'Unknown serial'}")
 
-        try:
-            conn = FidoConnection(dev.path, dev.pid)
-        except OSError as e:
-            print(f"  Failed to open: {e}")
+        conn: FidoConnection | SmartCardConnection
+        transport: str
+        if dev.supports_connection(FidoConnection):  # type: ignore[arg-type]
+            transport = "FIDO HID"
+            try:
+                conn = dev.open_connection(FidoConnection)  # type: ignore[arg-type]
+            except OSError as e:
+                print(f"  Failed to open: {e}")
+                continue
+        elif dev.supports_connection(SmartCardConnection):
+            transport = "CCID"
+            try:
+                conn = dev.open_connection(SmartCardConnection)
+            except OSError as e:
+                print(f"  Failed to open: {e}")
+                continue
+        else:
+            print("  No usable connection available.")
             continue
 
-        print(
-            f"  Device version: {conn.device_version[0]}.{conn.device_version[1]}"
-            f".{conn.device_version[2]}, capabilities: 0x{conn.capabilities:02X}"
-        )
-
         try:
-            fido_session = Ctap2FidoSession(conn)
+            session = Ctap2Session(conn)
         except Exception as e:
             print(f"  Failed to open CTAP2 session: {e}")
             continue
 
-        run_demo(fido_session, "FIDO HID")
-
-    # CCID / SmartCard
-    for reader in readers:
-        found_any = True
-        print(f"Found CCID reader: {reader}")
-
-        try:
-            sc_conn = PcscConnection(reader)
-        except OSError as e:
-            print(f"  Failed to connect: {e}")
-            continue
-
-        try:
-            ccid_session = Ctap2Session(sc_conn)
-        except Exception as e:
-            print(f"  FIDO not available: {e}")
-            continue
-
-        run_demo(ccid_session, f"CCID ({reader})")
-
-    if not found_any:
-        print("No YubiKeys found.")
+        run_demo(session, transport)
 
 
 if __name__ == "__main__":

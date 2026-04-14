@@ -32,39 +32,33 @@ fn webauthn_err<E: std::error::Error + Send + Sync + 'static>(e: ClientError<E>)
 // ---------------------------------------------------------------------------
 
 struct PyUserInteraction {
-    prompt_up_cb: Option<PyObject>,
-    request_pin_cb: Option<PyObject>,
-    request_uv_cb: Option<PyObject>,
+    obj: PyObject,
 }
 
 impl UserInteraction for PyUserInteraction {
     fn prompt_up(&self) {
-        if let Some(cb) = &self.prompt_up_cb {
-            Python::with_gil(|py| {
-                let _ = cb.call0(py);
-            });
-        }
+        Python::with_gil(|py| {
+            let _ = self.obj.call_method0(py, "prompt_up");
+        });
     }
 
-    fn request_pin(&self, _permissions: Permissions, _rp_id: Option<&str>) -> Option<String> {
-        let cb = self.request_pin_cb.as_ref()?;
+    fn request_pin(&self, permissions: Permissions, rp_id: Option<&str>) -> Option<String> {
         Python::with_gil(|py| {
-            cb.call0(py)
+            self.obj
+                .call_method1(py, "request_pin", (permissions.bits(), rp_id))
                 .ok()
                 .and_then(|v| v.extract::<Option<String>>(py).ok())
                 .flatten()
         })
     }
 
-    fn request_uv(&self, _permissions: Permissions, _rp_id: Option<&str>) -> bool {
-        match &self.request_uv_cb {
-            Some(cb) => Python::with_gil(|py| {
-                cb.call0(py)
-                    .and_then(|v| v.extract::<bool>(py))
-                    .unwrap_or(true)
-            }),
-            None => true,
-        }
+    fn request_uv(&self, permissions: Permissions, rp_id: Option<&str>) -> bool {
+        Python::with_gil(|py| {
+            self.obj
+                .call_method1(py, "request_uv", (permissions.bits(), rp_id))
+                .and_then(|v| v.extract::<bool>(py))
+                .unwrap_or(true)
+        })
     }
 }
 
@@ -73,7 +67,7 @@ impl UserInteraction for PyUserInteraction {
 // ---------------------------------------------------------------------------
 
 struct PyClientDataCollector {
-    origin: String,
+    obj: PyObject,
 }
 
 impl ClientDataCollector for PyClientDataCollector {
@@ -81,27 +75,40 @@ impl ClientDataCollector for PyClientDataCollector {
         &self,
         options: &PublicKeyCredentialCreationOptions,
     ) -> Result<(CollectedClientData, String), String> {
-        let rp_id = options
-            .rp
-            .id
-            .clone()
-            .ok_or("RP ID is required for registration")?;
-        let cd =
-            CollectedClientData::create("webauthn.create", &options.challenge, &self.origin, false);
-        Ok((cd, rp_id))
+        let options_json = options
+            .to_json()
+            .map_err(|e| format!("failed to serialize options: {e}"))?;
+        Python::with_gil(|py| {
+            let result = self
+                .obj
+                .call_method1(py, "collect_create", (options_json,))
+                .map_err(|e| format!("collect_create failed: {e}"))?;
+            let (client_data_json, rp_id): (Vec<u8>, String) = result
+                .extract(py)
+                .map_err(|e| format!("collect_create returned invalid type: {e}"))?;
+            let cd = CollectedClientData::from_json(client_data_json)?;
+            Ok((cd, rp_id))
+        })
     }
 
     fn collect_get(
         &self,
         options: &PublicKeyCredentialRequestOptions,
     ) -> Result<(CollectedClientData, String), String> {
-        let rp_id = options
-            .rp_id
-            .clone()
-            .ok_or("RP ID is required for authentication")?;
-        let cd =
-            CollectedClientData::create("webauthn.get", &options.challenge, &self.origin, false);
-        Ok((cd, rp_id))
+        let options_json = options
+            .to_json()
+            .map_err(|e| format!("failed to serialize options: {e}"))?;
+        Python::with_gil(|py| {
+            let result = self
+                .obj
+                .call_method1(py, "collect_get", (options_json,))
+                .map_err(|e| format!("collect_get failed: {e}"))?;
+            let (client_data_json, rp_id): (Vec<u8>, String) = result
+                .extract(py)
+                .map_err(|e| format!("collect_get returned invalid type: {e}"))?;
+            let cd = CollectedClientData::from_json(client_data_json)?;
+            Ok((cd, rp_id))
+        })
     }
 }
 
@@ -120,22 +127,11 @@ pub struct PyWebAuthnClient {
 
 #[pymethods]
 impl PyWebAuthnClient {
-    /// Create a WebAuthn client from a FIDO HID connection.
-    ///
-    /// Args:
-    ///     connection: A FidoConnection to a FIDO HID device.
-    ///     origin: The origin URL (e.g. "https://example.com").
-    ///     prompt_up: Optional callback called when user presence is needed.
-    ///     request_pin: Optional callback that should return the PIN string, or None to cancel.
-    ///     request_uv: Optional callback that returns True to proceed with UV, False for PIN.
     #[new]
-    #[pyo3(signature = (connection, origin, prompt_up=None, request_pin=None, request_uv=None))]
     fn new(
         connection: &Bound<'_, PyAny>,
-        origin: String,
-        prompt_up: Option<PyObject>,
-        request_pin: Option<PyObject>,
-        request_uv: Option<PyObject>,
+        user_interaction: PyObject,
+        client_data_collector: PyObject,
     ) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();
         let conn = extract_fido_connection(connection)?;
@@ -148,11 +144,11 @@ impl PyWebAuthnClient {
             .map_err(|e| PyOSError::new_err(format!("CTAP2 init failed: {e}")))?;
 
         let interaction = PyUserInteraction {
-            prompt_up_cb: prompt_up,
-            request_pin_cb: request_pin,
-            request_uv_cb: request_uv,
+            obj: user_interaction,
         };
-        let collector = PyClientDataCollector { origin };
+        let collector = PyClientDataCollector {
+            obj: client_data_collector,
+        };
         let client = WebAuthnClient::new(session, interaction, collector);
 
         Ok(Self {
@@ -161,13 +157,6 @@ impl PyWebAuthnClient {
         })
     }
 
-    /// Perform a WebAuthn registration ceremony.
-    ///
-    /// Args:
-    ///     options_json: JSON string with PublicKeyCredentialCreationOptions.
-    ///
-    /// Returns:
-    ///     JSON string with RegistrationResponse.
     fn make_credential(&mut self, options_json: &str) -> PyResult<String> {
         let options = PublicKeyCredentialCreationOptions::from_json(options_json)
             .map_err(|e| PyValueError::new_err(format!("invalid options JSON: {e}")))?;
@@ -180,13 +169,6 @@ impl PyWebAuthnClient {
             .map_err(|e| PyRuntimeError::new_err(format!("failed to serialize response: {e}")))
     }
 
-    /// Perform a WebAuthn authentication ceremony.
-    ///
-    /// Args:
-    ///     options_json: JSON string with PublicKeyCredentialRequestOptions.
-    ///
-    /// Returns:
-    ///     List of JSON strings, one per assertion.
     fn get_assertion(&mut self, options_json: &str) -> PyResult<Vec<String>> {
         let options = PublicKeyCredentialRequestOptions::from_json(options_json)
             .map_err(|e| PyValueError::new_err(format!("invalid options JSON: {e}")))?;
@@ -204,7 +186,6 @@ impl PyWebAuthnClient {
             .collect()
     }
 
-    /// Close the client and release the underlying connection.
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
         if let Some(client) = self.client.take() {
             let session = client.into_session();
@@ -230,15 +211,12 @@ pub struct PyWebAuthnCcidClient {
 
 #[pymethods]
 impl PyWebAuthnCcidClient {
-    /// Create a WebAuthn client from a SmartCard (CCID) connection.
     #[new]
-    #[pyo3(signature = (connection, origin, prompt_up=None, request_pin=None, request_uv=None, scp_key_params=None))]
+    #[pyo3(signature = (connection, user_interaction, client_data_collector, scp_key_params=None))]
     fn new(
         connection: &Bound<'_, PyAny>,
-        origin: String,
-        prompt_up: Option<PyObject>,
-        request_pin: Option<PyObject>,
-        request_uv: Option<PyObject>,
+        user_interaction: PyObject,
+        client_data_collector: PyObject,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();
@@ -258,11 +236,11 @@ impl PyWebAuthnCcidClient {
             .map_err(|e| PyOSError::new_err(format!("CTAP2 init failed: {e}")))?;
 
         let interaction = PyUserInteraction {
-            prompt_up_cb: prompt_up,
-            request_pin_cb: request_pin,
-            request_uv_cb: request_uv,
+            obj: user_interaction,
         };
-        let collector = PyClientDataCollector { origin };
+        let collector = PyClientDataCollector {
+            obj: client_data_collector,
+        };
         let client = WebAuthnClient::new(session, interaction, collector);
 
         Ok(Self {

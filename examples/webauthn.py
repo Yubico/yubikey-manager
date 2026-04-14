@@ -2,7 +2,7 @@
 WebAuthn registration + authentication using a FIDO2 security key.
 
 Demonstrates:
-  1. Discovering a FIDO HID device
+  1. Discovering a YubiKey via ykman
   2. Creating a WebAuthnClient with console-based interaction
   3. Performing a registration ceremony (make_credential)
   4. Using the resulting credential to perform authentication (get_assertion)
@@ -16,37 +16,73 @@ Usage: uv run python examples/webauthn.py
   It does NOT delete it afterwards.
 """
 
+from __future__ import annotations
+
 import base64
 import getpass
 import json
 import os
 import sys
 
-from _yubikit_native.hid import FidoConnection, list_fido_devices
-from _yubikit_native.sessions import WebAuthnClient
+from yubikit.core.fido import FidoConnection
+from yubikit.core.smartcard import SmartCardConnection
+from yubikit.device import list_all_devices
+from yubikit.webauthn import ClientDataCollector, UserInteraction, WebAuthnClient
 
 ORIGIN = "https://example.com"
 RP_ID = "example.com"
 
 
-def prompt_up() -> None:
-    """Called when the authenticator is waiting for user presence."""
-    print("\n👆 Touch your security key...")
+class ConsoleInteraction(UserInteraction):
+    """Console-based user interaction for PIN/UV prompts."""
+
+    def prompt_up(self) -> None:
+        print("\n👆 Touch your security key...")
+
+    def request_pin(self, permissions: int, rp_id: str | None) -> str | None:
+        try:
+            pin = getpass.getpass("🔑 Enter PIN: ")
+            return pin if pin else None
+        except (EOFError, KeyboardInterrupt):
+            return None
+
+    def request_uv(self, permissions: int, rp_id: str | None) -> bool:
+        print("🔒 Biometric verification requested – proceeding")
+        return True
 
 
-def request_pin() -> str | None:
-    """Called when a PIN is needed. Return the PIN or None to cancel."""
-    try:
-        pin = getpass.getpass("🔑 Enter PIN: ")
-        return pin if pin else None
-    except (EOFError, KeyboardInterrupt):
-        return None
+class SimpleCollector(ClientDataCollector):
+    """Simple client data collector for example.com."""
 
+    def collect_create(self, options_json: str) -> tuple[bytes, str]:
+        options = json.loads(options_json)
+        rp_id = options.get("rp", {}).get("id", RP_ID)
+        challenge = options["challenge"]
+        client_data = json.dumps(
+            {
+                "type": "webauthn.create",
+                "challenge": challenge,
+                "origin": ORIGIN,
+                "crossOrigin": False,
+            },
+            separators=(",", ":"),
+        ).encode()
+        return client_data, rp_id
 
-def request_uv() -> bool:
-    """Called when biometric verification is available."""
-    print("🔒 Biometric verification requested – proceeding")
-    return True
+    def collect_get(self, options_json: str) -> tuple[bytes, str]:
+        options = json.loads(options_json)
+        rp_id = options.get("rpId", RP_ID)
+        challenge = options["challenge"]
+        client_data = json.dumps(
+            {
+                "type": "webauthn.get",
+                "challenge": challenge,
+                "origin": ORIGIN,
+                "crossOrigin": False,
+            },
+            separators=(",", ":"),
+        ).encode()
+        return client_data, rp_id
 
 
 def random_challenge() -> bytes:
@@ -60,29 +96,31 @@ def b64url(data: bytes) -> str:
 
 
 def main() -> None:
-    # 1. Find a FIDO HID device
-    devices = list_fido_devices()
+    # 1. Find a YubiKey
+    devices = list_all_devices()
     if not devices:
-        print(
-            "No FIDO HID devices found. Insert a security key and try again.",
-            file=sys.stderr,
-        )
+        print("No YubiKeys found.", file=sys.stderr)
         sys.exit(1)
 
-    dev = devices[0]
-    print(f"Using device: {dev.path} (PID=0x{dev.pid:04X})")
+    dev, info = devices[0]
+    print(f"Using: {info.serial or 'Unknown serial'}")
 
-    # 2. Open connection and create WebAuthn client
-    conn = FidoConnection(dev.path, dev.pid)
-    client = WebAuthnClient(
-        conn,
-        origin=ORIGIN,
-        prompt_up=prompt_up,
-        request_pin=request_pin,
-        request_uv=request_uv,
-    )
+    # 2. Open connection (prefer FIDO HID, fall back to CCID)
+    conn: FidoConnection | SmartCardConnection
+    if dev.supports_connection(FidoConnection):  # type: ignore[arg-type]
+        print("  Using FIDO HID transport")
+        conn = dev.open_connection(FidoConnection)  # type: ignore[arg-type]
+    elif dev.supports_connection(SmartCardConnection):
+        print("  Using CCID transport")
+        conn = dev.open_connection(SmartCardConnection)
+    else:
+        print("  No usable connection available.", file=sys.stderr)
+        sys.exit(1)
 
-    # 3. Registration ceremony
+    # 3. Create WebAuthn client
+    client = WebAuthnClient(conn, ConsoleInteraction(), SimpleCollector())
+
+    # 4. Registration ceremony
     print("\n━━━ Registration ━━━")
 
     challenge = random_challenge()
@@ -116,7 +154,7 @@ def main() -> None:
     att_obj = base64.urlsafe_b64decode(reg["response"]["attestationObject"] + "==")
     print(f"  Attestation object: {len(att_obj)} bytes")
 
-    # 4. Authentication ceremony
+    # 5. Authentication ceremony
     print("\n━━━ Authentication ━━━")
 
     challenge = random_challenge()

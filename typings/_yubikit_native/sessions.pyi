@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from typing import Any
 
 def py_list_fido_devices() -> list[dict[str, Any]]: ...
@@ -728,10 +727,8 @@ class WebAuthnClient:
     def __init__(
         self,
         connection: Any,
-        origin: str,
-        prompt_up: Callable[[], None] | None = None,
-        request_pin: Callable[[], str | None] | None = None,
-        request_uv: Callable[[], bool] | None = None,
+        user_interaction: Any,
+        client_data_collector: Any,
     ) -> None: ...
     def make_credential(self, options_json: str) -> str: ...
     def get_assertion(self, options_json: str) -> list[str]: ...
@@ -741,10 +738,8 @@ class WebAuthnCcidClient:
     def __init__(
         self,
         connection: Any,
-        origin: str,
-        prompt_up: Callable[[], None] | None = None,
-        request_pin: Callable[[], str | None] | None = None,
-        request_uv: Callable[[], bool] | None = None,
+        user_interaction: Any,
+        client_data_collector: Any,
         scp_key_params: Any | None = None,
     ) -> None: ...
     def make_credential(self, options_json: str) -> str: ...

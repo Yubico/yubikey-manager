@@ -11,7 +11,6 @@ Usage: uv run python examples/credential_management.py
 import getpass
 import hashlib
 
-from ykman.device import list_all_devices
 from yubikit.core.fido import FidoConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.ctap2 import (
@@ -20,6 +19,7 @@ from yubikit.ctap2 import (
     CredentialManagement,
     Ctap2Session,
 )
+from yubikit.device import list_all_devices
 
 
 def print_credential(cred: dict) -> None:
