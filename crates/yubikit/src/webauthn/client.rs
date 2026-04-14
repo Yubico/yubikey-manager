@@ -322,7 +322,16 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
 
         let uv_requirement = options.user_verification.unwrap_or_default();
 
-        let permissions = Permissions::GET_ASSERTION;
+        let mut permissions = Permissions::GET_ASSERTION;
+
+        // Large blob write requires an additional permission
+        if let Some(ref ext) = options.extensions
+            && let Some(ref lb) = ext.large_blob
+            && lb.write.is_some()
+        {
+            permissions |= Permissions::LARGE_BLOB_WRITE;
+        }
+
         let (token, protocol, internal_uv) =
             self.get_token(uv_requirement, permissions, Some(&rp_id))?;
 
