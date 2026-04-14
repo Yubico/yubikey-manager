@@ -30,13 +30,15 @@
 use crate::cbor;
 use crate::core::Connection;
 use crate::ctap2::types::AuthenticatorOptions;
-use crate::ctap2::{ClientPin, Ctap2Error, Ctap2Session, Info, Permissions};
+use crate::ctap2::{
+    ClientPin, Ctap2Error, Ctap2Session, CtapStatus, Info, Permissions, PinProtocol,
+};
 
 use super::types::{
     AuthenticationResponse, AuthenticatorAssertionResponse, AuthenticatorAttachment,
     AuthenticatorAttestationResponse, CollectedClientData, PublicKeyCredentialCreationOptions,
-    PublicKeyCredentialRequestOptions, PublicKeyCredentialType, RegistrationResponse,
-    ResidentKeyRequirement, UserVerificationRequirement,
+    PublicKeyCredentialDescriptor, PublicKeyCredentialRequestOptions, PublicKeyCredentialType,
+    RegistrationResponse, ResidentKeyRequirement, UserVerificationRequirement,
 };
 
 // ---------------------------------------------------------------------------
@@ -181,10 +183,26 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             ResidentKeyRequirement::Required | ResidentKeyRequirement::Preferred
         );
 
-        // Get PIN/UV auth parameters
-        let permissions = Permissions::MAKE_CREDENTIAL;
-        let (pin_uv_param, pin_uv_protocol, internal_uv) =
-            self.get_auth_params(uv_requirement, permissions, Some(&rp_id), &client_data_hash)?;
+        // Need GET_ASSERTION permission if we have an exclude list to filter
+        let mut permissions = Permissions::MAKE_CREDENTIAL;
+        if options.exclude_credentials.is_some() {
+            permissions |= Permissions::GET_ASSERTION;
+        }
+
+        // Get PIN/UV token
+        let (token, protocol, internal_uv) =
+            self.get_token(uv_requirement, permissions, Some(&rp_id))?;
+
+        // Pre-flight filtering of exclude list
+        let exclude_cred = if let Some(ref exclude_list) = options.exclude_credentials {
+            self.filter_creds(&rp_id, exclude_list, protocol, token.as_deref())?
+        } else {
+            None
+        };
+
+        // Compute pin_uv_param for the actual request
+        let (pin_uv_param, pin_uv_protocol) =
+            compute_pin_uv_param(token.as_deref(), protocol, &client_data_hash);
 
         let authenticator_options = AuthenticatorOptions {
             rk: Some(rk),
@@ -198,6 +216,15 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         let enterprise_attestation = match options.attestation {
             Some(super::types::AttestationConveyancePreference::Enterprise) => Some(1u32),
             _ => None,
+        };
+
+        // Build the filtered exclude list (single matching cred, or None)
+        let filtered_exclude: Option<Vec<PublicKeyCredentialDescriptor>>;
+        let exclude_slice = if let Some(cred) = exclude_cred {
+            filtered_exclude = Some(vec![cred]);
+            filtered_exclude.as_deref()
+        } else {
+            None
         };
 
         let mut session = self.take_session();
@@ -214,7 +241,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             &ctap2_rp,
             &options.user,
             &options.pub_key_cred_params,
-            options.exclude_credentials.as_deref(),
+            exclude_slice,
             None, // extensions (TODO)
             Some(&authenticator_options),
             pin_uv_param.as_deref(),
@@ -285,8 +312,35 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         let uv_requirement = options.user_verification.unwrap_or_default();
 
         let permissions = Permissions::GET_ASSERTION;
-        let (pin_uv_param, pin_uv_protocol, internal_uv) =
-            self.get_auth_params(uv_requirement, permissions, Some(&rp_id), &client_data_hash)?;
+        let (token, protocol, internal_uv) =
+            self.get_token(uv_requirement, permissions, Some(&rp_id))?;
+
+        // Pre-flight filtering of allow list
+        let filtered_allow: Option<Vec<PublicKeyCredentialDescriptor>>;
+        let allow_slice = if let Some(ref allow_list) = options.allow_credentials {
+            let selected = self.filter_creds(&rp_id, allow_list, protocol, token.as_deref())?;
+            if let Some(cred) = selected {
+                filtered_allow = Some(vec![cred]);
+                filtered_allow.as_deref()
+            } else if !allow_list.is_empty() {
+                // No matches found — send a dummy credential ID so the
+                // authenticator will fail with NoCredentials after UP
+                filtered_allow = Some(vec![PublicKeyCredentialDescriptor {
+                    type_: allow_list[0].type_,
+                    id: vec![0],
+                    transports: None,
+                }]);
+                filtered_allow.as_deref()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Compute pin_uv_param for the actual request
+        let (pin_uv_param, pin_uv_protocol) =
+            compute_pin_uv_param(token.as_deref(), protocol, &client_data_hash);
 
         let authenticator_options = AuthenticatorOptions {
             rk: None,
@@ -305,7 +359,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         let first = match session.get_assertion(
             &rp_id,
             &client_data_hash,
-            options.allow_credentials.as_deref(),
+            allow_slice,
             None, // extensions (TODO)
             Some(&authenticator_options),
             pin_uv_param.as_deref(),
@@ -375,19 +429,110 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
     }
 
     // -----------------------------------------------------------------------
+    // Pre-flight credential filtering
+    // -----------------------------------------------------------------------
+
+    /// Filter a credential list against the authenticator using silent
+    /// `getAssertion` calls (UP=false).
+    ///
+    /// Returns the first matching credential, or `None` if no matches.
+    /// Credentials whose ID exceeds the authenticator's `max_cred_id_length`
+    /// are silently skipped.
+    fn filter_creds(
+        &mut self,
+        rp_id: &str,
+        cred_list: &[PublicKeyCredentialDescriptor],
+        protocol: Option<PinProtocol>,
+        token: Option<&[u8]>,
+    ) -> Result<Option<PublicKeyCredentialDescriptor>, ClientError<C::Error>> {
+        let info = self.session().info().clone();
+
+        // Filter out credential IDs that are too long
+        let filtered: Vec<&PublicKeyCredentialDescriptor> =
+            if let Some(max_len) = info.max_cred_id_length {
+                cred_list.iter().filter(|c| c.id.len() <= max_len).collect()
+            } else {
+                cred_list.iter().collect()
+            };
+
+        if filtered.is_empty() {
+            return Ok(None);
+        }
+
+        // Compute pin_uv_param for the silent assertion (dummy client_data_hash)
+        let dummy_hash = [0u8; 32];
+        let (pin_uv_param, pin_uv_protocol) = compute_pin_uv_param(token, protocol, &dummy_hash);
+
+        let no_up = AuthenticatorOptions {
+            rk: None,
+            uv: None,
+            up: Some(false),
+        };
+
+        let mut max_creds = info.max_creds_in_list.unwrap_or(1);
+        let mut remaining: &[&PublicKeyCredentialDescriptor] = &filtered;
+
+        while !remaining.is_empty() {
+            let chunk_size = max_creds.min(remaining.len());
+            let chunk: Vec<PublicKeyCredentialDescriptor> = remaining[..chunk_size]
+                .iter()
+                .map(|c| (*c).clone())
+                .collect();
+
+            let mut session = self.take_session();
+            let result = session.get_assertion(
+                rp_id,
+                &dummy_hash,
+                Some(&chunk),
+                None,
+                Some(&no_up),
+                pin_uv_param.as_deref(),
+                pin_uv_protocol,
+                None,
+                None,
+            );
+            self.restore_session(session);
+
+            match result {
+                Ok(resp) => {
+                    if chunk.len() == 1 {
+                        // Credential ID may be omitted from single-cred responses
+                        return Ok(Some(chunk.into_iter().next().unwrap()));
+                    }
+                    // Multiple creds in chunk — use the returned credential
+                    if let Some(cred) = resp.credential {
+                        return Ok(Some(cred));
+                    }
+                    return Ok(Some(chunk.into_iter().next().unwrap()));
+                }
+                Err(Ctap2Error::StatusError(CtapStatus::NoCredentials)) => {
+                    // None in this chunk, try next
+                    remaining = &remaining[chunk_size..];
+                }
+                Err(Ctap2Error::StatusError(CtapStatus::RequestTooLarge)) if max_creds > 1 => {
+                    // Message too large, try smaller chunks
+                    max_creds = (max_creds - 1).max(1);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        Ok(None)
+    }
+
+    // -----------------------------------------------------------------------
     // PIN / UV helpers
     // -----------------------------------------------------------------------
 
     /// Determine whether UV should be used, and if so, obtain a PIN/UV token.
     ///
-    /// Returns `(pin_uv_param, pin_uv_protocol_version, internal_uv)`.
-    fn get_auth_params(
+    /// Returns `(token, protocol, internal_uv)`.
+    fn get_token(
         &mut self,
         uv_requirement: UserVerificationRequirement,
         permissions: Permissions,
         rp_id: Option<&str>,
-        client_data_hash: &[u8],
-    ) -> Result<(Option<Vec<u8>>, Option<u32>, bool), ClientError<C::Error>> {
+    ) -> Result<(Option<Vec<u8>>, Option<PinProtocol>, bool), ClientError<C::Error>> {
         if !self.should_use_uv(uv_requirement, permissions)? {
             return Ok((None, None, false));
         }
@@ -396,13 +541,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         match self.obtain_token(session, permissions, rp_id) {
             Ok((session, token, protocol, internal_uv)) => {
                 self.restore_session(session);
-                let (pin_uv_param, protocol_version) = if let Some(token) = token {
-                    let param = protocol.authenticate(&token, client_data_hash);
-                    (Some(param), Some(protocol.version()))
-                } else {
-                    (None, Some(protocol.version()))
-                };
-                Ok((pin_uv_param, protocol_version, internal_uv))
+                Ok((token, Some(protocol), internal_uv))
             }
             Err((session, e)) => {
                 self.restore_session(session);
@@ -562,6 +701,22 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Compute the `pin_uv_param` and protocol version from a token and protocol.
+fn compute_pin_uv_param(
+    token: Option<&[u8]>,
+    protocol: Option<PinProtocol>,
+    client_data_hash: &[u8],
+) -> (Option<Vec<u8>>, Option<u32>) {
+    match (token, protocol) {
+        (Some(token), Some(protocol)) => {
+            let param = protocol.authenticate(token, client_data_hash);
+            (Some(param), Some(protocol.version()))
+        }
+        (None, Some(protocol)) => (None, Some(protocol.version())),
+        _ => (None, None),
+    }
+}
 
 /// Extract the credential ID from authenticator data containing attested
 /// credential data.
