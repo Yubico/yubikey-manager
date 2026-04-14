@@ -16,7 +16,6 @@
 # This file, with modifications, is licensed under the above Apache License.
 
 import ctypes
-import ctypes.util
 import logging
 
 from yubikit.core.otp import OtpConnection
@@ -91,14 +90,9 @@ K_IO_MASTER_PORT_DEFAULT = 0
 K_IO_HID_REPORT_TYPE_FEATURE = 2
 K_IO_RETURN_SUCCESS = 0
 
-# NOTE: find_library doesn't currently work on Big Sur, requiring the hardcoded paths
-iokit = ctypes.cdll.LoadLibrary(
-    ctypes.util.find_library("IOKit")
-    or "/System/Library/Frameworks/IOKit.framework/IOKit"
-)
+iokit = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/IOKit.framework/IOKit")
 cf = ctypes.cdll.LoadLibrary(
-    ctypes.util.find_library("CoreFoundation")
-    or "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+    "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 )
 
 

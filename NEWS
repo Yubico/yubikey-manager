@@ -1,4 +1,5 @@
 * Version 5.9.1
+ ** Restrict DLL search paths (YSA-2026-01).
  ** Improve device information when listing YubiKeys with no serial number visible over OTP.
  ** Windows and MacOS installers build with Python 3.14.4
 
