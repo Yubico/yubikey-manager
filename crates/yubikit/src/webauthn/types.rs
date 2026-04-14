@@ -456,7 +456,7 @@ pub struct PublicKeyCredentialCreationOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attestation_formats: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub extensions: Option<serde_json::Value>,
+    pub extensions: Option<super::extensions::RegistrationExtensionInputs>,
 }
 
 impl PublicKeyCredentialCreationOptions {
@@ -488,7 +488,7 @@ pub struct PublicKeyCredentialRequestOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<PublicKeyCredentialHint>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub extensions: Option<serde_json::Value>,
+    pub extensions: Option<super::extensions::AuthenticationExtensionInputs>,
 }
 
 impl PublicKeyCredentialRequestOptions {
@@ -633,6 +633,8 @@ pub struct RegistrationResponse {
     pub authenticator_attachment: Option<AuthenticatorAttachment>,
     #[serde(rename = "type")]
     pub type_: PublicKeyCredentialType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_extension_results: Option<super::extensions::RegistrationExtensionOutputs>,
 }
 
 impl RegistrationResponse {
@@ -653,6 +655,8 @@ pub struct AuthenticationResponse {
     pub authenticator_attachment: Option<AuthenticatorAttachment>,
     #[serde(rename = "type")]
     pub type_: PublicKeyCredentialType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_extension_results: Option<super::extensions::AuthenticationExtensionOutputs>,
 }
 
 impl AuthenticationResponse {
@@ -891,6 +895,7 @@ mod tests {
                 attestation_object: vec![0x01, 0x02],
             },
             authenticator_attachment: Some(AuthenticatorAttachment::CrossPlatform),
+            client_extension_results: None,
             type_: PublicKeyCredentialType::PublicKey,
         };
         let json = resp.to_json().unwrap();
@@ -913,6 +918,7 @@ mod tests {
                 user_handle: Some(b"user".to_vec()),
             },
             authenticator_attachment: None,
+            client_extension_results: None,
             type_: PublicKeyCredentialType::PublicKey,
         };
         let json = resp.to_json().unwrap();

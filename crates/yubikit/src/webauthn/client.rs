@@ -34,6 +34,7 @@ use crate::ctap2::{
     ClientPin, Ctap2Error, Ctap2Session, CtapStatus, Info, Permissions, PinProtocol,
 };
 
+use super::extensions::{self, prf};
 use super::types::{
     AuthenticationResponse, AuthenticatorAssertionResponse, AuthenticatorAttachment,
     AuthenticatorAttestationResponse, CollectedClientData, PublicKeyCredentialCreationOptions,
@@ -227,11 +228,13 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             None
         };
 
+        // Build extension inputs
+        let (ext_cbor, hmac_state) = self.build_make_credential_extensions(options, protocol)?;
+
         let mut session = self.take_session();
         let interaction = &self.user_interaction;
         let mut on_keepalive = |status: u8| {
             if status == 0x02 {
-                // KEEPALIVE_STATUS_UPNEEDED
                 interaction.prompt_up();
             }
         };
@@ -242,7 +245,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             &options.user,
             &options.pub_key_cred_params,
             exclude_slice,
-            None, // extensions (TODO)
+            ext_cbor,
             Some(&authenticator_options),
             pin_uv_param.as_deref(),
             pin_uv_protocol,
@@ -274,10 +277,17 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         ]));
 
         // Extract credential ID from auth_data
-        // authData layout: rpIdHash(32) + flags(1) + counter(4) + [attestedCredData]
-        // attestedCredData: aaguid(16) + credIdLen(2) + credId(credIdLen) + ...
         let credential_id = extract_credential_id(&att_resp.auth_data)
             .ok_or_else(|| ClientError::BadRequest("no credential data in auth_data".into()))?;
+
+        // Parse extension outputs
+        let ext_outputs = self.parse_registration_extensions(
+            options,
+            &att_resp.auth_data,
+            hmac_state.as_ref(),
+            att_resp.large_blob_key.is_some(),
+            rk,
+        );
 
         Ok(RegistrationResponse {
             id: credential_id,
@@ -287,6 +297,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             },
             authenticator_attachment: Some(AuthenticatorAttachment::CrossPlatform),
             type_: PublicKeyCredentialType::PublicKey,
+            client_extension_results: ext_outputs,
         })
     }
 
@@ -316,15 +327,16 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             self.get_token(uv_requirement, permissions, Some(&rp_id))?;
 
         // Pre-flight filtering of allow list
+        let selected_cred_id: Option<Vec<u8>>;
         let filtered_allow: Option<Vec<PublicKeyCredentialDescriptor>>;
         let allow_slice = if let Some(ref allow_list) = options.allow_credentials {
             let selected = self.filter_creds(&rp_id, allow_list, protocol, token.as_deref())?;
             if let Some(cred) = selected {
+                selected_cred_id = Some(cred.id.clone());
                 filtered_allow = Some(vec![cred]);
                 filtered_allow.as_deref()
             } else if !allow_list.is_empty() {
-                // No matches found — send a dummy credential ID so the
-                // authenticator will fail with NoCredentials after UP
+                selected_cred_id = None;
                 filtered_allow = Some(vec![PublicKeyCredentialDescriptor {
                     type_: allow_list[0].type_,
                     id: vec![0],
@@ -332,9 +344,11 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 }]);
                 filtered_allow.as_deref()
             } else {
+                selected_cred_id = None;
                 None
             }
         } else {
+            selected_cred_id = None;
             None
         };
 
@@ -348,6 +362,10 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             up: None,
         };
 
+        // Build extension inputs
+        let (ext_cbor, hmac_state) =
+            self.build_get_assertion_extensions(options, protocol, selected_cred_id.as_deref())?;
+
         let mut session = self.take_session();
         let interaction = &self.user_interaction;
         let mut on_keepalive = |status: u8| {
@@ -360,7 +378,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             &rp_id,
             &client_data_hash,
             allow_slice,
-            None, // extensions (TODO)
+            ext_cbor,
             Some(&authenticator_options),
             pin_uv_param.as_deref(),
             pin_uv_protocol,
@@ -377,16 +395,44 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         let total = first.number_of_credentials.unwrap_or(1) as usize;
         let client_data_json = client_data.as_bytes().to_vec();
 
-        let mut responses = Vec::with_capacity(total);
-
-        // First assertion
-        let credential_id = first
+        // Parse extension outputs for the first assertion
+        let first_cred_id = first
             .credential
             .as_ref()
             .map(|c| c.id.clone())
             .unwrap_or_default();
+
+        let ext_outputs =
+            self.parse_authentication_extensions(options, &first.auth_data, hmac_state.as_ref());
+
+        // Handle large blob read/write if requested
+        let large_blob_output = if let Some(ref ext) = options.extensions {
+            if let Some(ref lb_input) = ext.large_blob {
+                let (s, output) = self.process_large_blob(
+                    session,
+                    lb_input,
+                    first.large_blob_key.as_deref(),
+                    token.as_deref(),
+                    protocol,
+                );
+                session = s;
+                output
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let mut ext_outputs = ext_outputs;
+        if let Some(lb_out) = large_blob_output {
+            let outputs = ext_outputs.get_or_insert_with(Default::default);
+            outputs.large_blob = Some(lb_out);
+        }
+
+        let mut responses = Vec::with_capacity(total);
         responses.push(AuthenticationResponse {
-            id: credential_id,
+            id: first_cred_id,
             response: AuthenticatorAssertionResponse {
                 client_data_json: client_data_json.clone(),
                 authenticator_data: first.auth_data,
@@ -395,6 +441,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             },
             authenticator_attachment: Some(AuthenticatorAttachment::CrossPlatform),
             type_: PublicKeyCredentialType::PublicKey,
+            client_extension_results: ext_outputs,
         });
 
         // Additional assertions (getNextAssertion)
@@ -411,6 +458,10 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 .as_ref()
                 .map(|c| c.id.clone())
                 .unwrap_or_default();
+
+            let next_ext_outputs =
+                self.parse_authentication_extensions(options, &next.auth_data, hmac_state.as_ref());
+
             responses.push(AuthenticationResponse {
                 id: credential_id,
                 response: AuthenticatorAssertionResponse {
@@ -421,11 +472,375 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 },
                 authenticator_attachment: Some(AuthenticatorAttachment::CrossPlatform),
                 type_: PublicKeyCredentialType::PublicKey,
+                client_extension_results: next_ext_outputs,
             });
         }
 
         self.restore_session(session);
         Ok(responses)
+    }
+
+    // -----------------------------------------------------------------------
+    // Extension building and parsing
+    // -----------------------------------------------------------------------
+
+    /// Build CTAP2 extension CBOR for makeCredential.
+    fn build_make_credential_extensions(
+        &mut self,
+        options: &PublicKeyCredentialCreationOptions,
+        protocol: Option<PinProtocol>,
+    ) -> Result<(Option<cbor::Value>, Option<prf::HmacSecretState>), ClientError<C::Error>> {
+        let ext = match &options.extensions {
+            Some(e) => e,
+            None => return Ok((None, None)),
+        };
+
+        let mut entries: Vec<(String, cbor::Value)> = Vec::new();
+        let mut hmac_state = None;
+
+        // PRF / hmac-secret
+        if let Some(ref prf_input) = ext.prf {
+            let info = self.session().info().clone();
+            if info.extensions.iter().any(|e| e == "hmac-secret") {
+                if let Some(ref eval) = prf_input.eval {
+                    // hmac-secret-mc: need key agreement + salt encryption
+                    if let Some(state) = self.get_hmac_secret_state(protocol)? {
+                        for entry in prf::make_credential_salts_cbor(eval, &state) {
+                            entries.push(entry);
+                        }
+                        hmac_state = Some(state);
+                    }
+                } else {
+                    // Simple enable
+                    entries.push(prf::make_credential_enable_cbor());
+                }
+            }
+        }
+
+        // credProtect
+        if let Some(ref cp) = ext.cred_protect {
+            let info = self.session().info().clone();
+            if cp.enforce && !info.extensions.iter().any(|e| e == "credProtect") {
+                return Err(ClientError::ConfigurationUnsupported(
+                    "credProtect not supported by authenticator".into(),
+                ));
+            }
+            entries.push(extensions::cred_protect::to_cbor(cp.policy));
+        }
+
+        // credBlob
+        if let Some(ref cb) = ext.cred_blob {
+            let info = self.session().info().clone();
+            if info.extensions.iter().any(|e| e == "credBlob") {
+                if let Some(max_len) = info.max_cred_blob_length
+                    && cb.blob.len() > max_len
+                {
+                    return Err(ClientError::BadRequest(format!(
+                        "credBlob too large: {} > {}",
+                        cb.blob.len(),
+                        max_len,
+                    )));
+                }
+                entries.push(extensions::cred_blob::make_credential_to_cbor(&cb.blob));
+            }
+        }
+
+        // largeBlobKey
+        if let Some(ref lb) = ext.large_blob {
+            let info = self.session().info().clone();
+            let supported = info.extensions.iter().any(|e| e == "largeBlobKey");
+            if lb.support == extensions::large_blob::LargeBlobSupport::Required && !supported {
+                return Err(ClientError::ConfigurationUnsupported(
+                    "largeBlob not supported by authenticator".into(),
+                ));
+            }
+            if supported {
+                entries.push(extensions::large_blob::to_cbor());
+            }
+        }
+
+        // minPinLength
+        if ext.min_pin_length == Some(true) {
+            let info = self.session().info().clone();
+            if info.extensions.iter().any(|e| e == "minPinLength") {
+                entries.push(extensions::min_pin_length::to_cbor());
+            }
+        }
+
+        Ok((extensions::build_extensions_cbor(entries), hmac_state))
+    }
+
+    /// Build CTAP2 extension CBOR for getAssertion.
+    fn build_get_assertion_extensions(
+        &mut self,
+        options: &PublicKeyCredentialRequestOptions,
+        protocol: Option<PinProtocol>,
+        selected_cred_id: Option<&[u8]>,
+    ) -> Result<(Option<cbor::Value>, Option<prf::HmacSecretState>), ClientError<C::Error>> {
+        let ext = match &options.extensions {
+            Some(e) => e,
+            None => return Ok((None, None)),
+        };
+
+        let mut entries: Vec<(String, cbor::Value)> = Vec::new();
+        let mut hmac_state = None;
+
+        // PRF / hmac-secret
+        if let Some(ref prf_input) = ext.prf {
+            let info = self.session().info().clone();
+            if info.extensions.iter().any(|e| e == "hmac-secret")
+                && let Some(eval) = prf::select_eval(prf_input, selected_cred_id)
+                && let Some(state) = self.get_hmac_secret_state(protocol)?
+            {
+                entries.push(prf::get_assertion_cbor(eval, &state));
+                hmac_state = Some(state);
+            }
+        }
+
+        // credBlob (getCredBlob)
+        if ext.get_cred_blob == Some(true) {
+            let info = self.session().info().clone();
+            if info.extensions.iter().any(|e| e == "credBlob") {
+                entries.push(extensions::cred_blob::get_assertion_to_cbor());
+            }
+        }
+
+        // largeBlobKey
+        if ext.large_blob.is_some() {
+            let info = self.session().info().clone();
+            if info.extensions.iter().any(|e| e == "largeBlobKey") {
+                entries.push(extensions::large_blob::to_cbor());
+            }
+        }
+
+        Ok((extensions::build_extensions_cbor(entries), hmac_state))
+    }
+
+    /// Perform ECDH key agreement for hmac-secret.
+    fn get_hmac_secret_state(
+        &mut self,
+        protocol: Option<PinProtocol>,
+    ) -> Result<Option<prf::HmacSecretState>, ClientError<C::Error>> {
+        let proto = match protocol {
+            Some(p) => p,
+            None => {
+                // Select a protocol for key agreement
+                let info = self.session().info().clone();
+                if info.pin_uv_protocols.contains(&2) {
+                    PinProtocol::V2
+                } else if info.pin_uv_protocols.contains(&1) {
+                    PinProtocol::V1
+                } else {
+                    return Ok(None);
+                }
+            }
+        };
+
+        // Get authenticator's key agreement key via clientPin
+        let mut session = self.take_session();
+        let result = session.client_pin(
+            proto.version(),
+            0x02, // getKeyAgreement
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        self.restore_session(session);
+
+        let resp = result.map_err(ClientError::Ctap)?;
+        let peer_key = resp
+            .map_get_int(0x01) // keyAgreement
+            .ok_or_else(|| ClientError::BadRequest("missing keyAgreement in response".into()))?;
+
+        prf::HmacSecretState::new(proto, peer_key)
+            .map(Some)
+            .map_err(|e| ClientError::BadRequest(format!("hmac-secret key agreement failed: {e}")))
+    }
+
+    /// Parse extension outputs from a makeCredential response.
+    fn parse_registration_extensions(
+        &self,
+        options: &PublicKeyCredentialCreationOptions,
+        auth_data: &[u8],
+        hmac_state: Option<&prf::HmacSecretState>,
+        has_large_blob_key: bool,
+        rk: bool,
+    ) -> Option<extensions::RegistrationExtensionOutputs> {
+        let ext = options.extensions.as_ref()?;
+        let auth_exts = extensions::parse_auth_data_extensions(auth_data);
+
+        let mut outputs = extensions::RegistrationExtensionOutputs::default();
+        let mut has_output = false;
+
+        // PRF
+        if ext.prf.is_some()
+            && let Some(ref exts) = auth_exts
+        {
+            match prf::make_credential_from_auth_data(exts, hmac_state) {
+                Ok(Some(prf_out)) => {
+                    outputs.prf = Some(prf_out);
+                    has_output = true;
+                }
+                Ok(None) => {}
+                Err(_) => {} // Silently ignore parse errors
+            }
+        }
+
+        // credProtect
+        if ext.cred_protect.is_some()
+            && let Some(ref exts) = auth_exts
+            && let Some((_, val)) = exts.iter().find(|(k, _)| k == "credProtect")
+            && let Some(policy) = extensions::cred_protect::from_cbor(val)
+        {
+            outputs.cred_protect = Some(extensions::cred_protect::RegistrationOutput { policy });
+            has_output = true;
+        }
+
+        // credBlob
+        if ext.cred_blob.is_some()
+            && let Some(ref exts) = auth_exts
+            && let Some((_, val)) = exts.iter().find(|(k, _)| k == "credBlob")
+            && let Some(stored) = extensions::cred_blob::make_credential_from_cbor(val)
+        {
+            outputs.cred_blob = Some(extensions::cred_blob::RegistrationOutput { stored });
+            has_output = true;
+        }
+
+        // largeBlob
+        if ext.large_blob.is_some() {
+            outputs.large_blob = Some(extensions::large_blob::RegistrationOutput {
+                supported: has_large_blob_key,
+            });
+            has_output = true;
+        }
+
+        // credProps (client-side only)
+        if ext.cred_props == Some(true) {
+            outputs.cred_props = Some(extensions::cred_props::RegistrationOutput { rk });
+            has_output = true;
+        }
+
+        // minPinLength
+        if ext.min_pin_length == Some(true)
+            && let Some(ref exts) = auth_exts
+            && let Some((_, val)) = exts.iter().find(|(k, _)| k == "minPinLength")
+            && let Some(length) = extensions::min_pin_length::from_cbor(val)
+        {
+            outputs.min_pin_length =
+                Some(extensions::min_pin_length::RegistrationOutput { length });
+            has_output = true;
+        }
+
+        if has_output { Some(outputs) } else { None }
+    }
+
+    /// Parse extension outputs from a getAssertion response.
+    fn parse_authentication_extensions(
+        &self,
+        options: &PublicKeyCredentialRequestOptions,
+        auth_data: &[u8],
+        hmac_state: Option<&prf::HmacSecretState>,
+    ) -> Option<extensions::AuthenticationExtensionOutputs> {
+        let ext = options.extensions.as_ref()?;
+        let auth_exts = extensions::parse_auth_data_extensions(auth_data);
+
+        let mut outputs = extensions::AuthenticationExtensionOutputs::default();
+        let mut has_output = false;
+
+        // PRF
+        if ext.prf.is_some()
+            && let (Some(exts), Some(state)) = (&auth_exts, hmac_state)
+        {
+            match prf::get_assertion_from_auth_data(exts, state) {
+                Ok(Some(results)) => {
+                    outputs.prf = Some(prf::AuthenticationOutput { results });
+                    has_output = true;
+                }
+                Ok(None) => {}
+                Err(_) => {}
+            }
+        }
+
+        // credBlob
+        if ext.get_cred_blob == Some(true)
+            && let Some(ref exts) = auth_exts
+            && let Some((_, val)) = exts.iter().find(|(k, _)| k == "credBlob")
+            && let Some(blob) = extensions::cred_blob::get_assertion_from_cbor(val)
+        {
+            outputs.cred_blob = Some(extensions::cred_blob::AuthenticationOutput { blob });
+            has_output = true;
+        }
+
+        // Note: largeBlob output is handled separately via process_large_blob
+
+        if has_output { Some(outputs) } else { None }
+    }
+
+    /// Process large blob read/write after authentication.
+    /// Takes ownership of the session and returns it.
+    fn process_large_blob(
+        &self,
+        session: Ctap2Session<C>,
+        input: &extensions::large_blob::AuthenticationInput,
+        large_blob_key: Option<&[u8]>,
+        token: Option<&[u8]>,
+        protocol: Option<PinProtocol>,
+    ) -> (
+        Ctap2Session<C>,
+        Option<extensions::large_blob::AuthenticationOutput>,
+    ) {
+        use crate::ctap2::LargeBlobs;
+
+        let (Some(key), Some(protocol)) = (large_blob_key, protocol) else {
+            return (session, None);
+        };
+
+        let token = token.unwrap_or(&[]);
+
+        // LargeBlobs::new only fails if the authenticator doesn't support
+        // largeBlobs, which we've already verified. If it does fail, we lose
+        // the session — this is a programming error, not a runtime one.
+        let mut large_blobs = match LargeBlobs::new(session, protocol, token.to_vec()) {
+            Ok(lb) => lb,
+            Err(_) => {
+                // Can't recover session from Ctap2Error — this path should
+                // be unreachable since we checked support beforehand.
+                unreachable!("LargeBlobs::new failed after support check");
+            }
+        };
+
+        let output = if input.read == Some(true) {
+            match large_blobs.get_blob(key) {
+                Ok(blob) => Some(extensions::large_blob::AuthenticationOutput {
+                    blob,
+                    written: None,
+                }),
+                Err(_) => Some(extensions::large_blob::AuthenticationOutput {
+                    blob: None,
+                    written: None,
+                }),
+            }
+        } else if let Some(ref data) = input.write {
+            match large_blobs.put_blob(key, data) {
+                Ok(()) => Some(extensions::large_blob::AuthenticationOutput {
+                    blob: None,
+                    written: Some(true),
+                }),
+                Err(_) => Some(extensions::large_blob::AuthenticationOutput {
+                    blob: None,
+                    written: Some(false),
+                }),
+            }
+        } else {
+            None
+        };
+
+        (large_blobs.into_session(), output)
     }
 
     // -----------------------------------------------------------------------

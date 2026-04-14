@@ -25,23 +25,45 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! WebAuthn client implementation.
+//! Minimum PIN Length extension (minPinLength).
 //!
-//! Provides [`WebAuthnClient`] for performing WebAuthn registration and
-//! authentication ceremonies using a CTAP2 authenticator, along with the
-//! WebAuthn types needed for the public API.
+//! Returns the minimum PIN length enforced by the authenticator.
+//! Registration only.
 
-mod client;
-pub mod extensions;
-pub mod types;
+use serde::{Deserialize, Serialize};
 
-pub use client::{ClientDataCollector, ClientError, UserInteraction, WebAuthnClient};
-pub use types::{
-    AttestationConveyancePreference, AuthenticationResponse, AuthenticatorAssertionResponse,
-    AuthenticatorAttachment, AuthenticatorAttestationResponse, AuthenticatorSelectionCriteria,
-    AuthenticatorTransport, CollectedClientData, PublicKeyCredentialCreationOptions,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialHint, PublicKeyCredentialParameters,
-    PublicKeyCredentialRequestOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialType,
-    PublicKeyCredentialUserEntity, RegistrationResponse, ResidentKeyRequirement,
-    UserVerificationRequirement,
-};
+use crate::cbor::Value;
+
+pub const EXTENSION_ID: &str = "minPinLength";
+
+/// Registration output for minPinLength.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistrationOutput {
+    #[serde(rename = "minPinLength")]
+    pub length: u32,
+}
+
+// CBOR helpers
+
+pub(crate) fn to_cbor() -> (String, Value) {
+    (EXTENSION_ID.into(), Value::Bool(true))
+}
+
+pub(crate) fn from_cbor(value: &Value) -> Option<u32> {
+    value.as_int().map(|v| v as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cbor() {
+        let (key, val) = to_cbor();
+        assert_eq!(key, "minPinLength");
+        assert_eq!(val.as_bool(), Some(true));
+
+        let out = from_cbor(&Value::Int(8));
+        assert_eq!(out, Some(8));
+    }
+}

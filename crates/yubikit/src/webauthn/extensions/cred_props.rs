@@ -25,23 +25,16 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! WebAuthn client implementation.
+//! Credential Properties extension (credProps).
 //!
-//! Provides [`WebAuthnClient`] for performing WebAuthn registration and
-//! authentication ceremonies using a CTAP2 authenticator, along with the
-//! WebAuthn types needed for the public API.
+//! Client-side extension that reports whether a created credential is
+//! discoverable (resident key). No CTAP2 extension is sent to the
+//! authenticator — the result is computed by the client.
 
-mod client;
-pub mod extensions;
-pub mod types;
+use serde::{Deserialize, Serialize};
 
-pub use client::{ClientDataCollector, ClientError, UserInteraction, WebAuthnClient};
-pub use types::{
-    AttestationConveyancePreference, AuthenticationResponse, AuthenticatorAssertionResponse,
-    AuthenticatorAttachment, AuthenticatorAttestationResponse, AuthenticatorSelectionCriteria,
-    AuthenticatorTransport, CollectedClientData, PublicKeyCredentialCreationOptions,
-    PublicKeyCredentialDescriptor, PublicKeyCredentialHint, PublicKeyCredentialParameters,
-    PublicKeyCredentialRequestOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialType,
-    PublicKeyCredentialUserEntity, RegistrationResponse, ResidentKeyRequirement,
-    UserVerificationRequirement,
-};
+/// Registration output for credProps.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistrationOutput {
+    pub rk: bool,
+}
