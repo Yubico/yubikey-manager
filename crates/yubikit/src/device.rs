@@ -1085,7 +1085,7 @@ pub fn read_info_ccid<C: SmartCardConnection + Send + 'static>(
     };
     let version = session.version();
 
-    match session.read_device_info_unchecked() {
+    match session.read_device_info() {
         Ok(mut info) => {
             apply_device_info_fixups(&mut info);
             let conn = session.into_connection();
@@ -1124,7 +1124,7 @@ pub fn read_info_otp<T: OtpConnection + 'static>(
 ) -> Result<(DeviceInfo, T), (DeviceError, Option<T>)> {
     let mut session = ManagementSession::new_otp(conn)
         .map_err(|(e, conn)| (DeviceError::Management(e.erase()), Some(conn)))?;
-    match session.read_device_info_unchecked() {
+    match session.read_device_info() {
         Ok(mut info) => {
             apply_device_info_fixups(&mut info);
             Ok((info, session.into_connection()))
@@ -1159,7 +1159,7 @@ pub fn read_info_fido<C: FidoConnection + 'static>(
 ) -> Result<(DeviceInfo, C), (DeviceError, Option<C>)> {
     let mut session = ManagementSession::new_fido(conn)
         .map_err(|(e, conn)| (DeviceError::Management(e.erase()), Some(conn)))?;
-    match session.read_device_info_unchecked() {
+    match session.read_device_info() {
         Ok(mut info) => {
             apply_device_info_fixups(&mut info);
             Ok((info, session.into_connection()))

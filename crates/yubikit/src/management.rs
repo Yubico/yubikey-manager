@@ -35,7 +35,7 @@ use std::fmt;
 
 use thiserror::Error;
 
-use crate::core::{Connection, Transport, Version, bytes2int, patch_version};
+use crate::core::{Connection, Transport, Version, bytes2int};
 use crate::fido::FidoConnection;
 use crate::otp::{
     OtpConnection, OtpError, OtpProtocol, STATUS_OFFSET_PROG_SEQ, verify_and_strip_crc,
@@ -828,6 +828,20 @@ fn read_device_info_from_config<E: fmt::Debug + fmt::Display>(
     DeviceInfo::parse_tlvs(&tlvs, version).map_err(ManagementError::from_parse)
 }
 
+/// Dev devices report version 0.0.1. When detected, read device info
+/// and replace the version with the one from `version_qualifier`.
+fn resolve_dev_version<E: fmt::Debug + fmt::Display>(
+    version: &mut Version,
+    read_config: &mut dyn FnMut(u8) -> Result<Vec<u8>, E>,
+) {
+    if *version == Version(0, 0, 1) {
+        match read_device_info_from_config(*version, read_config) {
+            Ok(info) => *version = info.version_qualifier.version,
+            Err(e) => log::warn!("Failed to read device info for dev version: {e}"),
+        }
+    }
+}
+
 /// Serialize a write_device_config call into bytes, with validation.
 fn validate_and_serialize_device_config<E: fmt::Debug + fmt::Display>(
     version: Version,
@@ -923,11 +937,6 @@ impl<C: Connection + 'static> ManagementSession<C> {
                 "DeviceInfo requires YubiKey 4.1.0 or later".into(),
             ));
         }
-        self.read_device_info_unchecked()
-    }
-
-    /// Read device info without version check (for dev device version override).
-    pub fn read_device_info_unchecked(&mut self) -> Result<DeviceInfo, ManagementError<C::Error>> {
         let version = self.inner.version();
         read_device_info_from_config(version, &mut |page| self.inner.read_config(page))
     }
@@ -1036,6 +1045,12 @@ struct CcidManagement<C: SmartCardConnection> {
 }
 
 impl<C: SmartCardConnection> CcidManagement<C> {
+    fn ccid_read_config(
+        protocol: &mut SmartCardProtocol<C>,
+        page: u8,
+    ) -> Result<Vec<u8>, SmartCardError> {
+        protocol.send_apdu(0, INS_READ_CONFIG, page, 0, &[])
+    }
     fn open(connection: C) -> Result<Self, (SmartCardError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
         let select_bytes = match protocol.select(Aid::MANAGEMENT) {
@@ -1082,7 +1097,7 @@ impl<C: SmartCardConnection> CcidManagement<C> {
                 ));
             }
         };
-        let version = match parse_version_string(version_str) {
+        let mut version = match parse_version_string(version_str) {
             Ok(v) => v,
             Err(e) => {
                 return Err((
@@ -1091,7 +1106,11 @@ impl<C: SmartCardConnection> CcidManagement<C> {
                 ));
             }
         };
-        let version = patch_version(version);
+
+        // Dev devices report 0.0.1; read the real version from device info.
+        resolve_dev_version(&mut version, &mut |page| {
+            Self::ccid_read_config(&mut protocol, page)
+        });
 
         // For YubiKey NEO (v3), switch to OTP applet for further commands
         if version.0 == 3 {
@@ -1116,7 +1135,7 @@ impl<C: SmartCardConnection + 'static> ManagementOps<SmartCardError> for CcidMan
     }
 
     fn read_config(&mut self, page: u8) -> Result<Vec<u8>, SmartCardError> {
-        self.protocol.send_apdu(0, INS_READ_CONFIG, page, 0, &[])
+        Self::ccid_read_config(&mut self.protocol, page)
     }
 
     fn write_config(&mut self, config: &[u8]) -> Result<(), SmartCardError> {
@@ -1169,13 +1188,33 @@ struct OtpManagement<T: OtpConnection> {
 }
 
 impl<T: OtpConnection> OtpManagement<T> {
+    fn otp_read_config(protocol: &mut OtpProtocol<T>, page: u8) -> Result<Vec<u8>, OtpError> {
+        let data = int2bytes(page as u64);
+        let response =
+            protocol.send_and_receive(ConfigSlot::Yk4Capabilities as u8, Some(&data), Some(-1))?;
+        match response {
+            Some(raw) => {
+                let r_len = raw[0] as usize;
+                let checked = verify_and_strip_crc(&raw, r_len + 1)?;
+                Ok(checked)
+            }
+            None => Err(OtpError::BadResponse("Expected data response".into())),
+        }
+    }
+
     fn open(connection: T) -> Result<Self, (OtpError, T)> {
         log::debug!("Opening OtpManagement");
-        let protocol = match OtpProtocol::new(connection) {
+        let mut protocol = match OtpProtocol::new(connection) {
             Ok(p) => p,
             Err((e, conn)) => return Err((e, conn)),
         };
-        let version = patch_version(protocol.version);
+        let mut version = protocol.version;
+
+        // Dev devices report 0.0.1; read the real version from device info.
+        resolve_dev_version(&mut version, &mut |page| {
+            Self::otp_read_config(&mut protocol, page)
+        });
+
         if version >= Version(1, 0, 0) && version < Version(3, 0, 0) {
             return Err((
                 OtpError::BadResponse(
@@ -1194,20 +1233,7 @@ impl<T: OtpConnection + 'static> ManagementOps<OtpError> for OtpManagement<T> {
     }
 
     fn read_config(&mut self, page: u8) -> Result<Vec<u8>, OtpError> {
-        let data = int2bytes(page as u64);
-        let response = self.protocol.send_and_receive(
-            ConfigSlot::Yk4Capabilities as u8,
-            Some(&data),
-            Some(-1),
-        )?;
-        match response {
-            Some(raw) => {
-                let r_len = raw[0] as usize;
-                let checked = verify_and_strip_crc(&raw, r_len + 1)?;
-                Ok(checked)
-            }
-            None => Err(OtpError::BadResponse("Expected data response".into())),
-        }
+        Self::otp_read_config(&mut self.protocol, page)
     }
 
     fn write_config(&mut self, config: &[u8]) -> Result<(), OtpError> {
@@ -1295,7 +1321,12 @@ struct FidoManagement<C: FidoConnection> {
 }
 
 impl<C: FidoConnection> FidoManagement<C> {
-    fn open(connection: C) -> Result<Self, (FidoError, C)> {
+    fn fido_read_config(connection: &mut C, page: u8) -> Result<Vec<u8>, FidoError> {
+        let data = int2bytes(page as u64);
+        connection.call(CTAP_READ_CONFIG, &data, None, None)
+    }
+
+    fn open(mut connection: C) -> Result<Self, (FidoError, C)> {
         log::debug!("Opening FidoManagement");
         let (v1, v2, v3) = connection.device_version();
         let mut version = Version(v1, v2, v3);
@@ -1304,7 +1335,12 @@ impl<C: FidoConnection> FidoManagement<C> {
         {
             version = Version(3, 0, 0); // Guess NEO
         }
-        version = patch_version(version);
+
+        // Dev devices report 0.0.1; read the real version from device info.
+        resolve_dev_version(&mut version, &mut |page| {
+            Self::fido_read_config(&mut connection, page)
+        });
+
         Ok(Self {
             connection,
             version,
@@ -1318,8 +1354,7 @@ impl<C: FidoConnection + 'static> ManagementOps<FidoError> for FidoManagement<C>
     }
 
     fn read_config(&mut self, page: u8) -> Result<Vec<u8>, FidoError> {
-        let data = int2bytes(page as u64);
-        self.connection.call(CTAP_READ_CONFIG, &data, None, None)
+        Self::fido_read_config(&mut self.connection, page)
     }
 
     fn write_config(&mut self, config: &[u8]) -> Result<(), FidoError> {

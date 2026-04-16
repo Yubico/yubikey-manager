@@ -417,10 +417,7 @@ class ManagementSession(Session):
         return self._do_read_device_info()
 
     def _do_read_device_info(self) -> DeviceInfo:
-        try:
-            d = self._native.read_device_info()
-        except Exception:
-            d = self._native.read_device_info_unchecked()
+        d = self._native.read_device_info()
         return _device_info_from_native(d)
 
     def write_device_config(

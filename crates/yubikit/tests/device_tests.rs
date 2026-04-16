@@ -169,7 +169,7 @@ fn get_nfc_device_version() -> &'static Option<Version> {
     NFC_DEVICE_VERSION.get_or_init(|| {
         let conn = open_nfc_smartcard()?;
         let mut session = ManagementSession::new(conn).ok()?;
-        let info = session.read_device_info_unchecked().ok()?;
+        let info = session.read_device_info().ok()?;
         Some(info.version)
     })
 }
@@ -357,9 +357,7 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
             let (dev, _) = get_device_and_info();
             let conn = dev.open_otp().expect("open OTP");
             let mut session = ManagementSession::new_otp(conn).expect("ManagementSession::new_otp");
-            let info = session
-                .read_device_info_unchecked()
-                .expect("read_device_info_unchecked");
+            let info = session.read_device_info().expect("read_device_info");
             assert_eq!(info.serial, required_serial());
         }
         _ => {
@@ -370,9 +368,7 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
             } else {
                 ManagementSession::new(conn).expect("ManagementSession::new (CCID)")
             };
-            let info = session
-                .read_device_info_unchecked()
-                .expect("read_device_info_unchecked");
+            let info = session.read_device_info().expect("read_device_info");
             if matches!(
                 tc,
                 TestConnection::UsbSmartCard | TestConnection::UsbSmartCardScp11b

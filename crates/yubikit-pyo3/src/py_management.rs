@@ -140,15 +140,6 @@ impl ManagementCcidSession {
         device_info_to_dict(py, &info)
     }
 
-    /// Read device info without version check (for dev device version override).
-    fn read_device_info_unchecked(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self
-            .session_mut()?
-            .read_device_info_unchecked()
-            .map_err(management_err)?;
-        device_info_to_dict(py, &info)
-    }
-
     /// Write device config from individual parameters.
     ///
     /// `enabled_capabilities` is a dict mapping transport name ("Usb"/"Nfc") to capability bitmask.
@@ -269,14 +260,6 @@ impl ManagementOtpSession {
         device_info_to_dict(py, &info)
     }
 
-    fn read_device_info_unchecked(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self
-            .session_mut()?
-            .read_device_info_unchecked()
-            .map_err(management_err)?;
-        device_info_to_dict(py, &info)
-    }
-
     #[pyo3(signature = (enabled_capabilities, reboot, cur_lock_code=None, new_lock_code=None, auto_eject_timeout=None, challenge_response_timeout=None, device_flags=None, nfc_restricted=None))]
     fn write_device_config(
         &mut self,
@@ -386,14 +369,6 @@ impl ManagementFidoSession {
         let info = self
             .session_mut()?
             .read_device_info()
-            .map_err(management_err)?;
-        device_info_to_dict(py, &info)
-    }
-
-    fn read_device_info_unchecked(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = self
-            .session_mut()?
-            .read_device_info_unchecked()
             .map_err(management_err)?;
         device_info_to_dict(py, &info)
     }
