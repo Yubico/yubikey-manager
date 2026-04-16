@@ -859,22 +859,20 @@ fn decompress_certificate(cert_data: &[u8]) -> Result<Vec<u8>, PivError> {
                     .map_err(|_| PivError::InvalidData("Failed to decompress gzip".into()))?;
                 return Ok(decompressed);
             }
-            (0x01, 0x00) => {
+            (0x01, 0x00) if cert_data.len() >= 4 => {
                 // Net iD zlib format
-                if cert_data.len() >= 4 {
-                    let expected_len = u16::from_le_bytes([cert_data[2], cert_data[3]]) as usize;
-                    let mut decoder = flate2::read::ZlibDecoder::new(&cert_data[4..]);
-                    let mut decompressed = Vec::new();
-                    decoder
-                        .read_to_end(&mut decompressed)
-                        .map_err(|_| PivError::InvalidData("Failed to decompress zlib".into()))?;
-                    if decompressed.len() != expected_len {
-                        return Err(PivError::InvalidData(
-                            "Decompressed length does not match expected length".into(),
-                        ));
-                    }
-                    return Ok(decompressed);
+                let expected_len = u16::from_le_bytes([cert_data[2], cert_data[3]]) as usize;
+                let mut decoder = flate2::read::ZlibDecoder::new(&cert_data[4..]);
+                let mut decompressed = Vec::new();
+                decoder
+                    .read_to_end(&mut decompressed)
+                    .map_err(|_| PivError::InvalidData("Failed to decompress zlib".into()))?;
+                if decompressed.len() != expected_len {
+                    return Err(PivError::InvalidData(
+                        "Decompressed length does not match expected length".into(),
+                    ));
                 }
+                return Ok(decompressed);
             }
             _ => {}
         }
