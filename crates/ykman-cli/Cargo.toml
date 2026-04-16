@@ -33,7 +33,7 @@ sha2 = "0.10"
 quick-xml = "0.37"
 rpassword = "7"
 x509-cert = { version = "0.2.5", features = ["pem"] }
-aes-gcm = "0.10"
+fernet = { version = "0.2", default-features = false, features = ["rustcrypto"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 dirs = "6"

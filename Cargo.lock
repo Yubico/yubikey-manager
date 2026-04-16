@@ -1126,6 +1126,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
+name = "fernet"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c66b725fe9483b9ee72ccaec072b15eb8ad95a3ae63a8c798d5748883b72fd33"
+dependencies = [
+ "aes 0.8.4",
+ "base64",
+ "byteorder",
+ "cbc 0.1.2",
+ "getrandom 0.2.17",
+ "hmac 0.12.1",
+ "sha2 0.10.9",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "ff"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3733,7 +3750,6 @@ dependencies = [
 name = "ykman-cli"
 version = "6.0.0-dev.0"
 dependencies = [
- "aes-gcm 0.10.3",
  "assert_cmd",
  "base32",
  "base64",
@@ -3742,6 +3758,7 @@ dependencies = [
  "ctrlc",
  "dirs",
  "elliptic-curve",
+ "fernet",
  "getrandom 0.3.4",
  "hex",
  "keyring",
