@@ -36,25 +36,10 @@ from typing import NamedTuple, Sequence
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from _yubikit_native.scp import (  # noqa: F401
-    ScpState as _RustScpState,
-)
-
-from .. import BadResponseError
-
 logger = logging.getLogger(__name__)
 
 
 _DEFAULT_KEY = b"\x40\x41\x42\x43\x44\x45\x46\x47\x48\x49\x4a\x4b\x4c\x4d\x4e\x4f"
-
-
-class SessionKeys(NamedTuple):
-    """SCP Session Keys."""
-
-    key_senc: bytes
-    key_smac: bytes
-    key_srmac: bytes
-    key_dek: bytes | None = None
 
 
 class StaticKeys(NamedTuple):
@@ -129,38 +114,3 @@ class Scp11KeyParams(ScpKeyParams):
     sk_oce_ecka: ec.EllipticCurvePrivateKey | None = None
     # Certificate chain for sk_oce_ecka, leaf-last order
     certificates: Sequence[x509.Certificate] = field(default_factory=list)
-
-
-class ScpState:
-    def __init__(
-        self,
-        session_keys: SessionKeys,
-        mac_chain: bytes = b"\0" * 16,
-        enc_counter: int = 1,
-    ):
-        self._keys = session_keys
-        self._state = _RustScpState(
-            session_keys.key_senc,
-            session_keys.key_smac,
-            session_keys.key_srmac,
-            mac_chain,
-            enc_counter,
-        )
-
-    def encrypt(self, data: bytes) -> bytes:
-        return bytes(self._state.encrypt(data))
-
-    def mac(self, data: bytes) -> bytes:
-        return bytes(self._state.mac(data))
-
-    def unmac(self, data: bytes, sw: int) -> bytes:
-        try:
-            return bytes(self._state.unmac(data, sw))
-        except ValueError as e:
-            raise BadResponseError(str(e)) from None
-
-    def decrypt(self, encrypted: bytes) -> bytes:
-        try:
-            return bytes(self._state.decrypt(encrypted))
-        except ValueError as e:
-            raise BadResponseError(str(e)) from None

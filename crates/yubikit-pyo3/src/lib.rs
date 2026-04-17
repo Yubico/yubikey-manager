@@ -38,7 +38,6 @@ mod py_openpgp;
 mod py_otp;
 mod py_pcsc;
 mod py_piv;
-mod py_scp;
 mod py_securitydomain;
 mod py_smartcard;
 mod py_webauthn;
@@ -52,7 +51,6 @@ fn _yubikit_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     py_pcsc::register(m)?;
     py_hid::register(m)?;
     py_core::register(m)?;
-    py_scp::register(m)?;
     py_oath::register(m)?;
     py_device::register(m)?;
     register_sessions(m)?;

@@ -5,5 +5,4 @@ from _yubikit_native import device as device
 from _yubikit_native import hid as hid
 from _yubikit_native import oath as oath
 from _yubikit_native import pcsc as pcsc
-from _yubikit_native import scp as scp
 from _yubikit_native import sessions as sessions
