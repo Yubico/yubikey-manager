@@ -6,11 +6,6 @@ introduction on this type of scripting, see
 link:../doc/Scripting.adoc[Scripting].
 
 === Running a script
-The simplest way to run a script is by passing it to the `ykman` tool:
-
-  ykman script script_file.py [args...]
-
-You can also run the scripts with the standard Python interpreter, though
-`ykman` and its dependencies will need to be available:
+Run scripts with the Python interpreter (with `yubikey-manager` installed):
 
   python script_file.py [args...]

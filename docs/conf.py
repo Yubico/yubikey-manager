@@ -177,7 +177,7 @@ texinfo_documents = [
         "yubikey-manager Documentation",
         author,
         "yubikey-manager",
-        "One line description of project.",
+        "Library and CLI for managing your YubiKey configuration.",
         "Miscellaneous",
     )
 ]

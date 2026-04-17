@@ -11,38 +11,44 @@ If you're looking for a graphical application, check out  https://developers.yub
 For more usage information and examples, see the https://docs.yubico.com/software/yubikey/tools/ykman/Using_the_ykman_CLI.html[YubiKey Manager CLI User Manual].
 
 ....
-Usage: ykman [OPTIONS] COMMAND [ARGS]...
+Configure your YubiKey via the command line.
 
-  Configure your YubiKey via the command line.
-
-  Examples:
-
-    List connected YubiKeys, only output serial number:
-    $ ykman list --serials
-
-    Show information about YubiKey with serial number 0123456:
-    $ ykman --device 0123456 info
-
-Options:
-  -d, --device SERIAL             specify which YubiKey to interact with by serial number
-  -r, --reader NAME               specify a YubiKey by smart card reader name (can't be used with --device or list)
-  -l, --log-level [ERROR|WARNING|INFO|DEBUG|TRAFFIC]
-                                  enable logging at given verbosity level
-  --log-file FILE                 write log to FILE instead of printing to stderr (requires --log-level)
-  --diagnose                      show diagnostics information useful for troubleshooting
-  -v, --version                   show version information about the app
-  --full-help                     show --help output, including hidden commands
-  -h, --help                      show this message and exit
+Usage: ykman [OPTIONS] [COMMAND]
 
 Commands:
-  info     show general information
-  list     list connected YubiKeys
-  config   enable or disable applications
-  fido     manage the FIDO applications
-  oath     manage the OATH application
-  openpgp  manage the OpenPGP application
-  otp      manage the YubiOTP application
-  piv      manage the PIV application
+  list     List connected YubiKeys
+  info     Show general information
+  config   Enable or disable applications and settings
+  oath     Manage the OATH application
+  otp      Manage the YubiKey OTP application
+  piv      Manage the PIV application
+  fido     Manage the FIDO applications
+  openpgp  Manage the OpenPGP application
+  hsmauth  Manage the YubiHSM Auth application
+  sd       Manage the Security Domain
+  apdu     Send raw APDUs to the YubiKey
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -d, --device <DEVICE>              Specify which YubiKey to interact with by serial number
+      --scp <SCP_CRED>               SCP credentials: private key and cert files, or SCP03 keys as K-ENC:K-MAC[:K-DEK] hex
+      --scp-ca <SCP_CA>              CA certificate for SCP11 card key verification (PEM/DER file)
+      --scp-sd <KID> <KVN>           Card key reference for SCP (KID KVN, hex)
+      --scp-oce <KID> <KVN>          OCE key reference for SCP (KID KVN, hex)
+      --scp-password <SCP_PASSWORD>  Password for SCP credential file
+      --diagnose                     Show diagnostic information
+  -l, --log-level <LOG_LEVEL>        Enable logging at given verbosity level [possible values: error, warning, info, debug, traffic]
+      --log-file <FILE>              Write log to FILE instead of printing to stderr (requires --log-level)
+  -h, --help                         Print help
+  -V, --version                      Print version
+
+Examples:
+
+  List connected YubiKeys, only output serial number:
+  $ ykman list --serials
+
+  Show information about YubiKey with serial number 123456:
+  $ ykman --device 123456 info
 ....
 
 The `--help` argument can also be used to get detailed information about specific
@@ -125,9 +131,9 @@ that it's **NOT** maintained by Yubico.
 
 To install the binary package, use `pkg install pyXY-yubikey-manager`, with `pyXY`
 specifying the version of Python the package was built for, so in order to install
-YubiKey Manager for Python 3.8, use:
+YubiKey Manager for Python 3.10, use:
 
-  # pkg install py38-yubikey-manager
+  # pkg install py310-yubikey-manager
 
 For more information about how to install packages or ports on FreeBSD, please refer
 to its official documentation: https://docs.freebsd.org/en/books/handbook/ports[FreeBSD Handbook].
@@ -165,14 +171,3 @@ so that the key will still function as a USB keyboard:
 To install from source, see the link:doc/Development.adoc[development]
 instructions.
 
-=== Shell completion
-
-Experimental shell completion for the command line tool is available, provided
-by the underlying CLI library (`click`) but it is not enabled by default. To
-enable it, run this command once (for Bash):
-
-  $ source <(_YKMAN_COMPLETE=bash_source ykman | sudo tee /etc/bash_completion.d/ykman)
-
-More information on shell completion (including instructions for other shells) is
-available at:
-https://click.palletsprojects.com/en/stable/shell-completion/
