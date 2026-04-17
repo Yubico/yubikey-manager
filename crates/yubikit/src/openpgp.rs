@@ -25,6 +25,16 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! OpenPGP smart card application for YubiKeys.
+//!
+//! This module implements the OpenPGP card specification (ISO/IEC 7816) for
+//! managing keys, PINs, certificates, and performing cryptographic operations
+//! (signing, decryption, authentication) via the YubiKey's OpenPGP applet.
+//!
+//! The main entry point is [`OpenPgpSession`], which wraps a smart card
+//! connection and exposes high-level operations such as key generation,
+//! key import, PIN management, and KDF configuration.
+
 use std::collections::HashMap;
 use std::fmt;
 
@@ -43,7 +53,9 @@ use crate::tlv::{
 // Constants
 // ---------------------------------------------------------------------------
 
+/// Default user PIN for a factory-reset OpenPGP applet (`"123456"`).
 pub const DEFAULT_USER_PIN: &str = "123456";
+/// Default admin PIN for a factory-reset OpenPGP applet (`"12345678"`).
 pub const DEFAULT_ADMIN_PIN: &str = "12345678";
 
 const INVALID_PIN: &[u8] = &[0; 8];
@@ -82,17 +94,23 @@ const BUTTON_FLAG: u8 = 0x20;
 // Error
 // ---------------------------------------------------------------------------
 
+/// Errors returned by OpenPGP session operations.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum OpenPgpError {
+    /// The requested feature is not supported by this YubiKey firmware version.
     #[error("Not supported: {0}")]
     NotSupported(String),
+    /// The data provided or received was malformed or out of range.
     #[error("Invalid data: {0}")]
     InvalidData(String),
+    /// PIN verification failed; the inner value is the number of remaining attempts.
     #[error("Invalid PIN, {0} attempts remaining")]
     InvalidPin(u32),
+    /// The PIN has been blocked after too many failed attempts.
     #[error("PIN blocked")]
     PinBlocked,
+    /// An underlying smart card transport error occurred.
     #[error("Connection error: {0}")]
     Connection(SmartCardError),
 }
@@ -120,17 +138,27 @@ impl From<TlvError> for OpenPgpError {
 // Enums
 // ---------------------------------------------------------------------------
 
+/// User Interaction Flag (UIF) setting for a key slot.
+///
+/// Controls whether the YubiKey requires a physical touch for operations
+/// using the associated key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Uif {
+    /// Touch is not required.
     Off = 0x00,
+    /// Touch is required for each operation.
     On = 0x01,
+    /// Touch is permanently required and cannot be changed.
     Fixed = 0x02,
+    /// Touch is required but cached for a short period after use.
     Cached = 0x03,
+    /// Touch is permanently required with caching; cannot be changed.
     CachedFixed = 0x04,
 }
 
 impl Uif {
+    /// Convert a raw byte value to a [`Uif`] variant, if valid.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x00 => Some(Self::Off),
@@ -142,31 +170,39 @@ impl Uif {
         }
     }
 
+    /// Parse a UIF value from its encoded byte representation.
     pub fn parse(encoded: &[u8]) -> Option<Self> {
         encoded.first().and_then(|&v| Self::from_u8(v))
     }
 
+    /// Returns `true` if this UIF setting is permanent and cannot be changed.
     pub fn is_fixed(self) -> bool {
         matches!(self, Uif::Fixed | Uif::CachedFixed)
     }
 
+    /// Returns `true` if touch confirmation is cached for a short period.
     pub fn is_cached(self) -> bool {
         matches!(self, Uif::Cached | Uif::CachedFixed)
     }
 
+    /// Encode this UIF value as a two-byte array (value byte + button flag).
     pub fn to_bytes(self) -> [u8; 2] {
         [self as u8, BUTTON_FLAG]
     }
 }
 
+/// PIN verification policy for the user (signature) PIN.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum PinPolicy {
+    /// PIN must be verified before every signature operation.
     Always = 0x00,
+    /// PIN verification is valid for the entire session after first use.
     Once = 0x01,
 }
 
 impl PinPolicy {
+    /// Convert a byte value to a [`PinPolicy`], defaulting to [`PinPolicy::Always`].
     pub fn from_u8(v: u8) -> Self {
         match v {
             0x01 => Self::Once,
@@ -175,82 +211,141 @@ impl PinPolicy {
     }
 }
 
+/// Password reference identifying which PIN to operate on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Pw {
+    /// User PIN (PW1), used for signing and decryption.
     User = 0x81,
+    /// Reset code, used to unblock the user PIN.
     Reset = 0x82,
+    /// Admin PIN (PW3), used for card administration.
     Admin = 0x83,
 }
 
+/// OpenPGP Data Object (DO) tags used for reading and writing card data.
+///
+/// Each variant's discriminant encodes the P1/P2 bytes of the GET DATA /
+/// PUT DATA APDU commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum Do {
+    /// Private use data object 1 (read/write with user PIN).
     PrivateUse1 = 0x0101,
+    /// Private use data object 2 (read/write with user PIN).
     PrivateUse2 = 0x0102,
+    /// Private use data object 3 (read/write with admin PIN).
     PrivateUse3 = 0x0103,
+    /// Private use data object 4 (read/write with admin PIN).
     PrivateUse4 = 0x0104,
+    /// Application identifier (AID).
     Aid = 0x4F,
+    /// Cardholder name.
     Name = 0x5B,
+    /// Login data (e.g. a username).
     LoginData = 0x5E,
+    /// Preferred language(s) of the cardholder.
     Language = 0xEF2D,
+    /// Sex of the cardholder.
     Sex = 0x5F35,
+    /// URL (e.g. for public key retrieval).
     Url = 0x5F50,
+    /// Historical bytes from the ATR.
     HistoricalBytes = 0x5F52,
+    /// Extended length information.
     ExtendedLengthInfo = 0x7F66,
+    /// General feature management DO.
     GeneralFeatureManagement = 0x7F74,
+    /// Cardholder related data (composite DO).
     CardholderRelatedData = 0x65,
+    /// Application related data (composite DO).
     ApplicationRelatedData = 0x6E,
+    /// Algorithm attributes for the signature key slot.
     AlgorithmAttributesSig = 0xC1,
+    /// Algorithm attributes for the decryption key slot.
     AlgorithmAttributesDec = 0xC2,
+    /// Algorithm attributes for the authentication key slot.
     AlgorithmAttributesAut = 0xC3,
+    /// Algorithm attributes for the attestation key slot.
     AlgorithmAttributesAtt = 0xDA,
+    /// PW status bytes (PIN lengths, retry counters, policy).
     PwStatusBytes = 0xC4,
+    /// Fingerprint of the signature key.
     FingerprintSig = 0xC7,
+    /// Fingerprint of the decryption key.
     FingerprintDec = 0xC8,
+    /// Fingerprint of the authentication key.
     FingerprintAut = 0xC9,
+    /// Fingerprint of the attestation key.
     FingerprintAtt = 0xDB,
+    /// CA fingerprint 1 (associated with signature key).
     CaFingerprint1 = 0xCA,
+    /// CA fingerprint 2 (associated with decryption key).
     CaFingerprint2 = 0xCB,
+    /// CA fingerprint 3 (associated with authentication key).
     CaFingerprint3 = 0xCC,
+    /// CA fingerprint 4 (associated with attestation key).
     CaFingerprint4 = 0xDC,
+    /// Generation timestamp for the signature key.
     GenerationTimeSig = 0xCE,
+    /// Generation timestamp for the decryption key.
     GenerationTimeDec = 0xCF,
+    /// Generation timestamp for the authentication key.
     GenerationTimeAut = 0xD0,
+    /// Generation timestamp for the attestation key.
     GenerationTimeAtt = 0xDD,
+    /// Resetting code for unblocking the user PIN.
     ResettingCode = 0xD3,
+    /// User Interaction Flag for the signature key.
     UifSig = 0xD6,
+    /// User Interaction Flag for the decryption key.
     UifDec = 0xD7,
+    /// User Interaction Flag for the authentication key.
     UifAut = 0xD8,
+    /// User Interaction Flag for the attestation key.
     UifAtt = 0xD9,
+    /// Security support template (contains the signature counter).
     SecuritySupportTemplate = 0x7A,
+    /// Cardholder certificate.
     CardholderCertificate = 0x7F21,
+    /// Key Derivation Function (KDF) data object.
     Kdf = 0xF9,
+    /// Algorithm information (list of supported algorithms per slot).
     AlgorithmInformation = 0xFA,
+    /// Attestation certificate.
     AttCertificate = 0xFC,
+    /// Key information (generation status of each key slot).
     KeyInformation = 0xDE,
 }
 
 impl Do {
+    /// Returns the P1 byte (high byte of the DO tag) for APDU commands.
     pub fn p1(self) -> u8 {
         ((self as u16) >> 8) as u8
     }
 
+    /// Returns the P2 byte (low byte of the DO tag) for APDU commands.
     pub fn p2(self) -> u8 {
         (self as u16) as u8
     }
 }
 
+/// Reference to one of the four OpenPGP key slots on the card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum KeyRef {
+    /// Signature key slot.
     Sig = 0x01,
+    /// Decryption key slot.
     Dec = 0x02,
+    /// Authentication key slot.
     Aut = 0x03,
+    /// Attestation key slot (YubiKey 5.2+).
     Att = 0x81,
 }
 
 impl KeyRef {
+    /// Convert a raw byte value to a [`KeyRef`], if valid.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x01 => Some(Self::Sig),
@@ -261,8 +356,10 @@ impl KeyRef {
         }
     }
 
+    /// All four key slot references.
     pub const ALL: &[KeyRef] = &[KeyRef::Sig, KeyRef::Dec, KeyRef::Aut, KeyRef::Att];
 
+    /// Returns the algorithm attributes [`Do`] tag for this key slot.
     pub fn algorithm_attributes_do(self) -> Do {
         match self {
             Self::Sig => Do::AlgorithmAttributesSig,
@@ -272,6 +369,7 @@ impl KeyRef {
         }
     }
 
+    /// Returns the UIF (touch policy) [`Do`] tag for this key slot.
     pub fn uif_do(self) -> Do {
         match self {
             Self::Sig => Do::UifSig,
@@ -281,6 +379,7 @@ impl KeyRef {
         }
     }
 
+    /// Returns the generation time [`Do`] tag for this key slot.
     pub fn generation_time_do(self) -> Do {
         match self {
             Self::Sig => Do::GenerationTimeSig,
@@ -290,6 +389,7 @@ impl KeyRef {
         }
     }
 
+    /// Returns the fingerprint [`Do`] tag for this key slot.
     pub fn fingerprint_do(self) -> Do {
         match self {
             Self::Sig => Do::FingerprintSig,
@@ -313,15 +413,20 @@ impl KeyRef {
     }
 }
 
+/// Status of a key slot (whether a key has been generated, imported, or is absent).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum KeyStatus {
+    /// No key is present in this slot.
     None = 0,
+    /// A key was generated on-card.
     Generated = 1,
+    /// A key was imported from an external source.
     Imported = 2,
 }
 
 impl KeyStatus {
+    /// Convert a raw byte value to a [`KeyStatus`], if valid.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0 => Some(Self::None),
@@ -332,24 +437,34 @@ impl KeyStatus {
     }
 }
 
+/// Supported RSA key sizes for key generation and import.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum RsaSize {
+    /// 2048-bit RSA key.
     Rsa2048 = 2048,
+    /// 3072-bit RSA key.
     Rsa3072 = 3072,
+    /// 4096-bit RSA key.
     Rsa4096 = 4096,
 }
 
+/// RSA private key import format as indicated in the algorithm attributes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum RsaImportFormat {
+    /// Standard format: (e, p, q).
     Standard = 0,
+    /// Standard format with modulus: (e, p, q, n).
     StandardWMod = 1,
+    /// CRT (Chinese Remainder Theorem) format: (e, p, q, iqmp, dmp1, dmq1).
     Crt = 2,
+    /// CRT format with modulus: (e, p, q, iqmp, dmp1, dmq1, n).
     CrtWMod = 3,
 }
 
 impl RsaImportFormat {
+    /// Convert a raw byte value to an [`RsaImportFormat`], if valid.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0 => Some(Self::Standard),
@@ -361,14 +476,18 @@ impl RsaImportFormat {
     }
 }
 
+/// Elliptic curve private key import format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum EcImportFormat {
+    /// Standard format: private scalar only.
     Standard = 0,
+    /// Standard format with public key included.
     StandardWPubkey = 0xFF,
 }
 
 impl EcImportFormat {
+    /// Convert a raw byte value to an [`EcImportFormat`], if valid.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x00 => Some(Self::Standard),
@@ -378,14 +497,18 @@ impl EcImportFormat {
     }
 }
 
+/// Hash algorithm identifier used in KDF (Key Derivation Function) configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum HashAlgorithm {
+    /// SHA-256 (OpenPGP hash algorithm ID `0x08`).
     Sha256 = 0x08,
+    /// SHA-512 (OpenPGP hash algorithm ID `0x0A`).
     Sha512 = 0x0A,
 }
 
 impl HashAlgorithm {
+    /// Convert a raw byte value to a [`HashAlgorithm`], if valid.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x08 => Some(Self::Sha256),
@@ -397,26 +520,43 @@ impl HashAlgorithm {
 
 /// Extended capability flags (bitfield).
 pub mod extended_capability_flags {
+    /// Device supports Key Derivation Function (KDF) for PIN hashing.
     pub const KDF: u8 = 1 << 0;
+    /// Device supports PSO:DEC/ENC with AES.
     pub const PSO_DEC_ENC_AES: u8 = 1 << 1;
+    /// Algorithm attributes of key slots can be changed.
     pub const ALGORITHM_ATTRIBUTES_CHANGEABLE: u8 = 1 << 2;
+    /// Private use data objects are supported.
     pub const PRIVATE_USE: u8 = 1 << 3;
+    /// PW status bytes (PIN policy) can be changed.
     pub const PW_STATUS_CHANGEABLE: u8 = 1 << 4;
+    /// Private key import is supported.
     pub const KEY_IMPORT: u8 = 1 << 5;
+    /// GET CHALLENGE command is supported.
     pub const GET_CHALLENGE: u8 = 1 << 6;
+    /// Secure messaging is supported.
     pub const SECURE_MESSAGING: u8 = 1 << 7;
 }
 
-// Well-known curve OID dotted strings
+/// Well-known elliptic curve OIDs as dotted-decimal strings.
 pub mod curve_oid {
+    /// NIST P-256 (secp256r1 / prime256v1).
     pub const SECP256R1: &str = "1.2.840.10045.3.1.7";
+    /// secp256k1 (used in Bitcoin / Ethereum).
     pub const SECP256K1: &str = "1.3.132.0.10";
+    /// NIST P-384 (secp384r1).
     pub const SECP384R1: &str = "1.3.132.0.34";
+    /// NIST P-521 (secp521r1).
     pub const SECP521R1: &str = "1.3.132.0.35";
+    /// Brainpool P-256r1.
     pub const BRAINPOOL_P256R1: &str = "1.3.36.3.3.2.8.1.1.7";
+    /// Brainpool P-384r1.
     pub const BRAINPOOL_P384R1: &str = "1.3.36.3.3.2.8.1.1.11";
+    /// Brainpool P-512r1.
     pub const BRAINPOOL_P512R1: &str = "1.3.36.3.3.2.8.1.1.13";
+    /// Curve25519 for ECDH (X25519).
     pub const X25519: &str = "1.3.6.1.4.1.3029.1.5.1";
+    /// Curve25519 for EdDSA signatures (Ed25519).
     pub const ED25519: &str = "1.3.6.1.4.1.11591.15.1";
 }
 
@@ -449,13 +589,17 @@ const PKCS1_SHA512: &[u8] = &[
 // Data types
 // ---------------------------------------------------------------------------
 
+/// Algorithm attributes for an OpenPGP key slot (RSA or elliptic curve).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AlgorithmAttributes {
+    /// RSA algorithm attributes.
     Rsa(RsaAttributes),
+    /// Elliptic curve algorithm attributes.
     Ec(EcAttributes),
 }
 
 impl AlgorithmAttributes {
+    /// Parse algorithm attributes from their TLV-encoded representation.
     pub fn parse(encoded: &[u8]) -> Result<Self, OpenPgpError> {
         if encoded.is_empty() {
             return Err(OpenPgpError::InvalidData(
@@ -475,6 +619,7 @@ impl AlgorithmAttributes {
         }
     }
 
+    /// Serialize these algorithm attributes to bytes for storage on the card.
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             Self::Rsa(a) => a.to_bytes(),
@@ -482,6 +627,8 @@ impl AlgorithmAttributes {
         }
     }
 
+    /// Returns the algorithm identifier byte (RSA = 0x01, EC varies).
+    /// Returns the OpenPGP algorithm identifier byte.
     pub fn algorithm_id(&self) -> u8 {
         match self {
             Self::Rsa(_) => RSA_ALG_ID,
@@ -490,14 +637,20 @@ impl AlgorithmAttributes {
     }
 }
 
+/// RSA algorithm attributes stored on the card.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RsaAttributes {
+    /// Length of the RSA modulus (n) in bits.
     pub n_len: u16,
+    /// Length of the public exponent (e) in bits.
     pub e_len: u16,
+    /// Private key import format.
     pub import_format: RsaImportFormat,
 }
 
 impl RsaAttributes {
+    /// Create RSA attributes with the given key size and import format.
+    /// Creates RSA attributes with the given key size and import format.
     pub fn create(n_len: RsaSize, import_format: RsaImportFormat) -> Self {
         Self {
             n_len: n_len as u16,
@@ -531,14 +684,22 @@ impl RsaAttributes {
     }
 }
 
+/// Elliptic curve algorithm attributes stored on the OpenPGP card.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EcAttributes {
+    /// EC algorithm identifier (ECDH, ECDSA, or EdDSA).
     pub algorithm_id: u8,
+    /// DER-encoded curve OID bytes.
     pub oid: Vec<u8>,
+    /// Private key import format.
     pub import_format: EcImportFormat,
 }
 
 impl EcAttributes {
+    /// Create EC attributes for the given key slot and curve OID string.
+    ///
+    /// The algorithm ID is inferred automatically: EdDSA for Ed25519,
+    /// ECDH for the decryption slot, and ECDSA otherwise.
     pub fn create(key_ref: KeyRef, oid_str: &str) -> Result<Self, OpenPgpError> {
         let oid_bytes = oid_from_string(oid_str)
             .map_err(|e| OpenPgpError::InvalidData(format!("Invalid OID: {e}")))?;
@@ -581,6 +742,7 @@ impl EcAttributes {
         buf
     }
 
+    /// Returns the curve OID as a dotted-decimal string (e.g. `"1.2.840.10045.3.1.7"`).
     pub fn oid_string(&self) -> Result<String, TlvError> {
         oid_to_string(&self.oid)
     }
@@ -597,14 +759,17 @@ fn bcd(value: u8) -> u8 {
 /// Parsed OpenPGP Application Identifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenPgpAid {
+    /// Raw AID bytes as returned by the card.
     pub raw: Vec<u8>,
 }
 
 impl OpenPgpAid {
+    /// Parse an AID from raw bytes.
     pub fn parse(data: &[u8]) -> Self {
         Self { raw: data.to_vec() }
     }
 
+    /// Returns the OpenPGP specification version as `(major, minor)`.
     pub fn version(&self) -> (u8, u8) {
         (
             bcd(*self.raw.get(6).unwrap_or(&0)),
@@ -612,6 +777,7 @@ impl OpenPgpAid {
         )
     }
 
+    /// Returns the manufacturer ID from the AID.
     pub fn manufacturer(&self) -> u16 {
         if self.raw.len() >= 10 {
             u16::from_be_bytes([self.raw[8], self.raw[9]])
@@ -620,6 +786,7 @@ impl OpenPgpAid {
         }
     }
 
+    /// Returns the card serial number decoded from BCD.
     pub fn serial(&self) -> i64 {
         if self.raw.len() >= 14 {
             let bytes = &self.raw[10..14];
@@ -640,18 +807,27 @@ impl OpenPgpAid {
     }
 }
 
+/// PIN/password status bytes describing lengths, retry counters, and policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PwStatus {
+    /// User PIN verification policy (once per session vs. every operation).
     pub pin_policy_user: PinPolicy,
+    /// Maximum allowed length for the user PIN.
     pub max_len_user: u8,
+    /// Maximum allowed length for the reset code.
     pub max_len_reset: u8,
+    /// Maximum allowed length for the admin PIN.
     pub max_len_admin: u8,
+    /// Remaining verification attempts for the user PIN.
     pub attempts_user: u8,
+    /// Remaining verification attempts for the reset code.
     pub attempts_reset: u8,
+    /// Remaining verification attempts for the admin PIN.
     pub attempts_admin: u8,
 }
 
 impl PwStatus {
+    /// Parse PW status bytes from the card's encoded response (at least 7 bytes).
     pub fn parse(encoded: &[u8]) -> Result<Self, OpenPgpError> {
         if encoded.len() < 7 {
             return Err(OpenPgpError::InvalidData("PwStatus too short".into()));
@@ -667,6 +843,7 @@ impl PwStatus {
         })
     }
 
+    /// Returns the maximum PIN length for the given password reference.
     pub fn get_max_len(&self, pw: Pw) -> u8 {
         match pw {
             Pw::User => self.max_len_user,
@@ -675,6 +852,7 @@ impl PwStatus {
         }
     }
 
+    /// Returns the remaining verification attempts for the given password reference.
     pub fn get_attempts(&self, pw: Pw) -> u8 {
         match pw {
             Pw::User => self.attempts_user,
@@ -684,18 +862,27 @@ impl PwStatus {
     }
 }
 
+/// Extended capabilities of the OpenPGP card, describing supported features and limits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtendedCapabilities {
+    /// Bitfield of capability flags (see [`extended_capability_flags`]).
     pub flags: u8,
+    /// Secure messaging algorithm identifier.
     pub sm_algorithm: u8,
+    /// Maximum number of bytes that GET CHALLENGE can return.
     pub challenge_max_length: u16,
+    /// Maximum certificate storage size in bytes.
     pub certificate_max_length: u16,
+    /// Maximum size of special data objects in bytes.
     pub special_do_max_length: u16,
+    /// Whether PIN block 2 format is supported.
     pub pin_block_2_format: bool,
+    /// Whether the MSE (Manage Security Environment) command is supported.
     pub mse_command: bool,
 }
 
 impl ExtendedCapabilities {
+    /// Parse extended capabilities from the card's encoded response (at least 10 bytes).
     pub fn parse(encoded: &[u8]) -> Result<Self, OpenPgpError> {
         if encoded.len() < 10 {
             return Err(OpenPgpError::InvalidData(
@@ -713,13 +900,17 @@ impl ExtendedCapabilities {
         })
     }
 
+    /// Check whether a specific capability flag is set.
     pub fn has_flag(&self, flag: u8) -> bool {
         self.flags & flag != 0
     }
 }
 
+/// Map of key slot references to their 20-byte SHA-1 fingerprints.
 pub type Fingerprints = HashMap<KeyRef, Vec<u8>>;
+/// Map of key slot references to their generation timestamps (Unix epoch seconds).
 pub type GenerationTimes = HashMap<KeyRef, u32>;
+/// Map of key slot references to their key status (none, generated, or imported).
 pub type KeyInformation = HashMap<KeyRef, KeyStatus>;
 
 fn parse_fingerprints(encoded: &[u8]) -> Fingerprints {
@@ -769,25 +960,44 @@ fn parse_key_information(encoded: &[u8]) -> KeyInformation {
 // Discretionary and ApplicationRelatedData
 // ---------------------------------------------------------------------------
 
+/// Parsed discretionary data objects from the application related data DO.
+///
+/// Contains the algorithm attributes, PIN status, key fingerprints,
+/// generation timestamps, key status, and UIF settings for all key slots.
 #[derive(Debug, Clone)]
 pub struct DiscretionaryDataObjects {
+    /// Extended capabilities of the card.
     pub extended_capabilities: ExtendedCapabilities,
+    /// Algorithm attributes for the signature key slot.
     pub attributes_sig: AlgorithmAttributes,
+    /// Algorithm attributes for the decryption key slot.
     pub attributes_dec: AlgorithmAttributes,
+    /// Algorithm attributes for the authentication key slot.
     pub attributes_aut: AlgorithmAttributes,
+    /// Algorithm attributes for the attestation key slot (if supported).
     pub attributes_att: Option<AlgorithmAttributes>,
+    /// Current PIN/password status bytes.
     pub pw_status: PwStatus,
+    /// SHA-1 fingerprints for each key slot.
     pub fingerprints: Fingerprints,
+    /// CA fingerprints for each key slot.
     pub ca_fingerprints: Fingerprints,
+    /// Key generation timestamps for each key slot.
     pub generation_times: GenerationTimes,
+    /// Key status (none/generated/imported) for each key slot.
     pub key_information: KeyInformation,
+    /// User Interaction Flag for the signature key.
     pub uif_sig: Option<Uif>,
+    /// User Interaction Flag for the decryption key.
     pub uif_dec: Option<Uif>,
+    /// User Interaction Flag for the authentication key.
     pub uif_aut: Option<Uif>,
+    /// User Interaction Flag for the attestation key.
     pub uif_att: Option<Uif>,
 }
 
 impl DiscretionaryDataObjects {
+    /// Parse discretionary data objects from TLV-encoded bytes.
     pub fn parse(encoded: &[u8]) -> Result<Self, OpenPgpError> {
         let data = parse_tlv_dict(encoded)?;
         Ok(Self {
@@ -849,6 +1059,7 @@ impl DiscretionaryDataObjects {
         })
     }
 
+    /// Returns the algorithm attributes for the given key slot, if present.
     pub fn get_algorithm_attributes(&self, key_ref: KeyRef) -> Option<&AlgorithmAttributes> {
         match key_ref {
             KeyRef::Sig => Some(&self.attributes_sig),
@@ -858,6 +1069,7 @@ impl DiscretionaryDataObjects {
         }
     }
 
+    /// Returns the UIF (touch policy) for the given key slot, if set.
     pub fn get_uif(&self, key_ref: KeyRef) -> Option<Uif> {
         match key_ref {
             KeyRef::Sig => self.uif_sig,
@@ -868,14 +1080,20 @@ impl DiscretionaryDataObjects {
     }
 }
 
+/// Parsed application related data (DO `0x6E`), the top-level composite
+/// data object returned by the OpenPGP applet.
 #[derive(Debug, Clone)]
 pub struct ApplicationRelatedData {
+    /// The application identifier.
     pub aid: OpenPgpAid,
+    /// Historical bytes from the ATR.
     pub historical: Vec<u8>,
+    /// Discretionary data objects (algorithm attributes, PIN status, etc.).
     pub discretionary: DiscretionaryDataObjects,
 }
 
 impl ApplicationRelatedData {
+    /// Parse the application related data from TLV-encoded bytes.
     pub fn parse(encoded: &[u8]) -> Result<Self, OpenPgpError> {
         let outer = tlv_unpack(Do::ApplicationRelatedData as u32, encoded)?;
         let data = parse_tlv_dict(&outer)?;
@@ -908,21 +1126,35 @@ impl ApplicationRelatedData {
 // KDF
 // ---------------------------------------------------------------------------
 
+/// Key Derivation Function (KDF) configuration for PIN hashing.
+///
+/// When KDF is enabled, PINs are hashed on the host before being sent to the
+/// card, improving resistance to passive eavesdropping.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kdf {
+    /// KDF is disabled; PINs are sent in plaintext.
     None,
+    /// Iterated-salted S2K (string-to-key) as defined in OpenPGP.
     IterSaltedS2k {
+        /// Hash algorithm used for key derivation.
         hash_algorithm: HashAlgorithm,
+        /// Total number of bytes to hash (controls iteration count).
         iteration_count: u32,
+        /// Salt for deriving the user PIN.
         salt_user: Vec<u8>,
+        /// Salt for deriving the reset code.
         salt_reset: Option<Vec<u8>>,
+        /// Salt for deriving the admin PIN.
         salt_admin: Option<Vec<u8>>,
+        /// Pre-computed hash of the default user PIN (for initial setup).
         initial_hash_user: Option<Vec<u8>>,
+        /// Pre-computed hash of the default admin PIN (for initial setup).
         initial_hash_admin: Option<Vec<u8>>,
     },
 }
 
 impl Kdf {
+    /// Parse KDF configuration from TLV-encoded bytes.
     pub fn parse(encoded: &[u8]) -> Result<Self, OpenPgpError> {
         let data = parse_tlv_dict(encoded)?;
         let algorithm = data.get(&0x81).map(|v| bytes2int(v) as u8).unwrap_or(0);
@@ -948,6 +1180,7 @@ impl Kdf {
         }
     }
 
+    /// Serialize this KDF configuration to bytes for storage on the card.
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             Kdf::None => tlv_encode(0x81, &[0x00]),
@@ -1021,6 +1254,10 @@ impl Kdf {
         })
     }
 
+    /// Apply KDF processing to a PIN for the given password reference.
+    ///
+    /// When KDF is [`Kdf::None`], the raw PIN bytes are returned.
+    /// Otherwise the PIN is hashed with the appropriate salt.
     pub fn process(&self, pw: Pw, pin: &str) -> Vec<u8> {
         match self {
             Kdf::None => pin.as_bytes().to_vec(),
@@ -1086,24 +1323,40 @@ fn kdf_s2k_hash(
 // Private Key Template (for import)
 // ---------------------------------------------------------------------------
 
+/// A private key to be imported into an OpenPGP key slot.
 #[derive(Clone)]
 pub enum OpenPgpPrivateKey {
+    /// RSA private key in standard format (e, p, q).
     Rsa {
+        /// Public exponent.
         e: Vec<u8>,
+        /// First prime factor.
         p: Vec<u8>,
+        /// Second prime factor.
         q: Vec<u8>,
     },
+    /// RSA private key in CRT (Chinese Remainder Theorem) format.
     RsaCrt {
+        /// Public exponent.
         e: Vec<u8>,
+        /// First prime factor.
         p: Vec<u8>,
+        /// Second prime factor.
         q: Vec<u8>,
+        /// CRT coefficient: q^{-1} mod p.
         iqmp: Vec<u8>,
+        /// CRT exponent: d mod (p-1).
         dmp1: Vec<u8>,
+        /// CRT exponent: d mod (q-1).
         dmq1: Vec<u8>,
+        /// Public modulus n = p * q.
         n: Vec<u8>,
     },
+    /// Elliptic curve private key.
     Ec {
+        /// Private scalar value.
         scalar: Vec<u8>,
+        /// Optional uncompressed public key point.
         public_key: Option<Vec<u8>>,
     },
 }
@@ -1180,9 +1433,13 @@ fn build_private_key_template(key_ref: KeyRef, private_key: &OpenPgpPrivateKey) 
 /// Hash algorithm enum for sign/authenticate operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignHashAlgorithm {
+    /// SHA-1 hash (legacy; 160-bit digest).
     Sha1,
+    /// SHA-256 hash (256-bit digest).
     Sha256,
+    /// SHA-384 hash (384-bit digest).
     Sha384,
+    /// SHA-512 hash (512-bit digest).
     Sha512,
     /// Data is already hashed; the wrapped algorithm selects the DigestInfo header for RSA.
     Prehashed(PrehashAlgorithm),
@@ -1193,9 +1450,13 @@ pub enum SignHashAlgorithm {
 /// The hash algorithm used to produce a prehashed digest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrehashAlgorithm {
+    /// SHA-1 was used to produce the digest.
     Sha1,
+    /// SHA-256 was used to produce the digest.
     Sha256,
+    /// SHA-384 was used to produce the digest.
     Sha384,
+    /// SHA-512 was used to produce the digest.
     Sha512,
 }
 
@@ -1265,6 +1526,11 @@ fn pad_message(
 // Session
 // ---------------------------------------------------------------------------
 
+/// An active session with the OpenPGP applet on a YubiKey.
+///
+/// Provides methods for PIN management, key generation and import,
+/// cryptographic operations (sign, decrypt, authenticate), certificate
+/// management, and card configuration.
 pub struct OpenPgpSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
@@ -1365,22 +1631,27 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- Accessors --
 
+    /// Returns the application identifier for this OpenPGP session.
     pub fn aid(&self) -> &OpenPgpAid {
         &self.app_data.aid
     }
 
+    /// Returns the YubiKey firmware version.
     pub fn version(&self) -> Version {
         self.version
     }
 
+    /// Returns the card's extended capabilities.
     pub fn extended_capabilities(&self) -> &ExtendedCapabilities {
         &self.app_data.discretionary.extended_capabilities
     }
 
+    /// Returns a reference to the underlying smart card protocol.
     pub fn protocol(&self) -> &SmartCardProtocol<C> {
         &self.protocol
     }
 
+    /// Returns a mutable reference to the underlying smart card protocol.
     pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
         &mut self.protocol
     }
@@ -1392,12 +1663,14 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- Data Object I/O --
 
+    /// Read a data object from the card by its [`Do`] tag.
     pub fn get_data(&mut self, data_object: Do) -> Result<Vec<u8>, OpenPgpError> {
         Ok(self
             .protocol
             .send_apdu(0, INS_GET_DATA, data_object.p1(), data_object.p2(), &[])?)
     }
 
+    /// Write a data object to the card by its [`Do`] tag.
     pub fn put_data(&mut self, data_object: Do, data: &[u8]) -> Result<(), OpenPgpError> {
         self.protocol
             .send_apdu(0, INS_PUT_DATA, data_object.p1(), data_object.p2(), data)?;
@@ -1406,11 +1679,13 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- Status / Metadata --
 
+    /// Read the current PIN status (retry counters, max lengths, and policy).
     pub fn get_pin_status(&mut self) -> Result<PwStatus, OpenPgpError> {
         let data = self.get_data(Do::PwStatusBytes)?;
         PwStatus::parse(&data)
     }
 
+    /// Read the global signature counter from the security support template.
     pub fn get_signature_counter(&mut self) -> Result<u32, OpenPgpError> {
         let data = self.get_data(Do::SecuritySupportTemplate)?;
         let inner = tlv_unpack(Do::SecuritySupportTemplate as u32, &data)?;
@@ -1421,6 +1696,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Ok(bytes2int(counter_bytes) as u32)
     }
 
+    /// Read and parse the full application related data from the card.
     pub fn get_application_related_data(&mut self) -> Result<ApplicationRelatedData, OpenPgpError> {
         let data = self.get_data(Do::ApplicationRelatedData)?;
         let mut app_data = ApplicationRelatedData::parse(&data)?;
@@ -1433,6 +1709,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Ok(app_data)
     }
 
+    /// Read the key information (status of each key slot) from the card.
     pub fn get_key_information(&mut self) -> Result<KeyInformation, OpenPgpError> {
         Ok(self
             .get_application_related_data()?
@@ -1440,6 +1717,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             .key_information)
     }
 
+    /// Read the key generation timestamps for all key slots.
     pub fn get_generation_times(&mut self) -> Result<GenerationTimes, OpenPgpError> {
         Ok(self
             .get_application_related_data()?
@@ -1447,6 +1725,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             .generation_times)
     }
 
+    /// Read the key fingerprints for all key slots.
     pub fn get_fingerprints(&mut self) -> Result<Fingerprints, OpenPgpError> {
         Ok(self
             .get_application_related_data()?
@@ -1489,15 +1768,18 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         }
     }
 
+    /// Verify the user PIN. If `extended` is true, uses extended mode (PW1 for signing).
     pub fn verify_pin(&mut self, pin: &str, extended: bool) -> Result<(), OpenPgpError> {
         let mode = if extended { 1 } else { 0 };
         self.verify_inner(Pw::User, pin, mode)
     }
 
+    /// Verify the admin PIN.
     pub fn verify_admin(&mut self, admin_pin: &str) -> Result<(), OpenPgpError> {
         self.verify_inner(Pw::Admin, admin_pin, 0)
     }
 
+    /// Clear the verification state of the given PIN (requires YubiKey 5.6.0+).
     pub fn unverify_pin(&mut self, pw: Pw) -> Result<(), OpenPgpError> {
         require_version(self.version, Version(5, 6, 0), "unverify_pin")?;
         self.protocol
@@ -1525,10 +1807,12 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         }
     }
 
+    /// Change the user PIN from `pin` to `new_pin`.
     pub fn change_pin(&mut self, pin: &str, new_pin: &str) -> Result<(), OpenPgpError> {
         self.change_inner(Pw::User, pin, new_pin)
     }
 
+    /// Change the admin PIN from `admin_pin` to `new_admin_pin`.
     pub fn change_admin(
         &mut self,
         admin_pin: &str,
@@ -1537,12 +1821,16 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         self.change_inner(Pw::Admin, admin_pin, new_admin_pin)
     }
 
+    /// Set the resetting code used to unblock the user PIN.
     pub fn set_reset_code(&mut self, reset_code: &str) -> Result<(), OpenPgpError> {
         let kdf = self.get_kdf()?;
         let data = self.process_pin(&kdf, Pw::Reset, reset_code)?;
         self.put_data(Do::ResettingCode, &data)
     }
 
+    /// Reset the user PIN to `new_pin`, optionally using a reset code.
+    ///
+    /// If `reset_code` is `None`, the admin PIN must have been verified first.
     pub fn reset_pin(
         &mut self,
         new_pin: &str,
@@ -1576,10 +1864,12 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         }
     }
 
+    /// Set the signature PIN policy (verify once per session or every operation).
     pub fn set_signature_pin_policy(&mut self, pin_policy: PinPolicy) -> Result<(), OpenPgpError> {
         self.put_data(Do::PwStatusBytes, &[pin_policy as u8])
     }
 
+    /// Set the maximum retry attempts for user PIN, reset code, and admin PIN.
     pub fn set_pin_attempts(
         &mut self,
         user_attempts: u8,
@@ -1603,6 +1893,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- KDF --
 
+    /// Read the current KDF configuration from the card.
     pub fn get_kdf(&mut self) -> Result<Kdf, OpenPgpError> {
         if !self
             .app_data
@@ -1616,6 +1907,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Kdf::parse(&data)
     }
 
+    /// Write a new KDF configuration to the card.
     pub fn set_kdf(&mut self, kdf: &Kdf) -> Result<(), OpenPgpError> {
         if !self
             .app_data
@@ -1630,6 +1922,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- Factory Reset --
 
+    /// Perform a factory reset of the OpenPGP applet, erasing all keys and settings.
     pub fn reset(&mut self) -> Result<(), OpenPgpError> {
         require_version(self.version, Version(1, 0, 6), "reset")?;
 
@@ -1652,6 +1945,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- Algorithm Attributes --
 
+    /// Read the current algorithm attributes for a key slot.
     pub fn get_algorithm_attributes(
         &mut self,
         key_ref: KeyRef,
@@ -1665,6 +1959,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             })
     }
 
+    /// Read the list of supported algorithms for each key slot.
     pub fn get_algorithm_information(
         &mut self,
     ) -> Result<HashMap<KeyRef, Vec<AlgorithmAttributes>>, OpenPgpError> {
@@ -1739,6 +2034,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Ok(result)
     }
 
+    /// Set the algorithm attributes for a key slot.
     pub fn set_algorithm_attributes(
         &mut self,
         key_ref: KeyRef,
@@ -1749,6 +2045,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- UIF (Touch) --
 
+    /// Read the User Interaction Flag (touch policy) for a key slot.
     pub fn get_uif(&mut self, key_ref: KeyRef) -> Result<Uif, OpenPgpError> {
         if self.version >= Version(4, 2, 0) {
             let data = self.get_data(key_ref.uif_do())?;
@@ -1758,6 +2055,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         }
     }
 
+    /// Set the User Interaction Flag (touch policy) for a key slot.
     pub fn set_uif(&mut self, key_ref: KeyRef, uif: Uif) -> Result<(), OpenPgpError> {
         require_version(self.version, Version(4, 2, 0), "set_uif")?;
         if key_ref == KeyRef::Att {
@@ -1779,6 +2077,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- Key Metadata --
 
+    /// Set the key generation timestamp for a key slot (Unix epoch seconds).
     pub fn set_generation_time(
         &mut self,
         key_ref: KeyRef,
@@ -1787,6 +2086,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         self.put_data(key_ref.generation_time_do(), &timestamp.to_be_bytes())
     }
 
+    /// Set the key fingerprint for a key slot.
     pub fn set_fingerprint(
         &mut self,
         key_ref: KeyRef,
@@ -1797,6 +2097,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- Key Generation --
 
+    /// Generate an RSA key pair on-card and return the raw public key data.
     pub fn generate_rsa_key(
         &mut self,
         key_ref: KeyRef,
@@ -1836,6 +2137,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Ok(pk_data)
     }
 
+    /// Generate an EC key pair on-card for the given curve and return the raw public key data.
     pub fn generate_ec_key(
         &mut self,
         key_ref: KeyRef,
@@ -1854,6 +2156,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Ok(pk_data)
     }
 
+    /// Read the public key from a key slot without generating a new one.
     pub fn get_public_key(&mut self, key_ref: KeyRef) -> Result<Vec<u8>, OpenPgpError> {
         let crt = key_ref.crt();
         let resp = self
@@ -1865,6 +2168,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- Key Import / Delete --
 
+    /// Import a private key into a key slot.
     pub fn put_key(
         &mut self,
         key_ref: KeyRef,
@@ -1876,6 +2180,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Ok(())
     }
 
+    /// Delete the key in a slot by resetting its algorithm attributes.
     pub fn delete_key(&mut self, key_ref: KeyRef) -> Result<(), OpenPgpError> {
         if 0 < self.version.0 && self.version.0 < 4 {
             // NEO: overwrite with a dummy RSA key import is not easily supported
@@ -1905,6 +2210,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- Crypto Operations --
 
+    /// Perform a signing operation using the SIG key slot (PSO: COMPUTE DIGITAL SIGNATURE).
     pub fn sign(
         &mut self,
         message: &[u8],
@@ -1916,6 +2222,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Ok(response)
     }
 
+    /// Perform a decryption operation using the DEC key slot (PSO: DECIPHER).
     pub fn decrypt(&mut self, value: &[u8]) -> Result<Vec<u8>, OpenPgpError> {
         let attributes = self.get_algorithm_attributes(KeyRef::Dec)?;
         let data = match &attributes {
@@ -1934,6 +2241,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Ok(response)
     }
 
+    /// Perform an authentication operation using the AUT key slot (INTERNAL AUTHENTICATE).
     pub fn authenticate(
         &mut self,
         message: &[u8],
@@ -1972,6 +2280,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Ok(())
     }
 
+    /// Read the certificate stored for a key slot (DER-encoded X.509).
     pub fn get_certificate(&mut self, key_ref: KeyRef) -> Result<Vec<u8>, OpenPgpError> {
         if key_ref == KeyRef::Att {
             require_version(self.version, Version(5, 2, 0), "ATT certificate")?;
@@ -1989,6 +2298,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Ok(data)
     }
 
+    /// Write a DER-encoded X.509 certificate to a key slot.
     pub fn put_certificate(
         &mut self,
         key_ref: KeyRef,
@@ -2002,6 +2312,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         self.put_data(Do::CardholderCertificate, cert_der)
     }
 
+    /// Delete the certificate stored for a key slot.
     pub fn delete_certificate(&mut self, key_ref: KeyRef) -> Result<(), OpenPgpError> {
         if key_ref == KeyRef::Att {
             require_version(self.version, Version(5, 2, 0), "ATT certificate")?;
@@ -2011,6 +2322,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         self.put_data(Do::CardholderCertificate, &[])
     }
 
+    /// Generate an attestation certificate for a key slot (YubiKey 5.2+).
     pub fn attest_key(&mut self, key_ref: KeyRef) -> Result<Vec<u8>, OpenPgpError> {
         require_version(self.version, Version(5, 2, 0), "attest_key")?;
         self.protocol
@@ -2020,6 +2332,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- Challenge --
 
+    /// Request random bytes from the card's RNG (GET CHALLENGE).
     pub fn get_challenge(&mut self, length: u16) -> Result<Vec<u8>, OpenPgpError> {
         let ec = &self.app_data.discretionary.extended_capabilities;
         if !ec.has_flag(extended_capability_flags::GET_CHALLENGE) {
