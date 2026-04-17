@@ -13,7 +13,7 @@ use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::piv::{
     DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, ManagementKeyType, ObjectId, PinPolicy,
-    PivSession, PivSignature, PivSigner, Slot, TouchPolicy, device_pubkey_to_spki,
+    PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
 };
 
 use yubikit::smartcard::SmartCardConnection;
@@ -704,12 +704,9 @@ pub fn run_keys_generate(
         ensure_pin(&mut session, pin)?;
     }
 
-    let pub_key_device = session
+    let spki_der = session
         .generate_key(slot, key_type, pp, tp)
         .map_err(|e| CliError(format!("Failed to generate key: {e}")))?;
-
-    let spki_der = device_pubkey_to_spki(key_type, &pub_key_device)
-        .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
 
     match format {
         CliFormat::Der => {
@@ -830,9 +827,7 @@ pub fn run_keys_export(
     let (spki_der, from_cert) = if let Ok(meta) = session.get_slot_metadata(slot)
         && !meta.public_key_der.is_empty()
     {
-        let spki = device_pubkey_to_spki(meta.key_type, &meta.public_key_der)
-            .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
-        (spki, false)
+        (meta.public_key_der, false)
     } else {
         // Fall back to reading public key from stored certificate
         let cert_der = session
@@ -1284,9 +1279,7 @@ fn resolve_public_key(
             ))
         })?;
         let kt = metadata.key_type;
-        let spki = device_pubkey_to_spki(kt, &metadata.public_key_der)
-            .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
-        Ok((kt, spki))
+        Ok((kt, metadata.public_key_der))
     }
 }
 

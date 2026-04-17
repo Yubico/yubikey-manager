@@ -48,6 +48,7 @@ from cryptography.hazmat.primitives.serialization import (
     NoEncryption,
     PrivateFormat,
     PublicFormat,
+    load_der_public_key,
 )
 
 from .core import (
@@ -354,8 +355,8 @@ class SlotMetadata:
     public_key_encoded: bytes
 
     @property
-    def public_key(self):
-        return _parse_device_public_key(self.key_type, self.public_key_encoded)
+    def public_key(self) -> PublicKey:
+        return load_der_public_key(self.public_key_encoded)  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
 
 @dataclass
@@ -602,25 +603,6 @@ def _do_check_key_support(
         KEY_TYPE.X25519,
     ):
         require_version(version, (5, 7, 0), f"{key_type} requires YubiKey 5.7 or later")
-
-
-def _parse_device_public_key(key_type, encoded):
-    data = Tlv.parse_dict(encoded)
-    if key_type.algorithm == ALGORITHM.RSA:
-        modulus = bytes2int(data[0x81])
-        exponent = bytes2int(data[0x82])
-        return rsa.RSAPublicNumbers(exponent, modulus).public_key(default_backend())
-    if key_type == KEY_TYPE.ED25519:
-        return ed25519.Ed25519PublicKey.from_public_bytes(data[0x86])
-    if key_type == KEY_TYPE.X25519:
-        return x25519.X25519PublicKey.from_public_bytes(data[0x86])
-    if key_type == KEY_TYPE.ECCP256:
-        curve: type[ec.EllipticCurve] = ec.SECP256R1
-    elif key_type == KEY_TYPE.ECCP384:
-        curve = ec.SECP384R1
-    else:
-        raise ValueError(f"Unsupported key type: {key_type}")
-    return ec.EllipticCurvePublicKey.from_encoded_point(curve(), data[0x86])
 
 
 def decompress_certificate(cert_data: bytes) -> bytes:
@@ -1140,7 +1122,7 @@ class PivSession(Session):
         logger.debug(
             f"Generating key with pin_policy={pin_policy}, touch_policy={touch_policy}"
         )
-        pub_key_encoded = bytes(
+        spki_der = bytes(
             self._native.generate_key(
                 int(slot),
                 int(key_type),
@@ -1149,7 +1131,8 @@ class PivSession(Session):
             )
         )
         logger.info(f"Private key generated in slot {slot} of type {key_type}")
-        return _parse_device_public_key(key_type, pub_key_encoded)
+
+        return load_der_public_key(spki_der)  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
     def attest_key(self, slot: SLOT) -> x509.Certificate:
         """Attest key in slot.

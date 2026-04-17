@@ -525,7 +525,7 @@ mod piv {
     use x509_cert::der::{Decode, Encode};
     use yubikit::piv::{
         DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, PinPolicy, PivSession, PivSignature,
-        PivSigner, Slot, TouchPolicy, device_pubkey_to_spki, hash_data,
+        PivSigner, Slot, TouchPolicy,
     };
 
     fn open_piv_session(tc: &TestConnection) -> PivSession<PcscSmartCardConnection> {
@@ -593,7 +593,7 @@ mod piv {
             .authenticate(DEFAULT_MANAGEMENT_KEY)
             .expect("authenticate");
 
-        let pub_key = session
+        let spki_der = session
             .generate_key(
                 Slot::Retired1,
                 KeyType::EccP256,
@@ -601,10 +601,8 @@ mod piv {
                 TouchPolicy::Never,
             )
             .expect("generate_key");
-        assert!(!pub_key.is_empty());
-
-        let spki = device_pubkey_to_spki(KeyType::EccP256, &pub_key).expect("to_spki");
-        assert!(spki.len() > 50, "SPKI should be substantial");
+        assert!(!spki_der.is_empty());
+        assert!(spki_der.len() > 50, "SPKI should be substantial");
         eprintln!("  PASS {tc:?}");
     }
 
@@ -619,7 +617,7 @@ mod piv {
             .authenticate(DEFAULT_MANAGEMENT_KEY)
             .expect("authenticate");
 
-        let pub_key = session
+        let spki_der = session
             .generate_key(
                 Slot::Retired1,
                 KeyType::Rsa2048,
@@ -627,10 +625,8 @@ mod piv {
                 TouchPolicy::Never,
             )
             .expect("generate_key");
-        assert!(!pub_key.is_empty());
-
-        let spki = device_pubkey_to_spki(KeyType::Rsa2048, &pub_key).expect("to_spki");
-        assert!(spki.len() > 256, "RSA SPKI should be large");
+        assert!(!spki_der.is_empty());
+        assert!(spki_der.len() > 256, "RSA SPKI should be large");
         eprintln!("  PASS {tc:?}");
     }
 
@@ -646,7 +642,7 @@ mod piv {
             .expect("authenticate");
         session.verify_pin("123456").expect("verify PIN");
 
-        let pub_key = session
+        let spki_der = session
             .generate_key(
                 Slot::Retired1,
                 KeyType::EccP256,
@@ -654,10 +650,9 @@ mod piv {
                 TouchPolicy::Never,
             )
             .expect("generate_key");
-        let spki_der = device_pubkey_to_spki(KeyType::EccP256, &pub_key).expect("to_spki");
 
         let message = b"test data to sign";
-        let hash = hash_data(HashAlgorithm::Sha256, message);
+        let hash = <sha2::Sha256 as sha2::Digest>::digest(message);
         let sig = session
             .sign(Slot::Retired1, KeyType::EccP256, &hash)
             .expect("sign");
@@ -691,7 +686,7 @@ mod piv {
             .expect("authenticate");
         session.verify_pin("123456").expect("verify PIN");
 
-        let pub_key = session
+        let spki_der = session
             .generate_key(
                 Slot::Retired1,
                 KeyType::EccP256,
@@ -699,7 +694,6 @@ mod piv {
                 TouchPolicy::Never,
             )
             .expect("generate_key");
-        let spki_der = device_pubkey_to_spki(KeyType::EccP256, &pub_key).expect("to_spki");
 
         use x509_cert::builder::{Builder, CertificateBuilder, Profile};
         use x509_cert::name::Name;
@@ -778,7 +772,7 @@ mod piv {
             .expect("authenticate");
         session.verify_pin("123456").expect("verify PIN");
 
-        let pub_key = session
+        let spki_der = session
             .generate_key(
                 Slot::Retired1,
                 KeyType::EccP256,
@@ -786,7 +780,6 @@ mod piv {
                 TouchPolicy::Never,
             )
             .expect("generate_key");
-        let spki_der = device_pubkey_to_spki(KeyType::EccP256, &pub_key).expect("to_spki");
 
         use x509_cert::builder::{Builder, RequestBuilder};
         use x509_cert::name::Name;
@@ -840,7 +833,7 @@ mod piv {
             .expect("authenticate");
         session.verify_pin("123456").expect("verify PIN");
 
-        let pub_key = session
+        let spki_der = session
             .generate_key(
                 Slot::Retired1,
                 KeyType::Rsa2048,
@@ -848,7 +841,6 @@ mod piv {
                 TouchPolicy::Never,
             )
             .expect("generate_key");
-        let spki_der = device_pubkey_to_spki(KeyType::Rsa2048, &pub_key).expect("to_spki");
 
         use x509_cert::builder::{Builder, CertificateBuilder, Profile};
         use x509_cert::name::Name;
@@ -902,7 +894,7 @@ mod piv {
             .expect("authenticate");
         session.verify_pin("123456").expect("verify PIN");
 
-        let pub_key = session
+        let spki_der = session
             .generate_key(
                 Slot::Retired1,
                 KeyType::Rsa2048,
@@ -910,7 +902,6 @@ mod piv {
                 TouchPolicy::Never,
             )
             .expect("generate_key");
-        let spki_der = device_pubkey_to_spki(KeyType::Rsa2048, &pub_key).expect("to_spki");
 
         // Encrypt a message with the public key
         use rsa::pkcs8::DecodePublicKey;
@@ -947,7 +938,7 @@ mod piv {
             .expect("authenticate");
         session.verify_pin("123456").expect("verify PIN");
 
-        let pub_key = session
+        let spki_der = session
             .generate_key(
                 Slot::Retired1,
                 KeyType::EccP256,
@@ -955,7 +946,6 @@ mod piv {
                 TouchPolicy::Never,
             )
             .expect("generate_key");
-        let spki_der = device_pubkey_to_spki(KeyType::EccP256, &pub_key).expect("to_spki");
 
         // Generate an ephemeral key pair on the host
         use p256::PublicKey;

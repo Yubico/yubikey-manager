@@ -1592,10 +1592,11 @@ impl<C: SmartCardConnection> PivSession<C> {
             .and_then(|v| v.first().copied())
             .ok_or_else(|| PivError::InvalidData("Missing origin in metadata".into()))?;
 
-        let public_key_der = data
+        let device_bytes = data
             .get(&TAG_METADATA_PUBLIC_KEY)
-            .cloned()
             .ok_or_else(|| PivError::InvalidData("Missing public key in metadata".into()))?;
+
+        let public_key_der = device_pubkey_to_spki(key_type, device_bytes)?;
 
         Ok(SlotMetadata {
             key_type,
@@ -1852,7 +1853,8 @@ impl<C: SmartCardConnection> PivSession<C> {
         Ok(())
     }
 
-    /// Generate a key pair in a slot. Returns the public key as device-encoded bytes.
+    /// Generate a key pair in a slot. Returns the public key as DER-encoded
+    /// SubjectPublicKeyInfo.
     pub fn generate_key(
         &mut self,
         slot: Slot,
@@ -1888,8 +1890,9 @@ impl<C: SmartCardConnection> PivSession<C> {
             self.protocol
                 .send_apdu(0, INS_GENERATE_ASYMMETRIC, 0, slot as u8, &request)?;
 
-        // Return the 0x7F49 container contents (device public key encoding)
-        Ok(tlv_unpack(0x7F49, &response)?)
+        // Convert device encoding to SPKI DER
+        let device_bytes = tlv_unpack(0x7F49, &response)?;
+        device_pubkey_to_spki(key_type, &device_bytes)
     }
 
     /// Attest key in slot. Returns DER-encoded X.509 certificate.
@@ -2184,7 +2187,7 @@ const DIGEST_INFO_SHA512: &[u8] = &[
 ];
 
 /// Compute the hash of `data` using the specified algorithm.
-pub fn hash_data(hash_alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {
+pub(crate) fn hash_data(hash_alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {
     match hash_alg {
         HashAlgorithm::Sha256 => sha2::Sha256::digest(data).to_vec(),
         HashAlgorithm::Sha384 => sha2::Sha384::digest(data).to_vec(),
@@ -2193,7 +2196,7 @@ pub fn hash_data(hash_alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {
 }
 
 /// Construct a PKCS#1 v1.5 signature padding block from a hash digest.
-pub fn pkcs1v15_pad(hash_alg: HashAlgorithm, hash: &[u8], key_byte_len: usize) -> Vec<u8> {
+fn pkcs1v15_pad(hash_alg: HashAlgorithm, hash: &[u8], key_byte_len: usize) -> Vec<u8> {
     let digest_info_prefix = match hash_alg {
         HashAlgorithm::Sha256 => DIGEST_INFO_SHA256,
         HashAlgorithm::Sha384 => DIGEST_INFO_SHA384,
@@ -2266,7 +2269,7 @@ fn parse_device_tlv(data: &[u8], offset: usize) -> Result<(u8, Vec<u8>, usize), 
 /// - EC keys: `86 <len> <uncompressed_point>`
 /// - RSA keys: `81 <len> <modulus> 82 <len> <exponent>`
 /// - Ed25519/X25519: `86 <len> <32_bytes>`
-pub fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u8>, PivError> {
+fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u8>, PivError> {
     let spki = match key_type {
         KeyType::EccP256 | KeyType::EccP384 => {
             let (tag, ec_point, _) = parse_device_tlv(device_bytes, 0)?;
