@@ -34,7 +34,8 @@ use std::time::Instant;
 use thiserror::Error;
 
 use crate::core::{Transport, Version};
-use crate::scp::{ScpState, aes_cmac, constant_time_eq, scp03_derive, x963_kdf};
+use crate::scp::{ScpError, ScpState, aes_cmac, x963_kdf};
+use subtle::ConstantTimeEq;
 
 // ---------------------------------------------------------------------------
 // AID — YubiKey application identifiers
@@ -761,7 +762,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
         // 5. Verify card cryptogram
         let gen_card_crypto = scp03_derive(&key_smac, 0x00, &context, 0x40)?;
-        if !constant_time_eq(&gen_card_crypto, card_cryptogram) {
+        if !bool::from(gen_card_crypto.ct_eq(card_cryptogram)) {
             return Err(SmartCardError::InvalidState(
                 "Card cryptogram verification failed".into(),
             ));
@@ -937,7 +938,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         // Verify receipt: CMAC(keys[0], key_agreement_data) == receipt
         let receipt_key = &keybytes[0..16];
         let expected_receipt = aes_cmac(receipt_key, &key_agreement_data)?;
-        if !constant_time_eq(&expected_receipt[..receipt.len()], &receipt) {
+        if !bool::from(expected_receipt[..receipt.len()].ct_eq(&receipt)) {
             return Err(SmartCardError::InvalidState(
                 "SCP11 receipt verification failed".into(),
             ));
@@ -998,4 +999,21 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             }
         }
     }
+}
+
+/// SCP03 key derivation using AES-CMAC.
+fn scp03_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> Result<Vec<u8>, ScpError> {
+    if l != 0x80 && l != 0x40 {
+        return Err(ScpError::InvalidDerivationLength);
+    }
+    let mut input = vec![0u8; 11];
+    input.push(t);
+    input.push(0);
+    input.push((l >> 8) as u8);
+    input.push(l as u8);
+    input.push(1);
+    input.extend_from_slice(context);
+
+    let result = aes_cmac(key, &input)?;
+    Ok(result[..(l as usize / 8)].to_vec())
 }

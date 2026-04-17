@@ -56,13 +56,13 @@ use std::fmt;
 
 use thiserror::Error;
 
-use crate::core::{Connection, Transport, Version, bytes2int};
+use crate::core::{Connection, Transport, Version, bytes2int, int2bytes};
 use crate::fido::FidoConnection;
 use crate::otp::{
     OtpConnection, OtpError, OtpProtocol, STATUS_OFFSET_PROG_SEQ, verify_and_strip_crc,
 };
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
-use crate::tlv::{int2bytes, parse_tlv_dict, tlv_encode};
+use crate::tlv::{parse_tlv_dict, tlv_encode};
 use crate::transport::ctaphid::FidoError;
 use crate::yubiotp::ConfigSlot;
 

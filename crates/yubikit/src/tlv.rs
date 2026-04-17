@@ -34,6 +34,8 @@
 use std::collections::HashMap;
 use thiserror::Error;
 
+use crate::core::int2bytes;
+
 /// Error type for TLV parsing operations.
 #[derive(Debug, Error)]
 pub enum TlvError {
@@ -170,15 +172,6 @@ pub fn tlv_encode(tag: u32, value: &[u8]) -> Vec<u8> {
 
     buf.extend_from_slice(value);
     buf
-}
-
-/// Encode an integer as big-endian bytes with no leading zeros.
-pub fn int2bytes(value: u64) -> Vec<u8> {
-    if value == 0 {
-        return vec![0];
-    }
-    let byte_len = ((64 - value.leading_zeros()) as usize).div_ceil(8);
-    value.to_be_bytes()[8 - byte_len..].to_vec()
 }
 
 /// Decode OID bytes to dotted string notation.

@@ -72,10 +72,9 @@ use x509_cert::spki::{
     ObjectIdentifier, SignatureBitStringEncoding, SubjectPublicKeyInfoOwned,
 };
 
-use crate::core::Version;
-use crate::core::patch_version;
+use crate::core::{Version, int2bytes, patch_version};
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
-use crate::tlv::{int2bytes, parse_tlv_dict, tlv_encode, tlv_parse, tlv_unpack};
+use crate::tlv::{parse_tlv_dict, tlv_encode, tlv_parse, tlv_unpack};
 
 // ---------------------------------------------------------------------------
 // Errors

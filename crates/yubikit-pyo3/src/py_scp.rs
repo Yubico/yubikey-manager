@@ -1,25 +1,6 @@
 use pyo3::prelude::*;
 use yubikit::scp;
 
-#[pyfunction]
-#[pyo3(signature = (key, t, context, l=0x80))]
-fn scp_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> PyResult<Vec<u8>> {
-    scp::scp03_derive(key, t, context, l)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-}
-
-#[pyfunction]
-fn scp_calculate_mac(key: &[u8], chain: &[u8], message: &[u8]) -> PyResult<(Vec<u8>, Vec<u8>)> {
-    let (new_chain, mac) = scp::scp03_calculate_mac(key, chain, message)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-    Ok((new_chain.to_vec(), mac.to_vec()))
-}
-
-#[pyfunction]
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    scp::constant_time_eq(a, b)
-}
-
 #[pyclass]
 struct ScpState {
     inner: scp::ScpState,
@@ -81,9 +62,6 @@ impl ScpState {
 
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "scp")?;
-    m.add_function(wrap_pyfunction!(scp_derive, &m)?)?;
-    m.add_function(wrap_pyfunction!(scp_calculate_mac, &m)?)?;
-    m.add_function(wrap_pyfunction!(constant_time_eq, &m)?)?;
     m.add_class::<ScpState>()?;
     parent.add_submodule(&m)?;
 

@@ -59,11 +59,11 @@ use sha2::Digest;
 use thiserror::Error;
 
 use crate::core::Version;
-use crate::core::{bytes2int, patch_version};
+use crate::core::{bytes2int, int2bytes, patch_version};
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
 use crate::tlv::{
-    TlvError, int2bytes, oid_from_string, oid_to_string, parse_tlv_dict, parse_tlv_list,
-    tlv_encode, tlv_unpack,
+    TlvError, oid_from_string, oid_to_string, parse_tlv_dict, parse_tlv_list, tlv_encode,
+    tlv_unpack,
 };
 
 // ---------------------------------------------------------------------------

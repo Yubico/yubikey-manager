@@ -73,7 +73,7 @@ pub enum ScpError {
 }
 
 /// Compute AES-CMAC over data.
-pub(crate) fn aes_cmac(key: &[u8], data: &[u8]) -> Result<[u8; 16], ScpError> {
+pub fn aes_cmac(key: &[u8], data: &[u8]) -> Result<[u8; 16], ScpError> {
     let mut mac = <Cmac<Aes128> as Mac>::new_from_slice(key)
         .map_err(|e| ScpError::CmacInit(e.to_string()))?;
     mac.update(data);
@@ -94,38 +94,6 @@ fn calculate_mac_inner(
     let chain: [u8; 16] = result.into();
     let truncated: [u8; 8] = chain[..8].try_into().unwrap();
     Ok((chain, truncated))
-}
-
-/// SCP03 key derivation using AES-CMAC.
-pub fn scp03_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> Result<Vec<u8>, ScpError> {
-    if l != 0x80 && l != 0x40 {
-        return Err(ScpError::InvalidDerivationLength);
-    }
-    let mut input = vec![0u8; 11];
-    input.push(t);
-    input.push(0);
-    input.push((l >> 8) as u8);
-    input.push(l as u8);
-    input.push(1);
-    input.extend_from_slice(context);
-
-    let result = aes_cmac(key, &input)?;
-    Ok(result[..(l as usize / 8)].to_vec())
-}
-
-/// SCP03 MAC calculation: CMAC(key, chain || message).
-/// Returns (new_chain, mac) where mac is first 8 bytes.
-pub fn scp03_calculate_mac(
-    key: &[u8],
-    chain: &[u8],
-    message: &[u8],
-) -> Result<([u8; 16], [u8; 8]), ScpError> {
-    calculate_mac_inner(key, chain, message)
-}
-
-/// Constant-time byte comparison.
-pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.ct_eq(b).into()
 }
 
 fn derive_iv(key: &[u8], counter: u32, response: bool) -> Result<[u8; 16], ScpError> {
