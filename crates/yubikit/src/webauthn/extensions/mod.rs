@@ -28,8 +28,8 @@
 //! WebAuthn extension types and CBOR encoding/decoding.
 //!
 //! Each sub-module defines extension-specific input/output types with JSON
-//! serialization. The aggregate [`RegistrationExtensionInputs`] and
-//! [`AuthenticationExtensionInputs`] structs are used in the WebAuthn
+//! serialization. The aggregate [`RegistrationExtensionInputs`](crate::webauthn::extensions::RegistrationExtensionInputs) and
+//! [`AuthenticationExtensionInputs`](crate::webauthn::extensions::AuthenticationExtensionInputs) structs are used in the WebAuthn
 //! options, while the output types appear in ceremony responses.
 
 use serde::{Deserialize, Serialize};

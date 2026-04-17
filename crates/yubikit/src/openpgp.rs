@@ -31,7 +31,7 @@
 //! managing keys, PINs, certificates, and performing cryptographic operations
 //! (signing, decryption, authentication) via the YubiKey's OpenPGP applet.
 //!
-//! The main entry point is [`OpenPgpSession`], which wraps a smart card
+//! The main entry point is [`OpenPgpSession`](crate::openpgp::OpenPgpSession), which wraps a smart card
 //! connection and exposes high-level operations such as key generation,
 //! key import, PIN management, and KDF configuration.
 

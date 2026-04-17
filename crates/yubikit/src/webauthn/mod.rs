@@ -27,7 +27,7 @@
 
 //! WebAuthn client implementation.
 //!
-//! Provides [`WebAuthnClient`] for performing WebAuthn registration and
+//! Provides [`WebAuthnClient`](crate::webauthn::WebAuthnClient) for performing WebAuthn registration and
 //! authentication ceremonies using a CTAP2 authenticator, along with the
 //! WebAuthn types needed for the public API.
 

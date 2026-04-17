@@ -69,8 +69,8 @@
 //! | Interface | Connection | Used by |
 //! |-----------|-----------|---------|
 //! | CCID (SmartCard) | [`smartcard::SmartCardConnection`] | OATH, PIV, OpenPGP, Management, FIDO2, HSM Auth, Security Domain |
-//! | FIDO HID | [`transport::ctaphid::HidFidoConnection`] | FIDO2/CTAP2, WebAuthn, Management |
-//! | OTP HID | [`transport::otphid::HidOtpConnection`] | YubiOTP, Management |
+//! | FIDO HID | [`fido::FidoConnection`] | FIDO2/CTAP2, WebAuthn, Management |
+//! | OTP HID | [`otp::OtpConnection`] | YubiOTP, Management |
 //!
 //! All connection types implement [`core::Connection`]. Session types are
 //! generic over their connection type, so the same [`ctap2::Ctap2Session`]

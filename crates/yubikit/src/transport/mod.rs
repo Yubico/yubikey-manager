@@ -30,8 +30,8 @@
 //! This module provides low-level transport drivers for communicating with
 //! YubiKeys over different USB interfaces:
 //!
-//! - [`ctaphid`] — FIDO CTAP HID protocol (used by FIDO2/WebAuthn)
-//! - [`otphid`] — OTP HID protocol (used by YubiOTP challenge-response)
+//! - [`ctaphid`](crate::transport::ctaphid) — FIDO CTAP HID protocol (used by FIDO2/WebAuthn)
+//! - [`otphid`](crate::transport::otphid) — OTP HID protocol (used by YubiOTP challenge-response)
 //! - [`pcsc`] — PC/SC smart card reader access (used by CCID applications)
 //!
 //! Most users don't need to interact with transports directly — use

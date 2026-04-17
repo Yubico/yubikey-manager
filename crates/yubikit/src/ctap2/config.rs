@@ -50,7 +50,7 @@ mod config_cmd {
 ///
 /// Provides authenticator configuration management: enterprise attestation,
 /// always-UV toggle, and minimum PIN length enforcement.
-/// Owns a [`Ctap2Session`] and a [`PinProtocol`] for authenticated commands.
+/// Owns a [`Ctap2Session`](crate::ctap2::Ctap2Session) and a [`PinProtocol`](crate::ctap2::PinProtocol) for authenticated commands.
 pub struct Config<C: Connection> {
     session: Ctap2Session<C>,
     protocol: Option<PinProtocol>,

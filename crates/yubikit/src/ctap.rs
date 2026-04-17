@@ -27,10 +27,10 @@
 
 //! CTAP session for FIDO2 authenticator communication.
 //!
-//! Provides [`CtapSession`], a transport-agnostic session for communicating
+//! Provides [`CtapSession`](crate::ctap::CtapSession), a transport-agnostic session for communicating
 //! with FIDO2 authenticators using the CTAP2 protocol. Supports both
-//! CTAP HID (USB) via [`FidoConnection`] and NFCCTAP (SmartCard/NFC)
-//! via [`SmartCardConnection`].
+//! CTAP HID (USB) via [`FidoConnection`](crate::fido::FidoConnection) and NFCCTAP (SmartCard/NFC)
+//! via [`SmartCardConnection`](crate::smartcard::SmartCardConnection).
 
 use std::time::Duration;
 

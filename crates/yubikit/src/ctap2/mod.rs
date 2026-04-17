@@ -27,11 +27,11 @@
 
 //! CTAP2 protocol session and PIN/UV management.
 //!
-//! Provides [`Ctap2Session`], which wraps a [`CtapSession`] and implements
+//! Provides [`Ctap2Session`](crate::ctap2::Ctap2Session), which wraps a [`CtapSession`](crate::ctap::CtapSession) and implements
 //! CTAP2-specific command framing and response parsing.
 //!
-//! Also provides [`ClientPin`] for PIN/UV token operations, and
-//! [`PinProtocol`] (V1/V2) for the underlying cryptographic operations.
+//! Also provides [`ClientPin`](crate::ctap2::ClientPin) for PIN/UV token operations, and
+//! [`PinProtocol`](crate::ctap2::PinProtocol) (V1/V2) for the underlying cryptographic operations.
 
 mod bio_enrollment;
 mod client_pin;

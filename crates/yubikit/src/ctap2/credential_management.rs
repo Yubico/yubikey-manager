@@ -71,7 +71,7 @@ mod cred_mgmt_result_key {
 /// CTAP2 CredentialManagement operations (§6.8).
 ///
 /// Provides credential enumeration, deletion, and user info updates.
-/// Owns a [`Ctap2Session`] and a [`PinProtocol`] for authenticated commands.
+/// Owns a [`Ctap2Session`](crate::ctap2::Ctap2Session) and a [`PinProtocol`](crate::ctap2::PinProtocol) for authenticated commands.
 pub struct CredentialManagement<C: Connection> {
     session: Ctap2Session<C>,
     protocol: PinProtocol,

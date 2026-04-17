@@ -64,7 +64,7 @@ mod bio_result_key {
 /// CTAP2 BioEnrollment operations (§6.7).
 ///
 /// Provides fingerprint enrollment, enumeration, naming, and removal.
-/// Owns a [`Ctap2Session`] and a [`PinProtocol`] for authenticated commands.
+/// Owns a [`Ctap2Session`](crate::ctap2::Ctap2Session) and a [`PinProtocol`](crate::ctap2::PinProtocol) for authenticated commands.
 pub struct BioEnrollment<C: Connection> {
     session: Ctap2Session<C>,
     protocol: PinProtocol,

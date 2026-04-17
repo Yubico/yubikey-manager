@@ -115,7 +115,7 @@ pub trait ClientDataCollector {
 // WebAuthn client
 // ---------------------------------------------------------------------------
 
-/// WebAuthn client that wraps a [`Ctap2Session`] and performs registration
+/// WebAuthn client that wraps a [`Ctap2Session`](crate::ctap2::Ctap2Session) and performs registration
 /// and authentication ceremonies.
 pub struct WebAuthnClient<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> {
     session: Option<Ctap2Session<C>>,

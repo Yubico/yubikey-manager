@@ -58,7 +58,7 @@ use crate::otp::OtpConnection;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 use crate::transport::ctaphid::{FidoDeviceInfo, HidFidoConnection, list_fido_devices};
 use crate::transport::otphid::{HidDeviceInfo, HidError, HidOtpConnection, list_otp_devices};
-/// Re-export of [`list_readers`](crate::transport::pcsc::list_readers) for enumerating PC/SC smart card readers.
+/// Re-export of [`list_readers`] for enumerating PC/SC smart card readers.
 pub use crate::transport::pcsc::list_readers;
 use crate::transport::pcsc::{PcscError, PcscSmartCardConnection, is_reader_usb};
 #[cfg(windows)]

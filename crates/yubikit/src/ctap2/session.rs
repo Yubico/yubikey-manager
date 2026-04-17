@@ -42,7 +42,7 @@ use crate::webauthn::types::{
 
 /// CTAP2 protocol session.
 ///
-/// Wraps a [`CtapSession`] and provides CTAP2-specific command framing:
+/// Wraps a [`CtapSession`](crate::ctap::CtapSession) and provides CTAP2-specific command framing:
 /// each command is sent as `[cmd_byte] ++ cbor_data` via CBOR transport,
 /// and responses are parsed as `[status_byte] ++ cbor_data`.
 pub struct Ctap2Session<C: Connection> {
@@ -51,10 +51,10 @@ pub struct Ctap2Session<C: Connection> {
 }
 
 impl<C: Connection + 'static> Ctap2Session<C> {
-    /// Create a new `Ctap2Session` wrapping the given [`CtapSession`].
+    /// Create a new `Ctap2Session` wrapping the given [`CtapSession`](crate::ctap::CtapSession).
     ///
     /// Calls `get_info()` to cache the authenticator's capabilities.
-    /// On failure, returns the [`CtapSession`] alongside the error so
+    /// On failure, returns the [`CtapSession`](crate::ctap::CtapSession) alongside the error so
     /// it is not lost.
     pub fn new(session: CtapSession<C>) -> Result<Self, (Ctap2Error<C::Error>, CtapSession<C>)> {
         let mut s = Self {
@@ -83,7 +83,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         self.session.version()
     }
 
-    /// Consume the `Ctap2Session`, returning the underlying [`CtapSession`].
+    /// Consume the `Ctap2Session`, returning the underlying [`CtapSession`](crate::ctap::CtapSession).
     pub fn into_session(self) -> CtapSession<C> {
         self.session
     }
@@ -265,7 +265,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
 
     /// Send a raw authenticatorClientPIN command and return the parsed CBOR response.
     ///
-    /// This is the low-level interface used by [`ClientPin`] for all PIN/UV operations.
+    /// This is the low-level interface used by [`ClientPin`](crate::ctap2::ClientPin) for all PIN/UV operations.
     pub(crate) fn client_pin(
         &mut self,
         pin_uv_protocol: u32,

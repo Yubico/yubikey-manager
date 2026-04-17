@@ -116,7 +116,7 @@ impl std::ops::BitOrAssign for Permissions {
 
 /// CTAP2 Client PIN / UV token management.
 ///
-/// Owns a [`Ctap2Session`] and a [`PinProtocol`], providing high-level
+/// Owns a [`Ctap2Session`](crate::ctap2::Ctap2Session) and a [`PinProtocol`](crate::ctap2::PinProtocol), providing high-level
 /// PIN/UV operations: setting/changing PINs, getting PIN/UV tokens, and
 /// querying retry counters.
 pub struct ClientPin<C: Connection> {
