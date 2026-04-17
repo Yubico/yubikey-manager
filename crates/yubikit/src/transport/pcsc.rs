@@ -25,6 +25,11 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! PC/SC smart card transport for YubiKey CCID communication.
+//!
+//! Provides access to YubiKeys through the PC/SC (Personal Computer/Smart Card)
+//! interface, used by CCID applications such as PIV, OpenPGP, and OATH.
+
 use ::pcsc::{Card, Context, Protocols, Scope, ShareMode};
 use std::ffi::CString;
 use std::thread;
@@ -34,12 +39,16 @@ use crate::core::Transport;
 use crate::log_traffic;
 use crate::smartcard::{SmartCardConnection, SmartCardError};
 
+/// Errors that can occur during PC/SC communication.
 #[derive(Debug, thiserror::Error)]
 pub enum PcscError {
+    /// Low-level PC/SC subsystem error.
     #[error("PC/SC error: {0}")]
     Pcsc(#[from] ::pcsc::Error),
+    /// The reader name contains a null byte and cannot be converted to a C string.
     #[error("Invalid reader name")]
     InvalidReaderName,
+    /// The connection has already been closed.
     #[error("Connection is closed")]
     ConnectionClosed,
 }

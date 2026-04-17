@@ -35,14 +35,20 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
 
-/// CBOR value type supporting the subset used by CTAP.
+/// CBOR value type supporting the subset used by CTAP2.
 #[derive(Clone, PartialEq, Eq)]
 pub enum Value {
+    /// Signed or unsigned integer (CBOR major types 0 and 1).
     Int(i64),
+    /// Byte string (CBOR major type 2).
     Bytes(Vec<u8>),
+    /// UTF-8 text string (CBOR major type 3).
     Text(String),
+    /// Boolean (`true` / `false`, CBOR simple values 20/21).
     Bool(bool),
+    /// Ordered array of values (CBOR major type 4).
     Array(Vec<Value>),
+    /// Ordered list of key-value pairs (CBOR major type 5).
     Map(Vec<(Value, Value)>),
 }
 
@@ -65,22 +71,31 @@ impl fmt::Debug for Value {
     }
 }
 
+/// Error type for CBOR encoding and decoding operations.
 #[derive(Debug, thiserror::Error)]
 pub enum CborError {
+    /// Input data ended before a complete CBOR value could be read.
     #[error("Unexpected end of input")]
     UnexpectedEof,
+    /// The additional information field contains a reserved value.
     #[error("Invalid additional information: {0}")]
     InvalidAdditionalInfo(u8),
+    /// The CBOR major type is not supported by this implementation.
     #[error("Unsupported major type: {0}")]
     UnsupportedMajorType(u8),
+    /// A text string contains invalid UTF-8 data.
     #[error("Invalid UTF-8 in text string")]
     InvalidUtf8,
+    /// Trailing bytes remain after decoding a complete CBOR value.
     #[error("Extraneous data after CBOR value")]
     ExtraneousData,
+    /// An integer value exceeds the representable range.
     #[error("Integer overflow")]
     IntegerOverflow,
+    /// The input exceeds the maximum allowed CBOR message size.
     #[error("Input exceeds maximum CBOR message size")]
     InputTooLarge,
+    /// Nested arrays/maps exceed the maximum allowed depth.
     #[error("Nesting depth exceeds maximum of {MAX_DEPTH}")]
     MaxDepthExceeded,
 }

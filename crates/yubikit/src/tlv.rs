@@ -25,15 +25,25 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! BER-TLV (Tag-Length-Value) encoding and decoding.
+//!
+//! Used by SmartCard-based applications (PIV, OpenPGP, OATH, etc.) to
+//! parse and construct APDU payloads. Supports multi-byte tags,
+//! definite and indefinite length encoding, and OID conversions.
+
 use std::collections::HashMap;
 use thiserror::Error;
 
+/// Error type for TLV parsing operations.
 #[derive(Debug, Error)]
 pub enum TlvError {
+    /// The tag or length bytes are malformed.
     #[error("Invalid encoding of tag/length")]
     InvalidEncoding,
+    /// The encoded length does not match the available data.
     #[error("Incorrect TLV length")]
     IncorrectLength,
+    /// The parsed tag does not match the expected value.
     #[error("Wrong tag, got 0x{got:02x} expected 0x{expected:02x}")]
     WrongTag { got: u32, expected: u32 },
 }

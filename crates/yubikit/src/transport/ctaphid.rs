@@ -47,39 +47,65 @@ const TYPE_INIT: u8 = 0x80;
 const INIT_HEADER_SIZE: usize = 7; // CID(4) + CMD(1) + LEN(2)
 const CONT_HEADER_SIZE: usize = 5; // CID(4) + SEQ(1)
 
+/// CTAP HID command identifiers.
+///
+/// These correspond to the command byte in a CTAP HID initialization packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CtapHidCommand {
+    /// Echo data back from the authenticator.
     Ping = 0x01,
+    /// Send a U2F/CTAP1 message.
     Msg = 0x03,
+    /// Lock the channel for exclusive use.
     Lock = 0x04,
+    /// Allocate a new channel or re-sync an existing one.
     Init = 0x06,
+    /// Trigger a visual or audible indicator on the authenticator.
     Wink = 0x08,
+    /// Send a CTAP2 CBOR-encoded command.
     Cbor = 0x10,
+    /// Cancel an ongoing CTAP2 operation.
     Cancel = 0x11,
+    /// Keepalive sent by the authenticator while processing.
     Keepalive = 0x3B,
+    /// Error response from the authenticator.
     Error = 0x3F,
+    /// First vendor-defined command (0x40–0x7F).
     VendorFirst = 0x40,
 }
 
+/// Status codes sent in CTAP HID keepalive messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CtapHidStatus {
+    /// The authenticator is still processing the request.
     Processing = 1,
+    /// The authenticator is waiting for user presence (e.g., a touch).
     UpNeeded = 2,
 }
 
+/// Error codes returned in CTAP HID error frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CtapHidError {
+    /// The command byte is not recognized.
     InvalidCmd = 0x01,
+    /// Invalid parameter in the command.
     InvalidPar = 0x02,
+    /// Invalid message length.
     InvalidLen = 0x03,
+    /// Unexpected continuation sequence number.
     InvalidSeq = 0x04,
+    /// Message timed out.
     MsgTimeout = 0x05,
+    /// The channel is busy processing another request.
     ChannelBusy = 0x06,
+    /// A channel lock is required for this command.
     LockRequired = 0x0A,
+    /// The channel ID is not valid.
     InvalidChannel = 0x0B,
+    /// Unspecified error.
     Other = 0x7F,
 }
 
@@ -99,55 +125,75 @@ impl CtapHidError {
     }
 }
 
+/// Capability flags reported by an authenticator during CTAP HID INIT.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CtapHidCapability(u8);
 
 impl CtapHidCapability {
+    /// Device supports the WINK command.
     pub const WINK: u8 = 0x01;
+    /// Device supports CBOR (CTAP2) commands.
     pub const CBOR: u8 = 0x04;
+    /// Device does **not** support the MSG (CTAP1/U2F) command.
     pub const NMSG: u8 = 0x08;
 
+    /// Create from a raw capability byte.
     pub fn from_raw(raw: u8) -> Self {
         Self(raw)
     }
 
+    /// Returns `true` if the device supports CBOR (CTAP2) commands.
     pub fn has_cbor(self) -> bool {
         self.0 & Self::CBOR != 0
     }
 
+    /// Returns `true` if the device supports the WINK command.
     pub fn has_wink(self) -> bool {
         self.0 & Self::WINK != 0
     }
 
+    /// Returns `true` if the device does **not** support MSG (CTAP1/U2F).
     pub fn has_nmsg(self) -> bool {
         self.0 & Self::NMSG != 0
     }
 
+    /// Returns the raw capability byte.
     pub fn raw(self) -> u8 {
         self.0
     }
 }
 
+/// Errors that can occur during FIDO HID communication.
 #[derive(Debug, thiserror::Error)]
 pub enum FidoError {
+    /// Low-level HID transport error.
     #[error("HID error: {0}")]
     Hid(#[from] hidapi::HidError),
+    /// The device path is not a valid C string.
     #[error("Invalid device path")]
     InvalidPath,
+    /// The connection has already been closed.
     #[error("Connection is closed")]
     ConnectionClosed,
+    /// The INIT response contained an unexpected nonce.
     #[error("Wrong nonce in INIT response")]
     WrongNonce,
+    /// A response packet arrived on the wrong channel.
     #[error("Wrong channel in response")]
     WrongChannel,
+    /// A continuation packet had an unexpected sequence number.
     #[error("Wrong sequence number in response")]
     WrongSequence,
+    /// The authenticator returned a CTAP HID error frame.
     #[error("CTAP HID error: {0:?}")]
     CtapHidError(CtapHidError),
+    /// The response could not be parsed.
     #[error("Invalid response")]
     InvalidResponse,
+    /// No response was received within the timeout period.
     #[error("Timeout")]
     Timeout,
+    /// Any other error with a descriptive message.
     #[error("{0}")]
     Other(String),
 }
@@ -155,11 +201,15 @@ pub enum FidoError {
 /// Information about an enumerated FIDO HID device.
 #[derive(Clone, Debug)]
 pub struct FidoDeviceInfo {
+    /// OS-specific HID device path.
     pub path: String,
+    /// USB Product ID.
     pub pid: u16,
     /// Firmware version from USB bcdDevice descriptor.
     pub version: Version,
+    /// HID input report size in bytes (typically 64).
     pub report_size_in: usize,
+    /// HID output report size in bytes (typically 64).
     pub report_size_out: usize,
 }
 

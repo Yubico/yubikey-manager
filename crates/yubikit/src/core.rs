@@ -39,6 +39,9 @@ use std::sync::RwLock;
 pub struct Version(pub u8, pub u8, pub u8);
 
 impl Version {
+    /// Parse a version from a byte slice (major, minor, patch).
+    ///
+    /// Missing bytes default to `0`. Only the first three bytes are used.
     pub fn from_bytes(data: &[u8]) -> Self {
         Self(
             data.first().copied().unwrap_or(0),
@@ -122,9 +125,11 @@ pub trait Connection {
     fn close(&mut self);
 }
 
-/// Transport type for a smart card connection.
+/// Physical transport used for the connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Transport {
+    /// USB (wired) connection.
     Usb,
+    /// NFC (contactless) connection.
     Nfc,
 }

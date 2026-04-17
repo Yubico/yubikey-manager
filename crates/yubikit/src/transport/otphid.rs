@@ -25,6 +25,11 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! OTP HID transport for YubiKey devices.
+//!
+//! Communicates with the YubiKey OTP application using USB HID feature reports.
+//! This transport is used for YubiOTP challenge-response and configuration.
+
 use hidapi::HidApi;
 
 use crate::core::Version;
@@ -34,12 +39,16 @@ const YUBICO_VID: u16 = 0x1050;
 const USAGE_PAGE_OTP: u16 = 0x0001;
 const USAGE_OTP: u16 = 0x0006;
 
+/// Errors that can occur during OTP HID communication.
 #[derive(Debug, thiserror::Error)]
 pub enum HidError {
+    /// Low-level HID transport error.
     #[error("HID error: {0}")]
     Hid(#[from] hidapi::HidError),
+    /// The device path is not a valid C string.
     #[error("Invalid device path")]
     InvalidPath,
+    /// The connection has already been closed.
     #[error("Connection is closed")]
     ConnectionClosed,
 }
@@ -47,7 +56,9 @@ pub enum HidError {
 /// Information about an enumerated HID device.
 #[derive(Clone, Debug)]
 pub struct HidDeviceInfo {
+    /// OS-specific HID device path.
     pub path: String,
+    /// USB Product ID.
     pub pid: u16,
     /// Firmware version from USB bcdDevice descriptor.
     pub version: Version,
@@ -110,6 +121,7 @@ impl std::fmt::Debug for HidOtpConnection {
 }
 
 impl HidOtpConnection {
+    /// Open a connection to the OTP HID device at the given path.
     pub fn new(path: &str) -> Result<Self, HidError> {
         log_traffic!("Opening HID connection to '{}'", path);
         let api = HidApi::new()?;
@@ -145,6 +157,7 @@ impl HidOtpConnection {
         Ok(())
     }
 
+    /// Close the connection to the device.
     pub fn close(&mut self) {
         if self.device.is_some() {
             log_traffic!("Closing HID connection");
