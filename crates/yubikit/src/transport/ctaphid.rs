@@ -131,6 +131,7 @@ pub struct CtapHidCapability(u8);
 
 impl CtapHidCapability {
     /// Device supports the WINK command.
+    #[allow(dead_code)]
     const WINK: u8 = 0x01;
     /// Device supports CBOR (CTAP2) commands.
     pub const CBOR: u8 = 0x04;
@@ -148,7 +149,8 @@ impl CtapHidCapability {
     }
 
     /// Returns `true` if the device supports the WINK command.
-    pub fn has_wink(self) -> bool {
+    #[allow(dead_code)]
+    fn has_wink(self) -> bool {
         self.0 & Self::WINK != 0
     }
 

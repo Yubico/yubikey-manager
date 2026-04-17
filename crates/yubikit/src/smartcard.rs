@@ -276,7 +276,7 @@ impl SmartCardConnection for Box<dyn SmartCardConnection + Send + Sync> {
 const SHORT_APDU_MAX_CHUNK: usize = 0xFF;
 
 /// Format a short APDU (ISO 7816-4, case 1-4).
-pub fn format_short_apdu(
+fn format_short_apdu(
     cla: u8,
     ins: u8,
     p1: u8,
@@ -302,7 +302,7 @@ pub fn format_short_apdu(
 }
 
 /// Format an extended APDU (ISO 7816-4 extended length).
-pub fn format_extended_apdu(
+fn format_extended_apdu(
     cla: u8,
     ins: u8,
     p1: u8,

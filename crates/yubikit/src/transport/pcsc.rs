@@ -89,7 +89,7 @@ pub fn list_readers() -> Result<Vec<String>, PcscError> {
 
 /// Try to kill `scdaemon` (GPG smart card daemon) which may hold an exclusive
 /// lock on PC/SC readers. Returns `true` if a process was killed.
-pub fn kill_scdaemon() -> bool {
+fn kill_scdaemon() -> bool {
     #[cfg(windows)]
     {
         kill_scdaemon_windows()
@@ -102,7 +102,7 @@ pub fn kill_scdaemon() -> bool {
 
 /// Try to kill `yubikey-agent` which may hold an exclusive lock on PC/SC
 /// readers. Returns `true` if a process was signalled.
-pub fn kill_yubikey_agent() -> bool {
+fn kill_yubikey_agent() -> bool {
     #[cfg(windows)]
     {
         false

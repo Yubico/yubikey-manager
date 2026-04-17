@@ -760,7 +760,7 @@ pub struct BioMetadata {
 // Constants
 // ---------------------------------------------------------------------------
 
-/// The factory-default 24-byte Triple-DES PIV management key.
+/// The factory-default 24-byte Triple-DES or AES-192 PIV management key.
 pub const DEFAULT_MANAGEMENT_KEY: &[u8] = &[
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
@@ -792,31 +792,18 @@ const INS_IMPORT_KEY: u8 = 0xFE;
 const INS_SET_MGMKEY: u8 = 0xFF;
 
 // Tags
-/// TLV tag for the authentication witness (mutual-auth protocol).
 const TAG_AUTH_WITNESS: u32 = 0x80;
-/// TLV tag for the authentication challenge (mutual-auth protocol).
 const TAG_AUTH_CHALLENGE: u32 = 0x81;
-/// TLV tag for the authentication response (mutual-auth protocol).
 const TAG_AUTH_RESPONSE: u32 = 0x82;
-/// TLV tag for key-agreement exponentiation data.
 const TAG_AUTH_EXPONENTIATION: u32 = 0x85;
-/// TLV tag for the algorithm identifier in key generation.
 const TAG_GEN_ALGORITHM: u32 = 0x80;
-/// TLV tag for a PIV data-object payload.
 const TAG_OBJ_DATA: u32 = 0x53;
-/// TLV tag for a PIV data-object identifier.
 const TAG_OBJ_ID: u32 = 0x5C;
-/// TLV tag for an X.509 certificate within a data object.
 const TAG_CERTIFICATE: u32 = 0x70;
-/// TLV tag for certificate compression info.
 const TAG_CERT_INFO: u32 = 0x71;
-/// TLV tag for the dynamic authentication template.
 const TAG_DYN_AUTH: u32 = 0x7C;
-/// TLV tag for the error detection code (LRC).
 const TAG_LRC: u32 = 0xFE;
-/// TLV tag for the PIN policy in key generation / import.
 const TAG_PIN_POLICY: u32 = 0xAA;
-/// TLV tag for the touch policy in key generation / import.
 const TAG_TOUCH_POLICY: u32 = 0xAB;
 
 // Metadata tags
@@ -836,9 +823,7 @@ const INDEX_TOUCH_POLICY: usize = 1;
 const INDEX_RETRIES_TOTAL: usize = 0;
 const INDEX_RETRIES_REMAINING: usize = 1;
 
-/// P2 byte identifying the PIN reference.
 const PIN_P2: u8 = 0x80;
-/// P2 byte identifying the PUK reference.
 const PUK_P2: u8 = 0x81;
 
 // ---------------------------------------------------------------------------

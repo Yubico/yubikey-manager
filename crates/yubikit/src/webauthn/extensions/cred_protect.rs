@@ -49,7 +49,7 @@ pub enum CredProtectPolicy {
 
 impl CredProtectPolicy {
     /// Construct a policy from its CTAP2 integer value (1, 2, or 3).
-    pub fn from_u32(v: u32) -> Option<Self> {
+    fn from_u32(v: u32) -> Option<Self> {
         match v {
             1 => Some(Self::UserVerificationOptional),
             2 => Some(Self::UserVerificationOptionalWithCredentialIDList),

@@ -68,7 +68,7 @@ pub enum YubiOtpError<E: fmt::Debug + fmt::Display = std::convert::Infallible> {
 
 impl YubiOtpError {
     /// Widen an infallible error into any concrete connection-error type.
-    pub fn widen<E: fmt::Debug + fmt::Display>(self) -> YubiOtpError<E> {
+    fn widen<E: fmt::Debug + fmt::Display>(self) -> YubiOtpError<E> {
         match self {
             YubiOtpError::NotSupported(msg) => YubiOtpError::NotSupported(msg),
             YubiOtpError::InvalidData(msg) => YubiOtpError::InvalidData(msg),
@@ -104,13 +104,14 @@ impl From<OtpError> for YubiOtpError<OtpError> {
 // ---------------------------------------------------------------------------
 
 /// Maximum size of the fixed (public identity) field in bytes.
-const FIXED_SIZE: usize = 16;
+pub const FIXED_SIZE: usize = 16;
 /// Size of the private identity (UID) field in bytes.
 pub const UID_SIZE: usize = 6;
 /// Size of the AES key in bytes.
 pub const KEY_SIZE: usize = 16;
 /// Size of the access code in bytes.
 pub const ACC_CODE_SIZE: usize = 6;
+
 /// Size of a serialized slot configuration in bytes.
 const CONFIG_SIZE: usize = 52;
 /// Maximum size of NDEF data payload in bytes.
@@ -464,7 +465,7 @@ fn shorten_hmac_key(key: &[u8]) -> Result<Vec<u8>, YubiOtpError> {
 // ---------------------------------------------------------------------------
 
 /// Build a 52-byte configuration block with CRC.
-pub fn build_config(
+fn build_config(
     fixed: &[u8],
     uid: &[u8],
     key: &[u8],
@@ -509,7 +510,8 @@ pub fn build_config(
 }
 
 /// Build a config for an update operation (restricted flags).
-pub fn build_update(
+#[allow(dead_code)]
+fn build_update(
     ext: u8,
     tkt: u8,
     cfg: u8,
@@ -539,10 +541,7 @@ pub fn build_update(
 }
 
 /// Build a 56-byte NDEF configuration payload.
-pub fn build_ndef_config(
-    value: Option<&str>,
-    ndef_type: NdefType,
-) -> Result<Vec<u8>, YubiOtpError> {
+fn build_ndef_config(value: Option<&str>, ndef_type: NdefType) -> Result<Vec<u8>, YubiOtpError> {
     let data = match ndef_type {
         NdefType::Uri => {
             let uri = value.unwrap_or(DEFAULT_NDEF_URI);

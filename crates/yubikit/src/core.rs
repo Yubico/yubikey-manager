@@ -73,7 +73,7 @@ pub fn set_override_version(version: Version) {
 
 /// If `version` is the development placeholder (0.0.1) and an override has been
 /// set, return the override; otherwise return `version` unchanged.
-pub fn patch_version(version: Version) -> Version {
+pub(crate) fn patch_version(version: Version) -> Version {
     if version == DEV_VERSION {
         OVERRIDE_VERSION
             .read()

@@ -94,7 +94,8 @@ pub fn list_otp_devices() -> Result<Vec<HidDeviceInfo>, HidError> {
 }
 
 /// List all Yubico HID devices regardless of usage page.
-pub fn list_all_hid_devices() -> Result<Vec<HidDeviceInfo>, HidError> {
+#[allow(dead_code)]
+fn list_all_hid_devices() -> Result<Vec<HidDeviceInfo>, HidError> {
     let api = HidApi::new()?;
     let mut devices = Vec::new();
     for dev in api.device_list() {

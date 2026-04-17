@@ -114,10 +114,10 @@ fn modhex_char_value(ch: u8) -> Result<u8, OtpCodecError> {
 // Constants
 // ---------------------------------------------------------------------------
 
-pub(crate) const SLOT_DATA_SIZE: usize = 64;
+const SLOT_DATA_SIZE: usize = 64;
 const FRAME_SIZE: usize = SLOT_DATA_SIZE + 6; // 70
-pub(crate) const FEATURE_RPT_SIZE: usize = 8;
-pub(crate) const FEATURE_RPT_DATA_SIZE: usize = FEATURE_RPT_SIZE - 1; // 7
+const FEATURE_RPT_SIZE: usize = 8;
+const FEATURE_RPT_DATA_SIZE: usize = FEATURE_RPT_SIZE - 1; // 7
 
 const RESP_PENDING_FLAG: u8 = 0x40;
 const SLOT_WRITE_FLAG: u8 = 0x80;
@@ -125,9 +125,9 @@ const RESP_TIMEOUT_WAIT_FLAG: u8 = 0x20;
 const SEQUENCE_MASK: u8 = 0x1F;
 
 /// Byte offset of the programming sequence counter in an OTP status report.
-pub const STATUS_OFFSET_PROG_SEQ: usize = 4;
-pub(crate) const STATUS_OFFSET_TOUCH_LOW: usize = 5;
-pub(crate) const CONFIG_SLOTS_PROGRAMMED_MASK: u8 = 0b0000_0011;
+pub(crate) const STATUS_OFFSET_PROG_SEQ: usize = 4;
+const STATUS_OFFSET_TOUCH_LOW: usize = 5;
+const CONFIG_SLOTS_PROGRAMMED_MASK: u8 = 0b0000_0011;
 
 /// ConfigSlot::ScanMap raw value, used to probe NEO devices.
 const SCAN_MAP_SLOT: u8 = 0x12;
@@ -421,7 +421,10 @@ impl<T: OtpConnection> OtpProtocol<T> {
 }
 
 /// Verify and strip CRC from a raw OTP data response, returning `expected_len` bytes.
-pub fn verify_and_strip_crc(response: &[u8], expected_len: usize) -> Result<Vec<u8>, OtpError> {
+pub(crate) fn verify_and_strip_crc(
+    response: &[u8],
+    expected_len: usize,
+) -> Result<Vec<u8>, OtpError> {
     if response.len() < expected_len + 2 {
         return Err(OtpError::BadResponse(format!(
             "Response too short: expected at least {}, got {}",

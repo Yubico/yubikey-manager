@@ -123,7 +123,7 @@ impl Capability {
     pub const NONE: Self = Self(0);
 
     /// Decode FIPS capability bitmask to [`Capability`] flags.
-    pub fn from_fips(fips: u16) -> Self {
+    fn from_fips(fips: u16) -> Self {
         let mut c = 0u16;
         if fips & (1 << 0) != 0 {
             c |= Self::FIDO2.0;
@@ -554,7 +554,7 @@ pub struct DeviceConfig {
 
 impl DeviceConfig {
     /// Serialize to TLV format for write_config APDU.
-    pub fn get_bytes(
+    fn get_bytes(
         &self,
         reboot: bool,
         cur_lock_code: Option<&[u8]>,

@@ -58,7 +58,7 @@ pub struct SetupDiDeviceInfo {
 ///
 /// This does not open any device handles, so it works for FIDO devices
 /// even when the caller is not running as Administrator.
-pub fn list_setupdi_devices() -> Vec<SetupDiDeviceInfo> {
+pub(crate) fn list_setupdi_devices() -> Vec<SetupDiDeviceInfo> {
     let mut devices = Vec::new();
 
     let hid_guid = unsafe { HidD_GetHidGuid() };

@@ -1276,7 +1276,7 @@ fn synthesize_info_ccid<C: SmartCardConnection + Send + 'static>(
 }
 
 /// Apply standard fixups for known device quirks.
-pub fn apply_device_info_fixups(info: &mut DeviceInfo) {
+fn apply_device_info_fixups(info: &mut DeviceInfo) {
     // Override version from version qualifier for non-final (dev) firmware
     if info.version_qualifier.release_type != ReleaseType::Final {
         log::debug!(

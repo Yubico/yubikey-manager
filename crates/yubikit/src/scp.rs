@@ -73,7 +73,7 @@ pub enum ScpError {
 }
 
 /// Compute AES-CMAC over data.
-pub fn aes_cmac(key: &[u8], data: &[u8]) -> Result<[u8; 16], ScpError> {
+pub(crate) fn aes_cmac(key: &[u8], data: &[u8]) -> Result<[u8; 16], ScpError> {
     let mut mac = <Cmac<Aes128> as Mac>::new_from_slice(key)
         .map_err(|e| ScpError::CmacInit(e.to_string()))?;
     mac.update(data);
@@ -257,7 +257,7 @@ impl ScpState {
 }
 
 /// X9.63 KDF using SHA-256.
-pub fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Vec<u8> {
+pub(crate) fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Vec<u8> {
     let mut output = Vec::with_capacity(length);
     let mut counter: u32 = 1;
     while output.len() < length {

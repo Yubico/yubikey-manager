@@ -136,7 +136,7 @@ pub fn tlv_unpack(expected_tag: u32, data: &[u8]) -> Result<Vec<u8>, TlvError> {
 }
 
 /// Find the first entry with the given tag in a TLV list.
-pub fn tlv_get(tlvs: &[(u32, Vec<u8>)], tag: u32) -> Option<&[u8]> {
+pub(crate) fn tlv_get(tlvs: &[(u32, Vec<u8>)], tag: u32) -> Option<&[u8]> {
     tlvs.iter()
         .find(|(t, _)| *t == tag)
         .map(|(_, v)| v.as_slice())

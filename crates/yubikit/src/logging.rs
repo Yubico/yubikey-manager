@@ -15,6 +15,6 @@ macro_rules! log_traffic {
 }
 
 /// Format bytes as a lowercase hex string.
-pub fn hex_encode(bytes: &[u8]) -> String {
+pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

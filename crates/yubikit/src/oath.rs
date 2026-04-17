@@ -39,50 +39,29 @@ use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtoc
 use crate::tlv::{TlvError, parse_tlv_list, tlv_encode, tlv_get, tlv_unpack};
 
 // TLV tags
-/// TLV tag for credential name.
 const TAG_NAME: u32 = 0x71;
-/// TLV tag for the credential name list.
 const TAG_NAME_LIST: u32 = 0x72;
-/// TLV tag for the OATH key (secret).
 const TAG_KEY: u32 = 0x73;
-/// TLV tag for an HMAC challenge.
 const TAG_CHALLENGE: u32 = 0x74;
-/// TLV tag for an HMAC response.
-pub const TAG_RESPONSE: u32 = 0x75;
-/// TLV tag for a truncated OTP code.
+const TAG_RESPONSE: u32 = 0x75;
 const TAG_TRUNCATED: u32 = 0x76;
-/// TLV tag for HOTP-specific data.
 const TAG_HOTP: u32 = 0x77;
-/// TLV tag for credential properties (e.g., touch requirement).
 const TAG_PROPERTY: u32 = 0x78;
-/// TLV tag for the application version.
-pub const TAG_VERSION: u32 = 0x79;
-/// TLV tag for the initial moving factor (HOTP counter).
+const TAG_VERSION: u32 = 0x79;
 const TAG_IMF: u32 = 0x7A;
-/// TLV tag for touch-required indicator.
-pub const TAG_TOUCH: u32 = 0x7C;
+const TAG_TOUCH: u32 = 0x7C;
 
 // Instruction bytes
-/// APDU instruction byte for listing credentials.
-pub const INS_LIST: u8 = 0xA1;
-/// APDU instruction byte for adding/updating a credential.
-pub const INS_PUT: u8 = 0x01;
-/// APDU instruction byte for deleting a credential.
-pub const INS_DELETE: u8 = 0x02;
-/// APDU instruction byte for setting the access code.
+const INS_LIST: u8 = 0xA1;
+const INS_PUT: u8 = 0x01;
+const INS_DELETE: u8 = 0x02;
 const INS_SET_CODE: u8 = 0x03;
-/// APDU instruction byte for resetting the OATH application.
-pub const INS_RESET: u8 = 0x04;
-/// APDU instruction byte for renaming a credential.
+const INS_RESET: u8 = 0x04;
 const INS_RENAME: u8 = 0x05;
-/// APDU instruction byte for calculating a single credential code.
-pub const INS_CALCULATE: u8 = 0xA2;
-/// APDU instruction byte for validating the access code.
+const INS_CALCULATE: u8 = 0xA2;
 const INS_VALIDATE: u8 = 0xA3;
-/// APDU instruction byte for calculating all credential codes.
 const INS_CALCULATE_ALL: u8 = 0xA4;
-/// APDU instruction byte for retrieving remaining response data.
-pub const INS_SEND_REMAINING: u8 = 0xA5;
+const INS_SEND_REMAINING: u8 = 0xA5;
 
 /// Bitmask for extracting the hash algorithm from a combined type/algo byte.
 #[allow(dead_code)]
@@ -231,7 +210,7 @@ pub fn format_cred_id(
 }
 
 /// Parse a credential ID into (issuer, name, period).
-pub fn parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, String, u32) {
+fn parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, String, u32) {
     let data = String::from_utf8_lossy(cred_id);
     if oath_type == OathType::Totp {
         // Pattern: [<period>/][[issuer]:]name
@@ -258,7 +237,7 @@ fn split_issuer_name(data: &str) -> (Option<String>, String) {
 }
 
 /// Get device ID from salt (SHA-256, base64 without padding).
-pub fn get_device_id(salt: &[u8]) -> String {
+fn get_device_id(salt: &[u8]) -> String {
     let hash = Sha256::digest(salt);
     let b64 = base64_encode(&hash[..16]);
     b64.trim_end_matches('=').to_string()
@@ -289,14 +268,14 @@ fn base64_encode(data: &[u8]) -> String {
 }
 
 /// Compute HMAC-SHA1.
-pub fn hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
+fn hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
     let mut mac = HmacSha1::new_from_slice(key).expect("HMAC accepts any key size");
     mac.update(message);
     mac.finalize().into_bytes().to_vec()
 }
 
 /// Constant-time HMAC comparison.
-pub fn hmac_verify(key: &[u8], message: &[u8], expected: &[u8]) -> bool {
+fn hmac_verify(key: &[u8], message: &[u8], expected: &[u8]) -> bool {
     let computed = hmac_sha1(key, message);
     subtle::ConstantTimeEq::ct_eq(computed.as_slice(), expected).into()
 }
@@ -309,7 +288,7 @@ pub fn derive_key(salt: &[u8], passphrase: &str) -> [u8; 16] {
 }
 
 /// Shorten HMAC key per RFC 2104.
-pub fn hmac_shorten_key(key: &[u8], algo: HashAlgorithm) -> Vec<u8> {
+fn hmac_shorten_key(key: &[u8], algo: HashAlgorithm) -> Vec<u8> {
     if key.len() > algo.block_size() {
         match algo {
             HashAlgorithm::Sha1 => Sha1::digest(key).to_vec(),
@@ -331,7 +310,7 @@ pub fn get_challenge(timestamp: u64, period: u32) -> [u8; 8] {
 }
 
 /// Format an OATH code from truncated response.
-pub fn format_code(
+fn format_code(
     oath_type: OathType,
     period: u32,
     timestamp: u64,
@@ -353,7 +332,7 @@ pub fn format_code(
 }
 
 /// Build APDU data for put_credential command.
-pub fn build_put_data(
+fn build_put_data(
     cred_id: &[u8],
     oath_type: OathType,
     hash_algorithm: HashAlgorithm,
@@ -389,7 +368,7 @@ pub fn build_put_data(
 }
 
 /// Build APDU data for set_key command.
-pub fn build_set_key_data(key: &[u8], challenge: &[u8]) -> Vec<u8> {
+fn build_set_key_data(key: &[u8], challenge: &[u8]) -> Vec<u8> {
     let response = hmac_sha1(key, challenge);
     let mut key_val = vec![OathType::Totp as u8 | HashAlgorithm::Sha1 as u8];
     key_val.extend_from_slice(key);
@@ -401,7 +380,7 @@ pub fn build_set_key_data(key: &[u8], challenge: &[u8]) -> Vec<u8> {
 }
 
 /// Build APDU data for validate command.
-pub fn build_validate_data(key: &[u8], device_challenge: &[u8], host_challenge: &[u8]) -> Vec<u8> {
+fn build_validate_data(key: &[u8], device_challenge: &[u8], host_challenge: &[u8]) -> Vec<u8> {
     let response = hmac_sha1(key, device_challenge);
     let mut data = tlv_encode(TAG_RESPONSE, &response);
     data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, host_challenge));
@@ -409,7 +388,8 @@ pub fn build_validate_data(key: &[u8], device_challenge: &[u8], host_challenge: 
 }
 
 /// Parse a credential entry from LIST response.
-pub fn parse_list_entry(data: &[u8]) -> Result<(OathType, Vec<u8>), OathError> {
+#[allow(dead_code)]
+fn parse_list_entry(data: &[u8]) -> Result<(OathType, Vec<u8>), OathError> {
     let oath_type = OathType::from_u8(MASK_TYPE & data[0])
         .ok_or_else(|| OathError::InvalidData(format!("0x{:02x}", data[0] & MASK_TYPE)))?;
     Ok((oath_type, data[1..].to_vec()))

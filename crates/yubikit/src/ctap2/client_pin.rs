@@ -88,8 +88,7 @@ impl Permissions {
     /// Permission for authenticator configuration operations.
     pub const AUTHENTICATOR_CFG: Self = Self(0x20);
     /// Permission for persistent credential management (read-only enumeration).
-    #[allow(dead_code)]
-    pub(super) const PERSISTENT_CREDENTIAL_MGMT: Self = Self(0x40);
+    pub const PERSISTENT_CREDENTIAL_MGMT: Self = Self(0x40);
 
     /// Create a `Permissions` value from raw permission bits.
     pub const fn new(bits: u8) -> Self {

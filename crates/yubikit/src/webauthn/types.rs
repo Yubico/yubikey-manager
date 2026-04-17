@@ -298,7 +298,8 @@ pub struct PublicKeyCredentialRpEntity {
 
 impl PublicKeyCredentialRpEntity {
     /// SHA-256 hash of the RP ID, if set.
-    pub fn id_hash(&self) -> Option<[u8; 32]> {
+    #[allow(dead_code)]
+    fn id_hash(&self) -> Option<[u8; 32]> {
         self.id.as_ref().map(|id| {
             let mut hasher = Sha256::new();
             hasher.update(id.as_bytes());

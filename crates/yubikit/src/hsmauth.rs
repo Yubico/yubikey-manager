@@ -39,58 +39,35 @@ use crate::tlv::{parse_tlv_list, tlv_encode};
 // TLV tags
 // ---------------------------------------------------------------------------
 
-/// Tag for the credential label.
 const TAG_LABEL: u32 = 0x71;
-/// Tag for the credential label list.
 const TAG_LABEL_LIST: u32 = 0x72;
-/// Tag for the credential password.
 const TAG_CREDENTIAL_PASSWORD: u32 = 0x73;
-/// Tag for the algorithm identifier.
 const TAG_ALGORITHM: u32 = 0x74;
-/// Tag for the encryption key.
 const TAG_KEY_ENC: u32 = 0x75;
-/// Tag for the MAC key.
 const TAG_KEY_MAC: u32 = 0x76;
-/// Tag for the context value.
 const TAG_CONTEXT: u32 = 0x77;
-/// Tag for the response value.
-pub const TAG_RESPONSE: u32 = 0x78;
-/// Tag for the version information.
-pub const TAG_VERSION: u32 = 0x79;
-/// Tag for the touch-required flag.
-pub const TAG_TOUCH: u32 = 0x7A;
-/// Tag for the management key.
+const TAG_RESPONSE: u32 = 0x78;
+const TAG_VERSION: u32 = 0x79;
+const TAG_TOUCH: u32 = 0x7A;
 const TAG_MANAGEMENT_KEY: u32 = 0x7B;
-/// Tag for the public key.
-pub const TAG_PUBLIC_KEY: u32 = 0x7C;
-/// Tag for the private key.
+const TAG_PUBLIC_KEY: u32 = 0x7C;
 const TAG_PRIVATE_KEY: u32 = 0x7D;
 
 // ---------------------------------------------------------------------------
 // Instruction bytes
 // ---------------------------------------------------------------------------
 
-/// Instruction byte for storing a credential.
-pub const INS_PUT: u8 = 0x01;
-/// Instruction byte for deleting a credential.
-pub const INS_DELETE: u8 = 0x02;
-/// Instruction byte for calculating session keys.
-pub const INS_CALCULATE: u8 = 0x03;
-/// Instruction byte for getting a challenge.
-pub const INS_GET_CHALLENGE: u8 = 0x04;
-/// Instruction byte for listing credentials.
-pub const INS_LIST: u8 = 0x05;
-/// Instruction byte for resetting the application.
-pub const INS_RESET: u8 = 0x06;
-/// Instruction byte for getting the firmware version.
-pub const INS_GET_VERSION: u8 = 0x07;
-/// Instruction byte for storing a new management key.
+const INS_PUT: u8 = 0x01;
+const INS_DELETE: u8 = 0x02;
+const INS_CALCULATE: u8 = 0x03;
+const INS_GET_CHALLENGE: u8 = 0x04;
+const INS_LIST: u8 = 0x05;
+const INS_RESET: u8 = 0x06;
+#[allow(dead_code)]
+const INS_GET_VERSION: u8 = 0x07;
 const INS_PUT_MANAGEMENT_KEY: u8 = 0x08;
-/// Instruction byte for getting the management key retry counter.
 const INS_GET_MANAGEMENT_KEY_RETRIES: u8 = 0x09;
-/// Instruction byte for getting a public key.
 const INS_GET_PUBLIC_KEY: u8 = 0x0A;
-/// Instruction byte for changing a credential password.
 const INS_CHANGE_CREDENTIAL_PASSWORD: u8 = 0x0B;
 
 // ---------------------------------------------------------------------------
@@ -98,7 +75,7 @@ const INS_CHANGE_CREDENTIAL_PASSWORD: u8 = 0x0B;
 // ---------------------------------------------------------------------------
 
 /// Length of the management key in bytes.
-pub const MANAGEMENT_KEY_LEN: usize = 16;
+const MANAGEMENT_KEY_LEN: usize = 16;
 /// Length of the credential password in bytes.
 const CREDENTIAL_PASSWORD_LEN: usize = 16;
 /// Minimum length of a credential label in bytes.
@@ -107,7 +84,8 @@ const MIN_LABEL_LEN: usize = 1;
 const MAX_LABEL_LEN: usize = 64;
 
 /// The default management key (all zeros).
-pub const DEFAULT_MANAGEMENT_KEY: [u8; MANAGEMENT_KEY_LEN] = [0u8; MANAGEMENT_KEY_LEN];
+#[allow(dead_code)]
+const DEFAULT_MANAGEMENT_KEY: [u8; MANAGEMENT_KEY_LEN] = [0u8; MANAGEMENT_KEY_LEN];
 /// The initial retry counter value for new credentials.
 const INITIAL_RETRY_COUNTER: u32 = 8;
 
