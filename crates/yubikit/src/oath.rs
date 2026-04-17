@@ -40,25 +40,25 @@ use crate::tlv::{TlvError, parse_tlv_list, tlv_encode, tlv_get, tlv_unpack};
 
 // TLV tags
 /// TLV tag for credential name.
-pub const TAG_NAME: u32 = 0x71;
+const TAG_NAME: u32 = 0x71;
 /// TLV tag for the credential name list.
-pub const TAG_NAME_LIST: u32 = 0x72;
+const TAG_NAME_LIST: u32 = 0x72;
 /// TLV tag for the OATH key (secret).
-pub const TAG_KEY: u32 = 0x73;
+const TAG_KEY: u32 = 0x73;
 /// TLV tag for an HMAC challenge.
-pub const TAG_CHALLENGE: u32 = 0x74;
+const TAG_CHALLENGE: u32 = 0x74;
 /// TLV tag for an HMAC response.
 pub const TAG_RESPONSE: u32 = 0x75;
 /// TLV tag for a truncated OTP code.
-pub const TAG_TRUNCATED: u32 = 0x76;
+const TAG_TRUNCATED: u32 = 0x76;
 /// TLV tag for HOTP-specific data.
-pub const TAG_HOTP: u32 = 0x77;
+const TAG_HOTP: u32 = 0x77;
 /// TLV tag for credential properties (e.g., touch requirement).
-pub const TAG_PROPERTY: u32 = 0x78;
+const TAG_PROPERTY: u32 = 0x78;
 /// TLV tag for the application version.
 pub const TAG_VERSION: u32 = 0x79;
 /// TLV tag for the initial moving factor (HOTP counter).
-pub const TAG_IMF: u32 = 0x7A;
+const TAG_IMF: u32 = 0x7A;
 /// TLV tag for touch-required indicator.
 pub const TAG_TOUCH: u32 = 0x7C;
 
@@ -70,35 +70,39 @@ pub const INS_PUT: u8 = 0x01;
 /// APDU instruction byte for deleting a credential.
 pub const INS_DELETE: u8 = 0x02;
 /// APDU instruction byte for setting the access code.
-pub const INS_SET_CODE: u8 = 0x03;
+const INS_SET_CODE: u8 = 0x03;
 /// APDU instruction byte for resetting the OATH application.
 pub const INS_RESET: u8 = 0x04;
 /// APDU instruction byte for renaming a credential.
-pub const INS_RENAME: u8 = 0x05;
+const INS_RENAME: u8 = 0x05;
 /// APDU instruction byte for calculating a single credential code.
 pub const INS_CALCULATE: u8 = 0xA2;
 /// APDU instruction byte for validating the access code.
-pub const INS_VALIDATE: u8 = 0xA3;
+const INS_VALIDATE: u8 = 0xA3;
 /// APDU instruction byte for calculating all credential codes.
-pub const INS_CALCULATE_ALL: u8 = 0xA4;
+const INS_CALCULATE_ALL: u8 = 0xA4;
 /// APDU instruction byte for retrieving remaining response data.
 pub const INS_SEND_REMAINING: u8 = 0xA5;
 
 /// Bitmask for extracting the hash algorithm from a combined type/algo byte.
-pub const MASK_ALGO: u8 = 0x0F;
+#[allow(dead_code)]
+const MASK_ALGO: u8 = 0x0F;
 /// Bitmask for extracting the OATH type from a combined type/algo byte.
-pub const MASK_TYPE: u8 = 0xF0;
+const MASK_TYPE: u8 = 0xF0;
 
 /// Default TOTP time period in seconds.
-pub const DEFAULT_PERIOD: u32 = 30;
+const DEFAULT_PERIOD: u32 = 30;
 /// Default number of digits in an OTP code.
-pub const DEFAULT_DIGITS: u8 = 6;
+#[allow(dead_code)]
+const DEFAULT_DIGITS: u8 = 6;
 /// Default initial moving factor for HOTP.
-pub const DEFAULT_IMF: u32 = 0;
+#[allow(dead_code)]
+const DEFAULT_IMF: u32 = 0;
 /// Length of the HMAC challenge in bytes.
-pub const CHALLENGE_LEN: usize = 8;
+#[allow(dead_code)]
+const CHALLENGE_LEN: usize = 8;
 /// Minimum HMAC key size in bytes; shorter keys are zero-padded.
-pub const HMAC_MINIMUM_KEY_SIZE: usize = 14;
+const HMAC_MINIMUM_KEY_SIZE: usize = 14;
 
 const PROP_REQUIRE_TOUCH: u8 = 0x02;
 

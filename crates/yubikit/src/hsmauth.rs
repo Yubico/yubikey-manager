@@ -40,19 +40,19 @@ use crate::tlv::{parse_tlv_list, tlv_encode};
 // ---------------------------------------------------------------------------
 
 /// Tag for the credential label.
-pub const TAG_LABEL: u32 = 0x71;
+const TAG_LABEL: u32 = 0x71;
 /// Tag for the credential label list.
-pub const TAG_LABEL_LIST: u32 = 0x72;
+const TAG_LABEL_LIST: u32 = 0x72;
 /// Tag for the credential password.
-pub const TAG_CREDENTIAL_PASSWORD: u32 = 0x73;
+const TAG_CREDENTIAL_PASSWORD: u32 = 0x73;
 /// Tag for the algorithm identifier.
-pub const TAG_ALGORITHM: u32 = 0x74;
+const TAG_ALGORITHM: u32 = 0x74;
 /// Tag for the encryption key.
-pub const TAG_KEY_ENC: u32 = 0x75;
+const TAG_KEY_ENC: u32 = 0x75;
 /// Tag for the MAC key.
-pub const TAG_KEY_MAC: u32 = 0x76;
+const TAG_KEY_MAC: u32 = 0x76;
 /// Tag for the context value.
-pub const TAG_CONTEXT: u32 = 0x77;
+const TAG_CONTEXT: u32 = 0x77;
 /// Tag for the response value.
 pub const TAG_RESPONSE: u32 = 0x78;
 /// Tag for the version information.
@@ -60,11 +60,11 @@ pub const TAG_VERSION: u32 = 0x79;
 /// Tag for the touch-required flag.
 pub const TAG_TOUCH: u32 = 0x7A;
 /// Tag for the management key.
-pub const TAG_MANAGEMENT_KEY: u32 = 0x7B;
+const TAG_MANAGEMENT_KEY: u32 = 0x7B;
 /// Tag for the public key.
 pub const TAG_PUBLIC_KEY: u32 = 0x7C;
 /// Tag for the private key.
-pub const TAG_PRIVATE_KEY: u32 = 0x7D;
+const TAG_PRIVATE_KEY: u32 = 0x7D;
 
 // ---------------------------------------------------------------------------
 // Instruction bytes
@@ -85,13 +85,13 @@ pub const INS_RESET: u8 = 0x06;
 /// Instruction byte for getting the firmware version.
 pub const INS_GET_VERSION: u8 = 0x07;
 /// Instruction byte for storing a new management key.
-pub const INS_PUT_MANAGEMENT_KEY: u8 = 0x08;
+const INS_PUT_MANAGEMENT_KEY: u8 = 0x08;
 /// Instruction byte for getting the management key retry counter.
-pub const INS_GET_MANAGEMENT_KEY_RETRIES: u8 = 0x09;
+const INS_GET_MANAGEMENT_KEY_RETRIES: u8 = 0x09;
 /// Instruction byte for getting a public key.
-pub const INS_GET_PUBLIC_KEY: u8 = 0x0A;
+const INS_GET_PUBLIC_KEY: u8 = 0x0A;
 /// Instruction byte for changing a credential password.
-pub const INS_CHANGE_CREDENTIAL_PASSWORD: u8 = 0x0B;
+const INS_CHANGE_CREDENTIAL_PASSWORD: u8 = 0x0B;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -100,16 +100,16 @@ pub const INS_CHANGE_CREDENTIAL_PASSWORD: u8 = 0x0B;
 /// Length of the management key in bytes.
 pub const MANAGEMENT_KEY_LEN: usize = 16;
 /// Length of the credential password in bytes.
-pub const CREDENTIAL_PASSWORD_LEN: usize = 16;
+const CREDENTIAL_PASSWORD_LEN: usize = 16;
 /// Minimum length of a credential label in bytes.
-pub const MIN_LABEL_LEN: usize = 1;
+const MIN_LABEL_LEN: usize = 1;
 /// Maximum length of a credential label in bytes.
-pub const MAX_LABEL_LEN: usize = 64;
+const MAX_LABEL_LEN: usize = 64;
 
 /// The default management key (all zeros).
 pub const DEFAULT_MANAGEMENT_KEY: [u8; MANAGEMENT_KEY_LEN] = [0u8; MANAGEMENT_KEY_LEN];
 /// The initial retry counter value for new credentials.
-pub const INITIAL_RETRY_COUNTER: u32 = 8;
+const INITIAL_RETRY_COUNTER: u32 = 8;
 
 // ---------------------------------------------------------------------------
 // Algorithm

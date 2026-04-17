@@ -302,7 +302,8 @@ pub struct DeviceFlag(pub u8);
 
 impl DeviceFlag {
     /// Allow the device to be woken via USB remote wakeup.
-    pub const REMOTE_WAKEUP: Self = Self(0x40);
+    #[allow(dead_code)]
+    const REMOTE_WAKEUP: Self = Self(0x40);
     /// Allow the device to be ejected (CCID mode).
     pub const EJECT: Self = Self(0x80);
     /// No flags set.

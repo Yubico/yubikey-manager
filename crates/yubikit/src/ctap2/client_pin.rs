@@ -39,35 +39,35 @@ use super::{Ctap2Error, Info};
 /// ClientPin sub-command identifiers (§6.5.5).
 mod client_pin_cmd {
     /// Get the number of PIN retries remaining.
-    pub const GET_PIN_RETRIES: u8 = 0x01;
+    pub(super) const GET_PIN_RETRIES: u8 = 0x01;
     /// Perform key agreement to establish a shared secret.
-    pub const GET_KEY_AGREEMENT: u8 = 0x02;
+    pub(super) const GET_KEY_AGREEMENT: u8 = 0x02;
     /// Set a new PIN on the authenticator.
-    pub const SET_PIN: u8 = 0x03;
+    pub(super) const SET_PIN: u8 = 0x03;
     /// Change an existing PIN.
-    pub const CHANGE_PIN: u8 = 0x04;
+    pub(super) const CHANGE_PIN: u8 = 0x04;
     /// Get a PIN token using the PIN (legacy, pre-2.1).
-    pub const GET_TOKEN_USING_PIN_LEGACY: u8 = 0x05;
+    pub(super) const GET_TOKEN_USING_PIN_LEGACY: u8 = 0x05;
     /// Get a PIN/UV token using built-in user verification.
-    pub const GET_TOKEN_USING_UV: u8 = 0x06;
+    pub(super) const GET_TOKEN_USING_UV: u8 = 0x06;
     /// Get the number of built-in UV retries remaining.
-    pub const GET_UV_RETRIES: u8 = 0x07;
+    pub(super) const GET_UV_RETRIES: u8 = 0x07;
     /// Get a PIN token using the PIN (with permissions, FIDO 2.1+).
-    pub const GET_TOKEN_USING_PIN: u8 = 0x09;
+    pub(super) const GET_TOKEN_USING_PIN: u8 = 0x09;
 }
 
 /// ClientPin response map keys (§6.5.6).
 mod client_pin_result_key {
     /// Platform key agreement key (COSE_Key).
-    pub const KEY_AGREEMENT: i64 = 0x01;
+    pub(super) const KEY_AGREEMENT: i64 = 0x01;
     /// Encrypted PIN/UV auth token.
-    pub const PIN_UV_TOKEN: i64 = 0x02;
+    pub(super) const PIN_UV_TOKEN: i64 = 0x02;
     /// Number of PIN retries remaining.
-    pub const PIN_RETRIES: i64 = 0x03;
+    pub(super) const PIN_RETRIES: i64 = 0x03;
     /// Whether a power cycle is needed before retrying.
-    pub const POWER_CYCLE_STATE: i64 = 0x04;
+    pub(super) const POWER_CYCLE_STATE: i64 = 0x04;
     /// Number of built-in UV retries remaining.
-    pub const UV_RETRIES: i64 = 0x05;
+    pub(super) const UV_RETRIES: i64 = 0x05;
 }
 
 /// Permissions that can be associated with a PIN/UV token (§6.5.5.7).
@@ -88,7 +88,8 @@ impl Permissions {
     /// Permission for authenticator configuration operations.
     pub const AUTHENTICATOR_CFG: Self = Self(0x20);
     /// Permission for persistent credential management (read-only enumeration).
-    pub const PERSISTENT_CREDENTIAL_MGMT: Self = Self(0x40);
+    #[allow(dead_code)]
+    pub(super) const PERSISTENT_CREDENTIAL_MGMT: Self = Self(0x40);
 
     /// Create a `Permissions` value from raw permission bits.
     pub const fn new(bits: u8) -> Self {

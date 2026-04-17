@@ -104,7 +104,7 @@ impl From<OtpError> for YubiOtpError<OtpError> {
 // ---------------------------------------------------------------------------
 
 /// Maximum size of the fixed (public identity) field in bytes.
-pub const FIXED_SIZE: usize = 16;
+const FIXED_SIZE: usize = 16;
 /// Size of the private identity (UID) field in bytes.
 pub const UID_SIZE: usize = 6;
 /// Size of the AES key in bytes.
@@ -112,17 +112,17 @@ pub const KEY_SIZE: usize = 16;
 /// Size of the access code in bytes.
 pub const ACC_CODE_SIZE: usize = 6;
 /// Size of a serialized slot configuration in bytes.
-pub const CONFIG_SIZE: usize = 52;
+const CONFIG_SIZE: usize = 52;
 /// Maximum size of NDEF data payload in bytes.
-pub const NDEF_DATA_SIZE: usize = 54;
+const NDEF_DATA_SIZE: usize = 54;
 /// Size of the HMAC-SHA1 key in bytes.
-pub const HMAC_KEY_SIZE: usize = 20;
+const HMAC_KEY_SIZE: usize = 20;
 /// Maximum HMAC challenge size in bytes.
-pub const HMAC_CHALLENGE_SIZE: usize = 64;
+const HMAC_CHALLENGE_SIZE: usize = 64;
 /// Size of the HMAC-SHA1 response in bytes.
-pub const HMAC_RESPONSE_SIZE: usize = 20;
+const HMAC_RESPONSE_SIZE: usize = 20;
 /// Size of the keyboard scan codes map.
-pub const SCAN_CODES_SIZE: usize = FIXED_SIZE + UID_SIZE + KEY_SIZE; // 38
+const SCAN_CODES_SIZE: usize = FIXED_SIZE + UID_SIZE + KEY_SIZE; // 38
 
 const SHA1_BLOCK_SIZE: usize = 64;
 
@@ -130,7 +130,7 @@ const INS_CONFIG: u8 = 0x01;
 const INS_YK2_STATUS: u8 = 0x03;
 
 /// Default NDEF URI programmed on new YubiKeys.
-pub const DEFAULT_NDEF_URI: &str = "https://my.yubico.com/yk/#";
+const DEFAULT_NDEF_URI: &str = "https://my.yubico.com/yk/#";
 
 const NDEF_URL_PREFIXES: &[&str] = &[
     "http://www.",

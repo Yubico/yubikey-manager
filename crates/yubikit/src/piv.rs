@@ -793,31 +793,31 @@ const INS_SET_MGMKEY: u8 = 0xFF;
 
 // Tags
 /// TLV tag for the authentication witness (mutual-auth protocol).
-pub const TAG_AUTH_WITNESS: u32 = 0x80;
+const TAG_AUTH_WITNESS: u32 = 0x80;
 /// TLV tag for the authentication challenge (mutual-auth protocol).
-pub const TAG_AUTH_CHALLENGE: u32 = 0x81;
+const TAG_AUTH_CHALLENGE: u32 = 0x81;
 /// TLV tag for the authentication response (mutual-auth protocol).
-pub const TAG_AUTH_RESPONSE: u32 = 0x82;
+const TAG_AUTH_RESPONSE: u32 = 0x82;
 /// TLV tag for key-agreement exponentiation data.
-pub const TAG_AUTH_EXPONENTIATION: u32 = 0x85;
+const TAG_AUTH_EXPONENTIATION: u32 = 0x85;
 /// TLV tag for the algorithm identifier in key generation.
-pub const TAG_GEN_ALGORITHM: u32 = 0x80;
+const TAG_GEN_ALGORITHM: u32 = 0x80;
 /// TLV tag for a PIV data-object payload.
-pub const TAG_OBJ_DATA: u32 = 0x53;
+const TAG_OBJ_DATA: u32 = 0x53;
 /// TLV tag for a PIV data-object identifier.
-pub const TAG_OBJ_ID: u32 = 0x5C;
+const TAG_OBJ_ID: u32 = 0x5C;
 /// TLV tag for an X.509 certificate within a data object.
-pub const TAG_CERTIFICATE: u32 = 0x70;
+const TAG_CERTIFICATE: u32 = 0x70;
 /// TLV tag for certificate compression info.
-pub const TAG_CERT_INFO: u32 = 0x71;
+const TAG_CERT_INFO: u32 = 0x71;
 /// TLV tag for the dynamic authentication template.
-pub const TAG_DYN_AUTH: u32 = 0x7C;
+const TAG_DYN_AUTH: u32 = 0x7C;
 /// TLV tag for the error detection code (LRC).
-pub const TAG_LRC: u32 = 0xFE;
+const TAG_LRC: u32 = 0xFE;
 /// TLV tag for the PIN policy in key generation / import.
-pub const TAG_PIN_POLICY: u32 = 0xAA;
+const TAG_PIN_POLICY: u32 = 0xAA;
 /// TLV tag for the touch policy in key generation / import.
-pub const TAG_TOUCH_POLICY: u32 = 0xAB;
+const TAG_TOUCH_POLICY: u32 = 0xAB;
 
 // Metadata tags
 const TAG_METADATA_ALGO: u32 = 0x01;
@@ -837,9 +837,9 @@ const INDEX_RETRIES_TOTAL: usize = 0;
 const INDEX_RETRIES_REMAINING: usize = 1;
 
 /// P2 byte identifying the PIN reference.
-pub const PIN_P2: u8 = 0x80;
+const PIN_P2: u8 = 0x80;
 /// P2 byte identifying the PUK reference.
-pub const PUK_P2: u8 = 0x81;
+const PUK_P2: u8 = 0x81;
 
 // ---------------------------------------------------------------------------
 // Helpers

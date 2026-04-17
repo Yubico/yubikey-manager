@@ -151,7 +151,7 @@ impl fmt::Display for Sw {
 }
 
 /// Raw status word constant for success (`0x9000`).
-pub const SW_OK: u16 = 0x9000;
+const SW_OK: u16 = 0x9000;
 const SW1_HAS_MORE_DATA: u8 = 0x61;
 
 // ---------------------------------------------------------------------------

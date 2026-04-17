@@ -39,11 +39,11 @@ use super::{Ctap2Error, build_args_map, ctap2_cmd};
 /// Config sub-command identifiers (§6.11).
 mod config_cmd {
     /// Enable enterprise attestation mode.
-    pub const ENABLE_ENTERPRISE_ATT: u8 = 0x01;
+    pub(super) const ENABLE_ENTERPRISE_ATT: u8 = 0x01;
     /// Toggle the alwaysUv (always require user verification) option.
-    pub const TOGGLE_ALWAYS_UV: u8 = 0x02;
+    pub(super) const TOGGLE_ALWAYS_UV: u8 = 0x02;
     /// Set minimum PIN length and related policies.
-    pub const SET_MIN_PIN_LENGTH: u8 = 0x03;
+    pub(super) const SET_MIN_PIN_LENGTH: u8 = 0x03;
 }
 
 /// CTAP2 Authenticator Config operations (§6.11).

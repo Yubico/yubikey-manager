@@ -131,11 +131,11 @@ pub struct CtapHidCapability(u8);
 
 impl CtapHidCapability {
     /// Device supports the WINK command.
-    pub const WINK: u8 = 0x01;
+    const WINK: u8 = 0x01;
     /// Device supports CBOR (CTAP2) commands.
     pub const CBOR: u8 = 0x04;
     /// Device does **not** support the MSG (CTAP1/U2F) command.
-    pub const NMSG: u8 = 0x08;
+    const NMSG: u8 = 0x08;
 
     /// Create from a raw capability byte.
     pub fn from_raw(raw: u8) -> Self {

@@ -41,31 +41,31 @@ use crate::webauthn::types::{PublicKeyCredentialDescriptor, PublicKeyCredentialU
 /// CredentialManagement sub-command identifiers (§6.8).
 mod cred_mgmt_cmd {
     /// Get credential storage metadata.
-    pub const GET_CREDS_METADATA: u8 = 0x01;
+    pub(super) const GET_CREDS_METADATA: u8 = 0x01;
     /// Begin enumerating relying parties.
-    pub const ENUMERATE_RPS_BEGIN: u8 = 0x02;
+    pub(super) const ENUMERATE_RPS_BEGIN: u8 = 0x02;
     /// Get next relying party in enumeration.
-    pub const ENUMERATE_RPS_NEXT: u8 = 0x03;
+    pub(super) const ENUMERATE_RPS_NEXT: u8 = 0x03;
     /// Begin enumerating credentials for a relying party.
-    pub const ENUMERATE_CREDS_BEGIN: u8 = 0x04;
+    pub(super) const ENUMERATE_CREDS_BEGIN: u8 = 0x04;
     /// Get next credential in enumeration.
-    pub const ENUMERATE_CREDS_NEXT: u8 = 0x05;
+    pub(super) const ENUMERATE_CREDS_NEXT: u8 = 0x05;
     /// Delete a resident credential.
-    pub const DELETE_CREDENTIAL: u8 = 0x06;
+    pub(super) const DELETE_CREDENTIAL: u8 = 0x06;
     /// Update user information for a credential.
-    pub const UPDATE_USER_INFO: u8 = 0x07;
+    pub(super) const UPDATE_USER_INFO: u8 = 0x07;
 }
 
 /// Response map key constants for internal parsing.
 mod cred_mgmt_result_key {
     /// Number of existing discoverable credentials stored.
-    pub const EXISTING_CRED_COUNT: i64 = 0x01;
+    pub(super) const EXISTING_CRED_COUNT: i64 = 0x01;
     /// Maximum number of additional credentials that can be stored.
-    pub const MAX_REMAINING_COUNT: i64 = 0x02;
+    pub(super) const MAX_REMAINING_COUNT: i64 = 0x02;
     /// Total number of relying parties with stored credentials.
-    pub const TOTAL_RPS: i64 = 0x05;
+    pub(super) const TOTAL_RPS: i64 = 0x05;
     /// Total number of credentials for the current relying party.
-    pub const TOTAL_CREDENTIALS: i64 = 0x09;
+    pub(super) const TOTAL_CREDENTIALS: i64 = 0x09;
 }
 
 /// CTAP2 CredentialManagement operations (§6.8).
