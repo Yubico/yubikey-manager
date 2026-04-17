@@ -31,6 +31,25 @@
 //! NFC interfaces, and managing device settings such as capabilities, flags,
 //! and lock codes. Sessions can be opened over SmartCard (CCID), OTP HID, or
 //! FIDO HID transports.
+//!
+//! The main entry point is [`ManagementSession`](crate::management::ManagementSession), which is generic over the
+//! connection type.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use yubikit::device::list_devices;
+//! use yubikit::management::{ManagementSession, UsbInterface};
+//!
+//! let devices = list_devices(UsbInterface::CCID)?;
+//! let dev = devices.first().expect("no YubiKey found");
+//! let conn = dev.open_smartcard()?;
+//! let mut session = ManagementSession::new(conn).map_err(|(e, _)| e)?;
+//!
+//! let info = session.read_device_info()?;
+//! println!("Serial: {:?}, FW: {}", info.serial, info.version);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 use std::collections::HashMap;
 use std::fmt;

@@ -25,6 +25,31 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! YubiHSM Auth application for symmetric key storage and derivation.
+//!
+//! This module manages credentials on the YubiHSM Auth applet, which stores
+//! symmetric keys used for establishing secure sessions with a YubiHSM 2.
+//! The main entry point is [`HsmAuthSession`](crate::hsmauth::HsmAuthSession), which wraps a
+//! [`SmartCardConnection`](crate::smartcard::SmartCardConnection).
+//!
+//! # Example
+//!
+//! ```no_run
+//! use yubikit::device::list_devices;
+//! use yubikit::management::UsbInterface;
+//! use yubikit::hsmauth::HsmAuthSession;
+//!
+//! let devices = list_devices(UsbInterface::CCID)?;
+//! let dev = devices.first().expect("no YubiKey found");
+//! let conn = dev.open_smartcard()?;
+//! let mut session = HsmAuthSession::new(conn).map_err(|(e, _)| e)?;
+//!
+//! for cred in session.list_credentials()? {
+//!     println!("{}: {:?}", cred.label, cred.algorithm);
+//! }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+
 use std::fmt;
 
 use thiserror::Error;

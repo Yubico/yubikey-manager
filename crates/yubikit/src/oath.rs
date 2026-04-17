@@ -25,7 +25,30 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! OATH (TOTP/HOTP) credential management for YubiKeys using the YKOATH protocol over CCID.
+//! OATH (TOTP/HOTP) credential management for YubiKeys.
+//!
+//! This module implements the YKOATH protocol for managing OATH credentials
+//! on a YubiKey — adding, listing, calculating, and deleting TOTP and HOTP
+//! accounts. The main entry point is [`OathSession`](crate::oath::OathSession), which wraps a
+//! [`SmartCardConnection`](crate::smartcard::SmartCardConnection).
+//!
+//! # Example
+//!
+//! ```no_run
+//! use yubikit::device::list_devices;
+//! use yubikit::management::UsbInterface;
+//! use yubikit::oath::OathSession;
+//!
+//! let devices = list_devices(UsbInterface::CCID)?;
+//! let dev = devices.first().expect("no YubiKey found");
+//! let conn = dev.open_smartcard()?;
+//! let mut session = OathSession::new(conn).map_err(|(e, _)| e)?;
+//!
+//! for cred in session.list_credentials()? {
+//!     println!("{}: {:?}", cred.id.name, cred.oath_type);
+//! }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 use hmac::{Hmac, Mac};
 use sha1::Sha1;

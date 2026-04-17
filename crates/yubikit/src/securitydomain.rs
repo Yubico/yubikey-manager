@@ -25,8 +25,29 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! YubiKey Security Domain operations — managing SCP keys, certificates, and
-//! secure channel configuration.
+//! YubiKey Security Domain operations.
+//!
+//! Manages SCP (Secure Channel Protocol) keys, certificates, and secure
+//! channel configuration on the YubiKey's Security Domain applet. The main
+//! entry point is [`SecurityDomainSession`](crate::securitydomain::SecurityDomainSession), which wraps a
+//! [`SmartCardConnection`](crate::smartcard::SmartCardConnection).
+//!
+//! # Example
+//!
+//! ```no_run
+//! use yubikit::device::list_devices;
+//! use yubikit::management::UsbInterface;
+//! use yubikit::securitydomain::SecurityDomainSession;
+//!
+//! let devices = list_devices(UsbInterface::CCID)?;
+//! let dev = devices.first().expect("no YubiKey found");
+//! let conn = dev.open_smartcard()?;
+//! let mut session = SecurityDomainSession::new(conn).map_err(|(e, _)| e)?;
+//!
+//! let key_info = session.get_key_information()?;
+//! println!("Keys: {key_info:?}");
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 use std::collections::HashMap;
 use std::fmt;

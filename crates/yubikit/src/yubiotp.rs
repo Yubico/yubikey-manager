@@ -29,6 +29,27 @@
 //!
 //! Provides configuration and challenge-response for the two OTP slots on a
 //! YubiKey, accessible over both SmartCard (CCID) and HID OTP transports.
+//!
+//! The main entry point is [`YubiOtpSession`](crate::yubiotp::YubiOtpSession), which can be opened over
+//! either transport. Use [`SlotConfiguration`](crate::yubiotp::SlotConfiguration) to program OTP slot behavior.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use yubikit::device::list_devices;
+//! use yubikit::management::UsbInterface;
+//! use yubikit::yubiotp::{YubiOtpSession, Slot};
+//!
+//! // Over SmartCard (CCID)
+//! let devices = list_devices(UsbInterface::CCID)?;
+//! let dev = devices.first().expect("no YubiKey found");
+//! let conn = dev.open_smartcard()?;
+//! let mut session = YubiOtpSession::new(conn).map_err(|(e, _)| e)?;
+//!
+//! let status = session.get_config_state()?;
+//! println!("Slot 1 configured: {}", status.is_configured(Slot::One)?);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 use sha1::{Digest, Sha1};
 use thiserror::Error;

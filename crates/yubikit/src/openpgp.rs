@@ -31,9 +31,26 @@
 //! managing keys, PINs, certificates, and performing cryptographic operations
 //! (signing, decryption, authentication) via the YubiKey's OpenPGP applet.
 //!
-//! The main entry point is [`OpenPgpSession`](crate::openpgp::OpenPgpSession), which wraps a smart card
-//! connection and exposes high-level operations such as key generation,
-//! key import, PIN management, and KDF configuration.
+//! The main entry point is [`OpenPgpSession`](crate::openpgp::OpenPgpSession),
+//! which wraps a smart card connection and exposes high-level operations such
+//! as key generation, key import, PIN management, and KDF configuration.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use yubikit::device::list_devices;
+//! use yubikit::management::UsbInterface;
+//! use yubikit::openpgp::OpenPgpSession;
+//!
+//! let devices = list_devices(UsbInterface::CCID)?;
+//! let dev = devices.first().expect("no YubiKey found");
+//! let conn = dev.open_smartcard()?;
+//! let mut session = OpenPgpSession::new(conn).map_err(|(e, _)| e)?;
+//!
+//! let app_data = session.get_application_related_data()?;
+//! println!("OpenPGP version: {}", app_data.version);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 use std::collections::HashMap;
 use std::fmt;

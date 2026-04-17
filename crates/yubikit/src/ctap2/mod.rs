@@ -27,11 +27,30 @@
 
 //! CTAP2 protocol session and PIN/UV management.
 //!
-//! Provides [`Ctap2Session`](crate::ctap2::Ctap2Session), which wraps a [`CtapSession`](crate::ctap::CtapSession) and implements
-//! CTAP2-specific command framing and response parsing.
+//! Provides [`Ctap2Session`](crate::ctap2::Ctap2Session), which wraps a
+//! [`CtapSession`](crate::ctap::CtapSession) and implements CTAP2-specific
+//! command framing and response parsing.
 //!
-//! Also provides [`ClientPin`](crate::ctap2::ClientPin) for PIN/UV token operations, and
-//! [`PinProtocol`](crate::ctap2::PinProtocol) (V1/V2) for the underlying cryptographic operations.
+//! Also provides [`ClientPin`](crate::ctap2::ClientPin) for PIN/UV token
+//! operations, and [`PinProtocol`](crate::ctap2::PinProtocol) (V1/V2) for
+//! the underlying cryptographic operations.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use yubikit::ctap::CtapSession;
+//! use yubikit::ctap2::Ctap2Session;
+//! use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
+//!
+//! let devices = list_fido_devices()?;
+//! let dev = devices.first().expect("no FIDO device found");
+//! let conn = HidFidoConnection::open(dev)?;
+//! let ctap = CtapSession::new_fido(conn).map_err(|(e, _)| e)?;
+//! let session = Ctap2Session::new(ctap).map_err(|(e, _)| e)?;
+//!
+//! println!("Authenticator: {:?}", session.info().versions);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 mod bio_enrollment;
 mod client_pin;

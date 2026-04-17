@@ -25,6 +25,30 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! PIV (Personal Identity Verification) smart card application.
+//!
+//! This module implements the PIV standard (NIST SP 800-73) for managing
+//! certificates, keys, and PINs on a YubiKey. The main entry point is
+//! [`PivSession`](crate::piv::PivSession), which wraps a
+//! [`SmartCardConnection`](crate::smartcard::SmartCardConnection).
+//!
+//! # Example
+//!
+//! ```no_run
+//! use yubikit::device::list_devices;
+//! use yubikit::management::UsbInterface;
+//! use yubikit::piv::{PivSession, Slot};
+//!
+//! let devices = list_devices(UsbInterface::CCID)?;
+//! let dev = devices.first().expect("no YubiKey found");
+//! let conn = dev.open_smartcard()?;
+//! let mut session = PivSession::new(conn).map_err(|(e, _)| e)?;
+//!
+//! let cert = session.get_certificate(Slot::Authentication)?;
+//! println!("Certificate: {} bytes", cert.len());
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+
 use std::cell::RefCell;
 use std::fmt;
 use std::io::{Read, Write};
