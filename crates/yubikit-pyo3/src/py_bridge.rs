@@ -604,7 +604,9 @@ pub fn smartcard_err(e: SmartCardError) -> PyErr {
 ///
 /// Inspects the Python object's class name to determine whether to use SCP03
 /// or SCP11, then extracts the necessary fields and calls the Rust init method.
-pub fn scp_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp::ScpKeyParams> {
+pub fn scp_key_params_from_py(
+    params: &Bound<'_, PyAny>,
+) -> PyResult<yubikit::smartcard::ScpKeyParams> {
     let class_name = params.get_type().name()?.to_string();
 
     if class_name.contains("Scp03KeyParams") {
@@ -618,7 +620,9 @@ pub fn scp_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::sc
     }
 }
 
-fn scp03_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp::ScpKeyParams> {
+fn scp03_key_params_from_py(
+    params: &Bound<'_, PyAny>,
+) -> PyResult<yubikit::smartcard::ScpKeyParams> {
     let key_ref = params.getattr("ref")?;
     let kvn: u8 = key_ref.getattr("kvn")?.extract()?;
     let keys = params.getattr("keys")?;
@@ -653,7 +657,7 @@ fn scp03_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp:
         })
         .transpose()?;
 
-    Ok(yubikit::scp::ScpKeyParams::Scp03 {
+    Ok(yubikit::smartcard::ScpKeyParams::Scp03 {
         kvn,
         key_enc,
         key_mac,
@@ -661,7 +665,9 @@ fn scp03_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp:
     })
 }
 
-fn scp11_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp::ScpKeyParams> {
+fn scp11_key_params_from_py(
+    params: &Bound<'_, PyAny>,
+) -> PyResult<yubikit::smartcard::ScpKeyParams> {
     let key_ref = params.getattr("ref")?;
     let kid: u8 = key_ref.getattr("kid")?.extract()?;
     let kvn: u8 = key_ref.getattr("kvn")?.extract()?;
@@ -716,7 +722,7 @@ fn scp11_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp:
             let sk_arr: [u8; 32] = sk.as_slice().try_into().map_err(|_| {
                 pyo3::exceptions::PyValueError::new_err("sk_oce_ecka must be 32 bytes")
             })?;
-            Ok(yubikit::scp::ScpKeyParams::Scp11ac {
+            Ok(yubikit::smartcard::ScpKeyParams::Scp11ac {
                 kid,
                 kvn,
                 pk_sd_ecka: pk_bytes,
@@ -725,7 +731,7 @@ fn scp11_key_params_from_py(params: &Bound<'_, PyAny>) -> PyResult<yubikit::scp:
                 oce_ref,
             })
         }
-        None => Ok(yubikit::scp::ScpKeyParams::Scp11b {
+        None => Ok(yubikit::smartcard::ScpKeyParams::Scp11b {
             kid,
             kvn,
             pk_sd_ecka: pk_bytes,

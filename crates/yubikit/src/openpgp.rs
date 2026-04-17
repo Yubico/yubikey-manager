@@ -1583,7 +1583,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     /// On error, returns the connection so the caller can recover it.
     pub fn new_with_scp(
         connection: C,
-        scp_key_params: &crate::scp::ScpKeyParams,
+        scp_key_params: &crate::smartcard::ScpKeyParams,
     ) -> Result<Self, (OpenPgpError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
 

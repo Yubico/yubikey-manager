@@ -1084,7 +1084,7 @@ impl<C: SmartCardConnection + 'static> ManagementSession<C> {
     /// On error, returns the connection so the caller can recover it.
     pub fn new_with_scp(
         connection: C,
-        scp_key_params: &crate::scp::ScpKeyParams,
+        scp_key_params: &crate::smartcard::ScpKeyParams,
     ) -> Result<Self, (ManagementError<SmartCardError>, C)> {
         CcidManagement::open_with_scp(connection, scp_key_params)
             .map(|inner| Self::from_inner(Box::new(inner)))
@@ -1149,7 +1149,7 @@ impl<C: SmartCardConnection> CcidManagement<C> {
 
     fn open_with_scp(
         connection: C,
-        scp_key_params: &crate::scp::ScpKeyParams,
+        scp_key_params: &crate::smartcard::ScpKeyParams,
     ) -> Result<Self, (SmartCardError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
         let select_bytes = match protocol.select(Aid::MANAGEMENT) {

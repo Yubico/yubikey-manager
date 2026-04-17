@@ -134,7 +134,7 @@ pub fn resolve_scp(
 /// The AID must already be selected before calling this.
 /// Convert an `ScpConfig` into `ScpKeyParams`, returning `None` for
 /// `ScpConfig::None`.
-pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit::scp::ScpKeyParams> {
+pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit::smartcard::ScpKeyParams> {
     match config {
         ScpConfig::None => None,
         ScpConfig::Scp03 {
@@ -142,7 +142,7 @@ pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit::scp::ScpKeyParam
             key_enc,
             key_mac,
             key_dek,
-        } => Some(yubikit::scp::ScpKeyParams::Scp03 {
+        } => Some(yubikit::smartcard::ScpKeyParams::Scp03 {
             kvn: *kvn,
             key_enc: key_enc
                 .as_slice()
@@ -160,7 +160,7 @@ pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit::scp::ScpKeyParam
             kid,
             kvn,
             pk_sd_ecka,
-        } => Some(yubikit::scp::ScpKeyParams::Scp11b {
+        } => Some(yubikit::smartcard::ScpKeyParams::Scp11b {
             kid: *kid,
             kvn: *kvn,
             pk_sd_ecka: pk_sd_ecka.clone(),
@@ -172,7 +172,7 @@ pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit::scp::ScpKeyParam
             sk_oce_ecka,
             certificates,
             oce_ref,
-        } => Some(yubikit::scp::ScpKeyParams::Scp11ac {
+        } => Some(yubikit::smartcard::ScpKeyParams::Scp11ac {
             kid: *kid,
             kvn: *kvn,
             pk_sd_ecka: pk_sd_ecka.clone(),

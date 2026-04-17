@@ -312,8 +312,8 @@ macro_rules! require_version {
 }
 
 /// Build SCP11b key params for test helper usage.
-fn make_scp_key_params(kid: u8, kvn: u8, pk: &[u8]) -> yubikit::scp::ScpKeyParams {
-    yubikit::scp::ScpKeyParams::Scp11b {
+fn make_scp_key_params(kid: u8, kvn: u8, pk: &[u8]) -> yubikit::smartcard::ScpKeyParams {
+    yubikit::smartcard::ScpKeyParams::Scp11b {
         kid,
         kvn,
         pk_sd_ecka: pk.to_vec(),
@@ -1471,8 +1471,8 @@ mod hsmauth {
 
 mod securitydomain {
     use super::*;
-    use yubikit::scp::ScpKeyParams;
     use yubikit::securitydomain::{Curve, KeyRef, ScpKid, SecurityDomainSession, StaticKeys};
+    use yubikit::smartcard::ScpKeyParams;
 
     /// Path to SCP test files relative to the workspace root.
     fn scp_test_file(name: &str) -> std::path::PathBuf {

@@ -1224,7 +1224,7 @@ impl<C: SmartCardConnection + Send + 'static> YubiOtpSession<C> {
     /// On error, returns the connection so the caller can recover it.
     pub fn new_with_scp(
         connection: C,
-        scp_key_params: &crate::scp::ScpKeyParams,
+        scp_key_params: &crate::smartcard::ScpKeyParams,
     ) -> Result<Self, (YubiOtpError<SmartCardError>, C)> {
         CcidYubiOtp::open_with_scp(connection, scp_key_params)
             .map(|inner| Self::from_inner(Box::new(inner)))
@@ -1264,7 +1264,7 @@ impl<C: SmartCardConnection> CcidYubiOtp<C> {
 
     fn open_with_scp(
         connection: C,
-        scp_key_params: &crate::scp::ScpKeyParams,
+        scp_key_params: &crate::smartcard::ScpKeyParams,
     ) -> Result<Self, (YubiOtpError<SmartCardError>, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
         let status = match protocol.select(Aid::OTP) {

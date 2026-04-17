@@ -559,7 +559,7 @@ impl<C: SmartCardConnection> OathSession<C> {
     /// On error, returns the connection so the caller can recover it.
     pub fn new_with_scp(
         connection: C,
-        scp_key_params: &crate::scp::ScpKeyParams,
+        scp_key_params: &crate::smartcard::ScpKeyParams,
     ) -> Result<Self, (SmartCardError, C)> {
         let mut protocol =
             SmartCardProtocol::new(connection).with_ins_send_remaining(INS_SEND_REMAINING);

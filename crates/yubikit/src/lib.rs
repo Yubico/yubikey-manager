@@ -97,8 +97,7 @@
 //!
 //! ## Transport and protocol infrastructure
 //! - [`transport`] — USB HID (FIDO and OTP) and PC/SC transport implementations
-//! - [`smartcard`] — ISO 7816 SmartCard / CCID connection and APDU handling
-//! - [`scp`] — SCP03 secure channel parameters
+//! - [`smartcard`] — ISO 7816 SmartCard / CCID connection, APDU handling, and SCP03 secure channel
 //! - [`otp`] — OTP HID framing protocol
 //! - [`core`] — Shared types: [`core::Version`], [`core::Connection`] trait
 //! - [`cbor`] — CBOR encoding/decoding helpers for CTAP2
@@ -130,11 +129,9 @@ pub mod openpgp;
 pub mod otp;
 /// PIV (Personal Identity Verification) smart card application.
 pub mod piv;
-/// Secure Channel Protocol (SCP) for encrypted communication.
-pub mod scp;
 /// Security Domain operations for managing SCP keys and certificates.
 pub mod securitydomain;
-/// Smart card communication primitives — APDUs, status words, ISO 7816-4.
+/// Smart card communication primitives — APDUs, status words, ISO 7816-4, and SCP.
 pub mod smartcard;
 /// TLV (Tag-Length-Value) encoding and decoding.
 pub mod tlv;

@@ -1108,7 +1108,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     /// On error, returns the connection so the caller can recover it.
     pub fn new_with_scp(
         connection: C,
-        scp_key_params: &crate::scp::ScpKeyParams,
+        scp_key_params: &crate::smartcard::ScpKeyParams,
     ) -> Result<Self, (PivError, C)> {
         let mut protocol = SmartCardProtocol::new(connection);
         if let Err(e) = protocol.select(Aid::PIV) {
