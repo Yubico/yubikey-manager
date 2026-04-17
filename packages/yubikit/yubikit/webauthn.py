@@ -38,8 +38,8 @@ from __future__ import annotations
 import abc
 import logging
 
-from _yubikit_native.sessions import WebAuthnCcidClient as _WebAuthnCcidClient
-from _yubikit_native.sessions import WebAuthnClient as _WebAuthnClient
+from _yubikit_native.sessions import WebAuthnClientCcid as _WebAuthnClientCcid
+from _yubikit_native.sessions import WebAuthnClientFido as _WebAuthnClientFido
 
 from .core import Closable
 from .core.fido import FidoConnection
@@ -136,16 +136,18 @@ class WebAuthnClient(Closable):
         scp_key_params: ScpKeyParams | None = None,
     ) -> None:
         if isinstance(connection, SmartCardConnection):
-            self._native: _WebAuthnClient | _WebAuthnCcidClient = _WebAuthnCcidClient(
-                connection,
-                user_interaction,
-                client_data_collector,
-                scp_key_params=scp_key_params,
+            self._native: _WebAuthnClientFido | _WebAuthnClientCcid = (
+                _WebAuthnClientCcid(
+                    connection,
+                    user_interaction,
+                    client_data_collector,
+                    scp_key_params=scp_key_params,
+                )
             )
         elif isinstance(connection, FidoConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            self._native = _WebAuthnClient(
+            self._native = _WebAuthnClientFido(
                 connection,
                 user_interaction,
                 client_data_collector,

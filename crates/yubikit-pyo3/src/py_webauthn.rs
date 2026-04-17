@@ -116,17 +116,17 @@ impl ClientDataCollector for PyClientDataCollector {
 // WebAuthnClient for FIDO HID
 // ---------------------------------------------------------------------------
 
-type FidoWebAuthnClient =
+type FidoWebAuthnClientInner =
     WebAuthnClient<BoxedFidoConnection, PyUserInteraction, PyClientDataCollector>;
 
-#[pyclass(name = "WebAuthnClient", unsendable)]
-pub struct PyWebAuthnClient {
-    client: Option<FidoWebAuthnClient>,
+#[pyclass(name = "WebAuthnClientFido", unsendable)]
+pub struct PyWebAuthnClientFido {
+    client: Option<FidoWebAuthnClientInner>,
     py_connection: PyObject,
 }
 
 #[pymethods]
-impl PyWebAuthnClient {
+impl PyWebAuthnClientFido {
     #[new]
     fn new(
         connection: &Bound<'_, PyAny>,
@@ -196,17 +196,17 @@ impl PyWebAuthnClient {
     }
 }
 
-type SmartCardWebAuthnClient =
+type SmartCardWebAuthnClientInner =
     WebAuthnClient<BoxedSmartCardConnection, PyUserInteraction, PyClientDataCollector>;
 
-#[pyclass(name = "WebAuthnCcidClient", unsendable)]
-pub struct PyWebAuthnCcidClient {
-    client: Option<SmartCardWebAuthnClient>,
+#[pyclass(name = "WebAuthnClientCcid", unsendable)]
+pub struct PyWebAuthnClientCcid {
+    client: Option<SmartCardWebAuthnClientInner>,
     py_connection: PyObject,
 }
 
 #[pymethods]
-impl PyWebAuthnCcidClient {
+impl PyWebAuthnClientCcid {
     #[new]
     #[pyo3(signature = (connection, user_interaction, client_data_collector, scp_key_params=None))]
     fn new(

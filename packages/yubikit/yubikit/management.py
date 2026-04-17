@@ -33,10 +33,12 @@ from enum import IntEnum, IntFlag, unique
 from typing import Any, Mapping
 
 from _yubikit_native.sessions import (
-    ManagementFidoSession as _NativeManagementFidoSession,
+    ManagementSessionCcid as _NativeManagementSessionCcid,
 )
-from _yubikit_native.sessions import ManagementOtpSession as _NativeManagementOtpSession
-from _yubikit_native.sessions import ManagementSession as _NativeManagementSession
+from _yubikit_native.sessions import (
+    ManagementSessionFido as _NativeManagementSessionFido,
+)
+from _yubikit_native.sessions import ManagementSessionOtp as _NativeManagementSessionOtp
 
 from .core import TRANSPORT, USB_INTERFACE, Session, Version, require_version
 from .core.fido import FidoConnection
@@ -379,16 +381,16 @@ class ManagementSession(Session):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
             native: (
-                _NativeManagementOtpSession
-                | _NativeManagementSession
-                | _NativeManagementFidoSession
-            ) = _NativeManagementOtpSession(connection)  # type: ignore[arg-type]
+                _NativeManagementSessionOtp
+                | _NativeManagementSessionCcid
+                | _NativeManagementSessionFido
+            ) = _NativeManagementSessionOtp(connection)  # type: ignore[arg-type]
         elif isinstance(connection, SmartCardConnection):
-            native = _NativeManagementSession(connection, scp_key_params)
+            native = _NativeManagementSessionCcid(connection, scp_key_params)
         elif isinstance(connection, FidoConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            native = _NativeManagementFidoSession(connection)
+            native = _NativeManagementSessionFido(connection)
         else:
             raise TypeError("Unsupported connection type")
 

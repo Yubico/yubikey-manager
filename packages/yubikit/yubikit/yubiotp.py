@@ -35,10 +35,10 @@ from threading import Event
 from typing import Any, Callable, TypeVar
 
 from _yubikit_native.sessions import (
-    YubiOtpOtpSession as _NativeYubiOtpOtpSession,
+    YubiOtpSessionCcid as _NativeYubiOtpSessionCcid,
 )
 from _yubikit_native.sessions import (
-    YubiOtpSession as _NativeYubiOtpSession,
+    YubiOtpSessionOtp as _NativeYubiOtpSessionOtp,
 )
 
 from .core import (
@@ -645,11 +645,11 @@ class YubiOtpSession(Session):
         if isinstance(connection, OtpConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            native: _NativeYubiOtpOtpSession | _NativeYubiOtpSession = (
-                _NativeYubiOtpOtpSession(connection)  # type: ignore[arg-type]
+            native: _NativeYubiOtpSessionOtp | _NativeYubiOtpSessionCcid = (
+                _NativeYubiOtpSessionOtp(connection)  # type: ignore[arg-type]
             )
         elif isinstance(connection, SmartCardConnection):
-            native = _NativeYubiOtpSession(connection, scp_key_params)
+            native = _NativeYubiOtpSessionCcid(connection, scp_key_params)
         else:
             raise TypeError("Unsupported connection type")
 
@@ -792,7 +792,7 @@ class YubiOtpSession(Session):
         require_version(self.version, (2, 2, 0))
         slot = SLOT(slot)
         logger.debug(f"Calculating response for slot {slot}")
-        if isinstance(self._native, _NativeYubiOtpOtpSession):
+        if isinstance(self._native, _NativeYubiOtpSessionOtp):
             return bytes(
                 self._native.calculate_hmac_sha1(
                     int(slot), challenge, event, on_keepalive

@@ -70,13 +70,13 @@ pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObje
     Ok(dict.into())
 }
 
-#[pyclass(name = "ManagementSession", unsendable)]
-pub struct ManagementCcidSession {
+#[pyclass(name = "ManagementSessionCcid", unsendable)]
+pub struct ManagementSessionCcid {
     inner: Option<ManagementSession<BoxedSmartCardConnection>>,
     py_connection: PyObject,
 }
 
-impl ManagementCcidSession {
+impl ManagementSessionCcid {
     fn session(&self) -> PyResult<&ManagementSession<BoxedSmartCardConnection>> {
         self.inner
             .as_ref()
@@ -91,7 +91,7 @@ impl ManagementCcidSession {
 }
 
 #[pymethods]
-impl ManagementCcidSession {
+impl ManagementSessionCcid {
     #[new]
     #[pyo3(signature = (connection, scp_key_params=None))]
     fn new(
@@ -205,13 +205,13 @@ impl ManagementCcidSession {
     }
 }
 
-#[pyclass(name = "ManagementOtpSession", unsendable)]
-pub struct ManagementOtpSession {
+#[pyclass(name = "ManagementSessionOtp", unsendable)]
+pub struct ManagementSessionOtp {
     inner: Option<ManagementSession<BoxedOtpConnection>>,
     py_connection: PyObject,
 }
 
-impl ManagementOtpSession {
+impl ManagementSessionOtp {
     fn session(&self) -> PyResult<&ManagementSession<BoxedOtpConnection>> {
         self.inner
             .as_ref()
@@ -226,7 +226,7 @@ impl ManagementOtpSession {
 }
 
 #[pymethods]
-impl ManagementOtpSession {
+impl ManagementSessionOtp {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();
@@ -318,13 +318,13 @@ impl ManagementOtpSession {
     }
 }
 
-#[pyclass(name = "ManagementFidoSession", unsendable)]
-pub struct ManagementFidoSession {
+#[pyclass(name = "ManagementSessionFido", unsendable)]
+pub struct ManagementSessionFido {
     inner: Option<ManagementSession<BoxedFidoConnection>>,
     py_connection: PyObject,
 }
 
-impl ManagementFidoSession {
+impl ManagementSessionFido {
     fn session(&self) -> PyResult<&ManagementSession<BoxedFidoConnection>> {
         self.inner
             .as_ref()
@@ -339,7 +339,7 @@ impl ManagementFidoSession {
 }
 
 #[pymethods]
-impl ManagementFidoSession {
+impl ManagementSessionFido {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();

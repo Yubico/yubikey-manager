@@ -53,13 +53,13 @@ fn parse_ndef_type(ndef_type: u8) -> PyResult<NdefType> {
 // SmartCard-backed YubiOTP session
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "YubiOtpSession", unsendable)]
-pub struct PyYubiOtpSession {
+#[pyclass(name = "YubiOtpSessionCcid", unsendable)]
+pub struct PyYubiOtpSessionCcid {
     session: Option<YubiOtpSession<BoxedSmartCardConnection>>,
     py_connection: PyObject,
 }
 
-impl PyYubiOtpSession {
+impl PyYubiOtpSessionCcid {
     fn session(&self) -> PyResult<&YubiOtpSession<BoxedSmartCardConnection>> {
         self.session
             .as_ref()
@@ -74,7 +74,7 @@ impl PyYubiOtpSession {
 }
 
 #[pymethods]
-impl PyYubiOtpSession {
+impl PyYubiOtpSessionCcid {
     #[new]
     #[pyo3(signature = (connection, scp_key_params=None))]
     fn new(
@@ -210,13 +210,13 @@ impl PyYubiOtpSession {
 // HID/OTP-backed YubiOTP session
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "YubiOtpOtpSession", unsendable)]
-pub struct PyYubiOtpOtpSession {
+#[pyclass(name = "YubiOtpSessionOtp", unsendable)]
+pub struct PyYubiOtpSessionOtp {
     session: Option<YubiOtpSession<BoxedOtpConnection>>,
     py_connection: PyObject,
 }
 
-impl PyYubiOtpOtpSession {
+impl PyYubiOtpSessionOtp {
     fn session(&self) -> PyResult<&YubiOtpSession<BoxedOtpConnection>> {
         self.session
             .as_ref()
@@ -231,7 +231,7 @@ impl PyYubiOtpOtpSession {
 }
 
 #[pymethods]
-impl PyYubiOtpOtpSession {
+impl PyYubiOtpSessionOtp {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();

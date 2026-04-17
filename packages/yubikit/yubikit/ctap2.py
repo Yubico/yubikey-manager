@@ -39,19 +39,21 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from _yubikit_native.sessions import BioEnrollment as _BioEnrollment
+from _yubikit_native.sessions import BioEnrollmentCcid as _BioEnrollmentCcid
 from _yubikit_native.sessions import BioEnrollmentFido as _BioEnrollmentFido
-from _yubikit_native.sessions import ClientPin as _ClientPin
+from _yubikit_native.sessions import ClientPinCcid as _ClientPinCcid
 from _yubikit_native.sessions import ClientPinFido as _ClientPinFido
-from _yubikit_native.sessions import Config as _Config
+from _yubikit_native.sessions import ConfigCcid as _ConfigCcid
 from _yubikit_native.sessions import ConfigFido as _ConfigFido
-from _yubikit_native.sessions import CredentialManagement as _CredentialManagement
+from _yubikit_native.sessions import (
+    CredentialManagementCcid as _CredentialManagementCcid,
+)
 from _yubikit_native.sessions import (
     CredentialManagementFido as _CredentialManagementFido,
 )
-from _yubikit_native.sessions import Ctap2FidoSession as _Ctap2FidoSession
-from _yubikit_native.sessions import Ctap2Session as _Ctap2Session
-from _yubikit_native.sessions import LargeBlobs as _LargeBlobs
+from _yubikit_native.sessions import Ctap2SessionCcid as _Ctap2SessionCcid
+from _yubikit_native.sessions import Ctap2SessionFido as _Ctap2SessionFido
+from _yubikit_native.sessions import LargeBlobsCcid as _LargeBlobsCcid
 from _yubikit_native.sessions import LargeBlobsFido as _LargeBlobsFido
 from _yubikit_native.sessions import PinProtocol as _PinProtocol
 
@@ -90,13 +92,13 @@ class Ctap2Session(Session):
         scp_key_params: ScpKeyParams | None = None,
     ) -> None:
         if isinstance(connection, SmartCardConnection):
-            self._native: _Ctap2Session | _Ctap2FidoSession = _Ctap2Session(
+            self._native: _Ctap2SessionCcid | _Ctap2SessionFido = _Ctap2SessionCcid(
                 connection, scp_key_params
             )
         elif isinstance(connection, FidoConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
-            self._native = _Ctap2FidoSession(connection)
+            self._native = _Ctap2SessionFido(connection)
         else:
             raise TypeError("Unsupported connection type")
 
@@ -156,20 +158,22 @@ class ClientPin(Closable):
         self._session = session
         proto = protocol._native if protocol else None
         native = session._native
-        if isinstance(native, _Ctap2Session):
-            self._native: _ClientPin | _ClientPinFido = _ClientPin(native, proto)
+        if isinstance(native, _Ctap2SessionCcid):
+            self._native: _ClientPinCcid | _ClientPinFido = _ClientPinCcid(
+                native, proto
+            )
         else:
             self._native = _ClientPinFido(native, proto)
 
     def close(self) -> None:
         """Restore the session so it can be reused."""
         native_session = self._session._native
-        if isinstance(self._native, _ClientPin) and isinstance(
-            native_session, _Ctap2Session
+        if isinstance(self._native, _ClientPinCcid) and isinstance(
+            native_session, _Ctap2SessionCcid
         ):
             self._native.close(native_session)
         elif isinstance(self._native, _ClientPinFido) and isinstance(
-            native_session, _Ctap2FidoSession
+            native_session, _Ctap2SessionFido
         ):
             self._native.close(native_session)
 
@@ -232,9 +236,9 @@ class CredentialManagement(Closable):
     ) -> None:
         self._session = session
         native = session._native
-        if isinstance(native, _Ctap2Session):
-            self._native: _CredentialManagement | _CredentialManagementFido = (
-                _CredentialManagement(native, protocol._native, pin_token)
+        if isinstance(native, _Ctap2SessionCcid):
+            self._native: _CredentialManagementCcid | _CredentialManagementFido = (
+                _CredentialManagementCcid(native, protocol._native, pin_token)
             )
         else:
             self._native = _CredentialManagementFido(
@@ -244,12 +248,12 @@ class CredentialManagement(Closable):
     def close(self) -> None:
         """Restore the session so it can be reused."""
         native_session = self._session._native
-        if isinstance(self._native, _CredentialManagement) and isinstance(
-            native_session, _Ctap2Session
+        if isinstance(self._native, _CredentialManagementCcid) and isinstance(
+            native_session, _Ctap2SessionCcid
         ):
             self._native.close(native_session)
         elif isinstance(self._native, _CredentialManagementFido) and isinstance(
-            native_session, _Ctap2FidoSession
+            native_session, _Ctap2SessionFido
         ):
             self._native.close(native_session)
 
@@ -294,8 +298,8 @@ class Config(Closable):
     ) -> None:
         self._session = session
         native = session._native
-        if isinstance(native, _Ctap2Session):
-            self._native: _Config | _ConfigFido = _Config(
+        if isinstance(native, _Ctap2SessionCcid):
+            self._native: _ConfigCcid | _ConfigFido = _ConfigCcid(
                 native, protocol._native, pin_token
             )
         else:
@@ -304,12 +308,12 @@ class Config(Closable):
     def close(self) -> None:
         """Restore the session so it can be reused."""
         native_session = self._session._native
-        if isinstance(self._native, _Config) and isinstance(
-            native_session, _Ctap2Session
+        if isinstance(self._native, _ConfigCcid) and isinstance(
+            native_session, _Ctap2SessionCcid
         ):
             self._native.close(native_session)
         elif isinstance(self._native, _ConfigFido) and isinstance(
-            native_session, _Ctap2FidoSession
+            native_session, _Ctap2SessionFido
         ):
             self._native.close(native_session)
 
@@ -349,8 +353,8 @@ class BioEnrollment(Closable):
     ) -> None:
         self._session = session
         native = session._native
-        if isinstance(native, _Ctap2Session):
-            self._native: _BioEnrollment | _BioEnrollmentFido = _BioEnrollment(
+        if isinstance(native, _Ctap2SessionCcid):
+            self._native: _BioEnrollmentCcid | _BioEnrollmentFido = _BioEnrollmentCcid(
                 native, protocol._native, pin_token
             )
         else:
@@ -359,12 +363,12 @@ class BioEnrollment(Closable):
     def close(self) -> None:
         """Restore the session so it can be reused."""
         native_session = self._session._native
-        if isinstance(self._native, _BioEnrollment) and isinstance(
-            native_session, _Ctap2Session
+        if isinstance(self._native, _BioEnrollmentCcid) and isinstance(
+            native_session, _Ctap2SessionCcid
         ):
             self._native.close(native_session)
         elif isinstance(self._native, _BioEnrollmentFido) and isinstance(
-            native_session, _Ctap2FidoSession
+            native_session, _Ctap2SessionFido
         ):
             self._native.close(native_session)
 
@@ -424,8 +428,8 @@ class LargeBlobs(Closable):
     ) -> None:
         self._session = session
         native = session._native
-        if isinstance(native, _Ctap2Session):
-            self._native: _LargeBlobs | _LargeBlobsFido = _LargeBlobs(
+        if isinstance(native, _Ctap2SessionCcid):
+            self._native: _LargeBlobsCcid | _LargeBlobsFido = _LargeBlobsCcid(
                 native, protocol._native, pin_token
             )
         else:
@@ -434,12 +438,12 @@ class LargeBlobs(Closable):
     def close(self) -> None:
         """Restore the session so it can be reused."""
         native_session = self._session._native
-        if isinstance(self._native, _LargeBlobs) and isinstance(
-            native_session, _Ctap2Session
+        if isinstance(self._native, _LargeBlobsCcid) and isinstance(
+            native_session, _Ctap2SessionCcid
         ):
             self._native.close(native_session)
         elif isinstance(self._native, _LargeBlobsFido) and isinstance(
-            native_session, _Ctap2FidoSession
+            native_session, _Ctap2SessionFido
         ):
             self._native.close(native_session)
 

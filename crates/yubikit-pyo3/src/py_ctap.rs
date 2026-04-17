@@ -183,13 +183,13 @@ fn cbor_value_to_py(py: Python<'_>, value: &cbor::Value) -> PyResult<PyObject> {
 // SmartCard-backed Ctap2Session
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "Ctap2Session", unsendable)]
-pub struct PyCtap2Session {
+#[pyclass(name = "Ctap2SessionCcid", unsendable)]
+pub struct PyCtap2SessionCcid {
     session: Option<Ctap2Session<BoxedSmartCardConnection>>,
     py_connection: PyObject,
 }
 
-impl PyCtap2Session {
+impl PyCtap2SessionCcid {
     fn get_session(&self) -> PyResult<&Ctap2Session<BoxedSmartCardConnection>> {
         self.session
             .as_ref()
@@ -214,7 +214,7 @@ impl PyCtap2Session {
 }
 
 #[pymethods]
-impl PyCtap2Session {
+impl PyCtap2SessionCcid {
     #[new]
     #[pyo3(signature = (connection, scp_key_params=None))]
     fn new(
@@ -329,13 +329,13 @@ impl PyCtap2Session {
     }
 }
 
-#[pyclass(name = "Ctap2FidoSession", unsendable)]
-pub struct PyCtap2FidoSession {
+#[pyclass(name = "Ctap2SessionFido", unsendable)]
+pub struct PyCtap2SessionFido {
     session: Option<Ctap2Session<BoxedFidoConnection>>,
     py_connection: PyObject,
 }
 
-impl PyCtap2FidoSession {
+impl PyCtap2SessionFido {
     fn get_session(&self) -> PyResult<&Ctap2Session<BoxedFidoConnection>> {
         self.session
             .as_ref()
@@ -360,7 +360,7 @@ impl PyCtap2FidoSession {
 }
 
 #[pymethods]
-impl PyCtap2FidoSession {
+impl PyCtap2SessionFido {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();
@@ -507,12 +507,12 @@ impl PyPinProtocol {
 // SmartCard-backed ClientPin
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "ClientPin", unsendable)]
-pub struct PyClientPin {
+#[pyclass(name = "ClientPinCcid", unsendable)]
+pub struct PyClientPinCcid {
     inner: Option<ClientPin<BoxedSmartCardConnection>>,
 }
 
-impl PyClientPin {
+impl PyClientPinCcid {
     fn get(&self) -> PyResult<&ClientPin<BoxedSmartCardConnection>> {
         self.inner
             .as_ref()
@@ -527,10 +527,10 @@ impl PyClientPin {
 }
 
 #[pymethods]
-impl PyClientPin {
+impl PyClientPinCcid {
     #[new]
     #[pyo3(signature = (session, protocol=None))]
-    fn new(session: &mut PyCtap2Session, protocol: Option<&PyPinProtocol>) -> PyResult<Self> {
+    fn new(session: &mut PyCtap2SessionCcid, protocol: Option<&PyPinProtocol>) -> PyResult<Self> {
         let ctap2 = session.take_session()?;
         let inner = if let Some(proto) = protocol {
             ClientPin::new_with_protocol(ctap2, proto.protocol())
@@ -548,7 +548,7 @@ impl PyClientPin {
 
     /// Close this ClientPin and restore the session back to the given
     /// Ctap2Session object, allowing it to be reused.
-    fn close(&mut self, session: &mut PyCtap2Session) -> PyResult<()> {
+    fn close(&mut self, session: &mut PyCtap2SessionCcid) -> PyResult<()> {
         let pin = self
             .inner
             .take()
@@ -655,7 +655,7 @@ impl PyClientPinFido {
 impl PyClientPinFido {
     #[new]
     #[pyo3(signature = (session, protocol=None))]
-    fn new(session: &mut PyCtap2FidoSession, protocol: Option<&PyPinProtocol>) -> PyResult<Self> {
+    fn new(session: &mut PyCtap2SessionFido, protocol: Option<&PyPinProtocol>) -> PyResult<Self> {
         let ctap2 = session.take_session()?;
         let inner = if let Some(proto) = protocol {
             ClientPin::new_with_protocol(ctap2, proto.protocol())
@@ -673,7 +673,7 @@ impl PyClientPinFido {
 
     /// Close this ClientPinFido and restore the session back to the given
     /// Ctap2FidoSession object, allowing it to be reused.
-    fn close(&mut self, session: &mut PyCtap2FidoSession) -> PyResult<()> {
+    fn close(&mut self, session: &mut PyCtap2SessionFido) -> PyResult<()> {
         let pin = self
             .inner
             .take()
@@ -864,12 +864,12 @@ fn fingerprint_templates_to_py(
 // SmartCard-backed CredentialManagement
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "CredentialManagement", unsendable)]
-pub struct PyCredentialManagement {
+#[pyclass(name = "CredentialManagementCcid", unsendable)]
+pub struct PyCredentialManagementCcid {
     inner: Option<CredentialManagement<BoxedSmartCardConnection>>,
 }
 
-impl PyCredentialManagement {
+impl PyCredentialManagementCcid {
     fn get_mut(&mut self) -> PyResult<&mut CredentialManagement<BoxedSmartCardConnection>> {
         self.inner
             .as_mut()
@@ -878,10 +878,10 @@ impl PyCredentialManagement {
 }
 
 #[pymethods]
-impl PyCredentialManagement {
+impl PyCredentialManagementCcid {
     #[new]
     fn new(
-        session: &mut PyCtap2Session,
+        session: &mut PyCtap2SessionCcid,
         protocol: &PyPinProtocol,
         pin_token: &[u8],
     ) -> PyResult<Self> {
@@ -899,7 +899,7 @@ impl PyCredentialManagement {
 
     /// Close this CredentialManagement and restore the session back to the
     /// given Ctap2Session object, allowing it to be reused.
-    fn close(&mut self, session: &mut PyCtap2Session) -> PyResult<()> {
+    fn close(&mut self, session: &mut PyCtap2SessionCcid) -> PyResult<()> {
         let cm = self
             .inner
             .take()
@@ -981,7 +981,7 @@ impl PyCredentialManagementFido {
 impl PyCredentialManagementFido {
     #[new]
     fn new(
-        session: &mut PyCtap2FidoSession,
+        session: &mut PyCtap2SessionFido,
         protocol: &PyPinProtocol,
         pin_token: &[u8],
     ) -> PyResult<Self> {
@@ -999,7 +999,7 @@ impl PyCredentialManagementFido {
 
     /// Close this CredentialManagementFido and restore the session back to the
     /// given Ctap2FidoSession object, allowing it to be reused.
-    fn close(&mut self, session: &mut PyCtap2FidoSession) -> PyResult<()> {
+    fn close(&mut self, session: &mut PyCtap2SessionFido) -> PyResult<()> {
         let cm = self
             .inner
             .take()
@@ -1064,12 +1064,12 @@ impl PyCredentialManagementFido {
 // SmartCard-backed Config
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "Config", unsendable)]
-pub struct PyConfig {
+#[pyclass(name = "ConfigCcid", unsendable)]
+pub struct PyConfigCcid {
     inner: Option<Config<BoxedSmartCardConnection>>,
 }
 
-impl PyConfig {
+impl PyConfigCcid {
     fn get_mut(&mut self) -> PyResult<&mut Config<BoxedSmartCardConnection>> {
         self.inner
             .as_mut()
@@ -1078,10 +1078,10 @@ impl PyConfig {
 }
 
 #[pymethods]
-impl PyConfig {
+impl PyConfigCcid {
     #[new]
     fn new(
-        session: &mut PyCtap2Session,
+        session: &mut PyCtap2SessionCcid,
         protocol: &PyPinProtocol,
         pin_token: &[u8],
     ) -> PyResult<Self> {
@@ -1096,7 +1096,7 @@ impl PyConfig {
         Ok(Self { inner: Some(inner) })
     }
 
-    fn close(&mut self, session: &mut PyCtap2Session) -> PyResult<()> {
+    fn close(&mut self, session: &mut PyCtap2SessionCcid) -> PyResult<()> {
         let cfg = self
             .inner
             .take()
@@ -1149,7 +1149,7 @@ impl PyConfigFido {
 impl PyConfigFido {
     #[new]
     fn new(
-        session: &mut PyCtap2FidoSession,
+        session: &mut PyCtap2SessionFido,
         protocol: &PyPinProtocol,
         pin_token: &[u8],
     ) -> PyResult<Self> {
@@ -1164,7 +1164,7 @@ impl PyConfigFido {
         Ok(Self { inner: Some(inner) })
     }
 
-    fn close(&mut self, session: &mut PyCtap2FidoSession) -> PyResult<()> {
+    fn close(&mut self, session: &mut PyCtap2SessionFido) -> PyResult<()> {
         let cfg = self
             .inner
             .take()
@@ -1200,12 +1200,12 @@ impl PyConfigFido {
 // SmartCard-backed BioEnrollment
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "BioEnrollment", unsendable)]
-pub struct PyBioEnrollment {
+#[pyclass(name = "BioEnrollmentCcid", unsendable)]
+pub struct PyBioEnrollmentCcid {
     inner: Option<BioEnrollment<BoxedSmartCardConnection>>,
 }
 
-impl PyBioEnrollment {
+impl PyBioEnrollmentCcid {
     fn get_mut(&mut self) -> PyResult<&mut BioEnrollment<BoxedSmartCardConnection>> {
         self.inner
             .as_mut()
@@ -1214,10 +1214,10 @@ impl PyBioEnrollment {
 }
 
 #[pymethods]
-impl PyBioEnrollment {
+impl PyBioEnrollmentCcid {
     #[new]
     fn new(
-        session: &mut PyCtap2Session,
+        session: &mut PyCtap2SessionCcid,
         protocol: &PyPinProtocol,
         pin_token: &[u8],
     ) -> PyResult<Self> {
@@ -1232,7 +1232,7 @@ impl PyBioEnrollment {
         Ok(Self { inner: Some(inner) })
     }
 
-    fn close(&mut self, session: &mut PyCtap2Session) -> PyResult<()> {
+    fn close(&mut self, session: &mut PyCtap2SessionCcid) -> PyResult<()> {
         let bio = self
             .inner
             .take()
@@ -1350,7 +1350,7 @@ impl PyBioEnrollmentFido {
 impl PyBioEnrollmentFido {
     #[new]
     fn new(
-        session: &mut PyCtap2FidoSession,
+        session: &mut PyCtap2SessionFido,
         protocol: &PyPinProtocol,
         pin_token: &[u8],
     ) -> PyResult<Self> {
@@ -1365,7 +1365,7 @@ impl PyBioEnrollmentFido {
         Ok(Self { inner: Some(inner) })
     }
 
-    fn close(&mut self, session: &mut PyCtap2FidoSession) -> PyResult<()> {
+    fn close(&mut self, session: &mut PyCtap2SessionFido) -> PyResult<()> {
         let bio = self
             .inner
             .take()
@@ -1466,12 +1466,12 @@ impl PyBioEnrollmentFido {
 // SmartCard-backed LargeBlobs
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "LargeBlobs", unsendable)]
-pub struct PyLargeBlobs {
+#[pyclass(name = "LargeBlobsCcid", unsendable)]
+pub struct PyLargeBlobsCcid {
     inner: Option<LargeBlobs<BoxedSmartCardConnection>>,
 }
 
-impl PyLargeBlobs {
+impl PyLargeBlobsCcid {
     fn get_mut(&mut self) -> PyResult<&mut LargeBlobs<BoxedSmartCardConnection>> {
         self.inner
             .as_mut()
@@ -1480,10 +1480,10 @@ impl PyLargeBlobs {
 }
 
 #[pymethods]
-impl PyLargeBlobs {
+impl PyLargeBlobsCcid {
     #[new]
     fn new(
-        session: &mut PyCtap2Session,
+        session: &mut PyCtap2SessionCcid,
         protocol: &PyPinProtocol,
         pin_token: &[u8],
     ) -> PyResult<Self> {
@@ -1498,7 +1498,7 @@ impl PyLargeBlobs {
         Ok(Self { inner: Some(inner) })
     }
 
-    fn close(&mut self, session: &mut PyCtap2Session) -> PyResult<()> {
+    fn close(&mut self, session: &mut PyCtap2SessionCcid) -> PyResult<()> {
         let lb = self
             .inner
             .take()
@@ -1565,7 +1565,7 @@ impl PyLargeBlobsFido {
 impl PyLargeBlobsFido {
     #[new]
     fn new(
-        session: &mut PyCtap2FidoSession,
+        session: &mut PyCtap2SessionFido,
         protocol: &PyPinProtocol,
         pin_token: &[u8],
     ) -> PyResult<Self> {
@@ -1580,7 +1580,7 @@ impl PyLargeBlobsFido {
         Ok(Self { inner: Some(inner) })
     }
 
-    fn close(&mut self, session: &mut PyCtap2FidoSession) -> PyResult<()> {
+    fn close(&mut self, session: &mut PyCtap2SessionFido) -> PyResult<()> {
         let lb = self
             .inner
             .take()
