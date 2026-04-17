@@ -43,7 +43,9 @@ use super::pin_protocol::CoseKey;
 /// Relying Party entity (§5.4.2 of WebAuthn / §6.1 param 2 of CTAP2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicKeyCredentialRpEntity {
+    /// The relying party identifier (usually a domain name).
     pub id: String,
+    /// Optional human-readable name for the relying party.
     pub name: Option<String>,
 }
 

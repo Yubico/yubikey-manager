@@ -39,60 +39,94 @@ use crate::tlv::{parse_tlv_list, tlv_encode};
 // TLV tags
 // ---------------------------------------------------------------------------
 
+/// Tag for the credential label.
 pub const TAG_LABEL: u32 = 0x71;
+/// Tag for the credential label list.
 pub const TAG_LABEL_LIST: u32 = 0x72;
+/// Tag for the credential password.
 pub const TAG_CREDENTIAL_PASSWORD: u32 = 0x73;
+/// Tag for the algorithm identifier.
 pub const TAG_ALGORITHM: u32 = 0x74;
+/// Tag for the encryption key.
 pub const TAG_KEY_ENC: u32 = 0x75;
+/// Tag for the MAC key.
 pub const TAG_KEY_MAC: u32 = 0x76;
+/// Tag for the context value.
 pub const TAG_CONTEXT: u32 = 0x77;
+/// Tag for the response value.
 pub const TAG_RESPONSE: u32 = 0x78;
+/// Tag for the version information.
 pub const TAG_VERSION: u32 = 0x79;
+/// Tag for the touch-required flag.
 pub const TAG_TOUCH: u32 = 0x7A;
+/// Tag for the management key.
 pub const TAG_MANAGEMENT_KEY: u32 = 0x7B;
+/// Tag for the public key.
 pub const TAG_PUBLIC_KEY: u32 = 0x7C;
+/// Tag for the private key.
 pub const TAG_PRIVATE_KEY: u32 = 0x7D;
 
 // ---------------------------------------------------------------------------
 // Instruction bytes
 // ---------------------------------------------------------------------------
 
+/// Instruction byte for storing a credential.
 pub const INS_PUT: u8 = 0x01;
+/// Instruction byte for deleting a credential.
 pub const INS_DELETE: u8 = 0x02;
+/// Instruction byte for calculating session keys.
 pub const INS_CALCULATE: u8 = 0x03;
+/// Instruction byte for getting a challenge.
 pub const INS_GET_CHALLENGE: u8 = 0x04;
+/// Instruction byte for listing credentials.
 pub const INS_LIST: u8 = 0x05;
+/// Instruction byte for resetting the application.
 pub const INS_RESET: u8 = 0x06;
+/// Instruction byte for getting the firmware version.
 pub const INS_GET_VERSION: u8 = 0x07;
+/// Instruction byte for storing a new management key.
 pub const INS_PUT_MANAGEMENT_KEY: u8 = 0x08;
+/// Instruction byte for getting the management key retry counter.
 pub const INS_GET_MANAGEMENT_KEY_RETRIES: u8 = 0x09;
+/// Instruction byte for getting a public key.
 pub const INS_GET_PUBLIC_KEY: u8 = 0x0A;
+/// Instruction byte for changing a credential password.
 pub const INS_CHANGE_CREDENTIAL_PASSWORD: u8 = 0x0B;
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
+/// Length of the management key in bytes.
 pub const MANAGEMENT_KEY_LEN: usize = 16;
+/// Length of the credential password in bytes.
 pub const CREDENTIAL_PASSWORD_LEN: usize = 16;
+/// Minimum length of a credential label in bytes.
 pub const MIN_LABEL_LEN: usize = 1;
+/// Maximum length of a credential label in bytes.
 pub const MAX_LABEL_LEN: usize = 64;
 
+/// The default management key (all zeros).
 pub const DEFAULT_MANAGEMENT_KEY: [u8; MANAGEMENT_KEY_LEN] = [0u8; MANAGEMENT_KEY_LEN];
+/// The initial retry counter value for new credentials.
 pub const INITIAL_RETRY_COUNTER: u32 = 8;
 
 // ---------------------------------------------------------------------------
 // Algorithm
 // ---------------------------------------------------------------------------
 
+/// The cryptographic algorithm used by an HSM Auth credential.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Algorithm {
+    /// AES-128 Yubico authentication.
     Aes128YubicoAuthentication = 38,
+    /// EC P-256 Yubico authentication.
     EcP256YubicoAuthentication = 39,
 }
 
 impl Algorithm {
+    /// Convert a raw byte value to an [`Algorithm`], returning `None` for unknown values.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             38 => Some(Self::Aes128YubicoAuthentication),
@@ -101,6 +135,7 @@ impl Algorithm {
         }
     }
 
+    /// Return the key length in bytes for this algorithm.
     pub fn key_len(self) -> usize {
         match self {
             Self::Aes128YubicoAuthentication => 16,
@@ -113,11 +148,16 @@ impl Algorithm {
 // Credential
 // ---------------------------------------------------------------------------
 
+/// An HSM Auth credential stored on the YubiKey.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Credential {
+    /// The human-readable label identifying this credential.
     pub label: String,
+    /// The algorithm used by this credential.
     pub algorithm: Algorithm,
+    /// The remaining retry counter for this credential.
     pub counter: u32,
+    /// Whether touch confirmation is required to use this credential.
     pub touch_required: bool,
 }
 
@@ -125,10 +165,14 @@ pub struct Credential {
 // SessionKeys
 // ---------------------------------------------------------------------------
 
+/// A set of SCP03 session keys derived from an HSM Auth calculation.
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct SessionKeys {
+    /// The session encryption key (S-ENC).
     pub key_senc: [u8; 16],
+    /// The session MAC key (S-MAC).
     pub key_smac: [u8; 16],
+    /// The session response MAC key (S-RMAC).
     pub key_srmac: [u8; 16],
 }
 
@@ -143,6 +187,7 @@ impl fmt::Debug for SessionKeys {
 }
 
 impl SessionKeys {
+    /// Parse session keys from a raw APDU response.
     pub fn parse(response: &[u8]) -> Result<Self, HsmAuthError> {
         if response.len() < 48 {
             return Err(HsmAuthError::InvalidData(
@@ -161,15 +206,20 @@ impl SessionKeys {
 // Errors
 // ---------------------------------------------------------------------------
 
+/// Errors that can occur during HSM Auth operations.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum HsmAuthError {
+    /// The requested feature is not supported by the device.
     #[error("Not supported: {0}")]
     NotSupported(String),
+    /// The provided data is invalid or malformed.
     #[error("Invalid data: {0}")]
     InvalidData(String),
+    /// The PIN was incorrect; the inner value is the number of remaining attempts.
     #[error("Invalid PIN, {0} attempts remaining")]
     InvalidPin(u32),
+    /// A communication error occurred with the smart card.
     #[error("Connection error: {0}")]
     Connection(SmartCardError),
 }
@@ -215,6 +265,8 @@ fn parse_credential_password(password: &[u8]) -> Result<[u8; 16], HsmAuthError> 
     })
 }
 
+/// Convert a string password into a 16-byte credential password,
+/// padding with zeros or truncating as needed.
 pub fn credential_password_from_str(password: &str) -> [u8; 16] {
     let mut pw = [0u8; 16];
     let bytes = password.as_bytes();
@@ -267,6 +319,7 @@ fn map_pin_error(e: SmartCardError) -> HsmAuthError {
 // HsmAuthSession
 // ---------------------------------------------------------------------------
 
+/// A session for interacting with the YubiHSM Auth application on a YubiKey.
 pub struct HsmAuthSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
@@ -332,6 +385,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         Ok(Self { protocol, version })
     }
 
+    /// Return the firmware version of the YubiKey.
     pub fn version(&self) -> Version {
         self.version
     }
@@ -346,11 +400,13 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         self.protocol.into_connection()
     }
 
+    /// Reset the HSM Auth application to its factory state.
     pub fn reset(&mut self) -> Result<(), HsmAuthError> {
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD, &[])?;
         Ok(())
     }
 
+    /// List all credentials stored on the YubiKey.
     pub fn list_credentials(&mut self) -> Result<Vec<Credential>, HsmAuthError> {
         let response = self.protocol.send_apdu(0, INS_LIST, 0, 0, &[])?;
         let entries = parse_tlv_list(&response)?;
@@ -430,6 +486,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         })
     }
 
+    /// Store an AES-128 symmetric credential with explicit encryption and MAC keys.
     pub fn put_credential_symmetric(
         &mut self,
         management_key: &[u8],
@@ -460,6 +517,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         )
     }
 
+    /// Store an AES-128 symmetric credential with keys derived from a password.
     pub fn put_credential_derived(
         &mut self,
         management_key: &[u8],
@@ -479,6 +537,9 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         )
     }
 
+    /// Store an EC P-256 asymmetric credential from an existing private key.
+    ///
+    /// Requires firmware version 5.6.0 or later.
     pub fn put_credential_asymmetric(
         &mut self,
         management_key: &[u8],
@@ -499,6 +560,10 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         )
     }
 
+    /// Generate an EC P-256 asymmetric credential on the device.
+    ///
+    /// The private key is generated on-device and never leaves the YubiKey.
+    /// Requires firmware version 5.6.0 or later.
     pub fn generate_credential_asymmetric(
         &mut self,
         management_key: &[u8],
@@ -521,6 +586,9 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         )
     }
 
+    /// Retrieve the public key associated with an asymmetric credential.
+    ///
+    /// Requires firmware version 5.6.0 or later.
     pub fn get_public_key(&mut self, label: &str) -> Result<p256::PublicKey, HsmAuthError> {
         require_version(self.version, Version(5, 6, 0), "get_public_key")?;
         let data = tlv_encode(TAG_LABEL, &parse_label(label)?);
@@ -531,6 +599,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         parse_p256_public_key(&response)
     }
 
+    /// Delete a credential from the YubiKey.
     pub fn delete_credential(
         &mut self,
         management_key: &[u8],
@@ -560,6 +629,9 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         Ok(())
     }
 
+    /// Change the password protecting a credential, authenticating with the current password.
+    ///
+    /// Requires firmware version 5.8.0 or later.
     pub fn change_credential_password(
         &mut self,
         label: &str,
@@ -577,6 +649,9 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         self.change_credential_password_inner(&data, false)
     }
 
+    /// Change the password protecting a credential, authenticating with the management key.
+    ///
+    /// Requires firmware version 5.8.0 or later.
     pub fn change_credential_password_admin(
         &mut self,
         management_key: &[u8],
@@ -594,6 +669,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         self.change_credential_password_inner(&data, true)
     }
 
+    /// Replace the management key with a new one.
     pub fn put_management_key(
         &mut self,
         management_key: &[u8],
@@ -612,6 +688,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         Ok(())
     }
 
+    /// Get the number of remaining retry attempts for the management key.
     pub fn get_management_key_retries(&mut self) -> Result<u32, HsmAuthError> {
         let response = self
             .protocol
@@ -660,6 +737,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         Ok(response)
     }
 
+    /// Calculate SCP03 session keys using a symmetric (AES-128) credential.
     pub fn calculate_session_keys_symmetric(
         &mut self,
         label: &str,
@@ -677,6 +755,9 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         SessionKeys::parse(&response)
     }
 
+    /// Calculate SCP03 session keys using an asymmetric (EC P-256) credential.
+    ///
+    /// Requires firmware version 5.6.0 or later.
     pub fn calculate_session_keys_asymmetric(
         &mut self,
         label: &str,
@@ -705,6 +786,9 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         SessionKeys::parse(&response)
     }
 
+    /// Get a challenge from the YubiKey for an asymmetric credential.
+    ///
+    /// Requires firmware version 5.6.0 or later.
     pub fn get_challenge(
         &mut self,
         label: &str,

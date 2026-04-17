@@ -36,16 +36,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::cbor::{self, Value};
 
+/// Credential Blob extension (`credBlob`).
 pub mod cred_blob;
+/// Credential Properties extension (`credProps`).
 pub mod cred_props;
+/// Credential Protection extension (`credProtect`).
 pub mod cred_protect;
+/// Large Blob extension (`largeBlob`).
 pub mod large_blob;
+/// Minimum PIN Length extension (`minPinLength`).
 pub mod min_pin_length;
+/// Pseudo-Random Function extension (`prf` / `hmac-secret`).
 pub mod prf;
 
 // Re-export key types
+/// Credential protection policy level.
 pub use cred_protect::CredProtectPolicy;
+/// Level of large blob support requested during registration.
 pub use large_blob::LargeBlobSupport;
+/// PRF evaluation inputs and derived results.
 pub use prf::{PrfEval, PrfResults};
 
 // ---------------------------------------------------------------------------
@@ -56,6 +65,7 @@ pub use prf::{PrfEval, PrfResults};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistrationExtensionInputs {
+    /// PRF extension input — enables hmac-secret and optionally evaluates salts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prf: Option<prf::RegistrationInput>,
 
@@ -64,9 +74,11 @@ pub struct RegistrationExtensionInputs {
     #[serde(default, skip_serializing_if = "Option::is_none", flatten)]
     pub cred_protect: Option<cred_protect::RegistrationInput>,
 
+    /// credBlob — stores a small data blob with the credential.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cred_blob: Option<cred_blob::RegistrationInput>,
 
+    /// largeBlob — requests a large blob key for the credential.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub large_blob: Option<large_blob::RegistrationInput>,
 
@@ -74,6 +86,7 @@ pub struct RegistrationExtensionInputs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cred_props: Option<bool>,
 
+    /// minPinLength — requests the authenticator's minimum PIN length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_pin_length: Option<bool>,
 }
@@ -82,21 +95,27 @@ pub struct RegistrationExtensionInputs {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistrationExtensionOutputs {
+    /// PRF extension output — whether hmac-secret is enabled and optional results.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prf: Option<prf::RegistrationOutput>,
 
+    /// credProtect output — the effective credential protection policy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cred_protect: Option<cred_protect::RegistrationOutput>,
 
+    /// credBlob output — whether the blob was successfully stored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cred_blob: Option<cred_blob::RegistrationOutput>,
 
+    /// largeBlob output — whether large blob storage is supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub large_blob: Option<large_blob::RegistrationOutput>,
 
+    /// credProps output — credential properties (e.g. whether it is discoverable).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cred_props: Option<cred_props::RegistrationOutput>,
 
+    /// minPinLength output — the authenticator's minimum PIN length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_pin_length: Option<min_pin_length::RegistrationOutput>,
 }
@@ -109,12 +128,15 @@ pub struct RegistrationExtensionOutputs {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthenticationExtensionInputs {
+    /// PRF extension input — evaluates salts to derive symmetric secrets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prf: Option<prf::AuthenticationInput>,
 
+    /// Whether to retrieve a previously stored credBlob.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub get_cred_blob: Option<bool>,
 
+    /// largeBlob — reads or writes large blob data associated with a credential.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub large_blob: Option<large_blob::AuthenticationInput>,
 }
@@ -123,12 +145,15 @@ pub struct AuthenticationExtensionInputs {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthenticationExtensionOutputs {
+    /// PRF extension output — derived symmetric secrets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prf: Option<prf::AuthenticationOutput>,
 
+    /// credBlob output — the retrieved blob data.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cred_blob: Option<cred_blob::AuthenticationOutput>,
 
+    /// largeBlob output — blob data read or write status.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub large_blob: Option<large_blob::AuthenticationOutput>,
 }

@@ -25,6 +25,9 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! Smart card communication primitives — APDU encoding, status words, and
+//! ISO 7816-4 command/response handling.
+
 use std::fmt;
 use std::time::Instant;
 
@@ -37,16 +40,25 @@ use crate::scp::{ScpState, aes_cmac, constant_time_eq, scp03_derive, x963_kdf};
 // AID — YubiKey application identifiers
 // ---------------------------------------------------------------------------
 
+/// Known YubiKey application identifiers (AIDs).
 pub struct Aid;
 
 impl Aid {
+    /// AID for the OTP applet.
     pub const OTP: &[u8] = &[0xa0, 0x00, 0x00, 0x05, 0x27, 0x20, 0x01];
+    /// AID for the Management applet.
     pub const MANAGEMENT: &[u8] = &[0xa0, 0x00, 0x00, 0x05, 0x27, 0x47, 0x11, 0x17];
+    /// AID for the OpenPGP applet.
     pub const OPENPGP: &[u8] = &[0xd2, 0x76, 0x00, 0x01, 0x24, 0x01];
+    /// AID for the OATH applet.
     pub const OATH: &[u8] = &[0xa0, 0x00, 0x00, 0x05, 0x27, 0x21, 0x01];
+    /// AID for the PIV applet.
     pub const PIV: &[u8] = &[0xa0, 0x00, 0x00, 0x03, 0x08];
+    /// AID for the FIDO applet.
     pub const FIDO: &[u8] = &[0xa0, 0x00, 0x00, 0x06, 0x47, 0x2f, 0x00, 0x01];
+    /// AID for the YubiHSM Auth applet.
     pub const HSMAUTH: &[u8] = &[0xa0, 0x00, 0x00, 0x05, 0x27, 0x21, 0x07, 0x01];
+    /// AID for the Security Domain.
     pub const SECURE_DOMAIN: &[u8] = &[0xa0, 0x00, 0x00, 0x01, 0x51, 0x00, 0x00, 0x00];
 }
 
@@ -58,30 +70,52 @@ impl Aid {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum Sw {
+    /// No input data (`0x6285`).
     NoInputData = 0x6285,
+    /// Verification failed, no retries remaining (`0x63C0`).
     VerifyFailNoRetry = 0x63C0,
+    /// Memory failure (`0x6581`).
     MemoryFailure = 0x6581,
+    /// Wrong length (`0x6700`).
     WrongLength = 0x6700,
+    /// Security condition not satisfied (`0x6982`).
     SecurityConditionNotSatisfied = 0x6982,
+    /// Authentication method blocked (`0x6983`).
     AuthMethodBlocked = 0x6983,
+    /// Data invalid (`0x6984`).
     DataInvalid = 0x6984,
+    /// Conditions of use not satisfied (`0x6985`).
     ConditionsNotSatisfied = 0x6985,
+    /// Command not allowed (`0x6986`).
     CommandNotAllowed = 0x6986,
+    /// Incorrect parameters in command data (`0x6A80`).
     IncorrectParameters = 0x6A80,
+    /// Function not supported (`0x6A81`).
     FunctionNotSupported = 0x6A81,
+    /// File or application not found (`0x6A82`).
     FileNotFound = 0x6A82,
+    /// Record not found (`0x6A83`).
     RecordNotFound = 0x6A83,
+    /// Not enough memory space (`0x6A84`).
     NoSpace = 0x6A84,
+    /// Referenced data not found (`0x6A88`).
     ReferenceDataNotFound = 0x6A88,
+    /// Applet selection failed (`0x6999`).
     AppletSelectFailed = 0x6999,
+    /// Wrong parameters P1/P2 (`0x6B00`).
     WrongParametersP1P2 = 0x6B00,
+    /// Invalid instruction byte (`0x6D00`).
     InvalidInstruction = 0x6D00,
+    /// Class not supported (`0x6E00`).
     ClassNotSupported = 0x6E00,
+    /// Command aborted — unknown error (`0x6F00`).
     CommandAborted = 0x6F00,
+    /// Success (`0x9000`).
     Ok = 0x9000,
 }
 
 impl Sw {
+    /// Convert a raw `u16` status word to the corresponding [`Sw`] variant, if known.
     pub fn from_u16(v: u16) -> Option<Self> {
         match v {
             0x6285 => Some(Self::NoInputData),
@@ -116,6 +150,7 @@ impl fmt::Display for Sw {
     }
 }
 
+/// Raw status word constant for success (`0x9000`).
 pub const SW_OK: u16 = 0x9000;
 const SW1_HAS_MORE_DATA: u8 = 0x61;
 
@@ -123,26 +158,41 @@ const SW1_HAS_MORE_DATA: u8 = 0x61;
 // Errors
 // ---------------------------------------------------------------------------
 
+/// Errors related to APDU construction.
 #[derive(Debug, Error)]
 pub enum ApduError {
+    /// Data exceeds the 255-byte limit for short APDUs.
     #[error("Data length {0} exceeds maximum APDU size 255")]
     ShortApduTooLong(usize),
+    /// APDU length exceeds the device capability.
     #[error("APDU length exceeds YubiKey capability")]
     ExtendedApduTooLong,
 }
 
+/// Errors returned by smart card operations.
 #[derive(Debug, Error)]
 pub enum SmartCardError {
+    /// The device returned a non-success status word.
     #[error("APDU error: SW=0x{sw:04X}")]
-    Apdu { data: Vec<u8>, sw: u16 },
+    Apdu {
+        /// Response data preceding the status word.
+        data: Vec<u8>,
+        /// The status word returned by the card.
+        sw: u16,
+    },
+    /// The requested application is not available on the device.
     #[error("Application not available")]
     ApplicationNotAvailable,
+    /// The operation is not supported.
     #[error("Not supported: {0}")]
     NotSupported(String),
+    /// The provided data is invalid.
     #[error("Invalid data: {0}")]
     InvalidData(String),
+    /// The session or device is in an invalid state.
     #[error("Invalid state: {0}")]
     InvalidState(String),
+    /// An underlying transport error occurred.
     #[error("Transport error: {0}")]
     Transport(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -181,7 +231,9 @@ impl SmartCardError {
 
 /// Abstract smart card connection — send raw APDU bytes, get response + SW.
 pub trait SmartCardConnection: crate::core::Connection<Error = SmartCardError> {
+    /// Send a raw APDU and receive the response data and status word.
     fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError>;
+    /// Return the transport type (USB or NFC) of this connection.
     fn transport(&self) -> Transport;
 }
 
@@ -284,9 +336,12 @@ pub fn format_extended_apdu(
 // APDU format enum & max sizes
 // ---------------------------------------------------------------------------
 
+/// APDU encoding format: short (up to 255 bytes) or extended length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApduFormat {
+    /// Short APDU encoding (up to 255 bytes of data).
     Short,
+    /// Extended length APDU encoding.
     Extended,
 }
 
@@ -325,6 +380,7 @@ pub struct SmartCardProtocol<C: SmartCardConnection> {
 }
 
 impl<C: SmartCardConnection> SmartCardProtocol<C> {
+    /// Create a new protocol handler wrapping the given connection.
     pub fn new(connection: C) -> Self {
         Self {
             connection,
@@ -337,6 +393,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         }
     }
 
+    /// Override the INS byte used when fetching remaining response data.
     pub fn with_ins_send_remaining(mut self, ins: u8) -> Self {
         self.ins_send_remaining = ins;
         self

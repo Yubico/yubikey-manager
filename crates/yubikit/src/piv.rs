@@ -57,15 +57,20 @@ use crate::tlv::{int2bytes, parse_tlv_dict, tlv_encode, tlv_parse, tlv_unpack};
 // Errors
 // ---------------------------------------------------------------------------
 
+/// Errors that can occur during PIV operations.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum PivError {
+    /// The requested operation is not supported.
     #[error("Not supported: {0}")]
     NotSupported(String),
+    /// The provided data is malformed or invalid.
     #[error("Invalid data: {0}")]
     InvalidData(String),
+    /// The PIN was incorrect; contains the number of remaining attempts.
     #[error("Invalid PIN, {0} attempts remaining")]
     InvalidPin(u32),
+    /// An error occurred in the underlying smart card transport.
     #[error("Connection error: {0}")]
     Connection(SmartCardError),
 }
@@ -93,9 +98,12 @@ impl From<crate::tlv::TlvError> for PivError {
 // Algorithm enum (str-like)
 // ---------------------------------------------------------------------------
 
+/// High-level cryptographic algorithm family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Algorithm {
+    /// Elliptic-curve cryptography (NIST P-curves, Ed25519, X25519).
     Ec,
+    /// RSA public-key cryptography.
     Rsa,
 }
 
@@ -112,20 +120,30 @@ impl fmt::Display for Algorithm {
 // KeyType
 // ---------------------------------------------------------------------------
 
+/// Specific key algorithm and size used in a PIV slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum KeyType {
+    /// RSA 1024-bit key.
     Rsa1024 = 0x06,
+    /// RSA 2048-bit key.
     Rsa2048 = 0x07,
+    /// RSA 3072-bit key (requires firmware ≥ 5.7.0).
     Rsa3072 = 0x05,
+    /// RSA 4096-bit key (requires firmware ≥ 5.7.0).
     Rsa4096 = 0x16,
+    /// NIST P-256 elliptic-curve key.
     EccP256 = 0x11,
+    /// NIST P-384 elliptic-curve key.
     EccP384 = 0x14,
+    /// Ed25519 signing key (requires firmware ≥ 5.7.0).
     Ed25519 = 0xE0,
+    /// X25519 key-agreement key (requires firmware ≥ 5.7.0).
     X25519 = 0xE1,
 }
 
 impl KeyType {
+    /// Convert a raw byte to a [`KeyType`], returning `None` if unrecognized.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x06 => Some(Self::Rsa1024),
@@ -140,6 +158,7 @@ impl KeyType {
         }
     }
 
+    /// Returns the high-level [`Algorithm`] family for this key type.
     pub fn algorithm(self) -> Algorithm {
         match self {
             Self::Rsa1024 | Self::Rsa2048 | Self::Rsa3072 | Self::Rsa4096 => Algorithm::Rsa,
@@ -147,6 +166,7 @@ impl KeyType {
         }
     }
 
+    /// Returns the key size in bits.
     pub fn bit_len(self) -> u32 {
         match self {
             Self::Rsa1024 => 1024,
@@ -353,16 +373,22 @@ impl fmt::Display for KeyType {
 // ManagementKeyType
 // ---------------------------------------------------------------------------
 
+/// Algorithm used for the PIV management key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ManagementKeyType {
+    /// Triple-DES (3DES / TDES) — 24-byte key, legacy default.
     Tdes = 0x03,
+    /// AES-128 — 16-byte key.
     Aes128 = 0x08,
+    /// AES-192 — 24-byte key.
     Aes192 = 0x0A,
+    /// AES-256 — 32-byte key.
     Aes256 = 0x0C,
 }
 
 impl ManagementKeyType {
+    /// Convert a raw byte to a [`ManagementKeyType`], returning `None` if unrecognized.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x03 => Some(Self::Tdes),
@@ -373,6 +399,7 @@ impl ManagementKeyType {
         }
     }
 
+    /// Returns the required key length in bytes.
     pub fn key_len(self) -> usize {
         match self {
             Self::Tdes => 24,
@@ -382,6 +409,7 @@ impl ManagementKeyType {
         }
     }
 
+    /// Returns the challenge block size in bytes (8 for TDES, 16 for AES).
     pub fn challenge_len(self) -> usize {
         match self {
             Self::Tdes => 8,
@@ -405,37 +433,64 @@ impl fmt::Display for ManagementKeyType {
 // Slot
 // ---------------------------------------------------------------------------
 
+/// A PIV key slot on the YubiKey.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Slot {
+    /// Slot 9A — PIV Authentication.
     Authentication = 0x9A,
+    /// Slot 9C — Digital Signature.
     Signature = 0x9C,
+    /// Slot 9D — Key Management (encryption / key agreement).
     KeyManagement = 0x9D,
+    /// Slot 9E — Card Authentication.
     CardAuth = 0x9E,
+    /// Retired Key Management slot 1 (0x82).
     Retired1 = 0x82,
+    /// Retired Key Management slot 2 (0x83).
     Retired2 = 0x83,
+    /// Retired Key Management slot 3 (0x84).
     Retired3 = 0x84,
+    /// Retired Key Management slot 4 (0x85).
     Retired4 = 0x85,
+    /// Retired Key Management slot 5 (0x86).
     Retired5 = 0x86,
+    /// Retired Key Management slot 6 (0x87).
     Retired6 = 0x87,
+    /// Retired Key Management slot 7 (0x88).
     Retired7 = 0x88,
+    /// Retired Key Management slot 8 (0x89).
     Retired8 = 0x89,
+    /// Retired Key Management slot 9 (0x8A).
     Retired9 = 0x8A,
+    /// Retired Key Management slot 10 (0x8B).
     Retired10 = 0x8B,
+    /// Retired Key Management slot 11 (0x8C).
     Retired11 = 0x8C,
+    /// Retired Key Management slot 12 (0x8D).
     Retired12 = 0x8D,
+    /// Retired Key Management slot 13 (0x8E).
     Retired13 = 0x8E,
+    /// Retired Key Management slot 14 (0x8F).
     Retired14 = 0x8F,
+    /// Retired Key Management slot 15 (0x90).
     Retired15 = 0x90,
+    /// Retired Key Management slot 16 (0x91).
     Retired16 = 0x91,
+    /// Retired Key Management slot 17 (0x92).
     Retired17 = 0x92,
+    /// Retired Key Management slot 18 (0x93).
     Retired18 = 0x93,
+    /// Retired Key Management slot 19 (0x94).
     Retired19 = 0x94,
+    /// Retired Key Management slot 20 (0x95).
     Retired20 = 0x95,
+    /// Attestation slot (0xF9).
     Attestation = 0xF9,
 }
 
 impl Slot {
+    /// Convert a raw byte to a [`Slot`], returning `None` if unrecognized.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x9A => Some(Self::Authentication),
@@ -478,46 +533,82 @@ impl fmt::Display for Slot {
 // ObjectId
 // ---------------------------------------------------------------------------
 
+/// PIV data-object identifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum ObjectId {
+    /// Card Capability Container.
     Capability = 0x5FC107,
+    /// Card Holder Unique Identifier (CHUID).
     Chuid = 0x5FC102,
+    /// X.509 Certificate for PIV Authentication.
     Authentication = 0x5FC105,
+    /// Cardholder Fingerprints.
     Fingerprints = 0x5FC103,
+    /// Security Object.
     Security = 0x5FC106,
+    /// Cardholder Facial Image.
     Facial = 0x5FC108,
+    /// Printed Information.
     Printed = 0x5FC109,
+    /// X.509 Certificate for Digital Signature.
     Signature = 0x5FC10A,
+    /// X.509 Certificate for Key Management.
     KeyManagement = 0x5FC10B,
+    /// X.509 Certificate for Card Authentication.
     CardAuth = 0x5FC101,
+    /// Discovery Object.
     Discovery = 0x7E,
+    /// Key History Object.
     KeyHistory = 0x5FC10C,
+    /// Cardholder Iris Images.
     Iris = 0x5FC121,
+    /// Retired X.509 Certificate 1.
     Retired1 = 0x5FC10D,
+    /// Retired X.509 Certificate 2.
     Retired2 = 0x5FC10E,
+    /// Retired X.509 Certificate 3.
     Retired3 = 0x5FC10F,
+    /// Retired X.509 Certificate 4.
     Retired4 = 0x5FC110,
+    /// Retired X.509 Certificate 5.
     Retired5 = 0x5FC111,
+    /// Retired X.509 Certificate 6.
     Retired6 = 0x5FC112,
+    /// Retired X.509 Certificate 7.
     Retired7 = 0x5FC113,
+    /// Retired X.509 Certificate 8.
     Retired8 = 0x5FC114,
+    /// Retired X.509 Certificate 9.
     Retired9 = 0x5FC115,
+    /// Retired X.509 Certificate 10.
     Retired10 = 0x5FC116,
+    /// Retired X.509 Certificate 11.
     Retired11 = 0x5FC117,
+    /// Retired X.509 Certificate 12.
     Retired12 = 0x5FC118,
+    /// Retired X.509 Certificate 13.
     Retired13 = 0x5FC119,
+    /// Retired X.509 Certificate 14.
     Retired14 = 0x5FC11A,
+    /// Retired X.509 Certificate 15.
     Retired15 = 0x5FC11B,
+    /// Retired X.509 Certificate 16.
     Retired16 = 0x5FC11C,
+    /// Retired X.509 Certificate 17.
     Retired17 = 0x5FC11D,
+    /// Retired X.509 Certificate 18.
     Retired18 = 0x5FC11E,
+    /// Retired X.509 Certificate 19.
     Retired19 = 0x5FC11F,
+    /// Retired X.509 Certificate 20.
     Retired20 = 0x5FC120,
+    /// Attestation certificate data object.
     Attestation = 0x5FFF01,
 }
 
 impl ObjectId {
+    /// Returns the [`ObjectId`] that holds the certificate for the given [`Slot`].
     pub fn from_slot(slot: Slot) -> Self {
         match slot {
             Slot::Authentication => Self::Authentication,
@@ -553,18 +644,26 @@ impl ObjectId {
 // PinPolicy / TouchPolicy
 // ---------------------------------------------------------------------------
 
+/// PIN verification policy for a PIV key slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum PinPolicy {
+    /// Use the slot's default PIN policy.
     Default = 0x00,
+    /// PIN is never required.
     Never = 0x01,
+    /// PIN is required once per session.
     Once = 0x02,
+    /// PIN is required for every use.
     Always = 0x03,
+    /// Biometric match required once per session.
     MatchOnce = 0x04,
+    /// Biometric match required for every use.
     MatchAlways = 0x05,
 }
 
 impl PinPolicy {
+    /// Convert a raw byte to a [`PinPolicy`], returning `None` if unrecognized.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x00 => Some(Self::Default),
@@ -578,16 +677,22 @@ impl PinPolicy {
     }
 }
 
+/// Physical touch policy for a PIV key slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TouchPolicy {
+    /// Use the slot's default touch policy.
     Default = 0x00,
+    /// Touch is never required.
     Never = 0x01,
+    /// Touch is required for every operation.
     Always = 0x02,
+    /// Touch is cached for 15 seconds after first tap.
     Cached = 0x03,
 }
 
 impl TouchPolicy {
+    /// Convert a raw byte to a [`TouchPolicy`], returning `None` if unrecognized.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x00 => Some(Self::Default),
@@ -603,33 +708,51 @@ impl TouchPolicy {
 // Data structures
 // ---------------------------------------------------------------------------
 
+/// Metadata about the PIV PIN or PUK.
 #[derive(Debug, Clone)]
 pub struct PinMetadata {
+    /// Whether the PIN/PUK is still set to its factory default value.
     pub default_value: bool,
+    /// Total number of allowed attempts before lockout.
     pub total_attempts: u32,
+    /// Number of remaining attempts before lockout.
     pub attempts_remaining: u32,
 }
 
+/// Metadata about the PIV management key.
 #[derive(Debug, Clone)]
 pub struct ManagementKeyMetadata {
+    /// Algorithm type of the management key.
     pub key_type: ManagementKeyType,
+    /// Whether the management key is still the factory default.
     pub default_value: bool,
+    /// Touch policy applied to the management key.
     pub touch_policy: TouchPolicy,
 }
 
+/// Metadata about a key in a PIV slot.
 #[derive(Debug, Clone)]
 pub struct SlotMetadata {
+    /// Algorithm type of the key stored in the slot.
     pub key_type: KeyType,
+    /// PIN policy configured for this slot.
     pub pin_policy: PinPolicy,
+    /// Touch policy configured for this slot.
     pub touch_policy: TouchPolicy,
+    /// Whether the key was generated on-device (vs. imported).
     pub generated: bool,
+    /// DER-encoded SubjectPublicKeyInfo of the key's public component.
     pub public_key_der: Vec<u8>,
 }
 
+/// Metadata about biometric (on-card comparison) verification.
 #[derive(Debug, Clone)]
 pub struct BioMetadata {
+    /// Whether biometric templates are enrolled on the YubiKey.
     pub configured: bool,
+    /// Number of remaining biometric verification attempts.
     pub attempts_remaining: u32,
+    /// Whether a temporary PIN has been generated from biometric auth.
     pub temporary_pin: bool,
 }
 
@@ -637,6 +760,7 @@ pub struct BioMetadata {
 // Constants
 // ---------------------------------------------------------------------------
 
+/// The factory-default 24-byte Triple-DES PIV management key.
 pub const DEFAULT_MANAGEMENT_KEY: &[u8] = &[
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
@@ -668,18 +792,31 @@ const INS_IMPORT_KEY: u8 = 0xFE;
 const INS_SET_MGMKEY: u8 = 0xFF;
 
 // Tags
+/// TLV tag for the authentication witness (mutual-auth protocol).
 pub const TAG_AUTH_WITNESS: u32 = 0x80;
+/// TLV tag for the authentication challenge (mutual-auth protocol).
 pub const TAG_AUTH_CHALLENGE: u32 = 0x81;
+/// TLV tag for the authentication response (mutual-auth protocol).
 pub const TAG_AUTH_RESPONSE: u32 = 0x82;
+/// TLV tag for key-agreement exponentiation data.
 pub const TAG_AUTH_EXPONENTIATION: u32 = 0x85;
+/// TLV tag for the algorithm identifier in key generation.
 pub const TAG_GEN_ALGORITHM: u32 = 0x80;
+/// TLV tag for a PIV data-object payload.
 pub const TAG_OBJ_DATA: u32 = 0x53;
+/// TLV tag for a PIV data-object identifier.
 pub const TAG_OBJ_ID: u32 = 0x5C;
+/// TLV tag for an X.509 certificate within a data object.
 pub const TAG_CERTIFICATE: u32 = 0x70;
+/// TLV tag for certificate compression info.
 pub const TAG_CERT_INFO: u32 = 0x71;
+/// TLV tag for the dynamic authentication template.
 pub const TAG_DYN_AUTH: u32 = 0x7C;
+/// TLV tag for the error detection code (LRC).
 pub const TAG_LRC: u32 = 0xFE;
+/// TLV tag for the PIN policy in key generation / import.
 pub const TAG_PIN_POLICY: u32 = 0xAA;
+/// TLV tag for the touch policy in key generation / import.
 pub const TAG_TOUCH_POLICY: u32 = 0xAB;
 
 // Metadata tags
@@ -699,7 +836,9 @@ const INDEX_TOUCH_POLICY: usize = 1;
 const INDEX_RETRIES_TOTAL: usize = 0;
 const INDEX_RETRIES_REMAINING: usize = 1;
 
+/// P2 byte identifying the PIN reference.
 pub const PIN_P2: u8 = 0x80;
+/// P2 byte identifying the PUK reference.
 pub const PUK_P2: u8 = 0x81;
 
 // ---------------------------------------------------------------------------
@@ -935,6 +1074,7 @@ pub fn check_key_support(
 // PivSession
 // ---------------------------------------------------------------------------
 
+/// An active PIV application session on a YubiKey.
 pub struct PivSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
@@ -998,10 +1138,12 @@ impl<C: SmartCardConnection> PivSession<C> {
         Ok(session)
     }
 
+    /// Returns the firmware version of the connected YubiKey.
     pub fn version(&self) -> Version {
         self.version
     }
 
+    /// Returns the algorithm type of the current management key.
     pub fn management_key_type(&self) -> ManagementKeyType {
         self.mgmt_key_type
     }
@@ -1025,6 +1167,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     // Reset
     // -----------------------------------------------------------------------
 
+    /// Reset the PIV application to factory defaults, blocking PIN and PUK first.
     pub fn reset(&mut self) -> Result<(), PivError> {
         // Check biometrics
         match self.get_bio_metadata() {
@@ -1077,6 +1220,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     // Serial
     // -----------------------------------------------------------------------
 
+    /// Returns the serial number of the YubiKey. Requires firmware ≥ 5.0.3.
     pub fn get_serial(&mut self) -> Result<u32, PivError> {
         require_version(self.version, Version(5, 0, 3), "get_serial")?;
         let response = self.protocol.send_apdu(0, INS_GET_SERIAL, 0, 0, &[])?;
@@ -1087,6 +1231,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     // Management key authentication
     // -----------------------------------------------------------------------
 
+    /// Authenticate with the management key using a mutual-authentication protocol.
     pub fn authenticate(&mut self, management_key: &[u8]) -> Result<(), PivError> {
         let key_type = self.mgmt_key_type;
 
@@ -1139,6 +1284,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     // Management key
     // -----------------------------------------------------------------------
 
+    /// Set a new management key, optionally requiring touch.
     pub fn set_management_key(
         &mut self,
         key_type: ManagementKeyType,
@@ -1169,6 +1315,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     // PIN / PUK
     // -----------------------------------------------------------------------
 
+    /// Verify the PIV PIN. On failure, returns [`PivError::InvalidPin`] with remaining attempts.
     pub fn verify_pin(&mut self, pin: &str) -> Result<(), PivError> {
         let data = pin_bytes(pin)?;
         match self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, &data) {
@@ -1188,6 +1335,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         }
     }
 
+    /// Perform biometric (user verification) authentication, optionally returning a temporary PIN.
     pub fn verify_uv(
         &mut self,
         temporary_pin: bool,
@@ -1236,6 +1384,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         }
     }
 
+    /// Verify a temporary PIN obtained from biometric authentication.
     pub fn verify_temporary_pin(&mut self, pin: &[u8]) -> Result<(), PivError> {
         if pin.len() != TEMPORARY_PIN_LEN {
             return Err(PivError::InvalidData(format!(
@@ -1266,6 +1415,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         }
     }
 
+    /// Returns the number of remaining PIN attempts.
     pub fn get_pin_attempts(&mut self) -> Result<u32, PivError> {
         match self.get_pin_metadata() {
             Ok(meta) => return Ok(meta.attempts_remaining),
@@ -1294,10 +1444,12 @@ impl<C: SmartCardConnection> PivSession<C> {
         }
     }
 
+    /// Change the PIV PIN from `old_pin` to `new_pin`.
     pub fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> Result<(), PivError> {
         self.change_reference(INS_CHANGE_REFERENCE, PIN_P2, old_pin, new_pin)
     }
 
+    /// Change the PUK from `old_puk` to `new_puk`.
     pub fn change_puk(&mut self, old_puk: &str, new_puk: &str) -> Result<(), PivError> {
         match self.change_reference(INS_CHANGE_REFERENCE, PUK_P2, old_puk, new_puk) {
             Err(PivError::Connection(SmartCardError::Apdu { sw, .. }))
@@ -1311,6 +1463,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         }
     }
 
+    /// Unblock a locked PIN using the PUK and set a new PIN.
     pub fn unblock_pin(&mut self, puk: &str, new_pin: &str) -> Result<(), PivError> {
         match self.change_reference(INS_RESET_RETRY, PIN_P2, puk, new_pin) {
             Err(PivError::Connection(SmartCardError::Apdu { sw, .. }))
@@ -1324,6 +1477,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         }
     }
 
+    /// Set the maximum retry counts for PIN and PUK. Requires prior management-key authentication.
     pub fn set_pin_attempts(&mut self, pin_attempts: u8, puk_attempts: u8) -> Result<(), PivError> {
         match self
             .protocol
@@ -1349,14 +1503,17 @@ impl<C: SmartCardConnection> PivSession<C> {
     // Metadata
     // -----------------------------------------------------------------------
 
+    /// Retrieve metadata about the PIV PIN. Requires firmware ≥ 5.3.0.
     pub fn get_pin_metadata(&mut self) -> Result<PinMetadata, PivError> {
         self.get_pin_puk_metadata(PIN_P2)
     }
 
+    /// Retrieve metadata about the PUK. Requires firmware ≥ 5.3.0.
     pub fn get_puk_metadata(&mut self) -> Result<PinMetadata, PivError> {
         self.get_pin_puk_metadata(PUK_P2)
     }
 
+    /// Retrieve metadata about the management key. Requires firmware ≥ 5.3.0.
     pub fn get_management_key_metadata(&mut self) -> Result<ManagementKeyMetadata, PivError> {
         require_version(
             self.version,
@@ -1398,6 +1555,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         })
     }
 
+    /// Retrieve metadata about the key in a given slot. Requires firmware ≥ 5.3.0.
     pub fn get_slot_metadata(&mut self, slot: Slot) -> Result<SlotMetadata, PivError> {
         require_version(self.version, Version(5, 3, 0), "get_slot_metadata")?;
         let response = self
@@ -1439,6 +1597,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         })
     }
 
+    /// Retrieve biometric verification metadata from the YubiKey.
     pub fn get_bio_metadata(&mut self) -> Result<BioMetadata, PivError> {
         let response = match self
             .protocol
@@ -1532,14 +1691,17 @@ impl<C: SmartCardConnection> PivSession<C> {
     // Objects
     // -----------------------------------------------------------------------
 
+    /// Read a PIV data object by its [`ObjectId`].
     pub fn get_object(&mut self, object_id: ObjectId) -> Result<Vec<u8>, PivError> {
         self.get_object_raw(object_id as u32)
     }
 
+    /// Write (or delete) a PIV data object by its [`ObjectId`].
     pub fn put_object(&mut self, object_id: ObjectId, data: Option<&[u8]>) -> Result<(), PivError> {
         self.put_object_raw(object_id as u32, data)
     }
 
+    /// Read a PIV data object by raw numeric object identifier.
     pub fn get_object_raw(&mut self, object_id: u32) -> Result<Vec<u8>, PivError> {
         let expected = if object_id == ObjectId::Discovery as u32 {
             ObjectId::Discovery as u32
@@ -1557,6 +1719,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             .map_err(|_| PivError::InvalidData("Malformed object data".into()))
     }
 
+    /// Write (or delete) a PIV data object by raw numeric object identifier.
     pub fn put_object_raw(&mut self, object_id: u32, data: Option<&[u8]>) -> Result<(), PivError> {
         let id_bytes = u32_to_bytes(object_id);
         let obj_data = data.unwrap_or(&[]);
@@ -1624,6 +1787,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         self.put_object(ObjectId::from_slot(slot), Some(&data))
     }
 
+    /// Delete the certificate stored in the given slot.
     pub fn delete_certificate(&mut self, slot: Slot) -> Result<(), PivError> {
         self.put_object(ObjectId::from_slot(slot), None)
     }
@@ -1746,6 +1910,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     // Check key support (instance method)
     // -----------------------------------------------------------------------
 
+    /// Check whether the given key parameters are supported by this YubiKey.
     pub fn check_key_support(
         &mut self,
         key_type: KeyType,
@@ -1981,10 +2146,14 @@ fn build_ec_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivEr
 // Hash algorithm
 // ---------------------------------------------------------------------------
 
+/// Hash algorithm used for signing operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashAlgorithm {
+    /// SHA-256 (256-bit digest).
     Sha256,
+    /// SHA-384 (384-bit digest).
     Sha384,
+    /// SHA-512 (512-bit digest).
     Sha512,
 }
 
@@ -2005,6 +2174,7 @@ const DIGEST_INFO_SHA512: &[u8] = &[
     0x00, 0x04, 0x40,
 ];
 
+/// Compute the hash of `data` using the specified algorithm.
 pub fn hash_data(hash_alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {
     match hash_alg {
         HashAlgorithm::Sha256 => sha2::Sha256::digest(data).to_vec(),
@@ -2013,6 +2183,7 @@ pub fn hash_data(hash_alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {
     }
 }
 
+/// Construct a PKCS#1 v1.5 signature padding block from a hash digest.
 pub fn pkcs1v15_pad(hash_alg: HashAlgorithm, hash: &[u8], key_byte_len: usize) -> Vec<u8> {
     let digest_info_prefix = match hash_alg {
         HashAlgorithm::Sha256 => DIGEST_INFO_SHA256,
@@ -2242,6 +2413,7 @@ impl SignatureBitStringEncoding for PivSignature {
 // PivVerifyingKey — wraps SPKI DER bytes for EncodePublicKey
 // ---------------------------------------------------------------------------
 
+/// A verifying key backed by raw SPKI DER bytes, for use with `x509-cert` builders.
 #[derive(Clone, Debug)]
 pub struct PivVerifyingKey(Vec<u8>);
 
@@ -2277,6 +2449,7 @@ pub struct PivSigner<'a, C: SmartCardConnection> {
 }
 
 impl<'a, C: SmartCardConnection> PivSigner<'a, C> {
+    /// Create a new signer for the given session, slot, key type, hash algorithm, and SPKI DER.
     pub fn new(
         session: &'a mut PivSession<C>,
         slot: Slot,

@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cbor::Value;
 
+/// CTAP2 extension identifier for credProtect.
 pub const EXTENSION_ID: &str = "credProtect";
 
 /// Credential protection level.
@@ -47,6 +48,7 @@ pub enum CredProtectPolicy {
 }
 
 impl CredProtectPolicy {
+    /// Construct a policy from its CTAP2 integer value (1, 2, or 3).
     pub fn from_u32(v: u32) -> Option<Self> {
         match v {
             1 => Some(Self::UserVerificationOptional),
@@ -94,19 +96,23 @@ impl<'de> Deserialize<'de> for CredProtectPolicy {
 /// Registration input for credProtect.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationInput {
+    /// The requested credential protection level.
     #[serde(rename = "credentialProtectionPolicy")]
     pub policy: CredProtectPolicy,
+    /// Whether the RP requires the authenticator to support credProtect.
     #[serde(
         rename = "enforceCredentialProtectionPolicy",
         default,
         skip_serializing_if = "std::ops::Not::not"
     )]
+    /// Whether to fail registration if the authenticator does not support credProtect.
     pub enforce: bool,
 }
 
 /// Registration output for credProtect.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationOutput {
+    /// The effective credential protection policy set by the authenticator.
     #[serde(rename = "credentialProtectionPolicy")]
     pub policy: CredProtectPolicy,
 }

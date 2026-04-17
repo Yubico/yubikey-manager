@@ -31,6 +31,7 @@ use crate::transport::ctaphid::FidoError;
 
 /// Abstract FIDO connection — send CTAP HID commands.
 pub trait FidoConnection: crate::core::Connection<Error = FidoError> {
+    /// Send a CTAP HID command and receive the response.
     fn call(
         &mut self,
         cmd: u8,
@@ -38,7 +39,9 @@ pub trait FidoConnection: crate::core::Connection<Error = FidoError> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, FidoError>;
+    /// Return the firmware version as `(major, minor, patch)`.
     fn device_version(&self) -> (u8, u8, u8);
+    /// Return the CTAP HID capability flags reported by the device.
     fn capabilities(&self) -> crate::transport::ctaphid::CtapHidCapability;
 }
 

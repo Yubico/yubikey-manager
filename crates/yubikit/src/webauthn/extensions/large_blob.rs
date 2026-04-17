@@ -42,19 +42,23 @@ const LARGE_BLOB_KEY_EXT_ID: &str = "largeBlobKey";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LargeBlobSupport {
+    /// The RP requires large blob support; registration fails without it.
     Required,
+    /// The RP prefers large blob support but does not require it.
     Preferred,
 }
 
 /// Registration input for largeBlob.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationInput {
+    /// Level of large blob support requested.
     pub support: LargeBlobSupport,
 }
 
 /// Registration output for largeBlob.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationOutput {
+    /// Whether the authenticator supports large blob storage for this credential.
     pub supported: bool,
 }
 
@@ -62,18 +66,22 @@ pub struct RegistrationOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthenticationInput {
+    /// Set to `true` to read the large blob associated with the credential.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read: Option<bool>,
+    /// Data to write as the large blob (mutually exclusive with `read`).
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         serialize_with = "b64_opt_ser",
         deserialize_with = "b64_opt_de"
     )]
+    /// Data to write as the large blob (base64url-encoded in JSON).
     pub write: Option<Vec<u8>>,
 }
 
 impl AuthenticationInput {
+    /// Create an input that reads the large blob.
     pub fn read() -> Self {
         Self {
             read: Some(true),
@@ -81,6 +89,7 @@ impl AuthenticationInput {
         }
     }
 
+    /// Create an input that writes `data` as the large blob.
     pub fn write(data: Vec<u8>) -> Self {
         Self {
             read: None,
@@ -92,13 +101,16 @@ impl AuthenticationInput {
 /// Authentication output for largeBlob.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthenticationOutput {
+    /// The blob data read from the authenticator, if a read was requested.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         serialize_with = "b64_opt_ser",
         deserialize_with = "b64_opt_de"
     )]
+    /// The blob data read from the authenticator, if a read was requested.
     pub blob: Option<Vec<u8>>,
+    /// Whether the write operation succeeded, if a write was requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub written: Option<bool>,
 }

@@ -44,10 +44,12 @@ mod base64url {
     use base64::prelude::*;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+    /// Serialize a byte vector as a base64url-encoded string (no padding).
     pub fn serialize<S: Serializer>(bytes: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
         BASE64_URL_SAFE_NO_PAD.encode(bytes).serialize(s)
     }
 
+    /// Deserialize a base64url-encoded string (no padding) into a byte vector.
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
         let s = String::deserialize(d)?;
         BASE64_URL_SAFE_NO_PAD
@@ -60,6 +62,7 @@ mod base64url_opt {
     use base64::prelude::*;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+    /// Serialize an optional byte vector as a base64url-encoded string (no padding).
     pub fn serialize<S: Serializer>(bytes: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error> {
         match bytes {
             Some(b) => BASE64_URL_SAFE_NO_PAD.encode(b).serialize(s),
@@ -67,6 +70,7 @@ mod base64url_opt {
         }
     }
 
+    /// Deserialize an optional base64url-encoded string (no padding) into a byte vector.
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
         let opt = Option::<String>::deserialize(d)?;
         match opt {
@@ -86,11 +90,13 @@ mod base64url_opt {
 /// The type of a public key credential (§5.8.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PublicKeyCredentialType {
+    /// The `"public-key"` credential type.
     #[serde(rename = "public-key")]
     PublicKey,
 }
 
 impl PublicKeyCredentialType {
+    /// Returns the string representation (`"public-key"`).
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::PublicKey => "public-key",
@@ -130,6 +136,7 @@ pub enum AttestationConveyancePreference {
 }
 
 impl AttestationConveyancePreference {
+    /// Returns the string representation of this preference.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::None => "none",
@@ -144,13 +151,17 @@ impl AttestationConveyancePreference {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UserVerificationRequirement {
+    /// The RP requires user verification.
     Required,
+    /// The RP prefers user verification if available (default).
     #[default]
     Preferred,
+    /// The RP does not want user verification.
     Discouraged,
 }
 
 impl UserVerificationRequirement {
+    /// Returns the string representation of this requirement.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Required => "required",
@@ -164,13 +175,17 @@ impl UserVerificationRequirement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ResidentKeyRequirement {
+    /// A discoverable (resident) credential is required.
     Required,
+    /// A discoverable credential is preferred if supported (default).
     #[default]
     Preferred,
+    /// A server-side (non-discoverable) credential is preferred.
     Discouraged,
 }
 
 impl ResidentKeyRequirement {
+    /// Returns the string representation of this requirement.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Required => "required",
@@ -183,13 +198,16 @@ impl ResidentKeyRequirement {
 /// Authenticator attachment modality (§5.4.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuthenticatorAttachment {
+    /// A platform authenticator (built into the device).
     #[serde(rename = "platform")]
     Platform,
+    /// A roaming (cross-platform) authenticator such as a security key.
     #[serde(rename = "cross-platform")]
     CrossPlatform,
 }
 
 impl AuthenticatorAttachment {
+    /// Returns the string representation of this attachment modality.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Platform => "platform",
@@ -202,14 +220,20 @@ impl AuthenticatorAttachment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthenticatorTransport {
+    /// USB HID transport.
     Usb,
+    /// Near-Field Communication transport.
     Nfc,
+    /// Bluetooth Low Energy transport.
     Ble,
+    /// Hybrid (caBLE) transport.
     Hybrid,
+    /// Client-device internal transport (platform authenticator).
     Internal,
 }
 
 impl AuthenticatorTransport {
+    /// Returns the string representation of this transport.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Usb => "usb",
@@ -235,15 +259,19 @@ impl AuthenticatorTransport {
 /// Hint to the client about preferred authenticator type (§5.8.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PublicKeyCredentialHint {
+    /// Prefer a roaming security key.
     #[serde(rename = "security-key")]
     SecurityKey,
+    /// Prefer the client device's built-in authenticator.
     #[serde(rename = "client-device")]
     ClientDevice,
+    /// Prefer a hybrid (caBLE) authenticator.
     #[serde(rename = "hybrid")]
     Hybrid,
 }
 
 impl PublicKeyCredentialHint {
+    /// Returns the string representation of this hint.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::SecurityKey => "security-key",
@@ -261,7 +289,9 @@ impl PublicKeyCredentialHint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialRpEntity {
+    /// Human-readable RP name.
     pub name: String,
+    /// RP identifier (typically a domain). Defaults to the origin's effective domain.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 }
@@ -281,10 +311,13 @@ impl PublicKeyCredentialRpEntity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialUserEntity {
+    /// Opaque user handle (unique per RP, max 64 bytes).
     #[serde(with = "base64url")]
     pub id: Vec<u8>,
+    /// Human-readable user account name (e.g. `"alice@example.com"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Human-readable display name for the user.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
 }
@@ -326,8 +359,10 @@ impl PublicKeyCredentialUserEntity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialParameters {
+    /// Credential type — always [`PublicKeyCredentialType::PublicKey`].
     #[serde(rename = "type")]
     pub type_: PublicKeyCredentialType,
+    /// COSE algorithm identifier (e.g. `-7` for ES256, `-8` for EdDSA).
     pub alg: i64,
 }
 
@@ -357,10 +392,13 @@ impl PublicKeyCredentialParameters {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialDescriptor {
+    /// Credential type — always [`PublicKeyCredentialType::PublicKey`].
     #[serde(rename = "type")]
     pub type_: PublicKeyCredentialType,
+    /// Credential ID returned during registration.
     #[serde(with = "base64url")]
     pub id: Vec<u8>,
+    /// Optional transport hints indicating how the authenticator communicates.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transports: Option<Vec<AuthenticatorTransport>>,
 }
@@ -422,10 +460,13 @@ impl PublicKeyCredentialDescriptor {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthenticatorSelectionCriteria {
+    /// Preferred authenticator attachment modality (platform or cross-platform).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authenticator_attachment: Option<AuthenticatorAttachment>,
+    /// Whether a discoverable (resident) credential is required.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resident_key: Option<ResidentKeyRequirement>,
+    /// User verification requirement for this ceremony.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_verification: Option<UserVerificationRequirement>,
 }
@@ -438,23 +479,34 @@ pub struct AuthenticatorSelectionCriteria {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialCreationOptions {
+    /// Relying Party information.
     pub rp: PublicKeyCredentialRpEntity,
+    /// User account information.
     pub user: PublicKeyCredentialUserEntity,
+    /// Server-generated challenge.
     #[serde(with = "base64url")]
     pub challenge: Vec<u8>,
+    /// Acceptable public key algorithms, ordered by RP preference.
     pub pub_key_cred_params: Vec<PublicKeyCredentialParameters>,
+    /// Timeout for the ceremony in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
+    /// Credentials to exclude (prevents re-registration).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exclude_credentials: Option<Vec<PublicKeyCredentialDescriptor>>,
+    /// Authenticator selection criteria.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authenticator_selection: Option<AuthenticatorSelectionCriteria>,
+    /// Hints about the preferred authenticator type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<PublicKeyCredentialHint>>,
+    /// Attestation conveyance preference.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attestation: Option<AttestationConveyancePreference>,
+    /// Preferred attestation statement formats.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attestation_formats: Option<Vec<String>>,
+    /// Extension inputs for registration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extensions: Option<super::extensions::RegistrationExtensionInputs>,
 }
@@ -475,18 +527,25 @@ impl PublicKeyCredentialCreationOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialRequestOptions {
+    /// Server-generated challenge.
     #[serde(with = "base64url")]
     pub challenge: Vec<u8>,
+    /// Timeout for the ceremony in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
+    /// RP identifier. Defaults to the origin's effective domain if omitted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rp_id: Option<String>,
+    /// Credentials the RP expects may match (allow list).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_credentials: Option<Vec<PublicKeyCredentialDescriptor>>,
+    /// User verification requirement for this ceremony.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_verification: Option<UserVerificationRequirement>,
+    /// Hints about the preferred authenticator type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<PublicKeyCredentialHint>>,
+    /// Extension inputs for authentication.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extensions: Option<super::extensions::AuthenticationExtensionInputs>,
 }
@@ -513,9 +572,13 @@ impl PublicKeyCredentialRequestOptions {
 #[derive(Debug, Clone)]
 pub struct CollectedClientData {
     json: Vec<u8>,
+    /// The ceremony type (`"webauthn.create"` or `"webauthn.get"`).
     pub type_: String,
+    /// The server-generated challenge.
     pub challenge: Vec<u8>,
+    /// The origin that initiated the ceremony.
     pub origin: String,
+    /// Whether the request was cross-origin.
     pub cross_origin: bool,
 }
 
@@ -598,8 +661,10 @@ impl CollectedClientData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthenticatorAttestationResponse {
+    /// JSON-serialized [`CollectedClientData`].
     #[serde(rename = "clientDataJSON", with = "base64url")]
     pub client_data_json: Vec<u8>,
+    /// CBOR-encoded attestation object containing `fmt`, `authData`, and `attStmt`.
     #[serde(with = "base64url")]
     pub attestation_object: Vec<u8>,
 }
@@ -608,17 +673,22 @@ pub struct AuthenticatorAttestationResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthenticatorAssertionResponse {
+    /// JSON-serialized [`CollectedClientData`].
     #[serde(rename = "clientDataJSON", with = "base64url")]
     pub client_data_json: Vec<u8>,
+    /// Raw authenticator data containing RP ID hash, flags, counter, and extensions.
     #[serde(with = "base64url")]
     pub authenticator_data: Vec<u8>,
+    /// DER-encoded assertion signature over the authenticator data and client data hash.
     #[serde(with = "base64url")]
     pub signature: Vec<u8>,
+    /// User handle returned by the authenticator (for discoverable credentials).
     #[serde(
         skip_serializing_if = "Option::is_none",
         with = "base64url_opt",
         default
     )]
+    /// The user handle (user.id) associated with the credential.
     pub user_handle: Option<Vec<u8>>,
 }
 
@@ -626,13 +696,18 @@ pub struct AuthenticatorAssertionResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistrationResponse {
+    /// Credential ID (base64url-encoded in JSON).
     #[serde(with = "base64url")]
     pub id: Vec<u8>,
+    /// The authenticator's attestation response.
     pub response: AuthenticatorAttestationResponse,
+    /// The authenticator attachment modality used.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authenticator_attachment: Option<AuthenticatorAttachment>,
+    /// Credential type — always `"public-key"`.
     #[serde(rename = "type")]
     pub type_: PublicKeyCredentialType,
+    /// Extension outputs from the registration ceremony.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_extension_results: Option<super::extensions::RegistrationExtensionOutputs>,
 }
@@ -648,13 +723,18 @@ impl RegistrationResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthenticationResponse {
+    /// Credential ID (base64url-encoded in JSON).
     #[serde(with = "base64url")]
     pub id: Vec<u8>,
+    /// The authenticator's assertion response.
     pub response: AuthenticatorAssertionResponse,
+    /// The authenticator attachment modality used.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authenticator_attachment: Option<AuthenticatorAttachment>,
+    /// Credential type — always `"public-key"`.
     #[serde(rename = "type")]
     pub type_: PublicKeyCredentialType,
+    /// Extension outputs from the authentication ceremony.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_extension_results: Option<super::extensions::AuthenticationExtensionOutputs>,
 }

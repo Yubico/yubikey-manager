@@ -25,6 +25,8 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! CTAP2 session — manages communication with a FIDO2 authenticator.
+
 use crate::cbor::{self, Value};
 use crate::core::Connection;
 use crate::ctap::CtapSession;

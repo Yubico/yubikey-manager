@@ -34,11 +34,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::cbor::Value;
 
+/// CTAP2 extension identifier for minPinLength.
 pub const EXTENSION_ID: &str = "minPinLength";
 
 /// Registration output for minPinLength.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationOutput {
+    /// The minimum PIN length enforced by the authenticator.
     #[serde(rename = "minPinLength")]
     pub length: u32,
 }

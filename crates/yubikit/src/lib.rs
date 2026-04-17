@@ -25,6 +25,8 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+#![warn(missing_docs)]
+
 //! Rust SDK for interacting with YubiKey devices.
 //!
 //! **yubikit** provides a complete API for communicating with YubiKeys over
@@ -102,23 +104,43 @@
 //! - [`cbor`] — CBOR encoding/decoding helpers for CTAP2
 //! - [`tlv`] — TLV (Tag-Length-Value) encoding/decoding for SmartCard APDUs
 
+/// CBOR encoding and decoding utilities.
 pub mod cbor;
+/// Core types shared across all YubiKey applications.
 pub mod core;
+/// CTAP session management and device communication.
 pub mod ctap;
+/// CTAP2 protocol implementation for FIDO2 authenticator operations.
 pub mod ctap2;
+/// High-level device enumeration and connection management.
 pub mod device;
+/// FIDO connection trait and transport abstraction.
 pub mod fido;
+/// YubiHSM Auth application for symmetric key storage and derivation.
 pub mod hsmauth;
+/// Logging utilities for diagnostic output.
 pub mod logging;
+/// Device management — reading info, configuring interfaces, and settings.
 pub mod management;
+/// OATH (TOTP/HOTP) credential management.
 pub mod oath;
+/// OpenPGP smart card application.
 pub mod openpgp;
+/// OTP (One-Time Password) frame protocol and modhex codec.
 pub mod otp;
+/// PIV (Personal Identity Verification) smart card application.
 pub mod piv;
+/// Secure Channel Protocol (SCP) for encrypted communication.
 pub mod scp;
+/// Security Domain operations for managing SCP keys and certificates.
 pub mod securitydomain;
+/// Smart card communication primitives — APDUs, status words, ISO 7816-4.
 pub mod smartcard;
+/// TLV (Tag-Length-Value) encoding and decoding.
 pub mod tlv;
+/// Transport layer — HID, PC/SC, and NFC backends.
 pub mod transport;
+/// WebAuthn client — high-level API for credentials and assertions.
 pub mod webauthn;
+/// YubiOTP application — configuring OTP slots and challenge-response.
 pub mod yubiotp;

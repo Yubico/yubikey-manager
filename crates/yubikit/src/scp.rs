@@ -25,6 +25,9 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! Secure Channel Protocol (SCP) support for establishing encrypted communication
+//! with YubiKey applets.
+
 use std::fmt;
 
 use aes::Aes128;
@@ -40,22 +43,31 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 type Aes128CbcEnc = CbcEncryptor<Aes128>;
 type Aes128CbcDec = CbcDecryptor<Aes128>;
 
+/// Errors that can occur during SCP operations.
 #[derive(Debug, Error)]
 pub enum ScpError {
+    /// The derivation length parameter is not 0x40 or 0x80.
     #[error("L must be 0x40 or 0x80")]
     InvalidDerivationLength,
+    /// Failed to initialize CMAC.
     #[error("CMAC init failed: {0}")]
     CmacInit(String),
+    /// Failed to initialize AES cipher.
     #[error("AES init failed: {0}")]
     AesInit(String),
+    /// Failed to initialize CBC mode.
     #[error("CBC init failed: {0}")]
     CbcInit(String),
+    /// CBC decryption failed.
     #[error("CBC decrypt failed: {0}")]
     CbcDecrypt(String),
+    /// The response MAC did not match the expected value.
     #[error("Wrong MAC")]
     WrongMac,
+    /// Decrypted data has invalid padding.
     #[error("Wrong padding")]
     WrongPadding,
+    /// Response is too short to contain a MAC.
     #[error("Response too short for MAC")]
     ResponseTooShort,
 }
@@ -164,6 +176,7 @@ pub struct ScpState {
 }
 
 impl ScpState {
+    /// Create a new SCP state with the given session keys and optional MAC chain / counter.
     pub fn new(
         key_senc: [u8; 16],
         key_smac: [u8; 16],
@@ -264,32 +277,45 @@ pub fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Vec<
 pub enum ScpKeyParams {
     /// SCP03 with static keys.
     Scp03 {
+        /// Key version number.
         #[zeroize(skip)]
         kvn: u8,
+        /// Static encryption key (16 bytes).
         key_enc: [u8; 16],
+        /// Static MAC key (16 bytes).
         key_mac: [u8; 16],
+        /// Optional data encryption key (16 bytes).
         key_dek: Option<[u8; 16]>,
     },
     /// SCP11b — needs card key reference + public key from SD.
     Scp11b {
+        /// Key ID.
         #[zeroize(skip)]
         kid: u8,
+        /// Key version number.
         #[zeroize(skip)]
         kvn: u8,
+        /// Security Domain ECKA public key.
         #[zeroize(skip)]
         pk_sd_ecka: Vec<u8>,
     },
     /// SCP11a or SCP11c — needs OCE private key + cert chain.
     Scp11ac {
+        /// Key ID.
         #[zeroize(skip)]
         kid: u8,
+        /// Key version number.
         #[zeroize(skip)]
         kvn: u8,
+        /// Security Domain ECKA public key.
         #[zeroize(skip)]
         pk_sd_ecka: Vec<u8>,
+        /// OCE ECKA private key (32 bytes).
         sk_oce_ecka: [u8; 32],
+        /// OCE certificate chain.
         #[zeroize(skip)]
         certificates: Vec<Vec<u8>>,
+        /// Optional OCE key reference (KID, KVN).
         #[zeroize(skip)]
         oce_ref: Option<(u8, u8)>,
     },

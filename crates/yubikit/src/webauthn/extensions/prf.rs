@@ -47,20 +47,24 @@ const HMAC_SECRET_MC_ID: &str = "hmac-secret-mc";
 /// PRF evaluation inputs — first and optional second.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrfEval {
+    /// First PRF input (base64url-encoded in JSON).
     #[serde(serialize_with = "b64_ser", deserialize_with = "b64_de")]
     pub first: Vec<u8>,
+    /// Optional second PRF input (base64url-encoded in JSON).
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         serialize_with = "b64_opt_ser",
         deserialize_with = "b64_opt_de"
     )]
+    /// Optional second input value for the PRF (base64url-encoded in JSON).
     pub second: Option<Vec<u8>>,
 }
 
 /// Registration input for PRF.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationInput {
+    /// Optional evaluation inputs to compute PRF results during registration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eval: Option<PrfEval>,
 }
@@ -68,7 +72,9 @@ pub struct RegistrationInput {
 /// Registration output for PRF.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationOutput {
+    /// Whether the authenticator supports PRF (hmac-secret) for this credential.
     pub enabled: bool,
+    /// PRF evaluation results, if `eval` was provided in the input.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub results: Option<PrfResults>,
 }
@@ -77,34 +83,41 @@ pub struct RegistrationOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthenticationInput {
+    /// Default evaluation inputs applied when no credential-specific eval matches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eval: Option<PrfEval>,
+    /// Per-credential evaluation inputs, keyed by base64url credential ID.
     #[serde(
         default,
         skip_serializing_if = "HashMap::is_empty",
         serialize_with = "eval_by_cred_ser",
         deserialize_with = "eval_by_cred_de"
     )]
+    /// Per-credential evaluation inputs, keyed by credential ID.
     pub eval_by_credential: HashMap<Vec<u8>, PrfEval>,
 }
 
 /// Authentication output for PRF.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthenticationOutput {
+    /// The derived PRF secrets.
     pub results: PrfResults,
 }
 
 /// Derived PRF results.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrfResults {
+    /// First 32-byte derived secret (base64url-encoded in JSON).
     #[serde(serialize_with = "b64_ser", deserialize_with = "b64_de")]
     pub first: Vec<u8>,
+    /// Optional second 32-byte derived secret (base64url-encoded in JSON).
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         serialize_with = "b64_opt_ser",
         deserialize_with = "b64_opt_de"
     )]
+    /// Optional second 32-byte derived secret (base64url-encoded in JSON).
     pub second: Option<Vec<u8>>,
 }
 

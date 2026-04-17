@@ -25,10 +25,12 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! Management application protocol.
+//! YubiKey device management.
 //!
-//! Provides device configuration, capability queries, and mode setting for
-//! YubiKeys accessible over SmartCard (CCID).
+//! Provides functionality for reading device information, configuring USB and
+//! NFC interfaces, and managing device settings such as capabilities, flags,
+//! and lock codes. Sessions can be opened over SmartCard (CCID), OTP HID, or
+//! FIDO HID transports.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -103,13 +105,21 @@ const TAG_STM_VERSION: u32 = 0x21;
 pub struct Capability(pub u16);
 
 impl Capability {
+    /// Yubico OTP application.
     pub const OTP: Self = Self(0x01);
+    /// FIDO U2F application.
     pub const U2F: Self = Self(0x02);
+    /// OpenPGP application.
     pub const OPENPGP: Self = Self(0x08);
+    /// PIV (Personal Identity Verification) application.
     pub const PIV: Self = Self(0x10);
+    /// OATH (TOTP/HOTP) application.
     pub const OATH: Self = Self(0x20);
+    /// YubiHSM Auth application.
     pub const HSMAUTH: Self = Self(0x100);
+    /// FIDO2 / WebAuthn application.
     pub const FIDO2: Self = Self(0x200);
+    /// No capabilities enabled.
     pub const NONE: Self = Self(0);
 
     /// Decode FIPS capability bitmask to [`Capability`] flags.
@@ -133,10 +143,12 @@ impl Capability {
         Self(c)
     }
 
+    /// Returns `true` if no capabilities are set.
     pub fn is_empty(self) -> bool {
         self.0 == 0
     }
 
+    /// Returns `true` if all bits in `other` are set in `self`.
     pub fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
@@ -226,13 +238,21 @@ impl fmt::Display for Capability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum FormFactor {
+    /// Unknown or unrecognized form factor.
     Unknown = 0x00,
+    /// USB-A keychain form factor.
     UsbAKeychain = 0x01,
+    /// USB-A nano form factor.
     UsbANano = 0x02,
+    /// USB-C keychain form factor.
     UsbCKeychain = 0x03,
+    /// USB-C nano form factor.
     UsbCNano = 0x04,
+    /// USB-C + Lightning keychain form factor.
     UsbCLightning = 0x05,
+    /// USB-A biometric form factor.
     UsbABio = 0x06,
+    /// USB-C biometric form factor.
     UsbCBio = 0x07,
 }
 
@@ -251,6 +271,7 @@ impl FormFactor {
         }
     }
 
+    /// Returns `true` if this is a biometric (Bio) form factor.
     pub fn is_bio(self) -> bool {
         matches!(self, Self::UsbABio | Self::UsbCBio)
     }
@@ -280,10 +301,14 @@ impl fmt::Display for FormFactor {
 pub struct DeviceFlag(pub u8);
 
 impl DeviceFlag {
+    /// Allow the device to be woken via USB remote wakeup.
     pub const REMOTE_WAKEUP: Self = Self(0x40);
+    /// Allow the device to be ejected (CCID mode).
     pub const EJECT: Self = Self(0x80);
+    /// No flags set.
     pub const NONE: Self = Self(0);
 
+    /// Returns `true` if no flags are set.
     pub fn is_empty(self) -> bool {
         self.0 == 0
     }
@@ -323,12 +348,16 @@ impl fmt::Display for DeviceFlag {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ReleaseType {
+    /// Pre-release alpha firmware.
     Alpha = 0,
+    /// Pre-release beta firmware.
     Beta = 1,
+    /// Production release firmware.
     Final = 2,
 }
 
 impl ReleaseType {
+    /// Decode a release type from its numeric value.
     pub fn from_value(v: u8) -> Self {
         match v {
             0 => Self::Alpha,
@@ -355,12 +384,16 @@ impl fmt::Display for ReleaseType {
 /// Fully qualified YubiKey version (version + release type + iteration).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VersionQualifier {
+    /// Base firmware version.
     pub version: Version,
+    /// Release type (alpha, beta, or final).
     pub release_type: ReleaseType,
+    /// Build iteration within the release type.
     pub iteration: u8,
 }
 
 impl VersionQualifier {
+    /// Create a new version qualifier.
     pub fn new(version: Version, release_type: ReleaseType, iteration: u8) -> Self {
         Self {
             version,
@@ -369,6 +402,7 @@ impl VersionQualifier {
         }
     }
 
+    /// Create a version qualifier for a final (production) release.
     pub fn final_release(version: Version) -> Self {
         Self {
             version,
@@ -397,10 +431,14 @@ impl fmt::Display for VersionQualifier {
 pub struct UsbInterface(pub u8);
 
 impl UsbInterface {
+    /// OTP (keyboard HID) interface.
     pub const OTP: Self = Self(0x01);
+    /// CCID (SmartCard) interface.
     pub const CCID: Self = Self(0x02);
+    /// FIDO (U2F/FIDO2 HID) interface.
     pub const FIDO: Self = Self(0x04);
 
+    /// Returns `true` if all bits in `other` are set in `self`.
     pub fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
@@ -450,11 +488,14 @@ const MODES: [UsbInterface; 7] = [
 /// YubiKey USB Mode configuration for use with YubiKey NEO and 4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Mode {
+    /// Numeric mode code (index into the predefined mode table).
     pub code: u8,
+    /// The USB interfaces enabled by this mode.
     pub interfaces: UsbInterface,
 }
 
 impl Mode {
+    /// Look up the mode matching the given interface combination, if valid.
     pub fn new(interfaces: UsbInterface) -> Option<Self> {
         MODES
             .iter()
@@ -498,10 +539,15 @@ impl fmt::Display for Mode {
 /// Management settings for YubiKey which can be configured by the user.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DeviceConfig {
+    /// Enabled application capabilities per transport (USB / NFC).
     pub enabled_capabilities: HashMap<Transport, Capability>,
+    /// Auto-eject timeout in seconds (CCID mode, 0 = disabled).
     pub auto_eject_timeout: Option<u16>,
+    /// Challenge-response timeout in seconds.
     pub challenge_response_timeout: Option<u8>,
+    /// Device-level configuration flags.
     pub device_flags: Option<DeviceFlag>,
+    /// Whether NFC is restricted (requires physical touch to enable).
     pub nfc_restricted: Option<bool>,
 }
 
@@ -571,21 +617,37 @@ impl DeviceConfig {
 /// Full device information readable from a YubiKey.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeviceInfo {
+    /// Current device configuration (enabled capabilities, timeouts, flags).
     pub config: DeviceConfig,
+    /// Device serial number, if available.
     pub serial: Option<u32>,
+    /// Firmware version (behavioral version used for feature gating).
     pub version: Version,
+    /// Physical form factor of the device.
     pub form_factor: FormFactor,
+    /// Supported application capabilities per transport.
     pub supported_capabilities: HashMap<Transport, Capability>,
+    /// Whether the device configuration is protected by a lock code.
     pub is_locked: bool,
+    /// Whether the device is a FIPS series YubiKey.
     pub is_fips: bool,
+    /// Whether the device is a Security Key (SKY) series.
     pub is_sky: bool,
+    /// Device part number string, if reported.
     pub part_number: Option<String>,
+    /// Applications that are FIPS capable on this device.
     pub fips_capable: Capability,
+    /// Applications that are FIPS approved on this device.
     pub fips_approved: Capability,
+    /// Whether PIN complexity requirements are enforced.
     pub pin_complexity: bool,
+    /// Applications for which factory reset is blocked.
     pub reset_blocked: Capability,
+    /// Fingerprint sensor firmware version, if present.
     pub fps_version: Option<Version>,
+    /// STM co-processor firmware version, if present.
     pub stm_version: Option<Version>,
+    /// Fully qualified firmware version with release type.
     pub version_qualifier: VersionQualifier,
 }
 
@@ -733,10 +795,12 @@ impl DeviceInfo {
         })
     }
 
+    /// Returns `true` if the device supports the given transport.
     pub fn has_transport(&self, transport: Transport) -> bool {
         self.supported_capabilities.contains_key(&transport)
     }
 
+    /// Human-readable version string, including qualifier for pre-release firmware.
     pub fn version_name(&self) -> String {
         if self.version_qualifier.release_type != ReleaseType::Final {
             self.version_qualifier.to_string()
@@ -759,10 +823,13 @@ impl DeviceInfo {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ManagementError<E: fmt::Debug + fmt::Display> {
+    /// The requested operation is not supported by this YubiKey version.
     #[error("Not supported: {0}")]
     NotSupported(String),
+    /// The device returned or was given malformed data.
     #[error("Invalid data: {0}")]
     InvalidData(String),
+    /// A transport-level connection error occurred.
     #[error("Connection error: {0}")]
     Connection(E),
 }

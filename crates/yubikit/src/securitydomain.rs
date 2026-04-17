@@ -25,6 +25,9 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! YubiKey Security Domain operations — managing SCP keys, certificates, and
+//! secure channel configuration.
+
 use std::collections::HashMap;
 use std::fmt;
 
@@ -48,12 +51,16 @@ use crate::tlv::{parse_tlv_list, tlv_encode, tlv_parse, tlv_unpack};
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum SecurityDomainError {
+    /// The operation is not supported by the device.
     #[error("Not supported: {0}")]
     NotSupported(String),
+    /// The provided data is invalid or malformed.
     #[error("Invalid data: {0}")]
     InvalidData(String),
+    /// The configuration is invalid.
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
+    /// A SmartCard communication error occurred.
     #[error("Connection error: {0}")]
     Connection(SmartCardError),
 }
@@ -117,13 +124,18 @@ const DEFAULT_KCV_IV: [u8; 16] = [0x01; 16];
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum KeyType {
+    /// AES symmetric key.
     Aes = 0x88,
+    /// ECC public key.
     EccPublicKey = 0xB0,
+    /// ECC private key.
     EccPrivateKey = 0xB1,
+    /// ECC key parameters.
     EccKeyParams = 0xF0,
 }
 
 impl KeyType {
+    /// Convert a raw byte to the corresponding [`KeyType`], if recognized.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x88 => Some(Self::Aes),
@@ -143,15 +155,22 @@ impl KeyType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Curve {
+    /// NIST P-256.
     Secp256r1 = 0x00,
+    /// NIST P-384.
     Secp384r1 = 0x01,
+    /// NIST P-521.
     Secp521r1 = 0x02,
+    /// Brainpool P-256r1.
     BrainpoolP256r1 = 0x03,
+    /// Brainpool P-384r1.
     BrainpoolP384r1 = 0x05,
+    /// Brainpool P-512r1.
     BrainpoolP512r1 = 0x07,
 }
 
 impl Curve {
+    /// Convert a raw byte to the corresponding [`Curve`], if recognized.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x00 => Some(Self::Secp256r1),
@@ -207,13 +226,18 @@ impl Curve {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ScpKid {
+    /// SCP03 (symmetric).
     Scp03 = 0x01,
+    /// SCP11a (mutual authentication).
     Scp11a = 0x11,
+    /// SCP11b (one-way authentication).
     Scp11b = 0x13,
+    /// SCP11c (mutual authentication with receipts).
     Scp11c = 0x15,
 }
 
 impl ScpKid {
+    /// Convert a raw byte to the corresponding [`ScpKid`], if recognized.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x01 => Some(Self::Scp03),
@@ -232,15 +256,19 @@ impl ScpKid {
 /// Reference to an SCP key: key ID (kid) and key version number (kvn).
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KeyRef {
+    /// Key identifier.
     pub kid: u8,
+    /// Key version number.
     pub kvn: u8,
 }
 
 impl KeyRef {
+    /// Create a new key reference from a key ID and version number.
     pub fn new(kid: u8, kvn: u8) -> Self {
         Self { kid, kvn }
     }
 
+    /// Parse a key reference from a byte slice (requires at least 2 bytes).
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
         if data.len() >= 2 {
             Some(Self {
@@ -252,6 +280,7 @@ impl KeyRef {
         }
     }
 
+    /// Serialize this key reference as `[kid, kvn]`.
     pub fn to_bytes(self) -> [u8; 2] {
         [self.kid, self.kvn]
     }
@@ -276,8 +305,11 @@ impl fmt::Display for KeyRef {
 /// SCP03 static key set.
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct StaticKeys {
+    /// Static encryption key (S-ENC).
     pub key_enc: [u8; 16],
+    /// Static MAC key (S-MAC).
     pub key_mac: [u8; 16],
+    /// Optional data encryption key (DEK).
     pub key_dek: Option<[u8; 16]>,
 }
 
@@ -292,6 +324,7 @@ impl fmt::Debug for StaticKeys {
 }
 
 impl StaticKeys {
+    /// Create a new static key set with the given encryption, MAC, and optional DEK keys.
     pub fn new(key_enc: [u8; 16], key_mac: [u8; 16], key_dek: Option<[u8; 16]>) -> Self {
         Self {
             key_enc,

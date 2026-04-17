@@ -38,8 +38,12 @@
 //! [`crate::device::list_devices`] to discover YubiKeys and open
 //! connections through the device handle.
 
+/// CTAP HID transport for FIDO2 security keys.
 pub mod ctaphid;
+/// OTP HID transport for YubiKey OTP protocol.
 pub mod otphid;
+/// PC/SC smart card transport.
 pub mod pcsc;
 #[cfg(windows)]
+/// Windows SetupDI device enumeration.
 pub mod setupdi;

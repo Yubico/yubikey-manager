@@ -40,6 +40,7 @@ mod credential_management;
 mod large_blobs;
 mod pin_protocol;
 mod session;
+/// CTAP2 data types for credentials, attestations, and authenticator responses.
 pub mod types;
 
 use std::collections::BTreeMap;
@@ -50,16 +51,25 @@ use sha2::Sha256;
 use crate::cbor::{self, Value};
 use crate::ctap::CtapError;
 
+/// Re-export core WebAuthn credential types used throughout CTAP2 operations.
 pub use crate::webauthn::{
     PublicKeyCredentialDescriptor, PublicKeyCredentialParameters, PublicKeyCredentialUserEntity,
 };
+/// Re-export fingerprint bio enrollment management.
 pub use bio_enrollment::BioEnrollment;
+/// Re-export PIN/UV token management and permission flags.
 pub use client_pin::{ClientPin, Permissions};
+/// Re-export authenticator configuration management.
 pub use config::Config;
+/// Re-export resident credential management operations.
 pub use credential_management::CredentialManagement;
+/// Re-export large-blob array read/write operations.
 pub use large_blobs::LargeBlobs;
+/// Re-export COSE key representation and PIN protocol versions.
 pub use pin_protocol::{CoseKey, PinProtocol};
+/// Re-export the CTAP2 session for authenticator communication.
 pub use session::Ctap2Session;
+/// Re-export commonly used CTAP2 response and credential data types.
 pub use types::{
     AssertionResponse, AttestationResponse, AuthenticatorOptions, CredentialInfo,
     EnrollSampleResult, FingerprintSensorInfo, FingerprintTemplate, PublicKeyCredentialRpEntity,
@@ -73,18 +83,31 @@ pub use types::{
 /// CTAP2 authenticator command identifiers.
 #[allow(dead_code)]
 pub(crate) mod ctap2_cmd {
+    /// `authenticatorMakeCredential` (0x01).
     pub const MAKE_CREDENTIAL: u8 = 0x01;
+    /// `authenticatorGetAssertion` (0x02).
     pub const GET_ASSERTION: u8 = 0x02;
+    /// `authenticatorGetInfo` (0x04).
     pub const GET_INFO: u8 = 0x04;
+    /// `authenticatorClientPIN` (0x06).
     pub const CLIENT_PIN: u8 = 0x06;
+    /// `authenticatorReset` (0x07).
     pub const RESET: u8 = 0x07;
+    /// `authenticatorGetNextAssertion` (0x08).
     pub const GET_NEXT_ASSERTION: u8 = 0x08;
+    /// `authenticatorBioEnrollment` (0x09).
     pub const BIO_ENROLLMENT: u8 = 0x09;
+    /// `authenticatorCredentialManagement` (0x0A).
     pub const CREDENTIAL_MGMT: u8 = 0x0A;
+    /// `authenticatorSelection` (0x0B).
     pub const SELECTION: u8 = 0x0B;
+    /// `authenticatorLargeBlobs` (0x0C).
     pub const LARGE_BLOBS: u8 = 0x0C;
+    /// `authenticatorConfig` (0x0D).
     pub const CONFIG: u8 = 0x0D;
+    /// Vendor prototype `authenticatorBioEnrollment` (0x40).
     pub const BIO_ENROLLMENT_PRE: u8 = 0x40;
+    /// Vendor prototype `authenticatorCredentialManagement` (0x41).
     pub const CREDENTIAL_MGMT_PRE: u8 = 0x41;
 }
 
@@ -109,52 +132,96 @@ pub(crate) fn build_args_map(args: &[Option<Value>]) -> Vec<u8> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CtapStatus {
+    /// The command completed successfully.
     Success = 0x00,
+    /// The command is not a valid CTAP2 command.
     InvalidCommand = 0x01,
+    /// One or more command parameters are invalid.
     InvalidParameter = 0x02,
+    /// The encoded command length is invalid.
     InvalidLength = 0x03,
+    /// The command sequence number is out of order.
     InvalidSeq = 0x04,
+    /// The command timed out waiting for a response.
     Timeout = 0x05,
+    /// The authenticator channel is busy processing another request.
     ChannelBusy = 0x06,
+    /// A software lock is required before the command can proceed.
     LockRequired = 0x0A,
+    /// The logical channel is invalid.
     InvalidChannel = 0x0B,
+    /// The CBOR value has an unexpected type.
     CborUnexpectedType = 0x11,
+    /// The CBOR encoding could not be parsed.
     InvalidCbor = 0x12,
+    /// A required parameter is missing.
     MissingParameter = 0x14,
+    /// An internal limit was exceeded (e.g. map size, array length).
     LimitExceeded = 0x15,
+    /// The fingerprint database is full.
     FpDatabaseFull = 0x17,
+    /// The large-blob storage is full.
     LargeBlobStorageFull = 0x18,
+    /// The credential was excluded per the exclude list.
     CredentialExcluded = 0x19,
+    /// The authenticator is still processing the request.
     Processing = 0x21,
+    /// The credential is invalid or unrecognized.
     InvalidCredential = 0x22,
+    /// A user action (touch) is pending.
     UserActionPending = 0x23,
+    /// An operation is already in progress.
     OperationPending = 0x24,
+    /// No operations are pending.
     NoOperations = 0x25,
+    /// The requested algorithm is not supported.
     UnsupportedAlgorithm = 0x26,
+    /// The operation was denied by policy.
     OperationDenied = 0x27,
+    /// Internal key storage is full.
     KeyStoreFull = 0x28,
+    /// The requested option is not supported.
     UnsupportedOption = 0x2B,
+    /// The option value is invalid.
     InvalidOption = 0x2C,
+    /// The operation was cancelled by a keepalive cancel request.
     KeepaliveCancel = 0x2D,
+    /// No matching credentials were found.
     NoCredentials = 0x2E,
+    /// The user did not complete the required action in time.
     UserActionTimeout = 0x2F,
+    /// The operation is not allowed in the current state.
     NotAllowed = 0x30,
+    /// The PIN is invalid.
     PinInvalid = 0x31,
+    /// The PIN has been blocked due to too many failed attempts.
     PinBlocked = 0x32,
+    /// The PIN authentication parameter (pinUvAuthParam) is invalid.
     PinAuthInvalid = 0x33,
+    /// PIN authentication is blocked until the next power cycle.
     PinAuthBlocked = 0x34,
+    /// No PIN has been set on the authenticator.
     PinNotSet = 0x36,
+    /// The new PIN violates the authenticator's PIN policy.
     PinPolicyViolation = 0x37,
+    /// The serialized request is too large for the authenticator.
     RequestTooLarge = 0x39,
+    /// Built-in user verification is blocked.
     UvBlocked = 0x3C,
+    /// An integrity check failed.
     IntegrityFailure = 0x3D,
+    /// The subcommand is invalid.
     InvalidSubcommand = 0x3E,
+    /// Built-in user verification attempt was invalid.
     UvInvalid = 0x3F,
+    /// The PIN/UV token does not have the required permission.
     UnauthorizedPermission = 0x40,
+    /// An unrecognized or vendor-specific error code.
     Other = 0x7F,
 }
 
 impl CtapStatus {
+    /// Convert a raw status byte into a `CtapStatus`.
     pub fn from_byte(b: u8) -> Self {
         match b {
             0x00 => Self::Success,
@@ -259,20 +326,25 @@ impl<E: std::error::Error + Send + Sync + 'static> From<CtapError<E>> for Ctap2E
 pub struct Aaguid([u8; 16]);
 
 impl Aaguid {
+    /// The all-zeros AAGUID, indicating no attestation identity.
     pub const NONE: Aaguid = Aaguid([0u8; 16]);
 
+    /// Create an `Aaguid` from a 16-byte array.
     pub fn new(data: [u8; 16]) -> Self {
         Self(data)
     }
 
+    /// Create an `Aaguid` from a byte slice, returning `None` if not exactly 16 bytes.
     pub fn from_slice(data: &[u8]) -> Option<Self> {
         data.try_into().ok().map(Self)
     }
 
+    /// Return the underlying 16-byte array.
     pub fn as_bytes(&self) -> &[u8; 16] {
         &self.0
     }
 
+    /// Whether this is the all-zeros (absent) AAGUID.
     pub fn is_none(&self) -> bool {
         self.0 == [0u8; 16]
     }

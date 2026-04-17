@@ -25,6 +25,8 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! CTAP2 PIN/UV protocol implementations (protocol 1 and 2).
+
 use aes::Aes256;
 use cbc::{Decryptor as CbcDecryptor, Encryptor as CbcEncryptor};
 use cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
@@ -50,7 +52,9 @@ pub type CoseKey = Value;
 /// Uses enum dispatch to support both protocol version 1 and 2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PinProtocol {
+    /// PIN/UV auth protocol version 1 (CTAP 2.0).
     V1,
+    /// PIN/UV auth protocol version 2 (CTAP 2.1+).
     V2,
 }
 

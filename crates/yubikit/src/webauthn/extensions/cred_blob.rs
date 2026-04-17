@@ -34,22 +34,26 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::cbor::Value;
 
+/// CTAP2 extension identifier for credBlob.
 pub const EXTENSION_ID: &str = "credBlob";
 
 /// Registration input for credBlob — the blob data to store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationInput {
+    /// The blob data to store with the credential (base64url-encoded in JSON).
     #[serde(
         rename = "credBlob",
         serialize_with = "b64_ser",
         deserialize_with = "b64_de"
     )]
+    /// The blob data to store with the credential (base64url-encoded in JSON).
     pub blob: Vec<u8>,
 }
 
 /// Registration output for credBlob.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationOutput {
+    /// Whether the authenticator successfully stored the blob.
     #[serde(rename = "credBlob")]
     pub stored: bool,
 }
@@ -57,11 +61,13 @@ pub struct RegistrationOutput {
 /// Authentication output for credBlob.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthenticationOutput {
+    /// The blob data retrieved from the credential (base64url-encoded in JSON).
     #[serde(
         rename = "credBlob",
         serialize_with = "b64_ser",
         deserialize_with = "b64_de"
     )]
+    /// The blob data retrieved from the credential (base64url-encoded in JSON).
     pub blob: Vec<u8>,
 }
 

@@ -36,5 +36,6 @@ use serde::{Deserialize, Serialize};
 /// Registration output for credProps.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationOutput {
+    /// Whether the created credential is discoverable (resident).
     pub rk: bool,
 }

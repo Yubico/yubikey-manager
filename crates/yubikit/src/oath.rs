@@ -25,6 +25,8 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! OATH (TOTP/HOTP) credential management for YubiKeys using the YKOATH protocol over CCID.
+
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
@@ -37,52 +39,85 @@ use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtoc
 use crate::tlv::{TlvError, parse_tlv_list, tlv_encode, tlv_get, tlv_unpack};
 
 // TLV tags
+/// TLV tag for credential name.
 pub const TAG_NAME: u32 = 0x71;
+/// TLV tag for the credential name list.
 pub const TAG_NAME_LIST: u32 = 0x72;
+/// TLV tag for the OATH key (secret).
 pub const TAG_KEY: u32 = 0x73;
+/// TLV tag for an HMAC challenge.
 pub const TAG_CHALLENGE: u32 = 0x74;
+/// TLV tag for an HMAC response.
 pub const TAG_RESPONSE: u32 = 0x75;
+/// TLV tag for a truncated OTP code.
 pub const TAG_TRUNCATED: u32 = 0x76;
+/// TLV tag for HOTP-specific data.
 pub const TAG_HOTP: u32 = 0x77;
+/// TLV tag for credential properties (e.g., touch requirement).
 pub const TAG_PROPERTY: u32 = 0x78;
+/// TLV tag for the application version.
 pub const TAG_VERSION: u32 = 0x79;
+/// TLV tag for the initial moving factor (HOTP counter).
 pub const TAG_IMF: u32 = 0x7A;
+/// TLV tag for touch-required indicator.
 pub const TAG_TOUCH: u32 = 0x7C;
 
 // Instruction bytes
+/// APDU instruction byte for listing credentials.
 pub const INS_LIST: u8 = 0xA1;
+/// APDU instruction byte for adding/updating a credential.
 pub const INS_PUT: u8 = 0x01;
+/// APDU instruction byte for deleting a credential.
 pub const INS_DELETE: u8 = 0x02;
+/// APDU instruction byte for setting the access code.
 pub const INS_SET_CODE: u8 = 0x03;
+/// APDU instruction byte for resetting the OATH application.
 pub const INS_RESET: u8 = 0x04;
+/// APDU instruction byte for renaming a credential.
 pub const INS_RENAME: u8 = 0x05;
+/// APDU instruction byte for calculating a single credential code.
 pub const INS_CALCULATE: u8 = 0xA2;
+/// APDU instruction byte for validating the access code.
 pub const INS_VALIDATE: u8 = 0xA3;
+/// APDU instruction byte for calculating all credential codes.
 pub const INS_CALCULATE_ALL: u8 = 0xA4;
+/// APDU instruction byte for retrieving remaining response data.
 pub const INS_SEND_REMAINING: u8 = 0xA5;
 
+/// Bitmask for extracting the hash algorithm from a combined type/algo byte.
 pub const MASK_ALGO: u8 = 0x0F;
+/// Bitmask for extracting the OATH type from a combined type/algo byte.
 pub const MASK_TYPE: u8 = 0xF0;
 
+/// Default TOTP time period in seconds.
 pub const DEFAULT_PERIOD: u32 = 30;
+/// Default number of digits in an OTP code.
 pub const DEFAULT_DIGITS: u8 = 6;
+/// Default initial moving factor for HOTP.
 pub const DEFAULT_IMF: u32 = 0;
+/// Length of the HMAC challenge in bytes.
 pub const CHALLENGE_LEN: usize = 8;
+/// Minimum HMAC key size in bytes; shorter keys are zero-padded.
 pub const HMAC_MINIMUM_KEY_SIZE: usize = 14;
 
 const PROP_REQUIRE_TOUCH: u8 = 0x02;
 
 type HmacSha1 = Hmac<Sha1>;
 
+/// Hash algorithm used for OATH credential computation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum HashAlgorithm {
+    /// SHA-1 (20-byte digest).
     Sha1 = 0x01,
+    /// SHA-256 (32-byte digest).
     Sha256 = 0x02,
+    /// SHA-512 (64-byte digest).
     Sha512 = 0x03,
 }
 
 impl HashAlgorithm {
+    /// Convert a raw byte value to a [`HashAlgorithm`], returning `None` if unknown.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x01 => Some(Self::Sha1),
@@ -92,6 +127,7 @@ impl HashAlgorithm {
         }
     }
 
+    /// Returns the HMAC block size in bytes for this algorithm.
     pub fn block_size(self) -> usize {
         match self {
             HashAlgorithm::Sha1 => 64,
@@ -100,6 +136,7 @@ impl HashAlgorithm {
         }
     }
 
+    /// Returns the digest output size in bytes for this algorithm.
     pub fn digest_size(self) -> usize {
         match self {
             HashAlgorithm::Sha1 => 20,
@@ -109,14 +146,18 @@ impl HashAlgorithm {
     }
 }
 
+/// The type of OATH credential.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum OathType {
+    /// HMAC-based One-Time Password (event-based).
     Hotp = 0x10,
+    /// Time-based One-Time Password.
     Totp = 0x20,
 }
 
 impl OathType {
+    /// Convert a raw byte value to an [`OathType`], returning `None` if unknown.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x10 => Some(Self::Hotp),
@@ -126,17 +167,23 @@ impl OathType {
     }
 }
 
+/// Errors that can occur during OATH operations.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum OathError {
+    /// The requested operation or feature is not supported by this YubiKey.
     #[error("Not supported: {0}")]
     NotSupported(String),
+    /// The data received from the device was invalid or malformed.
     #[error("Invalid data: {0}")]
     InvalidData(String),
+    /// The HMAC response from the device did not match the expected value.
     #[error("Wrong response MAC")]
     WrongMac,
+    /// The credential does not belong to the currently connected YubiKey.
     #[error("Credential does not belong to this YubiKey")]
     WrongDevice,
+    /// A low-level smart card communication error occurred.
     #[error("Connection error: {0}")]
     Connection(SmartCardError),
 }
@@ -386,39 +433,57 @@ pub fn parse_b32_key(key: &str) -> Result<Vec<u8>, OathError> {
 /// An OATH credential on the device.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Credential {
+    /// Identifier of the YubiKey this credential belongs to.
     pub device_id: String,
+    /// Raw credential ID as stored on the device.
     pub id: Vec<u8>,
+    /// Optional issuer (e.g., service name) parsed from the credential ID.
     pub issuer: Option<String>,
+    /// Account name for this credential.
     pub name: String,
+    /// Whether this is a TOTP or HOTP credential.
     pub oath_type: OathType,
+    /// Time period in seconds (only meaningful for TOTP).
     pub period: u32,
+    /// Whether touch is required to compute a code, if known.
     pub touch_required: Option<bool>,
 }
 
 /// A computed OATH code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Code {
+    /// The formatted OTP code string (e.g., `"123456"`).
     pub value: String,
+    /// Start of the validity window as a Unix timestamp (seconds).
     pub valid_from: u64,
+    /// End of the validity window as a Unix timestamp (seconds).
     pub valid_to: u64,
 }
 
 /// Data needed to create a credential.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct CredentialData {
+    /// Account name for the credential.
     #[zeroize(skip)]
     pub name: String,
+    /// Whether this is a TOTP or HOTP credential.
     #[zeroize(skip)]
     pub oath_type: OathType,
+    /// Hash algorithm to use for code computation.
     #[zeroize(skip)]
     pub hash_algorithm: HashAlgorithm,
+    /// Shared secret key (zeroized on drop).
     pub secret: Vec<u8>,
+    /// Number of digits in the generated OTP code.
     #[zeroize(skip)]
     pub digits: u8,
+    /// Time period in seconds for TOTP credentials.
     #[zeroize(skip)]
     pub period: u32,
+    /// Initial counter value for HOTP credentials.
     #[zeroize(skip)]
     pub counter: u32,
+    /// Optional issuer (e.g., service name).
     #[zeroize(skip)]
     pub issuer: Option<String>,
 }

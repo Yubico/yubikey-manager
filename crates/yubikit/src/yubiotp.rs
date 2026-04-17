@@ -44,6 +44,7 @@ use crate::otp::calculate_crc;
 use crate::otp::check_crc;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 
+/// Re-export of OTP transport types.
 pub use crate::otp::{OtpConnection, OtpProtocol};
 
 // ---------------------------------------------------------------------------
@@ -54,10 +55,13 @@ pub use crate::otp::{OtpConnection, OtpProtocol};
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum YubiOtpError<E: fmt::Debug + fmt::Display = std::convert::Infallible> {
+    /// The operation is not supported by the device.
     #[error("Not supported: {0}")]
     NotSupported(String),
+    /// The provided data is invalid or malformed.
     #[error("Invalid data: {0}")]
     InvalidData(String),
+    /// A connection-level error occurred.
     #[error("Connection error: {0}")]
     Connection(E),
 }
@@ -99,15 +103,25 @@ impl From<OtpError> for YubiOtpError<OtpError> {
 // Constants
 // ---------------------------------------------------------------------------
 
+/// Maximum size of the fixed (public identity) field in bytes.
 pub const FIXED_SIZE: usize = 16;
+/// Size of the private identity (UID) field in bytes.
 pub const UID_SIZE: usize = 6;
+/// Size of the AES key in bytes.
 pub const KEY_SIZE: usize = 16;
+/// Size of the access code in bytes.
 pub const ACC_CODE_SIZE: usize = 6;
+/// Size of a serialized slot configuration in bytes.
 pub const CONFIG_SIZE: usize = 52;
+/// Maximum size of NDEF data payload in bytes.
 pub const NDEF_DATA_SIZE: usize = 54;
+/// Size of the HMAC-SHA1 key in bytes.
 pub const HMAC_KEY_SIZE: usize = 20;
+/// Maximum HMAC challenge size in bytes.
 pub const HMAC_CHALLENGE_SIZE: usize = 64;
+/// Size of the HMAC-SHA1 response in bytes.
 pub const HMAC_RESPONSE_SIZE: usize = 20;
+/// Size of the keyboard scan codes map.
 pub const SCAN_CODES_SIZE: usize = FIXED_SIZE + UID_SIZE + KEY_SIZE; // 38
 
 const SHA1_BLOCK_SIZE: usize = 64;
@@ -115,6 +129,7 @@ const SHA1_BLOCK_SIZE: usize = 64;
 const INS_CONFIG: u8 = 0x01;
 const INS_YK2_STATUS: u8 = 0x03;
 
+/// Default NDEF URI programmed on new YubiKeys.
 pub const DEFAULT_NDEF_URI: &str = "https://my.yubico.com/yk/#";
 
 const NDEF_URL_PREFIXES: &[&str] = &[
@@ -163,11 +178,14 @@ const NDEF_URL_PREFIXES: &[&str] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Slot {
+    /// OTP slot 1.
     One = 1,
+    /// OTP slot 2.
     Two = 2,
 }
 
 impl Slot {
+    /// Returns `one` for [`Slot::One`], `two` for [`Slot::Two`].
     pub fn map<T>(self, one: T, two: T) -> T {
         match self {
             Slot::One => one,
@@ -180,22 +198,39 @@ impl Slot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ConfigSlot {
+    /// Write configuration for slot 1.
     Config1 = 0x01,
+    /// Write NAV configuration.
     Nav = 0x02,
+    /// Write configuration for slot 2.
     Config2 = 0x03,
+    /// Update slot 1 without overwriting secrets.
     Update1 = 0x04,
+    /// Update slot 2 without overwriting secrets.
     Update2 = 0x05,
+    /// Swap the two slot configurations.
     Swap = 0x06,
+    /// Write NDEF record for slot 1.
     Ndef1 = 0x08,
+    /// Write NDEF record for slot 2.
     Ndef2 = 0x09,
+    /// Read the device serial number.
     DeviceSerial = 0x10,
+    /// Read or write device configuration.
     DeviceConfig = 0x11,
+    /// Write the keyboard scan-code map.
     ScanMap = 0x12,
+    /// Read YubiKey 4+ capability flags.
     Yk4Capabilities = 0x13,
+    /// Set device info on YubiKey 4+.
     Yk4SetDeviceInfo = 0x15,
+    /// Challenge-response with Yubico OTP for slot 1.
     ChalOtp1 = 0x20,
+    /// Challenge-response with Yubico OTP for slot 2.
     ChalOtp2 = 0x28,
+    /// Challenge-response with HMAC-SHA1 for slot 1.
     ChalHmac1 = 0x30,
+    /// Challenge-response with HMAC-SHA1 for slot 2.
     ChalHmac2 = 0x38,
 }
 
@@ -208,14 +243,23 @@ pub enum ConfigSlot {
 pub struct TktFlag(pub u8);
 
 impl TktFlag {
+    /// Send tab keystroke before OTP.
     pub const TAB_FIRST: Self = Self(0x01);
+    /// Append tab after first part.
     pub const APPEND_TAB1: Self = Self(0x02);
+    /// Append tab after second part.
     pub const APPEND_TAB2: Self = Self(0x04);
+    /// Append 0.5s delay after first part.
     pub const APPEND_DELAY1: Self = Self(0x08);
+    /// Append 0.5s delay after second part.
     pub const APPEND_DELAY2: Self = Self(0x10);
+    /// Append carriage return after OTP.
     pub const APPEND_CR: Self = Self(0x20);
+    /// Slot is configured for OATH-HOTP.
     pub const OATH_HOTP: Self = Self(0x40);
+    /// Slot is configured for challenge-response.
     pub const CHAL_RESP: Self = Self(0x40);
+    /// Protect slot 2 from accidental overwrite.
     pub const PROTECT_CFG2: Self = Self(0x80);
 }
 
@@ -231,26 +275,43 @@ impl std::ops::BitOr for TktFlag {
 pub struct CfgFlag(pub u8);
 
 impl CfgFlag {
+    /// Send reference string (0x00–0x0F) before OTP.
     pub const SEND_REF: Self = Self(0x01);
+    /// Send truncated ticket for static password.
     pub const SHORT_TICKET: Self = Self(0x02);
+    /// Add 10 ms delay between keystrokes.
     pub const PACING_10MS: Self = Self(0x04);
+    /// Add 20 ms delay between keystrokes.
     pub const PACING_20MS: Self = Self(0x08);
+    /// Include upper-case and digits in static password.
     pub const STRONG_PW1: Self = Self(0x10);
+    /// Generate a static ticket (no time/counter component).
     pub const STATIC_TICKET: Self = Self(0x20);
+    /// Include special characters in static password.
     pub const STRONG_PW2: Self = Self(0x40);
+    /// Allow configuration update without access code.
     pub const MAN_UPDATE: Self = Self(0x80);
 
     // OATH aliases
+    /// Use 8-digit OATH-HOTP output.
     pub const OATH_HOTP8: Self = Self(0x02);
+    /// Encode first byte of token ID as ModHex.
     pub const OATH_FIXED_MODHEX1: Self = Self(0x10);
+    /// Encode second byte of token ID as ModHex.
     pub const OATH_FIXED_MODHEX2: Self = Self(0x40);
+    /// Encode both bytes of token ID as ModHex.
     pub const OATH_FIXED_MODHEX: Self = Self(0x50);
+    /// Mask for OATH fixed ModHex flags.
     pub const OATH_FIXED_MASK: Self = Self(0x50);
 
     // Challenge-response aliases
+    /// Challenge-response using Yubico OTP algorithm.
     pub const CHAL_YUBICO: Self = Self(0x20);
+    /// Challenge-response using HMAC-SHA1.
     pub const CHAL_HMAC: Self = Self(0x22);
+    /// Accept HMAC challenges shorter than 64 bytes.
     pub const HMAC_LT64: Self = Self(0x04);
+    /// Require button press for challenge-response.
     pub const CHAL_BTN_TRIG: Self = Self(0x08);
 }
 
@@ -266,13 +327,21 @@ impl std::ops::BitOr for CfgFlag {
 pub struct ExtFlag(pub u8);
 
 impl ExtFlag {
+    /// Serial number visible via button sequence.
     pub const SERIAL_BTN_VISIBLE: Self = Self(0x01);
+    /// Serial number visible via USB descriptor.
     pub const SERIAL_USB_VISIBLE: Self = Self(0x02);
+    /// Serial number readable via API call.
     pub const SERIAL_API_VISIBLE: Self = Self(0x04);
+    /// Use numeric keypad for digit output.
     pub const USE_NUMERIC_KEYPAD: Self = Self(0x08);
+    /// Faster triggering (shorter press required).
     pub const FAST_TRIG: Self = Self(0x10);
+    /// Allow slot configuration to be updated.
     pub const ALLOW_UPDATE: Self = Self(0x20);
+    /// Slot is dormant (disabled until re-enabled).
     pub const DORMANT: Self = Self(0x40);
+    /// Invert the LED behavior.
     pub const LED_INV: Self = Self(0x80);
 }
 
@@ -301,7 +370,9 @@ const CFGFLAG_UPDATE_MASK: u8 = CfgFlag::PACING_10MS.0 | CfgFlag::PACING_20MS.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum NdefType {
+    /// NDEF Text record.
     Text = b'T',
+    /// NDEF URI record.
     Uri = b'U',
 }
 
@@ -314,10 +385,15 @@ pub enum NdefType {
 pub struct CfgState(pub u8);
 
 impl CfgState {
+    /// Slot 1 has a valid configuration.
     pub const SLOT1_VALID: Self = Self(0x01);
+    /// Slot 2 has a valid configuration.
     pub const SLOT2_VALID: Self = Self(0x02);
+    /// Slot 1 requires touch to trigger.
     pub const SLOT1_TOUCH: Self = Self(0x04);
+    /// Slot 2 requires touch to trigger.
     pub const SLOT2_TOUCH: Self = Self(0x08);
+    /// LED behavior is inverted.
     pub const LED_INV: Self = Self(0x10);
 
     const ALL_MASK: u8 = 0x01 | 0x02 | 0x04 | 0x08 | 0x10;
@@ -326,11 +402,14 @@ impl CfgState {
 /// Parsed configuration state of the YubiOTP application.
 #[derive(Debug, Clone)]
 pub struct ConfigState {
+    /// Firmware version of the YubiKey.
     pub version: Version,
+    /// Raw configuration state bitflags.
     pub flags: u8,
 }
 
 impl ConfigState {
+    /// Create a new [`ConfigState`] from a firmware version and raw touch-level word.
     pub fn new(version: Version, touch_level: u16) -> Self {
         Self {
             version,
@@ -707,31 +786,37 @@ impl SlotConfiguration {
 
     // -- common builder methods (SlotConfiguration) ------------------------
 
+    /// Set whether the serial number is readable via API.
     pub fn serial_api_visible(mut self, value: bool) -> Self {
         self.set_flag_ext(ExtFlag::SERIAL_API_VISIBLE, value);
         self
     }
 
+    /// Set whether the serial number is visible via USB descriptor.
     pub fn serial_usb_visible(mut self, value: bool) -> Self {
         self.set_flag_ext(ExtFlag::SERIAL_USB_VISIBLE, value);
         self
     }
 
+    /// Set whether the slot configuration can be updated.
     pub fn allow_update(mut self, value: bool) -> Self {
         self.set_flag_ext(ExtFlag::ALLOW_UPDATE, value);
         self
     }
 
+    /// Set whether the slot is dormant (disabled).
     pub fn dormant(mut self, value: bool) -> Self {
         self.set_flag_ext(ExtFlag::DORMANT, value);
         self
     }
 
+    /// Set whether to invert the LED behavior.
     pub fn invert_led(mut self, value: bool) -> Self {
         self.set_flag_ext(ExtFlag::LED_INV, value);
         self
     }
 
+    /// Set whether to protect slot 2 from accidental overwrite.
     pub fn protect_slot2(mut self, value: bool) -> Result<Self, YubiOtpError> {
         if self.kind == SlotConfigKind::Update {
             return Err(YubiOtpError::InvalidData(
@@ -758,22 +843,26 @@ impl SlotConfiguration {
 
     // -- keyboard configuration builder methods ----------------------------
 
+    /// Set whether to append a carriage return after the OTP output.
     pub fn append_cr(mut self, value: bool) -> Self {
         self.set_flag_tkt(TktFlag::APPEND_CR, value);
         self
     }
 
+    /// Set whether to use faster triggering (shorter button press).
     pub fn fast_trigger(mut self, value: bool) -> Self {
         self.set_flag_ext(ExtFlag::FAST_TRIG, value);
         self
     }
 
+    /// Set keystroke pacing delays (10 ms and/or 20 ms between keystrokes).
     pub fn pacing(mut self, pacing_10ms: bool, pacing_20ms: bool) -> Self {
         self.set_flag_cfg(CfgFlag::PACING_10MS, pacing_10ms);
         self.set_flag_cfg(CfgFlag::PACING_20MS, pacing_20ms);
         self
     }
 
+    /// Set whether to use the numeric keypad for digit output.
     pub fn use_numeric(mut self, value: bool) -> Self {
         self.set_flag_ext(ExtFlag::USE_NUMERIC_KEYPAD, value);
         self
@@ -843,11 +932,13 @@ impl SlotConfiguration {
 
     // -- StaticTicket builder methods --------------------------------------
 
+    /// Set whether to send a truncated (short) ticket for static password.
     pub fn short_ticket(mut self, value: bool) -> Self {
         self.set_flag_cfg(CfgFlag::SHORT_TICKET, value);
         self
     }
 
+    /// Configure strong-password character classes (upper-case, digits, special characters).
     pub fn strong_password(mut self, upper_case: bool, digit: bool, special: bool) -> Self {
         self.set_flag_cfg(CfgFlag::STRONG_PW1, upper_case);
         self.set_flag_cfg(CfgFlag::STRONG_PW2, digit || special);
@@ -855,6 +946,7 @@ impl SlotConfiguration {
         self
     }
 
+    /// Set whether to allow manual configuration update without access code.
     pub fn manual_update(mut self, value: bool) -> Self {
         self.set_flag_cfg(CfgFlag::MAN_UPDATE, value);
         self
@@ -874,6 +966,7 @@ impl SlotConfiguration {
         Ok(self)
     }
 
+    /// Set a configuration flag with update-mode validation.
     pub fn set_update_cfg_flag(mut self, flag: CfgFlag, value: bool) -> Result<Self, YubiOtpError> {
         if self.kind == SlotConfigKind::Update && (flag.0 & !CFGFLAG_UPDATE_MASK) != 0 {
             return Err(YubiOtpError::InvalidData(

@@ -40,10 +40,13 @@ use crate::transport::otphid::HidOtpConnection;
 const MODHEX_ALPHABET: &[u8; 16] = b"cbdefghijklnrtuv";
 const CRC_OK_RESIDUAL: u16 = 0xF0B8;
 
+/// Errors from modhex/OTP codec operations.
 #[derive(Debug, Error)]
 pub enum OtpCodecError {
+    /// Input length is not a multiple of 2.
     #[error("Length must be a multiple of 2")]
     OddLength,
+    /// A character outside the modhex alphabet was encountered.
     #[error("'{0}' is not a valid modhex character")]
     InvalidModhexChar(char),
 }
@@ -121,6 +124,7 @@ const SLOT_WRITE_FLAG: u8 = 0x80;
 const RESP_TIMEOUT_WAIT_FLAG: u8 = 0x20;
 const SEQUENCE_MASK: u8 = 0x1F;
 
+/// Byte offset of the programming sequence counter in an OTP status report.
 pub const STATUS_OFFSET_PROG_SEQ: usize = 4;
 pub(crate) const STATUS_OFFSET_TOUCH_LOW: usize = 5;
 pub(crate) const CONFIG_SLOTS_PROGRAMMED_MASK: u8 = 0b0000_0011;
@@ -135,12 +139,16 @@ const SCAN_MAP_SLOT: u8 = 0x12;
 /// Connection-level error for OTP HID transport.
 #[derive(Debug, Error)]
 pub enum OtpError {
+    /// The device rejected the command.
     #[error("Command rejected: {0}")]
     CommandRejected(String),
+    /// The device returned a malformed or unexpected response.
     #[error("Bad response: {0}")]
     BadResponse(String),
+    /// The operation timed out.
     #[error("Timeout: {0}")]
     Timeout(String),
+    /// An underlying HID transport error.
     #[error("HID error: {0}")]
     Hid(#[from] crate::transport::otphid::HidError),
 }
@@ -151,7 +159,9 @@ pub enum OtpError {
 
 /// Trait for low-level OTP HID transport (feature report read/write).
 pub trait OtpConnection: crate::core::Connection<Error = OtpError> {
+    /// Read an OTP HID feature report from the device.
     fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError>;
+    /// Write an OTP HID feature report to the device.
     fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError>;
 }
 
@@ -211,10 +221,14 @@ impl OtpConnection for HidOtpConnection {
 /// Low-level OTP frame protocol over HID feature reports.
 pub struct OtpProtocol<T: OtpConnection> {
     connection: T,
+    /// The firmware version reported by the YubiKey.
     pub version: Version,
 }
 
 impl<T: OtpConnection> OtpProtocol<T> {
+    /// Creates a new OTP protocol by reading the initial status from the connection.
+    ///
+    /// Returns the connection back alongside the error if initialization fails.
     pub fn new(connection: T) -> Result<Self, (OtpError, T)> {
         let mut proto = Self {
             connection,

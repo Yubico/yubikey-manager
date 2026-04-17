@@ -25,6 +25,8 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! CTAP2 Bio Enrollment — manage fingerprint templates.
+
 use zeroize::Zeroizing;
 
 use crate::cbor::{self, Value};
@@ -37,17 +39,25 @@ use super::{Ctap2Error, build_args_map, ctap2_cmd};
 
 /// Fingerprint bio-enrollment sub-command identifiers (§6.7).
 mod bio_cmd {
+    /// Begin a new fingerprint enrollment.
     pub const ENROLL_BEGIN: u8 = 0x01;
+    /// Capture the next fingerprint sample during enrollment.
     pub const ENROLL_CAPTURE_NEXT: u8 = 0x02;
+    /// Cancel an in-progress fingerprint enrollment.
     pub const ENROLL_CANCEL: u8 = 0x03;
+    /// Enumerate all enrolled fingerprint templates.
     pub const ENUMERATE_ENROLLMENTS: u8 = 0x04;
+    /// Set a friendly name for a fingerprint template.
     pub const SET_NAME: u8 = 0x05;
+    /// Remove a fingerprint enrollment.
     pub const REMOVE_ENROLLMENT: u8 = 0x06;
+    /// Query fingerprint sensor information.
     pub const GET_SENSOR_INFO: u8 = 0x07;
 }
 
 /// Response map key constants for internal parsing.
 mod bio_result_key {
+    /// Array of fingerprint template info entries.
     pub const TEMPLATE_INFOS: i64 = 0x07;
 }
 

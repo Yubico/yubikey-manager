@@ -25,6 +25,8 @@
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+//! CTAP2 Authenticator Config — toggle features and set configuration.
+
 use zeroize::Zeroizing;
 
 use crate::cbor::{self, Value};
@@ -36,8 +38,11 @@ use super::{Ctap2Error, build_args_map, ctap2_cmd};
 
 /// Config sub-command identifiers (§6.11).
 mod config_cmd {
+    /// Enable enterprise attestation mode.
     pub const ENABLE_ENTERPRISE_ATT: u8 = 0x01;
+    /// Toggle the alwaysUv (always require user verification) option.
     pub const TOGGLE_ALWAYS_UV: u8 = 0x02;
+    /// Set minimum PIN length and related policies.
     pub const SET_MIN_PIN_LENGTH: u8 = 0x03;
 }
 

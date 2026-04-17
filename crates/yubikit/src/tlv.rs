@@ -45,7 +45,12 @@ pub enum TlvError {
     IncorrectLength,
     /// The parsed tag does not match the expected value.
     #[error("Wrong tag, got 0x{got:02x} expected 0x{expected:02x}")]
-    WrongTag { got: u32, expected: u32 },
+    WrongTag {
+        /// The tag value that was actually parsed.
+        got: u32,
+        /// The tag value that was expected.
+        expected: u32,
+    },
 }
 
 /// Parsed TLV boundaries: (tag, value_offset, value_length, end_offset).
