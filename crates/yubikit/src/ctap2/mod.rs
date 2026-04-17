@@ -376,7 +376,7 @@ pub struct Info {
     /// 0x1B: Whether the authenticator enforces a PIN complexity policy beyond minPINLength.
     pub pin_complexity_policy: Option<bool>,
     /// 0x1C: URL with more information about the enforced PIN complexity policy.
-    pub pin_complexity_policy_url: Option<String>,
+    pub pin_complexity_policy_url: Option<Vec<u8>>,
     /// 0x1D: Maximum PIN length in Unicode code points (default 63 if absent).
     pub max_pin_length: Option<usize>,
     /// 0x1E: Encrypted credential store state (opaque, regenerated each getInfo call).
@@ -497,10 +497,7 @@ impl Info {
             enc_identifier: get(0x19).and_then(|v| v.as_bytes()).map(|b| b.to_vec()),
             transports_for_reset: get_strings(0x1A),
             pin_complexity_policy: get_bool(0x1B),
-            pin_complexity_policy_url: get(0x1C)
-                .and_then(|v| v.as_bytes())
-                .and_then(|b| std::str::from_utf8(b).ok())
-                .map(|s| s.to_string()),
+            pin_complexity_policy_url: get(0x1C).and_then(|v| v.as_bytes()).map(|b| b.to_vec()),
             max_pin_length: get_uint(0x1D).map(|n| n as usize),
             enc_cred_store_state: get(0x1E).and_then(|v| v.as_bytes()).map(|b| b.to_vec()),
             config_commands: get_uint_vec(0x1F),

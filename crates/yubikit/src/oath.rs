@@ -726,12 +726,10 @@ impl<C: SmartCardConnection> OathSession<C> {
         timestamp: u64,
     ) -> Result<Vec<(Credential, Option<Code>)>, OathError> {
         let challenge = get_challenge(timestamp, DEFAULT_PERIOD);
-        let mut data = tlv_encode(TAG_CHALLENGE, &challenge);
-        let _ = &data; // suppress warning
-        let resp = self
+        let data = tlv_encode(TAG_CHALLENGE, &challenge);
+        let data = self
             .protocol
             .send_apdu(0, INS_CALCULATE_ALL, 0, 0x01, &data)?;
-        data = resp; // reuse variable
 
         let tlvs = parse_tlv_list(&data)?;
 

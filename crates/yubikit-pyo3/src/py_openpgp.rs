@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use yubikit::openpgp::{
-    self, Do, KeyRef, OpenPgpSession as RustOpenPgpSession, Pw, RsaSize, SignHashAlgorithm, Uif,
+    self, Do, KeyRef, OpenPgpSession as RustOpenPgpSession, PrehashAlgorithm, Pw, RsaSize,
+    SignHashAlgorithm, Uif,
 };
 
 use crate::py_bridge::{
@@ -130,14 +131,36 @@ fn parse_rsa_size(v: u16) -> PyResult<RsaSize> {
     }
 }
 
-fn parse_hash_algorithm(v: u8) -> PyResult<SignHashAlgorithm> {
+fn parse_prehash_algorithm(v: u8) -> PyResult<PrehashAlgorithm> {
+    match v {
+        1 => Ok(PrehashAlgorithm::Sha1),
+        2 => Ok(PrehashAlgorithm::Sha256),
+        3 => Ok(PrehashAlgorithm::Sha384),
+        4 => Ok(PrehashAlgorithm::Sha512),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Invalid prehash algorithm: {}",
+            v
+        ))),
+    }
+}
+
+fn parse_hash_algorithm(v: u8, prehash: Option<u8>) -> PyResult<SignHashAlgorithm> {
     match v {
         0 => Ok(SignHashAlgorithm::None),
         1 => Ok(SignHashAlgorithm::Sha1),
         2 => Ok(SignHashAlgorithm::Sha256),
         3 => Ok(SignHashAlgorithm::Sha384),
         4 => Ok(SignHashAlgorithm::Sha512),
-        5 => Ok(SignHashAlgorithm::Prehashed),
+        5 => {
+            let inner = prehash.ok_or_else(|| {
+                pyo3::exceptions::PyValueError::new_err(
+                    "Prehashed requires an inner hash algorithm",
+                )
+            })?;
+            Ok(SignHashAlgorithm::Prehashed(parse_prehash_algorithm(
+                inner,
+            )?))
+        }
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "Invalid hash algorithm: {}",
             v
@@ -533,8 +556,13 @@ impl OpenPgpSession {
         self.session_mut()?.delete_key(kr).map_err(openpgp_err)
     }
 
-    fn sign(&mut self, message: &[u8], hash_algorithm: u8) -> PyResult<Vec<u8>> {
-        let ha = parse_hash_algorithm(hash_algorithm)?;
+    fn sign(
+        &mut self,
+        message: &[u8],
+        hash_algorithm: u8,
+        prehash: Option<u8>,
+    ) -> PyResult<Vec<u8>> {
+        let ha = parse_hash_algorithm(hash_algorithm, prehash)?;
         self.session_mut()?.sign(message, ha).map_err(openpgp_err)
     }
 
@@ -542,8 +570,13 @@ impl OpenPgpSession {
         self.session_mut()?.decrypt(value).map_err(openpgp_err)
     }
 
-    fn authenticate(&mut self, message: &[u8], hash_algorithm: u8) -> PyResult<Vec<u8>> {
-        let ha = parse_hash_algorithm(hash_algorithm)?;
+    fn authenticate(
+        &mut self,
+        message: &[u8],
+        hash_algorithm: u8,
+        prehash: Option<u8>,
+    ) -> PyResult<Vec<u8>> {
+        let ha = parse_hash_algorithm(hash_algorithm, prehash)?;
         self.session_mut()?
             .authenticate(message, ha)
             .map_err(openpgp_err)

@@ -345,12 +345,6 @@ impl From<u32> for Value {
     }
 }
 
-impl From<u64> for Value {
-    fn from(n: u64) -> Self {
-        Value::Int(n as i64)
-    }
-}
-
 impl From<bool> for Value {
     fn from(b: bool) -> Self {
         Value::Bool(b)

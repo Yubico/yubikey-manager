@@ -309,19 +309,6 @@ impl StaticKeys {
             key_dek: Some(key),
         }
     }
-
-    /// Iterate over the three keys (enc, mac, dek) in order.
-    /// Panics if key_dek is None.
-    pub fn keys(&self) -> [&[u8]; 3] {
-        [
-            &self.key_enc,
-            &self.key_mac,
-            self.key_dek
-                .as_ref()
-                .map(|v| v.as_slice())
-                .expect("key_dek must be set"),
-        ]
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -967,17 +954,6 @@ mod tests {
         assert_eq!(keys.key_enc, expected);
         assert_eq!(keys.key_mac, expected);
         assert_eq!(keys.key_dek.as_ref().unwrap(), &expected);
-    }
-
-    #[test]
-    fn test_static_keys_iteration() {
-        let keys = StaticKeys::default_keys();
-        let all = keys.keys();
-        assert_eq!(all.len(), 3);
-        let expected: [u8; 16] = std::array::from_fn(|i| 0x40 + i as u8);
-        for k in all {
-            assert_eq!(k, expected.as_slice());
-        }
     }
 
     #[test]

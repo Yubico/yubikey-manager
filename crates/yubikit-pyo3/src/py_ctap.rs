@@ -112,7 +112,9 @@ fn info_to_py(py: Python<'_>, info: &Info) -> PyResult<PyObject> {
     dict.set_item("pin_complexity_policy", info.pin_complexity_policy)?;
     dict.set_item(
         "pin_complexity_policy_url",
-        info.pin_complexity_policy_url.as_deref(),
+        info.pin_complexity_policy_url
+            .as_ref()
+            .map(|b| PyBytes::new(py, b).into_any()),
     )?;
     dict.set_item("max_pin_length", info.max_pin_length)?;
     dict.set_item(

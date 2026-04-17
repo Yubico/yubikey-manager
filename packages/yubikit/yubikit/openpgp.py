@@ -918,12 +918,19 @@ _HASH_ALGORITHM_MAP: dict[type, int] = {
 }
 
 
-def _hash_algorithm_to_int(hash_algorithm: hashes.HashAlgorithm) -> int:
+def _hash_algorithm_to_int(
+    hash_algorithm: hashes.HashAlgorithm,
+) -> tuple[int, int | None]:
     if isinstance(hash_algorithm, Prehashed):
-        return 5  # SignHashAlgorithm::Prehashed
+        inner_type = type(hash_algorithm._algorithm)
+        if inner_type not in _HASH_ALGORITHM_MAP:
+            raise ValueError(
+                f"Unsupported prehash algorithm: {hash_algorithm._algorithm}"
+            )
+        return 5, _HASH_ALGORITHM_MAP[inner_type]
     ha_type = type(hash_algorithm)
     if ha_type in _HASH_ALGORITHM_MAP:
-        return _HASH_ALGORITHM_MAP[ha_type]
+        return _HASH_ALGORITHM_MAP[ha_type], None
     raise ValueError(f"Unsupported hash algorithm: {hash_algorithm}")
 
 
@@ -1407,8 +1414,8 @@ class OpenPgpSession(Session):
         :param message: The message to sign.
         :param hash_algorithm: The pre-signature hash algorithm.
         """
-        ha_int = _hash_algorithm_to_int(hash_algorithm)
-        response = bytes(self._native.sign(message, ha_int))
+        ha_int, prehash = _hash_algorithm_to_int(hash_algorithm)
+        response = bytes(self._native.sign(message, ha_int, prehash))
         attributes = self.get_algorithm_attributes(KEY_REF.SIG)
         logger.info("Message signed")
         if attributes.algorithm_id == 0x13:
@@ -1452,8 +1459,8 @@ class OpenPgpSession(Session):
         :param message: The message to authenticate.
         :param hash_algorithm: The pre-authentication hash algorithm.
         """
-        ha_int = _hash_algorithm_to_int(hash_algorithm)
-        response = bytes(self._native.authenticate(message, ha_int))
+        ha_int, prehash = _hash_algorithm_to_int(hash_algorithm)
+        response = bytes(self._native.authenticate(message, ha_int, prehash))
         attributes = self.get_algorithm_attributes(KEY_REF.AUT)
         logger.info("Message authenticated")
         if attributes.algorithm_id == 0x13:

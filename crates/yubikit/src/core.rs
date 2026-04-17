@@ -63,14 +63,20 @@ static OVERRIDE_VERSION: RwLock<Option<Version>> = RwLock::new(None);
 ///
 /// When set, any session detecting version 0.0.1 will use this instead.
 pub fn set_override_version(version: Version) {
-    *OVERRIDE_VERSION.write().unwrap() = Some(version);
+    if let Ok(mut guard) = OVERRIDE_VERSION.write() {
+        *guard = Some(version);
+    }
 }
 
 /// If `version` is the development placeholder (0.0.1) and an override has been
 /// set, return the override; otherwise return `version` unchanged.
 pub fn patch_version(version: Version) -> Version {
     if version == DEV_VERSION {
-        OVERRIDE_VERSION.read().unwrap().unwrap_or(version)
+        OVERRIDE_VERSION
+            .read()
+            .ok()
+            .and_then(|guard| *guard)
+            .unwrap_or(version)
     } else {
         version
     }

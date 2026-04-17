@@ -1184,10 +1184,19 @@ pub enum SignHashAlgorithm {
     Sha256,
     Sha384,
     Sha512,
-    /// Data is already hashed; pass through directly.
-    Prehashed,
+    /// Data is already hashed; the wrapped algorithm selects the DigestInfo header for RSA.
+    Prehashed(PrehashAlgorithm),
     /// EdDSA: no hashing, pass message directly.
     None,
+}
+
+/// The hash algorithm used to produce a prehashed digest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrehashAlgorithm {
+    Sha1,
+    Sha256,
+    Sha384,
+    Sha512,
 }
 
 fn pad_message(
@@ -1201,7 +1210,7 @@ fn pad_message(
     }
 
     let hashed = match hash_algorithm {
-        SignHashAlgorithm::Prehashed => message.to_vec(),
+        SignHashAlgorithm::Prehashed(_) => message.to_vec(),
         SignHashAlgorithm::None => message.to_vec(),
         SignHashAlgorithm::Sha1 => {
             let mut h = sha1::Sha1::new();
@@ -1230,9 +1239,15 @@ fn pad_message(
         AlgorithmAttributes::Rsa(_) => {
             let header = match hash_algorithm {
                 SignHashAlgorithm::Sha1 => PKCS1_SHA1,
-                SignHashAlgorithm::Sha256 | SignHashAlgorithm::Prehashed => PKCS1_SHA256,
+                SignHashAlgorithm::Sha256 => PKCS1_SHA256,
                 SignHashAlgorithm::Sha384 => PKCS1_SHA384,
                 SignHashAlgorithm::Sha512 => PKCS1_SHA512,
+                SignHashAlgorithm::Prehashed(algo) => match algo {
+                    PrehashAlgorithm::Sha1 => PKCS1_SHA1,
+                    PrehashAlgorithm::Sha256 => PKCS1_SHA256,
+                    PrehashAlgorithm::Sha384 => PKCS1_SHA384,
+                    PrehashAlgorithm::Sha512 => PKCS1_SHA512,
+                },
                 SignHashAlgorithm::None => {
                     return Err(OpenPgpError::InvalidData(
                         "Hash algorithm required for RSA".into(),
@@ -1442,16 +1457,17 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     // -- PIN Management --
 
     fn process_pin(&self, kdf: &Kdf, pw: Pw, pin: &str) -> Result<Vec<u8>, OpenPgpError> {
-        let pin_bytes = kdf.process(pw, pin);
-        let pin_len = pin_bytes.len();
-        let min_len: usize = if matches!(pw, Pw::User) { 6 } else { 8 };
-        let max_len = self.app_data.discretionary.pw_status.get_max_len(pw) as usize;
-        if pin_len < min_len || pin_len > max_len {
-            return Err(OpenPgpError::InvalidData(format!(
-                "PIN length must be in the range {min_len}-{max_len}"
-            )));
+        if matches!(kdf, Kdf::None) {
+            let pin_len = pin.len();
+            let min_len: usize = if matches!(pw, Pw::User) { 6 } else { 8 };
+            let max_len = self.app_data.discretionary.pw_status.get_max_len(pw) as usize;
+            if pin_len < min_len || pin_len > max_len {
+                return Err(OpenPgpError::InvalidData(format!(
+                    "PIN length must be in the range {min_len}-{max_len}"
+                )));
+            }
         }
-        Ok(pin_bytes)
+        Ok(kdf.process(pw, pin))
     }
 
     fn verify_inner(&mut self, pw: Pw, pin: &str, mode: u8) -> Result<(), OpenPgpError> {

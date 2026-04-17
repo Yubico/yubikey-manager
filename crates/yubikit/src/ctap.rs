@@ -386,7 +386,13 @@ impl<C: SmartCardConnection> CcidCtap<C> {
         }
         let (cla, ins, p1, p2) = (data[0], data[1], data[2], data[3]);
         let payload = if data.len() > 5 {
-            &data[5..5 + data[4] as usize]
+            let end = 5 + data[4] as usize;
+            if end > data.len() {
+                return Err(CtapError::InvalidResponse(
+                    "Payload length exceeds data".into(),
+                ));
+            }
+            &data[5..end]
         } else {
             &[]
         };

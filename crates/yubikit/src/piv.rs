@@ -770,80 +770,74 @@ fn require_version(version: Version, required: Version, feature: &str) -> Result
     crate::core::require_version(version, required, feature).map_err(PivError::NotSupported)
 }
 
-/// Encrypt a single block using management key (ECB mode).
-fn mgmt_key_encrypt(
+fn mgmt_key_block_op(
     key_type: ManagementKeyType,
     key: &[u8],
     data: &[u8],
+    encrypt: bool,
 ) -> Result<Vec<u8>, PivError> {
     match key_type {
         ManagementKeyType::Tdes => {
             let cipher = TdesEde3::new_from_slice(key)
                 .map_err(|_| PivError::InvalidData("Invalid TDES key".into()))?;
             let mut block = cipher::Block::<TdesEde3>::clone_from_slice(data);
-            cipher.encrypt_block(&mut block);
+            if encrypt {
+                cipher.encrypt_block(&mut block)
+            } else {
+                cipher.decrypt_block(&mut block)
+            }
             Ok(block.to_vec())
         }
         ManagementKeyType::Aes128 => {
             let cipher = Aes128::new_from_slice(key)
                 .map_err(|_| PivError::InvalidData("Invalid AES-128 key".into()))?;
             let mut block = aes::Block::clone_from_slice(data);
-            cipher.encrypt_block(&mut block);
+            if encrypt {
+                cipher.encrypt_block(&mut block)
+            } else {
+                cipher.decrypt_block(&mut block)
+            }
             Ok(block.to_vec())
         }
         ManagementKeyType::Aes192 => {
             let cipher = Aes192::new_from_slice(key)
                 .map_err(|_| PivError::InvalidData("Invalid AES-192 key".into()))?;
             let mut block = aes::Block::clone_from_slice(data);
-            cipher.encrypt_block(&mut block);
+            if encrypt {
+                cipher.encrypt_block(&mut block)
+            } else {
+                cipher.decrypt_block(&mut block)
+            }
             Ok(block.to_vec())
         }
         ManagementKeyType::Aes256 => {
             let cipher = Aes256::new_from_slice(key)
                 .map_err(|_| PivError::InvalidData("Invalid AES-256 key".into()))?;
             let mut block = aes::Block::clone_from_slice(data);
-            cipher.encrypt_block(&mut block);
+            if encrypt {
+                cipher.encrypt_block(&mut block)
+            } else {
+                cipher.decrypt_block(&mut block)
+            }
             Ok(block.to_vec())
         }
     }
 }
 
-/// Decrypt a single block using management key (ECB mode).
+fn mgmt_key_encrypt(
+    key_type: ManagementKeyType,
+    key: &[u8],
+    data: &[u8],
+) -> Result<Vec<u8>, PivError> {
+    mgmt_key_block_op(key_type, key, data, true)
+}
+
 fn mgmt_key_decrypt(
     key_type: ManagementKeyType,
     key: &[u8],
     data: &[u8],
 ) -> Result<Vec<u8>, PivError> {
-    match key_type {
-        ManagementKeyType::Tdes => {
-            let cipher = TdesEde3::new_from_slice(key)
-                .map_err(|_| PivError::InvalidData("Invalid TDES key".into()))?;
-            let mut block = cipher::Block::<TdesEde3>::clone_from_slice(data);
-            cipher.decrypt_block(&mut block);
-            Ok(block.to_vec())
-        }
-        ManagementKeyType::Aes128 => {
-            let cipher = Aes128::new_from_slice(key)
-                .map_err(|_| PivError::InvalidData("Invalid AES-128 key".into()))?;
-            let mut block = aes::Block::clone_from_slice(data);
-            cipher.decrypt_block(&mut block);
-            Ok(block.to_vec())
-        }
-        ManagementKeyType::Aes192 => {
-            let cipher = Aes192::new_from_slice(key)
-                .map_err(|_| PivError::InvalidData("Invalid AES-192 key".into()))?;
-            let mut block = aes::Block::clone_from_slice(data);
-            cipher.decrypt_block(&mut block);
-            Ok(block.to_vec())
-        }
-        ManagementKeyType::Aes256 => {
-            let cipher = Aes256::new_from_slice(key)
-                .map_err(|_| PivError::InvalidData("Invalid AES-256 key".into()))?;
-            let mut block = aes::Block::clone_from_slice(data);
-            cipher.decrypt_block(&mut block);
-            Ok(block.to_vec())
-        }
-    }
+    mgmt_key_block_op(key_type, key, data, false)
 }
 
 /// Decompress a compressed certificate using various methods.

@@ -529,7 +529,7 @@ impl SlotConfiguration {
     // -- internal helpers --------------------------------------------------
 
     fn new_base() -> Self {
-        let mut s = Self {
+        Self {
             fixed: Vec::new(),
             uid: [0u8; UID_SIZE],
             key: [0u8; KEY_SIZE],
@@ -537,10 +537,7 @@ impl SlotConfiguration {
             tkt_flags: 0,
             cfg_flags: 0,
             kind: SlotConfigKind::YubiOtp,
-        };
-        // kind will be overwritten by actual constructors
-        let _ = &mut s;
-        s
+        }
     }
 
     fn new_keyboard_base() -> Self {
@@ -697,29 +694,15 @@ impl SlotConfiguration {
 
     /// Serialize the configuration to bytes (52 bytes with CRC).
     pub fn get_config(&self, acc_code: Option<&[u8]>) -> Vec<u8> {
-        if self.kind == SlotConfigKind::Update {
-            // Update uses the restricted builder path, but still calls build_config.
-            // Validation already happened in the flag setters.
-            build_config(
-                &self.fixed,
-                &self.uid,
-                &self.key,
-                self.ext_flags,
-                self.tkt_flags,
-                self.cfg_flags,
-                acc_code,
-            )
-        } else {
-            build_config(
-                &self.fixed,
-                &self.uid,
-                &self.key,
-                self.ext_flags,
-                self.tkt_flags,
-                self.cfg_flags,
-                acc_code,
-            )
-        }
+        build_config(
+            &self.fixed,
+            &self.uid,
+            &self.key,
+            self.ext_flags,
+            self.tkt_flags,
+            self.cfg_flags,
+            acc_code,
+        )
     }
 
     // -- common builder methods (SlotConfiguration) ------------------------
