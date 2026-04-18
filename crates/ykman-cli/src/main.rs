@@ -19,6 +19,7 @@ mod oath;
 mod openpgp;
 mod otp;
 mod piv;
+mod rpc;
 mod scp;
 mod securitydomain;
 mod util;
@@ -264,6 +265,9 @@ enum Commands {
         #[arg(short = 's', long = "send-apdu")]
         send_apdu: Vec<String>,
     },
+    /// Start RPC mode for programmatic access over stdin/stdout
+    #[command(hide = true)]
+    Rpc,
 }
 
 #[derive(Subcommand)]
@@ -3092,6 +3096,13 @@ fn run() -> Result<(), CliError> {
                 short,
                 &send_apdu,
             )
+        }
+        Commands::Rpc => {
+            let dev = require_device(cli.device)?;
+            let scp_config = scp::resolve_scp(&dev, &scp_params, Capability::NONE)?;
+            let scp_key_params = scp::to_scp_key_params(&scp_config);
+            rpc::run(dev, scp_key_params);
+            Ok(())
         }
     }
 }
