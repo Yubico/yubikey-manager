@@ -81,10 +81,9 @@ impl RpcNode for DeviceNode {
     fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
         match name {
             "ccid" => {
-                let conn = self
-                    .device
-                    .open_smartcard()
-                    .map_err(|_| RpcError::connection_error("ccid"))?;
+                let conn = self.device.open_smartcard().map_err(|e| {
+                    RpcError::connection_error(&self.device.name(), "ccid", &format!("{e:?}"))
+                })?;
                 Ok(Box::new(ConnectionNode::new_ccid(
                     conn,
                     self.device.clone(),
@@ -92,10 +91,9 @@ impl RpcNode for DeviceNode {
                 )))
             }
             "ctap" => {
-                let conn = self
-                    .device
-                    .open_fido()
-                    .map_err(|_| RpcError::connection_error("ctap"))?;
+                let conn = self.device.open_fido().map_err(|e| {
+                    RpcError::connection_error(&self.device.name(), "ctap", &format!("{e:?}"))
+                })?;
                 Ok(Box::new(ConnectionNode::new_ctap(
                     conn,
                     self.device.clone(),

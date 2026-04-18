@@ -1,35 +1,109 @@
+pub mod client;
 mod connection;
 mod ctap2;
-mod device;
+pub(crate) mod device;
 pub mod error;
 #[allow(clippy::module_inception)]
 pub mod rpc;
 
-use std::io::{BufRead, Write};
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
 use serde_json::{Value, json};
 
-use yubikit::device::YubiKeyDevice;
-use yubikit::smartcard::ScpKeyParams;
+use rpc::{NodeHost, RpcNode};
 
-use rpc::NodeHost;
+/// Sender/receiver function types for the RPC loop.
+pub type SendFn = Box<dyn Fn(Value) + Send + Sync>;
+pub type RecvLine = Box<dyn FnMut() -> Option<String> + Send>;
 
-/// Run the RPC server loop on stdin/stdout for the given device.
-pub fn run(device: YubiKeyDevice, scp_params: Option<ScpKeyParams>) {
+/// Run the RPC server loop on stdin/stdout.
+pub fn run(root: Box<dyn RpcNode>) {
     let stdout = Arc::new(Mutex::new(std::io::stdout()));
-    let cancel = Arc::new(AtomicBool::new(false));
 
-    let send = {
+    let send: SendFn = {
         let stdout = stdout.clone();
-        move |data: Value| {
+        Box::new(move |data: Value| {
             let mut out = stdout.lock().unwrap();
             serde_json::to_writer(&mut *out, &data).unwrap();
             out.write_all(b"\n").unwrap();
             out.flush().unwrap();
-        }
+        })
     };
+
+    let recv: RecvLine = Box::new(|| {
+        let stdin = std::io::stdin();
+        let mut line = String::new();
+        match stdin.lock().read_line(&mut line) {
+            Ok(0) | Err(_) => None,
+            Ok(_) => {
+                let trimmed = line.trim().to_string();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            }
+        }
+    });
+
+    run_rpc_loop(root, send, recv);
+}
+
+/// Run the RPC server loop over TCP.
+pub fn run_tcp(root: Box<dyn RpcNode>, port: u16, nonce: &str) {
+    let mut sock = TcpStream::connect(("127.0.0.1", port)).expect("Failed to connect to TCP port");
+    // Send nonce for authentication
+    sock.write_all(nonce.as_bytes()).unwrap();
+    sock.write_all(b"\n").unwrap();
+    sock.flush().unwrap();
+
+    let write_sock = Arc::new(Mutex::new(sock.try_clone().unwrap()));
+
+    let send: SendFn = {
+        let write_sock = write_sock.clone();
+        Box::new(move |data: Value| {
+            let json_str = serde_json::to_string(&data).unwrap();
+            let mut sock = write_sock.lock().unwrap();
+            // "O" prefix for output messages
+            sock.write_all(b"O").unwrap();
+            sock.write_all(json_str.as_bytes()).unwrap();
+            sock.write_all(b"\n").unwrap();
+            sock.flush().unwrap();
+        })
+    };
+
+    let reader = BufReader::new(sock);
+    let reader = Arc::new(Mutex::new(reader));
+
+    let recv: RecvLine = {
+        let reader = reader.clone();
+        Box::new(move || {
+            let mut reader = reader.lock().unwrap();
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) | Err(_) => None,
+                Ok(_) => {
+                    let trimmed = line.trim().to_string();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    }
+                }
+            }
+        })
+    };
+
+    run_rpc_loop(root, send, recv);
+}
+
+/// Core RPC loop shared between stdio and TCP transports.
+pub fn run_rpc_loop(root: Box<dyn RpcNode>, send: SendFn, mut recv: RecvLine) {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let send = Arc::new(send);
 
     let send_err = {
         let send = send.clone();
@@ -46,21 +120,11 @@ pub fn run(device: YubiKeyDevice, scp_params: Option<ScpKeyParams>) {
     let (cmd_tx, cmd_rx) = mpsc::sync_channel::<Option<Value>>(1);
     let cancel_reader = cancel.clone();
 
-    // Reader thread: reads stdin, dispatches signals, queues commands
+    // Reader thread: reads input, dispatches signals, queues commands
     let reader_handle = std::thread::spawn({
         let send_err = send_err.clone();
         move || {
-            let stdin = std::io::stdin();
-            for line in stdin.lock().lines() {
-                let line = match line {
-                    Ok(l) => l,
-                    Err(_) => break,
-                };
-                let line = line.trim().to_string();
-                if line.is_empty() {
-                    break;
-                }
-
+            while let Some(line) = recv() {
                 let request: Value = match serde_json::from_str(&line) {
                     Ok(v) => v,
                     Err(_) => {
@@ -95,8 +159,7 @@ pub fn run(device: YubiKeyDevice, scp_params: Option<ScpKeyParams>) {
     });
 
     // Main thread: process commands sequentially
-    let root = device::DeviceNode::new(device, scp_params);
-    let mut host = NodeHost::new(Box::new(root));
+    let mut host = NodeHost::new(root);
 
     while let Ok(Some(request)) = cmd_rx.recv() {
         let action = request

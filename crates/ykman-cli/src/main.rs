@@ -11,6 +11,7 @@ mod cli_enums;
 mod config;
 mod diagnose;
 mod fido;
+mod fido_rpc;
 mod hsmauth;
 mod info;
 mod list;
@@ -267,7 +268,12 @@ enum Commands {
     },
     /// Start RPC mode for programmatic access over stdin/stdout
     #[command(hide = true)]
-    Rpc,
+    Rpc {
+        /// Use TCP instead of stdin/stdout. Connects to localhost:PORT and
+        /// sends NONCE for authentication.
+        #[arg(long, num_args = 2, value_names = ["PORT", "NONCE"])]
+        tcp: Option<Vec<String>>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1887,6 +1893,122 @@ fn apply_version_override(dev: &YubiKeyDevice) {
     }
 }
 
+/// Build global CLI arguments for forwarding to `ykman rpc`.
+fn build_rpc_global_args(cli: &Cli) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(serial) = cli.device {
+        args.push("--device".to_string());
+        args.push(serial.to_string());
+    }
+    if let Some(level) = cli.log_level {
+        args.push("--log-level".to_string());
+        args.push(format!("{level:?}").to_lowercase());
+    }
+    for cred in &cli.scp_cred {
+        args.push("--scp".to_string());
+        args.push(cred.clone());
+    }
+    if let Some(ref ca) = cli.scp_ca {
+        args.push("--scp-ca".to_string());
+        args.push(ca.clone());
+    }
+    if let Some(ref sd) = cli.scp_sd {
+        args.push("--scp-sd".to_string());
+        for v in sd {
+            args.push(v.clone());
+        }
+    }
+    if let Some(ref oce) = cli.scp_oce {
+        args.push("--scp-oce".to_string());
+        for v in oce {
+            args.push(v.clone());
+        }
+    }
+    if let Some(ref pw) = cli.scp_password {
+        args.push("--scp-password".to_string());
+        args.push(pw.clone());
+    }
+    args
+}
+
+/// Run a FIDO subcommand via the RPC subprocess.
+fn run_fido_via_rpc(global_args: &[String], action: FidoAction) -> Result<(), CliError> {
+    let mut client = rpc::client::RpcClient::spawn(global_args)?;
+
+    match action {
+        FidoAction::Info => fido_rpc::run_info(&mut client),
+        FidoAction::Reset { force } => fido_rpc::run_reset(&mut client, force),
+        FidoAction::Access(access) => match access {
+            FidoAccessAction::ChangePin { pin, new_pin } => {
+                fido_rpc::run_access_change_pin(&mut client, pin.as_deref(), new_pin.as_deref())
+            }
+            FidoAccessAction::VerifyPin { pin } => {
+                fido_rpc::run_access_verify_pin(&mut client, pin.as_deref())
+            }
+            FidoAccessAction::ForceChange { pin } => {
+                fido_rpc::run_access_force_change(&mut client, pin.as_deref())
+            }
+            FidoAccessAction::SetMinLength { length, pin, rp_id } => {
+                fido_rpc::run_access_set_min_length(&mut client, length, pin.as_deref(), &rp_id)
+            }
+        },
+        FidoAction::Credentials(cred) => match cred {
+            FidoCredentialAction::List { pin, csv } => {
+                fido_rpc::run_credentials_list(&mut client, pin.as_deref(), csv)
+            }
+            FidoCredentialAction::Delete {
+                credential_id,
+                pin,
+                force,
+            } => {
+                fido_rpc::run_credentials_delete(&mut client, &credential_id, pin.as_deref(), force)
+            }
+            FidoCredentialAction::Update {
+                credential_id,
+                name,
+                display_name,
+                pin,
+            } => fido_rpc::run_credentials_update(
+                &mut client,
+                &credential_id,
+                name.as_deref(),
+                display_name.as_deref(),
+                pin.as_deref(),
+            ),
+        },
+        FidoAction::Fingerprints(fp) => match fp {
+            FidoFingerprintAction::List { pin } => {
+                fido_rpc::run_fingerprints_list(&mut client, pin.as_deref())
+            }
+            FidoFingerprintAction::Add { name, pin } => {
+                fido_rpc::run_fingerprints_add(&mut client, &name, pin.as_deref())
+            }
+            FidoFingerprintAction::Rename {
+                template_id,
+                name,
+                pin,
+            } => {
+                fido_rpc::run_fingerprints_rename(&mut client, &template_id, &name, pin.as_deref())
+            }
+            FidoFingerprintAction::Delete {
+                template_id,
+                pin,
+                force,
+            } => {
+                fido_rpc::run_fingerprints_delete(&mut client, &template_id, pin.as_deref(), force)
+            }
+        },
+        FidoAction::Config(cfg) => match cfg {
+            FidoConfigAction::ToggleAlwaysUv { pin } => {
+                fido_rpc::run_config_toggle_always_uv(&mut client, pin.as_deref())
+            }
+            FidoConfigAction::EnableEpAttestation { pin } => {
+                fido_rpc::run_config_enable_ep_attestation(&mut client, pin.as_deref())
+            }
+        },
+    }
+}
+
 fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
 
@@ -1912,6 +2034,9 @@ fn run() -> Result<(), CliError> {
 
     // Parse SCP params before consuming command
     let scp_params = parse_scp_params(&cli)?;
+
+    // Extract fields needed for RPC forwarding before moving command
+    let rpc_global_args = build_rpc_global_args(&cli);
 
     let command = match cli.command {
         Some(cmd) => cmd,
@@ -2619,6 +2744,9 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Fido { action } => {
+            if std::env::var("RPC").is_ok() {
+                return run_fido_via_rpc(&rpc_global_args, action);
+            }
             let mut dev = require_device(cli.device)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
@@ -3097,11 +3225,20 @@ fn run() -> Result<(), CliError> {
                 &send_apdu,
             )
         }
-        Commands::Rpc => {
+        Commands::Rpc { tcp } => {
             let dev = require_device(cli.device)?;
             let scp_config = scp::resolve_scp(&dev, &scp_params, Capability::NONE)?;
             let scp_key_params = scp::to_scp_key_params(&scp_config);
-            rpc::run(dev, scp_key_params);
+            let root = rpc::device::DeviceNode::new(dev, scp_key_params);
+            if let Some(args) = tcp {
+                let port: u16 = args[0]
+                    .parse()
+                    .map_err(|_| CliError(format!("Invalid port: {}", args[0])))?;
+                let nonce = args[1].clone();
+                rpc::run_tcp(Box::new(root), port, &nonce);
+            } else {
+                rpc::run(Box::new(root));
+            }
             Ok(())
         }
     }

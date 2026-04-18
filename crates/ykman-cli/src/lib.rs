@@ -4,3 +4,5 @@ pub mod appdata;
 pub mod diagnostics;
 pub mod keyboard;
 pub mod logging;
+pub mod rpc;
+mod util;

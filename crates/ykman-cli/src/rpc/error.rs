@@ -93,12 +93,14 @@ impl RpcError {
         )
     }
 
-    pub fn connection_error(connection: &str) -> Self {
+    pub fn connection_error(device: &str, connection: &str, exc_type: &str) -> Self {
         Self::with_body(
             "connection-error",
             format!("Error connecting to {connection} interface"),
             serde_json::json!({
+                "device": device,
                 "connection": connection,
+                "exc_type": exc_type,
             }),
         )
     }
@@ -117,4 +119,29 @@ impl std::error::Error for RpcError {}
 #[derive(Debug)]
 pub struct ChildResetException {
     pub message: String,
+}
+
+/// Secret store state.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretStore {
+    Unknown,
+    Allowed,
+    Failed,
+}
+
+impl SecretStore {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Allowed => "allowed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl serde::Serialize for SecretStore {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
 }
