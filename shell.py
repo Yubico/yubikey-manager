@@ -111,6 +111,7 @@ class RpcShell(cmd.Cmd):
 
     def emptyline(self):
         self.do_ls(None)
+        return False
 
     def get_node(self, target):
         logger.debug("sending get: %r", target)

@@ -1932,8 +1932,12 @@ fn build_rpc_global_args(cli: &Cli) -> Vec<String> {
 }
 
 /// Run a FIDO subcommand via the RPC subprocess.
-fn run_fido_via_rpc(global_args: &[String], action: FidoAction) -> Result<(), CliError> {
-    let mut client = rpc::client::RpcClient::spawn(global_args)?;
+fn run_fido_via_rpc(
+    global_args: &[String],
+    action: FidoAction,
+    elevate: bool,
+) -> Result<(), CliError> {
+    let mut client = rpc::client::RpcClient::spawn(global_args, elevate)?;
 
     match action {
         FidoAction::Info => fido_rpc::run_info(&mut client),
@@ -2744,8 +2748,11 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Fido { action } => {
-            if std::env::var("RPC").is_ok() {
-                return run_fido_via_rpc(&rpc_global_args, action);
+            if rpc::client::should_use_fido_rpc() {
+                // On Windows without admin, elevate the subprocess.
+                // On other platforms (RPC=1), no elevation needed.
+                let elevate = cfg!(target_os = "windows");
+                return run_fido_via_rpc(&rpc_global_args, action, elevate);
             }
             let mut dev = require_device(cli.device)?;
             check_scp_version(&dev, &scp_params)?;
