@@ -6,7 +6,7 @@
 
 use serde_json::{Value, json};
 
-use crate::rpc::client::RpcClient;
+use crate::rpc::client::{RpcCallError, RpcClient, RpcClientError};
 use crate::util::CliError;
 
 /// The CTAP2 target path, using the "ctap" (HID) connection by default.
@@ -16,9 +16,42 @@ const CTAP2: &[&str] = &["ctap", "ctap2"];
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Translate an RPC error into a user-friendly CLI error.
+fn format_rpc_error(e: RpcCallError) -> CliError {
+    match e {
+        RpcCallError::Rpc(ref rpc_err) => match rpc_err.status.as_str() {
+            "pin-validation" => {
+                let retries = rpc_err.body.get("retries").and_then(|v| v.as_u64());
+                let auth_blocked = rpc_err
+                    .body
+                    .get("auth_blocked")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if auth_blocked {
+                    CliError(
+                        "PIN authentication is currently blocked. \
+                         Remove and re-insert the YubiKey."
+                            .into(),
+                    )
+                } else if let Some(0) = retries {
+                    CliError("PIN is blocked.".into())
+                } else if let Some(r) = retries {
+                    CliError(format!("Wrong PIN, {r} attempt(s) remaining."))
+                } else {
+                    CliError("Wrong PIN.".into())
+                }
+            }
+            "pin-complexity" => CliError("PIN does not meet complexity requirements.".into()),
+            "timeout" => CliError("Operation timed out.".into()),
+            _ => e.into(),
+        },
+        RpcCallError::Transport(_) => e.into(),
+    }
+}
+
 /// Check if CTAP2 is available via the root node's children.
 fn has_ctap2(client: &mut RpcClient) -> Result<bool, CliError> {
-    let root = client.get(&[])?;
+    let root = client.get(&[]).map_err(format_rpc_error)?;
     let children = root.body.get("children").cloned().unwrap_or(json!({}));
     // "ctap" child with fido2: true means CTAP2 via HID
     if children
@@ -46,11 +79,12 @@ fn unlock(client: &mut RpcClient, pin: &str) -> Result<(), CliError> {
     client
         .call("unlock", CTAP2, json!({"pin": pin}), None, false)
         .map(|_| ())
+        .map_err(format_rpc_error)
 }
 
 /// Get CTAP2 node data.
 fn get_ctap2_data(client: &mut RpcClient) -> Result<Value, CliError> {
-    let result = client.get(CTAP2)?;
+    let result = client.get(CTAP2).map_err(format_rpc_error)?;
     Ok(result.body.get("data").cloned().unwrap_or(json!({})))
 }
 
@@ -105,7 +139,7 @@ fn csv_escape(s: &str) -> String {
 pub fn run_info(client: &mut RpcClient) -> Result<(), CliError> {
     // Check if CTAP2 is available via the root node's children
     if !has_ctap2(client)? {
-        let root = client.get(&[])?;
+        let root = client.get(&[]).map_err(format_rpc_error)?;
         let data = root.body.get("data").cloned().unwrap_or(json!({}));
         if data.get("fido2_supported") == Some(&json!(true)) {
             println!("CTAP2:          Disabled");
@@ -264,8 +298,8 @@ pub fn run_reset(client: &mut RpcClient, force: bool) -> Result<(), CliError> {
             println!("FIDO application has been reset.");
             Ok(())
         }
-        Err(e) => {
-            let msg = e.0.to_lowercase();
+        Err(RpcCallError::Rpc(ref rpc_err)) => {
+            let msg = rpc_err.message.to_lowercase();
             if msg.contains("keepalivecancel") || msg.contains("keepalive_cancel") {
                 Err(CliError("Reset aborted by user.".to_string()))
             } else if msg.contains("useractiontimeout") || msg.contains("user_action_timeout") {
@@ -280,9 +314,14 @@ pub fn run_reset(client: &mut RpcClient, force: bool) -> Result<(), CliError> {
                         .to_string(),
                 ))
             } else {
-                Err(e)
+                Err(format_rpc_error(RpcCallError::Rpc(RpcClientError {
+                    status: rpc_err.status.clone(),
+                    message: rpc_err.message.clone(),
+                    body: rpc_err.body.clone(),
+                })))
             }
         }
+        Err(e) => Err(format_rpc_error(e)),
     }
 }
 
@@ -322,13 +361,15 @@ pub fn run_access_change_pin(
                 p1
             }
         };
-        client.call(
-            "set_pin",
-            CTAP2,
-            json!({"pin": current_pin, "new_pin": new}),
-            None,
-            false,
-        )?;
+        client
+            .call(
+                "set_pin",
+                CTAP2,
+                json!({"pin": current_pin, "new_pin": new}),
+                None,
+                false,
+            )
+            .map_err(format_rpc_error)?;
         println!("PIN has been changed.");
     } else {
         let new = match new_pin.or(pin) {
@@ -346,7 +387,9 @@ pub fn run_access_change_pin(
                 p1
             }
         };
-        client.call("set_pin", CTAP2, json!({"new_pin": new}), None, false)?;
+        client
+            .call("set_pin", CTAP2, json!({"new_pin": new}), None, false)
+            .map_err(format_rpc_error)?;
         println!("PIN has been set.");
     }
 
@@ -368,7 +411,9 @@ pub fn run_access_force_change(client: &mut RpcClient, pin: Option<&str>) -> Res
         ));
     }
     require_pin(client, &data, pin, "Force change PIN")?;
-    client.call("force_pin_change", CTAP2, json!({}), None, false)?;
+    client
+        .call("force_pin_change", CTAP2, json!({}), None, false)
+        .map_err(format_rpc_error)?;
     println!("Force PIN change set.");
     Ok(())
 }
@@ -417,7 +462,9 @@ pub fn run_access_set_min_length(
     if !rp_ids.is_empty() {
         body["rp_ids"] = json!(rp_ids);
     }
-    client.call("set_min_pin_length", CTAP2, body, None, false)?;
+    client
+        .call("set_min_pin_length", CTAP2, body, None, false)
+        .map_err(format_rpc_error)?;
     println!("Minimum PIN length set.");
     Ok(())
 }
@@ -431,7 +478,9 @@ pub fn run_access_set_min_length(
 fn collect_credentials(
     client: &mut RpcClient,
 ) -> Result<Vec<(String, String, String, String, String)>, CliError> {
-    let creds_result = client.get(&[CTAP2[0], CTAP2[1], "credentials"])?;
+    let creds_result = client
+        .get(&[CTAP2[0], CTAP2[1], "credentials"])
+        .map_err(format_rpc_error)?;
     let children = creds_result
         .body
         .get("children")
@@ -443,7 +492,7 @@ fn collect_credentials(
 
     for (rp_id, _rp_data) in &children {
         let rp_target: Vec<&str> = vec![CTAP2[0], CTAP2[1], "credentials", rp_id.as_str()];
-        let rp_result = client.get(&rp_target)?;
+        let rp_result = client.get(&rp_target).map_err(format_rpc_error)?;
         let rp_children = rp_result
             .body
             .get("children")
@@ -602,7 +651,9 @@ pub fn run_credentials_delete(
                 rp_id.as_str(),
                 cred_id_hex.as_str(),
             ];
-            client.call("delete", &target, json!({}), None, false)?;
+            client
+                .call("delete", &target, json!({}), None, false)
+                .map_err(format_rpc_error)?;
             println!("Credential deleted.");
             Ok(())
         }
@@ -641,7 +692,9 @@ pub fn run_fingerprints_list(client: &mut RpcClient, pin: Option<&str>) -> Resul
 
     require_pin(client, &data, pin, "Biometrics")?;
 
-    let fp_result = client.get(&[CTAP2[0], CTAP2[1], "fingerprints"])?;
+    let fp_result = client
+        .get(&[CTAP2[0], CTAP2[1], "fingerprints"])
+        .map_err(format_rpc_error)?;
     let children = fp_result
         .body
         .get("children")
@@ -680,12 +733,11 @@ pub fn run_fingerprints_add(
 
     let signal_handler = |status: &str, body: &Value| match status {
         "capture" => {
-            if let Some(remaining) = body.get("remaining").and_then(|v| v.as_u64())
-                && remaining > 0
-            {
+            let remaining = body.get("remaining").and_then(|v| v.as_u64()).unwrap_or(0);
+            if remaining > 0 {
                 eprintln!("{remaining} more scans needed.");
+                eprintln!("Place your finger against the sensor now...");
             }
-            eprintln!("Place your finger against the sensor now...");
         }
         "capture-error" => {
             eprintln!("Capture failed. Re-center your finger, and try again.");
@@ -694,13 +746,15 @@ pub fn run_fingerprints_add(
     };
 
     eprintln!("Place your finger against the sensor now...");
-    client.call(
-        "add",
-        &[CTAP2[0], CTAP2[1], "fingerprints"],
-        json!({"name": name}),
-        Some(&signal_handler),
-        true,
-    )?;
+    client
+        .call(
+            "add",
+            &[CTAP2[0], CTAP2[1], "fingerprints"],
+            json!({"name": name}),
+            Some(&signal_handler),
+            true,
+        )
+        .map_err(format_rpc_error)?;
     eprintln!("Capture complete.");
     println!("Fingerprint registered.");
     Ok(())
@@ -722,7 +776,9 @@ pub fn run_fingerprints_rename(
     require_pin(client, &data, pin, "Biometrics")?;
 
     let target: Vec<&str> = vec![CTAP2[0], CTAP2[1], "fingerprints", template_id];
-    client.call("rename", &target, json!({"name": name}), None, false)?;
+    client
+        .call("rename", &target, json!({"name": name}), None, false)
+        .map_err(format_rpc_error)?;
     println!("Fingerprint renamed.");
     Ok(())
 }
@@ -748,7 +804,9 @@ pub fn run_fingerprints_delete(
     }
 
     let target: Vec<&str> = vec![CTAP2[0], CTAP2[1], "fingerprints", template_id];
-    client.call("delete", &target, json!({}), None, false)?;
+    client
+        .call("delete", &target, json!({}), None, false)
+        .map_err(format_rpc_error)?;
     println!("Fingerprint deleted.");
     Ok(())
 }
@@ -776,7 +834,9 @@ pub fn run_config_toggle_always_uv(
     if has_pin(&data) {
         require_pin(client, &data, pin, "Toggle Always Require UV")?;
     }
-    client.call("toggle_always_uv", CTAP2, json!({}), None, false)?;
+    client
+        .call("toggle_always_uv", CTAP2, json!({}), None, false)
+        .map_err(format_rpc_error)?;
 
     println!(
         "Always Require UV is {}.",
@@ -808,7 +868,9 @@ pub fn run_config_enable_ep_attestation(
     if has_pin(&data) {
         require_pin(client, &data, pin, "Enable Enterprise Attestation")?;
     }
-    client.call("enable_ep_attestation", CTAP2, json!({}), None, false)?;
+    client
+        .call("enable_ep_attestation", CTAP2, json!({}), None, false)
+        .map_err(format_rpc_error)?;
 
     println!("Enterprise Attestation enabled.");
     Ok(())

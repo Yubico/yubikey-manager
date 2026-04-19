@@ -133,14 +133,15 @@ impl RpcClient {
         body: Value,
         signal_handler: Option<&dyn Fn(&str, &Value)>,
         cancellable: bool,
-    ) -> Result<RpcResult, CliError> {
+    ) -> Result<RpcResult, RpcCallError> {
         let request = json!({
             "kind": "command",
             "action": action,
             "target": target,
             "body": body,
         });
-        self.write_message(&request)?;
+        self.write_message(&request)
+            .map_err(RpcCallError::Transport)?;
 
         // Install Ctrl+C handler that sends cancel to subprocess
         if cancellable {
@@ -158,12 +159,15 @@ impl RpcClient {
 
         loop {
             let mut buf = String::new();
-            let n = self
-                .reader
-                .read_line(&mut buf)
-                .map_err(|e| CliError(format!("Failed to read from RPC subprocess: {e}")))?;
+            let n = self.reader.read_line(&mut buf).map_err(|e| {
+                RpcCallError::Transport(CliError(format!(
+                    "Failed to read from RPC subprocess: {e}"
+                )))
+            })?;
             if n == 0 {
-                return Err(CliError("RPC subprocess closed unexpectedly".into()));
+                return Err(RpcCallError::Transport(CliError(
+                    "RPC subprocess closed unexpectedly".into(),
+                )));
             }
 
             // TCP messages are prefixed: "O" = output/JSON, "E" = stderr/log
@@ -179,8 +183,9 @@ impl RpcClient {
                 continue;
             }
 
-            let resp: Value = serde_json::from_str(json_str)
-                .map_err(|e| CliError(format!("Invalid JSON from RPC subprocess: {e}")))?;
+            let resp: Value = serde_json::from_str(json_str).map_err(|e| {
+                RpcCallError::Transport(CliError(format!("Invalid JSON from RPC subprocess: {e}")))
+            })?;
 
             match resp.get("kind").and_then(|v| v.as_str()) {
                 Some("success") => {
@@ -208,7 +213,11 @@ impl RpcClient {
                         .unwrap_or("Unknown error")
                         .to_string();
                     let body = resp.get("body").cloned().unwrap_or(json!({}));
-                    return Err(CliError(format!("RPC error ({status}): {message} {body}")));
+                    return Err(RpcCallError::Rpc(RpcClientError {
+                        status,
+                        message,
+                        body,
+                    }));
                 }
                 Some("signal") => {
                     if let Some(handler) = signal_handler {
@@ -219,17 +228,17 @@ impl RpcClient {
                     }
                 }
                 _ => {
-                    return Err(CliError(format!(
+                    return Err(RpcCallError::Transport(CliError(format!(
                         "Unexpected RPC response kind: {}",
                         resp.get("kind").unwrap_or(&json!(null))
-                    )));
+                    ))));
                 }
             }
         }
     }
 
     /// Call `get` on a target to retrieve node info.
-    pub fn get(&mut self, target: &[&str]) -> Result<RpcResult, CliError> {
+    pub fn get(&mut self, target: &[&str]) -> Result<RpcResult, RpcCallError> {
         self.call("get", target, json!({}), None, false)
     }
 }
@@ -278,6 +287,45 @@ pub struct RpcResult {
     pub body: Value,
     #[allow(dead_code)]
     pub flags: Vec<String>,
+}
+
+/// Error returned by an RPC call.
+#[derive(Debug)]
+pub struct RpcClientError {
+    /// The RPC error status code (e.g. "pin-validation", "device-error").
+    pub status: String,
+    /// Human-readable error message from the server.
+    pub message: String,
+    /// Structured error body with additional details.
+    pub body: Value,
+}
+
+impl std::fmt::Display for RpcClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+/// Error from an RPC call — either a transport/protocol failure or a
+/// structured error response from the server.
+#[derive(Debug)]
+pub enum RpcCallError {
+    /// Transport or protocol error (not from the RPC server).
+    Transport(CliError),
+    /// Structured error response from the RPC server.
+    Rpc(RpcClientError),
+}
+
+impl From<RpcCallError> for CliError {
+    fn from(e: RpcCallError) -> Self {
+        match e {
+            RpcCallError::Transport(e) => e,
+            RpcCallError::Rpc(e) => CliError(format!(
+                "RPC error ({}): {} {}",
+                e.status, e.message, e.body
+            )),
+        }
+    }
 }
 
 // --- Windows-specific: elevated process spawning and admin detection ---
