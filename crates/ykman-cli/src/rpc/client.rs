@@ -316,6 +316,17 @@ pub enum RpcCallError {
     Rpc(RpcClientError),
 }
 
+impl std::fmt::Display for RpcCallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transport(e) => write!(f, "{}", e.0),
+            Self::Rpc(e) => write!(f, "RPC error ({}): {}", e.status, e.message),
+        }
+    }
+}
+
+impl std::error::Error for RpcCallError {}
+
 impl From<RpcCallError> for CliError {
     fn from(e: RpcCallError) -> Self {
         match e {

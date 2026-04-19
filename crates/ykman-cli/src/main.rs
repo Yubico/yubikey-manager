@@ -2013,6 +2013,98 @@ fn run_fido_via_rpc(
     }
 }
 
+/// Run a FIDO subcommand via the RPC subprocess in proxy mode (RPC=2).
+///
+/// Spawns a TCP RPC subprocess, creates an `RpcDevice` that implements the
+/// `Device` trait, then calls the same `fido::run_*` functions used in
+/// non-RPC mode.
+fn run_fido_via_rpc_proxy(
+    global_args: &[String],
+    action: FidoAction,
+    scp_params: &scp::ScpParams,
+) -> Result<(), CliError> {
+    let client = rpc::client::RpcClient::spawn(global_args, false)?;
+    let mut dev = rpc::proxy::RpcDevice::new(client)?;
+
+    match action {
+        FidoAction::Info => fido::run_info(&dev, scp_params),
+        FidoAction::Reset { force } => fido::run_reset(&mut dev, scp_params, force),
+        FidoAction::Access(access) => match access {
+            FidoAccessAction::ChangePin { pin, new_pin } => {
+                fido::run_access_change_pin(&dev, scp_params, pin.as_deref(), new_pin.as_deref())
+            }
+            FidoAccessAction::VerifyPin { pin } => {
+                fido::run_access_verify_pin(&dev, scp_params, pin.as_deref())
+            }
+            FidoAccessAction::ForceChange { pin } => {
+                fido::run_access_force_change(&dev, scp_params, pin.as_deref())
+            }
+            FidoAccessAction::SetMinLength { length, pin, rp_id } => {
+                fido::run_access_set_min_length(&dev, scp_params, length, pin.as_deref(), &rp_id)
+            }
+        },
+        FidoAction::Credentials(cred) => match cred {
+            FidoCredentialAction::List { pin, csv } => {
+                fido::run_credentials_list(&dev, scp_params, pin.as_deref(), csv)
+            }
+            FidoCredentialAction::Delete {
+                credential_id,
+                pin,
+                force,
+            } => fido::run_credentials_delete(
+                &dev,
+                scp_params,
+                &credential_id,
+                pin.as_deref(),
+                force,
+            ),
+            FidoCredentialAction::Update {
+                credential_id,
+                name,
+                display_name,
+                pin,
+            } => fido::run_credentials_update(
+                &dev,
+                scp_params,
+                &credential_id,
+                name.as_deref(),
+                display_name.as_deref(),
+                pin.as_deref(),
+            ),
+        },
+        FidoAction::Fingerprints(fp) => match fp {
+            FidoFingerprintAction::List { pin } => {
+                fido::run_fingerprints_list(&dev, scp_params, pin.as_deref())
+            }
+            FidoFingerprintAction::Add { name, pin } => {
+                fido::run_fingerprints_add(&dev, scp_params, &name, pin.as_deref())
+            }
+            FidoFingerprintAction::Rename {
+                template_id,
+                name,
+                pin,
+            } => {
+                fido::run_fingerprints_rename(&dev, scp_params, &template_id, &name, pin.as_deref())
+            }
+            FidoFingerprintAction::Delete {
+                template_id,
+                pin,
+                force,
+            } => {
+                fido::run_fingerprints_delete(&dev, scp_params, &template_id, pin.as_deref(), force)
+            }
+        },
+        FidoAction::Config(cfg) => match cfg {
+            FidoConfigAction::ToggleAlwaysUv { pin } => {
+                fido::run_config_toggle_always_uv(&dev, scp_params, pin.as_deref())
+            }
+            FidoConfigAction::EnableEpAttestation { pin } => {
+                fido::run_config_enable_ep_attestation(&dev, scp_params, pin.as_deref())
+            }
+        },
+    }
+}
+
 fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
 
@@ -2748,6 +2840,11 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Fido { action } => {
+            if std::env::var("RPC").ok().as_deref() == Some("2") {
+                // RPC=2: proxy mode — reuse existing fido:: functions with
+                // an RpcDevice that implements the Device trait.
+                return run_fido_via_rpc_proxy(&rpc_global_args, action, &scp_params);
+            }
             if rpc::client::should_use_fido_rpc() {
                 // On Windows without admin, elevate the subprocess.
                 // On other platforms (RPC=1), no elevation needed.

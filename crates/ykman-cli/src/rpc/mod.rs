@@ -3,6 +3,7 @@ mod connection;
 mod ctap2;
 pub(crate) mod device;
 pub mod error;
+pub mod proxy;
 #[allow(clippy::module_inception)]
 pub mod rpc;
 

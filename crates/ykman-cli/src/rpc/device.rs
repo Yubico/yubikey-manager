@@ -38,10 +38,20 @@ impl RpcNode for DeviceNode {
         let info = self.device.info();
         let version = &info.version;
         let transport = self.device.transport();
-        let fido2_supported = info
-            .supported_capabilities
-            .get(&transport)
-            .is_some_and(|caps| caps.contains(Capability::FIDO2));
+
+        let cap_to_u16 = |c: &Capability| c.0;
+        let cap_map = |map: &std::collections::HashMap<Transport, Capability>| -> Value {
+            let mut obj = serde_json::Map::new();
+            for (t, c) in map {
+                let key = match t {
+                    Transport::Usb => "usb",
+                    Transport::Nfc => "nfc",
+                };
+                obj.insert(key.to_string(), json!(cap_to_u16(c)));
+            }
+            Value::Object(obj)
+        };
+
         json!({
             "version": [version.0, version.1, version.2],
             "serial": info.serial,
@@ -50,7 +60,15 @@ impl RpcNode for DeviceNode {
                 Transport::Usb => "usb",
                 Transport::Nfc => "nfc",
             },
-            "fido2_supported": fido2_supported,
+            "supported_capabilities": cap_map(&info.supported_capabilities),
+            "enabled_capabilities": cap_map(&info.config.enabled_capabilities),
+            "fips_capable": cap_to_u16(&info.fips_capable),
+            "fips_approved": cap_to_u16(&info.fips_approved),
+            "reset_blocked": cap_to_u16(&info.reset_blocked),
+            "is_fips": info.is_fips,
+            "is_sky": info.is_sky,
+            "pin_complexity": info.pin_complexity,
+            "form_factor": info.form_factor as u8,
         })
     }
 

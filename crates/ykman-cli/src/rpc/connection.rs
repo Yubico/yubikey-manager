@@ -1,12 +1,14 @@
 use std::collections::BTreeMap;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use hex::{self, FromHex, ToHex};
 use serde_json::{Value, json};
 
 use yubikit::core::Connection;
 use yubikit::device::YubiKeyDevice;
-use yubikit::smartcard::ScpKeyParams;
+use yubikit::fido::FidoConnection;
+use yubikit::smartcard::{ScpKeyParams, SmartCardConnection};
 use yubikit::transport::ctaphid::HidFidoConnection;
 use yubikit::transport::pcsc::PcscSmartCardConnection;
 
@@ -49,20 +51,110 @@ impl ConnectionNode {
             scp_params: None,
         }
     }
+
+    fn do_send_and_receive(&self, params: Value) -> Result<RpcResponse, RpcError> {
+        let apdu_hex = params
+            .get("apdu")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RpcError::invalid_params("missing 'apdu' (hex string)"))?;
+        let apdu = Vec::from_hex(apdu_hex).map_err(|e| RpcError::invalid_params(format!("{e}")))?;
+
+        let ConnType::SmartCard(conn) = &self.conn_type else {
+            return Err(RpcError::new(
+                "invalid-command",
+                "send_and_receive is only available on ccid connections",
+            ));
+        };
+        let mut guard = conn.lock().unwrap();
+        let c = guard
+            .as_mut()
+            .ok_or_else(|| RpcError::new("connection-error", "Connection in use"))?;
+
+        let (data, sw) = c
+            .send_and_receive(&apdu)
+            .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
+
+        Ok(RpcResponse::new(json!({
+            "data": data.encode_hex::<String>(),
+            "sw": sw,
+        })))
+    }
+
+    fn do_call(
+        &self,
+        params: Value,
+        signal: SignalFn,
+        cancel: &AtomicBool,
+    ) -> Result<RpcResponse, RpcError> {
+        let cmd = params
+            .get("cmd")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| RpcError::invalid_params("missing 'cmd' (u8)"))? as u8;
+        let data_hex = params.get("data").and_then(|v| v.as_str()).unwrap_or("");
+        let data = Vec::from_hex(data_hex).map_err(|e| RpcError::invalid_params(format!("{e}")))?;
+
+        let ConnType::Fido(conn) = &self.conn_type else {
+            return Err(RpcError::new(
+                "invalid-command",
+                "call is only available on ctap connections",
+            ));
+        };
+        let mut guard = conn.lock().unwrap();
+        let c = guard
+            .as_mut()
+            .ok_or_else(|| RpcError::new("connection-error", "Connection in use"))?;
+
+        let is_cancelled = || cancel.load(Ordering::Relaxed);
+        let mut on_keepalive = |status: u8| {
+            signal("keepalive", json!({"status": status}));
+        };
+
+        let response = c
+            .call(cmd, &data, Some(&mut on_keepalive), Some(&is_cancelled))
+            .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
+
+        Ok(RpcResponse::new(json!({
+            "data": response.encode_hex::<String>(),
+        })))
+    }
 }
 
 impl RpcNode for ConnectionNode {
     fn get_data(&self) -> Value {
         let info = self.device.info();
         let version = &info.version;
-        json!({
-            "version": [version.0, version.1, version.2],
-            "serial": info.serial,
-            "transport": match &self.conn_type {
-                ConnType::SmartCard(_) => "ccid",
-                ConnType::Fido(_) => "ctap",
-            },
-        })
+        match &self.conn_type {
+            ConnType::SmartCard(_) => {
+                json!({
+                    "version": [version.0, version.1, version.2],
+                    "serial": info.serial,
+                    "transport": "ccid",
+                })
+            }
+            ConnType::Fido(conn) => {
+                let guard = conn.lock().unwrap();
+                let (device_version, capabilities) = if let Some(c) = guard.as_ref() {
+                    let v = c.device_version();
+                    (json!([v.0, v.1, v.2]), c.capabilities().raw())
+                } else {
+                    (json!([version.0, version.1, version.2]), 0u8)
+                };
+                json!({
+                    "version": [version.0, version.1, version.2],
+                    "serial": info.serial,
+                    "transport": "ctap",
+                    "device_version": device_version,
+                    "capabilities": capabilities,
+                })
+            }
+        }
+    }
+
+    fn list_actions(&self) -> Vec<&'static str> {
+        match &self.conn_type {
+            ConnType::SmartCard(_) => vec!["send_and_receive"],
+            ConnType::Fido(_) => vec!["call"],
+        }
     }
 
     fn list_children(&mut self) -> BTreeMap<String, Value> {
@@ -72,14 +164,23 @@ impl RpcNode for ConnectionNode {
         children
     }
 
+    fn action_closes_child(&self, _action: &str) -> bool {
+        // Raw command actions don't need to close the ctap2 child
+        false
+    }
+
     fn call_action(
         &mut self,
         action: &str,
-        _params: Value,
-        _signal: SignalFn,
-        _cancel: &AtomicBool,
+        params: Value,
+        signal: SignalFn,
+        cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError> {
-        Err(RpcError::no_such_action(action))
+        match action {
+            "send_and_receive" => self.do_send_and_receive(params),
+            "call" => self.do_call(params, signal, cancel),
+            _ => Err(RpcError::no_such_action(action)),
+        }
     }
 
     fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {

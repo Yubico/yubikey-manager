@@ -145,6 +145,34 @@ impl From<HidError> for DeviceError {
 }
 
 // ---------------------------------------------------------------------------
+// Device trait
+// ---------------------------------------------------------------------------
+
+/// Abstract interface to a YubiKey device.
+///
+/// Provides access to device metadata and the ability to open connections.
+/// Implemented by [`YubiKeyDevice`] for local devices and can be implemented
+/// by RPC proxy types for remote access.
+pub trait Device {
+    /// Returns the [`DeviceInfo`] for this device.
+    fn info(&self) -> &DeviceInfo;
+    /// Returns the transport type (USB or NFC).
+    fn transport(&self) -> Transport;
+    /// Returns the product name derived from device info.
+    fn name(&self) -> String;
+    /// Open a SmartCard (CCID) connection, returning a trait object.
+    fn open_smartcard(&self) -> Result<Box<dyn SmartCardConnection + Send>, DeviceError>;
+    /// Open a FIDO HID (CTAP) connection, returning a trait object.
+    fn open_fido(&self) -> Result<Box<dyn FidoConnection + Send>, DeviceError>;
+    /// Wait for the user to remove and reinsert this YubiKey.
+    fn reinsert(
+        &mut self,
+        status_cb: &dyn Fn(ReinsertStatus),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), DeviceError>;
+}
+
+// ---------------------------------------------------------------------------
 // YubiKeyDevice
 // ---------------------------------------------------------------------------
 
@@ -498,6 +526,36 @@ impl YubiKeyDevice {
                 }
             }
         }
+    }
+}
+
+impl Device for YubiKeyDevice {
+    fn info(&self) -> &DeviceInfo {
+        self.info()
+    }
+
+    fn transport(&self) -> Transport {
+        self.transport()
+    }
+
+    fn name(&self) -> String {
+        self.name()
+    }
+
+    fn open_smartcard(&self) -> Result<Box<dyn SmartCardConnection + Send>, DeviceError> {
+        Ok(Box::new(self.open_smartcard()?))
+    }
+
+    fn open_fido(&self) -> Result<Box<dyn FidoConnection + Send>, DeviceError> {
+        Ok(Box::new(self.open_fido()?))
+    }
+
+    fn reinsert(
+        &mut self,
+        status_cb: &dyn Fn(ReinsertStatus),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), DeviceError> {
+        self.reinsert(status_cb, cancelled)
     }
 }
 
