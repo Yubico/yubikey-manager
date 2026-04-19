@@ -28,14 +28,20 @@ impl RpcNode for DeviceNode {
     fn get_data(&self) -> Value {
         let info = self.device.info();
         let version = &info.version;
+        let transport = self.device.transport();
+        let fido2_supported = info
+            .supported_capabilities
+            .get(&transport)
+            .is_some_and(|caps| caps.contains(Capability::FIDO2));
         json!({
             "version": [version.0, version.1, version.2],
             "serial": info.serial,
             "name": self.device.name(),
-            "transport": match self.device.transport() {
+            "transport": match transport {
                 Transport::Usb => "usb",
                 Transport::Nfc => "nfc",
             },
+            "fido2_supported": fido2_supported,
         })
     }
 

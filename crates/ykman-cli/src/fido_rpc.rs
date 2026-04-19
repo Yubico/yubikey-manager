@@ -16,6 +16,31 @@ const CTAP2: &[&str] = &["ctap", "ctap2"];
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Check if CTAP2 is available via the root node's children.
+fn has_ctap2(client: &mut RpcClient) -> Result<bool, CliError> {
+    let root = client.get(&[])?;
+    let children = root.body.get("children").cloned().unwrap_or(json!({}));
+    // "ctap" child with fido2: true means CTAP2 via HID
+    if children
+        .get("ctap")
+        .and_then(|v| v.get("fido2"))
+        .and_then(|v| v.as_bool())
+        == Some(true)
+    {
+        return Ok(true);
+    }
+    // "ccid" child with fido2: true means CTAP2 via CCID
+    if children
+        .get("ccid")
+        .and_then(|v| v.get("fido2"))
+        .and_then(|v| v.as_bool())
+        == Some(true)
+    {
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 /// Unlock the CTAP2 node with a PIN.
 fn unlock(client: &mut RpcClient, pin: &str) -> Result<(), CliError> {
     client
@@ -78,6 +103,20 @@ fn csv_escape(s: &str) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn run_info(client: &mut RpcClient) -> Result<(), CliError> {
+    // Check if CTAP2 is available via the root node's children
+    if !has_ctap2(client)? {
+        let root = client.get(&[])?;
+        let data = root.body.get("data").cloned().unwrap_or(json!({}));
+        if data.get("fido2_supported") == Some(&json!(true)) {
+            println!("CTAP2:          Disabled");
+            println!("PIN:            Disabled");
+        } else {
+            println!("CTAP2:          Not supported");
+            println!("PIN:            Not supported");
+        }
+        return Ok(());
+    }
+
     let data = get_ctap2_data(client)?;
     let info = data
         .get("info")
