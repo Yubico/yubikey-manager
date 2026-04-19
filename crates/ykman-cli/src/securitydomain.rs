@@ -8,7 +8,7 @@ use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 
 fn open_session<'a>(
-    dev: &'a YubiKeyDevice,
+    dev: &'a dyn YubiKeyDevice,
     scp_params: &ScpParams,
 ) -> Result<SecurityDomainSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError>
 {
@@ -48,7 +48,7 @@ fn confirm(msg: &str) -> bool {
     matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
-pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
 
     let keys = session
@@ -132,7 +132,11 @@ fn extract_cert_subject(der: &[u8]) -> String {
     }
 }
 
-pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
+pub fn run_reset(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    force: bool,
+) -> Result<(), CliError> {
     if !force {
         eprintln!("WARNING! This will reset all Security Domain data.");
         if !confirm("Proceed?") {
@@ -148,7 +152,7 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
 }
 
 pub fn run_keys_generate(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     kid: u8,
     kvn: u8,
@@ -173,7 +177,7 @@ pub fn run_keys_generate(
 }
 
 pub fn run_keys_delete(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     kid: u8,
     kvn: u8,
@@ -191,7 +195,7 @@ pub fn run_keys_delete(
 }
 
 pub fn run_keys_export(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     kid: u8,
     kvn: u8,
@@ -225,7 +229,7 @@ pub fn run_keys_export(
 }
 
 pub fn run_keys_import(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     kid: u8,
     kvn: u8,
@@ -407,7 +411,7 @@ pub fn run_keys_import(
 }
 
 pub fn run_keys_set_allowlist(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     kid: u8,
     kvn: u8,

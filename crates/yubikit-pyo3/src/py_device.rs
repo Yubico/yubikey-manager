@@ -168,7 +168,7 @@ pub fn scan_devices(py: Python<'_>) -> PyResult<PyObject> {
 /// A YubiKey device discovered via native enumeration.
 #[pyclass(unsendable)]
 pub struct NativeYubiKeyDevice {
-    inner: device::YubiKeyDevice,
+    inner: device::LocalYubiKeyDevice,
 }
 
 #[pymethods]

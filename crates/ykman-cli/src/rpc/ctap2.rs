@@ -11,7 +11,7 @@ use yubikit::ctap2::{
     BioEnrollment, ClientPin, Config, CredentialManagement, Ctap2Error, Ctap2Session, CtapStatus,
     Info, Permissions, PinProtocol, PublicKeyCredentialDescriptor,
 };
-use yubikit::device::{ReinsertStatus, YubiKeyDevice};
+use yubikit::device::{LocalYubiKeyDevice, ReinsertStatus};
 use yubikit::smartcard::ScpKeyParams;
 use yubikit::transport::ctaphid::HidFidoConnection;
 use yubikit::transport::pcsc::PcscSmartCardConnection;
@@ -227,7 +227,7 @@ macro_rules! with_ctap2_dev {
 
 pub struct Ctap2Node {
     device_type: FidoDeviceType,
-    yk_device: YubiKeyDevice,
+    yk_device: LocalYubiKeyDevice,
     pin_token: Option<Vec<u8>>,
     pin_protocol: Option<PinProtocol>,
     cached_data: Value,
@@ -249,7 +249,7 @@ impl Ctap2Node {
     pub fn new_hid(
         conn: HidFidoConnection,
         shared: SharedConn<HidFidoConnection>,
-        device: YubiKeyDevice,
+        device: LocalYubiKeyDevice,
     ) -> Result<Self, RpcError> {
         let mut node = Self {
             device_type: FidoDeviceType::Hid {
@@ -268,7 +268,7 @@ impl Ctap2Node {
     pub fn new_smartcard(
         conn: PcscSmartCardConnection,
         shared: SharedConn<PcscSmartCardConnection>,
-        device: YubiKeyDevice,
+        device: LocalYubiKeyDevice,
         scp_params: Option<ScpKeyParams>,
     ) -> Result<Self, RpcError> {
         let mut node = Self {

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::{Value, json};
 
 use yubikit::core::Transport;
-use yubikit::device::{ReinsertStatus, YubiKeyDevice};
+use yubikit::device::{LocalYubiKeyDevice, ReinsertStatus};
 use yubikit::management::Capability;
 use yubikit::smartcard::ScpKeyParams;
 
@@ -14,7 +14,7 @@ use super::rpc::{RpcNode, SignalFn};
 
 /// Root RPC node representing a single YubiKey device.
 pub struct DeviceNode {
-    device: YubiKeyDevice,
+    device: LocalYubiKeyDevice,
     scp_params: Option<ScpKeyParams>,
     /// Incremented after each reinsert to invalidate cached children.
     generation: u64,
@@ -23,7 +23,7 @@ pub struct DeviceNode {
 }
 
 impl DeviceNode {
-    pub fn new(device: YubiKeyDevice, scp_params: Option<ScpKeyParams>) -> Self {
+    pub fn new(device: LocalYubiKeyDevice, scp_params: Option<ScpKeyParams>) -> Self {
         Self {
             device,
             scp_params,
@@ -94,6 +94,11 @@ impl RpcNode for DeviceNode {
             children.insert("ctap".to_string(), json!({"fido2": true}));
         }
 
+        // "otp" if an OTP HID connection can be opened
+        if supported.contains(Capability::OTP) && self.device.open_otp().is_ok() {
+            children.insert("otp".to_string(), json!({}));
+        }
+
         children
     }
 
@@ -158,6 +163,12 @@ impl RpcNode for DeviceNode {
                     RpcError::connection_error(&self.device.name(), "ctap", &format!("{e:?}"))
                 })?;
                 Box::new(ConnectionNode::new_ctap(conn, self.device.clone()))
+            }
+            "otp" => {
+                let conn = self.device.open_otp().map_err(|e| {
+                    RpcError::connection_error(&self.device.name(), "otp", &format!("{e:?}"))
+                })?;
+                Box::new(ConnectionNode::new_otp(conn, self.device.clone()))
             }
             _ => return Err(RpcError::no_such_node(name)),
         };

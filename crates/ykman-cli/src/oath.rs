@@ -38,7 +38,7 @@ fn validate_and_remember(
 ///
 /// Tries (in order): explicit password, stored key, interactive prompt.
 fn open_session<'a>(
-    dev: &'a YubiKeyDevice,
+    dev: &'a dyn YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
     remember: bool,
@@ -135,7 +135,7 @@ fn is_hidden(cred: &Credential) -> bool {
 }
 
 pub fn run_info(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
 ) -> Result<(), CliError> {
@@ -176,7 +176,11 @@ pub fn run_info(
     Ok(())
 }
 
-pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
+pub fn run_reset(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    force: bool,
+) -> Result<(), CliError> {
     let _ = scp_params;
     if !force {
         eprintln!(
@@ -206,7 +210,7 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
 }
 
 pub fn run_accounts_list(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
     remember: bool,
@@ -240,7 +244,7 @@ pub fn run_accounts_list(
 }
 
 pub fn run_accounts_code(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
     remember: bool,
@@ -322,7 +326,7 @@ pub fn run_accounts_code(
 }
 
 pub fn run_accounts_add(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
     remember: bool,
@@ -398,7 +402,7 @@ pub fn run_accounts_add(
 }
 
 pub fn run_accounts_delete(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
     remember: bool,
@@ -442,7 +446,7 @@ pub fn run_accounts_delete(
 }
 
 pub fn run_accounts_rename(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
     remember: bool,
@@ -494,7 +498,7 @@ pub fn run_accounts_rename(
 }
 
 pub fn run_access_change(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
     new_password: Option<&str>,
@@ -532,7 +536,7 @@ pub fn run_access_change(
 }
 
 pub fn run_access_remember(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
 ) -> Result<(), CliError> {
@@ -573,7 +577,7 @@ pub fn run_access_remember(
 }
 
 pub fn run_access_forget(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     all: bool,
 ) -> Result<(), CliError> {
@@ -616,7 +620,7 @@ pub fn run_access_forget(
 }
 
 pub fn run_accounts_uri(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     uri: &str,
     password: Option<&str>,
@@ -778,7 +782,7 @@ struct PskcCredential {
 }
 
 pub fn run_accounts_import(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     file: &str,
     password: Option<&str>,

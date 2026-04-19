@@ -11,7 +11,7 @@ use crate::util::{CliError, write_file_or_stdout};
 const MANAGEMENT_KEY_LEN: usize = 16;
 
 fn open_session<'a>(
-    dev: &'a YubiKeyDevice,
+    dev: &'a dyn YubiKeyDevice,
     scp_params: &ScpParams,
 ) -> Result<HsmAuthSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::HSMAUTH)?;
@@ -111,7 +111,7 @@ fn format_credential_error(e: &yubikit::hsmauth::HsmAuthError, default_msg: &str
     }
 }
 
-pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
     println!("YubiHSM Auth version:             {}", session.version());
     if let Ok(retries) = session.get_management_key_retries() {
@@ -120,7 +120,11 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
     Ok(())
 }
 
-pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
+pub fn run_reset(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    force: bool,
+) -> Result<(), CliError> {
     if !force {
         eprintln!("WARNING! This will delete all stored HSM Auth credentials.");
         if !confirm("Proceed?") {
@@ -135,7 +139,10 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
     Ok(())
 }
 
-pub fn run_credentials_list(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+pub fn run_credentials_list(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
     let creds = session
         .list_credentials()
@@ -160,7 +167,7 @@ pub fn run_credentials_list(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Resu
 }
 
 pub fn run_credentials_generate(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     label: &str,
     credential_password: Option<&str>,
@@ -184,7 +191,7 @@ pub fn run_credentials_generate(
 }
 
 pub fn run_credentials_delete(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     label: &str,
     management_key: Option<&str>,
@@ -203,7 +210,7 @@ pub fn run_credentials_delete(
 }
 
 pub fn run_credentials_symmetric(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     label: &str,
     enc_key: Option<&str>,
@@ -249,7 +256,7 @@ pub fn run_credentials_symmetric(
 }
 
 pub fn run_credentials_derive(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     label: &str,
     derivation_password: &str,
@@ -269,7 +276,7 @@ pub fn run_credentials_derive(
 }
 
 pub fn run_credentials_change_password(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     label: &str,
     credential_password: Option<&str>,
@@ -304,7 +311,7 @@ pub fn run_credentials_change_password(
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_credentials_import(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     label: &str,
     private_key_file: &str,
@@ -386,7 +393,7 @@ fn parse_ec_private_key(data: &[u8], password: Option<&str>) -> Result<p256::Sec
 }
 
 pub fn run_credentials_export(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     label: &str,
     output: &str,
@@ -458,7 +465,7 @@ pub fn run_credentials_export(
 }
 
 pub fn run_access_change_management_key(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     management_key: Option<&str>,
     new_management_key: Option<&str>,

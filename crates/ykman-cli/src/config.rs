@@ -11,7 +11,7 @@ use crate::util::CliError;
 /// Open a management session on any available transport and run a generic function.
 ///
 /// Tries SmartCard first, then OTP HID, then FIDO HID.
-fn with_management_session<F, R>(dev: &YubiKeyDevice, f: F) -> Result<R, CliError>
+fn with_management_session<F, R>(dev: &dyn YubiKeyDevice, f: F) -> Result<R, CliError>
 where
     F: ManagementOp<R>,
 {
@@ -44,7 +44,7 @@ trait ManagementOp<R> {
 }
 
 fn write_config(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     config: &DeviceConfig,
     reboot: bool,
     lock_code: Option<&[u8]>,
@@ -105,7 +105,7 @@ fn confirm(msg: &str) -> bool {
 }
 
 pub fn run_usb(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     enable: &[CliCapability],
     disable: &[CliCapability],
     enable_all: bool,
@@ -234,7 +234,7 @@ pub fn run_usb(
 }
 
 pub fn run_nfc(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     enable: &[CliCapability],
     disable: &[CliCapability],
     enable_all: bool,
@@ -358,7 +358,7 @@ pub fn run_nfc(
 }
 
 pub fn run_set_lock_code(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     lock_code: Option<&str>,
     new_lock_code: Option<&str>,
     clear: bool,
@@ -389,7 +389,7 @@ pub fn run_set_lock_code(
     Ok(())
 }
 
-pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
+pub fn run_reset(dev: &dyn YubiKeyDevice, force: bool) -> Result<(), CliError> {
     if !force {
         eprintln!("WARNING! This will delete all stored data and restore factory settings.");
         if !confirm("Proceed?") {
@@ -411,7 +411,7 @@ pub fn run_reset(dev: &YubiKeyDevice, force: bool) -> Result<(), CliError> {
 }
 
 pub fn run_mode(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     mode_str: &str,
     touch_eject: bool,
     autoeject_timeout: Option<u16>,

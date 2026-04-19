@@ -1,6 +1,6 @@
 use yubikit::core::Transport;
 use yubikit::device::{
-    YubiKeyDevice, get_name, list_devices, list_readers, name_from_pid, scan_usb_devices,
+    LocalYubiKeyDevice, get_name, list_devices, list_readers, name_from_pid, scan_usb_devices,
     usb_interfaces_from_pid,
 };
 use yubikit::management::UsbInterface;
@@ -8,7 +8,7 @@ use yubikit::management::UsbInterface;
 use crate::util::CliError;
 
 /// Format a device description like: `YubiKey 5 NFC (5.4.3) [OTP+FIDO+CCID] Serial: 123`
-pub fn describe_device(dev: &YubiKeyDevice) -> String {
+pub fn describe_device(dev: &LocalYubiKeyDevice) -> String {
     let info = dev.info();
     let name = get_name(info);
     let version = info.version_name();

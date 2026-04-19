@@ -9,7 +9,7 @@ use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 
 fn open_session<'a>(
-    dev: &'a YubiKeyDevice,
+    dev: &'a dyn YubiKeyDevice,
     scp_params: &ScpParams,
 ) -> Result<OpenPgpSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::OPENPGP)?;
@@ -55,7 +55,7 @@ fn ensure_pin(pin: Option<&str>) -> Result<String, CliError> {
     }
 }
 
-pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
 
     let aid = session.aid().clone();
@@ -164,7 +164,11 @@ fn format_uif(uif: Uif) -> String {
     .to_string()
 }
 
-pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
+pub fn run_reset(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    force: bool,
+) -> Result<(), CliError> {
     if !force {
         eprintln!(
             "WARNING! This will delete all stored OpenPGP keys and restore factory settings."
@@ -191,7 +195,7 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
 }
 
 pub fn run_set_retries(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     pin_retries: u8,
     reset_code_retries: u8,
@@ -219,7 +223,7 @@ pub fn run_set_retries(
 }
 
 pub fn run_change_pin(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     pin: Option<&str>,
     new_pin: Option<&str>,
@@ -238,7 +242,7 @@ pub fn run_change_pin(
 }
 
 pub fn run_change_admin_pin(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     admin_pin: Option<&str>,
     new_admin_pin: Option<&str>,
@@ -257,7 +261,7 @@ pub fn run_change_admin_pin(
 }
 
 pub fn run_change_reset_code(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     admin_pin: Option<&str>,
     reset_code: Option<&str>,
@@ -279,7 +283,7 @@ pub fn run_change_reset_code(
 }
 
 pub fn run_unblock_pin(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     admin_pin: Option<&str>,
     reset_code: Option<&str>,
@@ -304,7 +308,7 @@ pub fn run_unblock_pin(
 }
 
 pub fn run_set_signature_policy(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     policy: CliOpenpgpPinPolicy,
     admin_pin: Option<&str>,
@@ -323,7 +327,7 @@ pub fn run_set_signature_policy(
 }
 
 pub fn run_keys_info(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     key: CliKeyRef,
 ) -> Result<(), CliError> {
@@ -414,7 +418,7 @@ fn format_timestamp(t: u32) -> String {
 }
 
 pub fn run_keys_set_touch(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     key: CliKeyRef,
     policy: CliUif,
@@ -448,7 +452,7 @@ pub fn run_keys_set_touch(
 }
 
 pub fn run_keys_import(
-    _dev: &YubiKeyDevice,
+    _dev: &dyn YubiKeyDevice,
     _scp_params: &ScpParams,
     key: CliKeyRef,
     key_file: &str,
@@ -465,7 +469,7 @@ pub fn run_keys_import(
 }
 
 pub fn run_keys_attest(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     key: CliKeyRef,
     output: &str,
@@ -488,7 +492,7 @@ pub fn run_keys_attest(
 }
 
 pub fn run_certificates_export(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     key: CliKeyRef,
     output: &str,
@@ -506,7 +510,7 @@ pub fn run_certificates_export(
 }
 
 pub fn run_certificates_import(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     key: CliKeyRef,
     cert_file: &str,
@@ -538,7 +542,7 @@ pub fn run_certificates_import(
 }
 
 pub fn run_certificates_delete(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     key: CliKeyRef,
     admin_pin: Option<&str>,

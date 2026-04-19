@@ -151,9 +151,9 @@ impl From<HidError> for DeviceError {
 /// Abstract interface to a YubiKey device.
 ///
 /// Provides access to device metadata and the ability to open connections.
-/// Implemented by [`YubiKeyDevice`] for local devices and can be implemented
+/// Implemented by [`LocalYubiKeyDevice`] for local devices and can be implemented
 /// by RPC proxy types for remote access.
-pub trait Device {
+pub trait YubiKeyDevice {
     /// Returns the [`DeviceInfo`] for this device.
     fn info(&self) -> &DeviceInfo;
     /// Returns the transport type (USB or NFC).
@@ -164,6 +164,8 @@ pub trait Device {
     fn open_smartcard(&self) -> Result<Box<dyn SmartCardConnection + Send>, DeviceError>;
     /// Open a FIDO HID (CTAP) connection, returning a trait object.
     fn open_fido(&self) -> Result<Box<dyn FidoConnection + Send>, DeviceError>;
+    /// Open an OTP HID connection, returning a trait object.
+    fn open_otp(&self) -> Result<Box<dyn OtpConnection + Send>, DeviceError>;
     /// Wait for the user to remove and reinsert this YubiKey.
     fn reinsert(
         &mut self,
@@ -172,8 +174,36 @@ pub trait Device {
     ) -> Result<(), DeviceError>;
 }
 
+impl YubiKeyDevice for Box<dyn YubiKeyDevice> {
+    fn info(&self) -> &DeviceInfo {
+        (**self).info()
+    }
+    fn transport(&self) -> Transport {
+        (**self).transport()
+    }
+    fn name(&self) -> String {
+        (**self).name()
+    }
+    fn open_smartcard(&self) -> Result<Box<dyn SmartCardConnection + Send>, DeviceError> {
+        (**self).open_smartcard()
+    }
+    fn open_fido(&self) -> Result<Box<dyn FidoConnection + Send>, DeviceError> {
+        (**self).open_fido()
+    }
+    fn open_otp(&self) -> Result<Box<dyn OtpConnection + Send>, DeviceError> {
+        (**self).open_otp()
+    }
+    fn reinsert(
+        &mut self,
+        status_cb: &dyn Fn(ReinsertStatus),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), DeviceError> {
+        (**self).reinsert(status_cb, cancelled)
+    }
+}
+
 // ---------------------------------------------------------------------------
-// YubiKeyDevice
+// LocalYubiKeyDevice
 // ---------------------------------------------------------------------------
 
 /// A discovered YubiKey that can open connections.
@@ -181,7 +211,7 @@ pub trait Device {
 /// Represents a physical YubiKey found via PC/SC (CCID) and/or HID enumeration.
 /// Use [`list_devices`] to discover connected devices.
 #[derive(Debug, Clone)]
-pub struct YubiKeyDevice {
+pub struct LocalYubiKeyDevice {
     reader_name: Option<String>,
     hid_path: Option<String>,
     fido_path: Option<String>,
@@ -190,7 +220,7 @@ pub struct YubiKeyDevice {
     info: DeviceInfo,
 }
 
-impl YubiKeyDevice {
+impl LocalYubiKeyDevice {
     /// Returns the [`DeviceInfo`] for this device.
     pub fn info(&self) -> &DeviceInfo {
         &self.info
@@ -324,9 +354,9 @@ impl YubiKeyDevice {
             .map_err(|e| DeviceError::SmartCard(SmartCardError::Transport(Box::new(e))))
     }
 
-    /// Absorb transport paths from another `YubiKeyDevice` representing the
+    /// Absorb transport paths from another `LocalYubiKeyDevice` representing the
     /// same physical key. Fills in any `None` fields from `other`.
-    fn merge_from(&mut self, other: YubiKeyDevice) {
+    fn merge_from(&mut self, other: LocalYubiKeyDevice) {
         if self.reader_name.is_none() {
             self.reader_name = other.reader_name;
         }
@@ -529,7 +559,7 @@ impl YubiKeyDevice {
     }
 }
 
-impl Device for YubiKeyDevice {
+impl YubiKeyDevice for LocalYubiKeyDevice {
     fn info(&self) -> &DeviceInfo {
         self.info()
     }
@@ -550,6 +580,10 @@ impl Device for YubiKeyDevice {
         Ok(Box::new(self.open_fido()?))
     }
 
+    fn open_otp(&self) -> Result<Box<dyn OtpConnection + Send>, DeviceError> {
+        Ok(Box::new(self.open_otp()?))
+    }
+
     fn reinsert(
         &mut self,
         status_cb: &dyn Fn(ReinsertStatus),
@@ -559,7 +593,7 @@ impl Device for YubiKeyDevice {
     }
 }
 
-impl fmt::Display for YubiKeyDevice {
+impl fmt::Display for LocalYubiKeyDevice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name())?;
         if let Some(serial) = self.serial() {
@@ -737,11 +771,11 @@ pub fn scan_usb_devices() -> (HashMap<u16, usize>, u64) {
 /// transports the caller is interested in. [`UsbInterface::CCID`] covers
 /// both USB and NFC readers.
 ///
-/// Each physical YubiKey is returned as a single [`YubiKeyDevice`] with
+/// Each physical YubiKey is returned as a single [`LocalYubiKeyDevice`] with
 /// transport paths populated for every interface that was discovered. When
 /// only one device is present per USB Product ID the merge is trivial;
 /// multiple devices sharing a PID are matched by firmware version and serial.
-pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, DeviceError> {
+pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<LocalYubiKeyDevice>, DeviceError> {
     log::debug!("Listing YubiKey devices (interfaces: {interfaces})");
 
     let want_ccid = interfaces.contains(UsbInterface::CCID);
@@ -812,7 +846,7 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, Devi
     );
 
     // ── Phase 2: open connections and build device list ───────────
-    let mut devices: Vec<YubiKeyDevice> = Vec::new();
+    let mut devices: Vec<LocalYubiKeyDevice> = Vec::new();
 
     // For each PID, decide whether we need full multi-transport enumeration.
     for (&pid, &count) in &pid_counts {
@@ -824,14 +858,14 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, Devi
         } else {
             // Multiple devices with this PID — enumerate all requested
             // interfaces and merge by identity.
-            let mut base: Vec<YubiKeyDevice> = Vec::new();
+            let mut base: Vec<LocalYubiKeyDevice> = Vec::new();
 
             if want_ccid {
                 for &(p, ref reader) in &usb_readers {
                     if p == pid
                         && let Ok((info, transport)) = read_info_reader(reader)
                     {
-                        base.push(YubiKeyDevice {
+                        base.push(LocalYubiKeyDevice {
                             reader_name: Some(reader.clone()),
                             hid_path: None,
                             fido_path: None,
@@ -848,7 +882,7 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, Devi
                 for hid in &otp_devs {
                     if hid.pid == pid {
                         let info = read_info_otp_device(hid);
-                        otp_group.push(YubiKeyDevice {
+                        otp_group.push(LocalYubiKeyDevice {
                             reader_name: None,
                             hid_path: Some(hid.path.clone()),
                             fido_path: None,
@@ -870,7 +904,7 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, Devi
                 for fido in &fido_devs {
                     if fido.pid == pid {
                         let info = read_info_fido_device(fido);
-                        fido_group.push(YubiKeyDevice {
+                        fido_group.push(LocalYubiKeyDevice {
                             reader_name: None,
                             hid_path: None,
                             fido_path: Some(fido.path.clone()),
@@ -896,7 +930,7 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<YubiKeyDevice>, Devi
         log::debug!("Checking NFC reader: {reader}");
         match read_info_reader(reader) {
             Ok((info, transport)) => {
-                devices.push(YubiKeyDevice {
+                devices.push(LocalYubiKeyDevice {
                     reader_name: Some(reader.clone()),
                     hid_path: None,
                     fido_path: None,
@@ -924,7 +958,7 @@ fn open_single_usb(
     usb_readers: &[(u16, String)],
     otp_devs: &[HidDeviceInfo],
     fido_devs: &[FidoDeviceInfo],
-) -> Option<YubiKeyDevice> {
+) -> Option<LocalYubiKeyDevice> {
     let reader = usb_readers.iter().find(|(p, _)| *p == pid).map(|(_, r)| r);
     let otp = otp_devs.iter().find(|h| h.pid == pid);
     let fido = fido_devs.iter().find(|f| f.pid == pid);
@@ -933,7 +967,7 @@ fn open_single_usb(
     if let Some(reader_name) = reader
         && let Ok((info, transport)) = read_info_reader(reader_name)
     {
-        return Some(YubiKeyDevice {
+        return Some(LocalYubiKeyDevice {
             reader_name: Some(reader_name.clone()),
             hid_path: otp.map(|h| h.path.clone()),
             fido_path: fido.map(|f| f.path.clone()),
@@ -946,7 +980,7 @@ fn open_single_usb(
     // Fall back to OTP HID.
     if let Some(hid) = otp {
         let info = read_info_otp_device(hid);
-        return Some(YubiKeyDevice {
+        return Some(LocalYubiKeyDevice {
             reader_name: None,
             hid_path: Some(hid.path.clone()),
             fido_path: fido.map(|f| f.path.clone()),
@@ -959,7 +993,7 @@ fn open_single_usb(
     // Fall back to FIDO HID.
     if let Some(f) = fido {
         let info = read_info_fido_device(f);
-        return Some(YubiKeyDevice {
+        return Some(LocalYubiKeyDevice {
             reader_name: None,
             hid_path: None,
             fido_path: Some(f.path.clone()),
@@ -974,7 +1008,7 @@ fn open_single_usb(
 
 /// Merge `incoming` partial devices into `base`, combining entries that
 /// represent the same physical YubiKey.
-fn merge_devices(base: &mut Vec<YubiKeyDevice>, incoming: Vec<YubiKeyDevice>) {
+fn merge_devices(base: &mut Vec<LocalYubiKeyDevice>, incoming: Vec<LocalYubiKeyDevice>) {
     // Count how many devices per PID across both sets.
     let mut pid_counts: HashMap<u16, usize> = HashMap::new();
     for dev in base.iter().chain(incoming.iter()) {
@@ -1603,7 +1637,7 @@ mod tests {
         pid: Option<u16>,
         version: Version,
         serial: Option<u32>,
-    ) -> YubiKeyDevice {
+    ) -> LocalYubiKeyDevice {
         let info = make_info(
             version,
             FormFactor::UsbAKeychain,
@@ -1614,7 +1648,7 @@ mod tests {
             Capability(Capability::OTP.0 | Capability::PIV.0),
             false,
         );
-        YubiKeyDevice {
+        LocalYubiKeyDevice {
             reader_name: reader_name.map(String::from),
             hid_path: hid_path.map(String::from),
             fido_path: fido_path.map(String::from),

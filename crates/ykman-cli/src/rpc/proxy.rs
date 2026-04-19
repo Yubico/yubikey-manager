@@ -10,9 +10,10 @@ use hex::{FromHex, ToHex};
 use serde_json::{Value, json};
 
 use yubikit::core::{Connection, Transport};
-use yubikit::device::{Device, DeviceError, ReinsertStatus};
+use yubikit::device::{DeviceError, ReinsertStatus, YubiKeyDevice};
 use yubikit::fido::FidoConnection;
 use yubikit::management::{Capability, DeviceInfo};
+use yubikit::otp::{OtpConnection, OtpError};
 use yubikit::smartcard::{SmartCardConnection, SmartCardError};
 use yubikit::transport::ctaphid::{CtapHidCapability, FidoError};
 
@@ -180,6 +181,56 @@ impl FidoConnection for RpcFidoConnection {
 }
 
 // ---------------------------------------------------------------------------
+// RpcOtpConnection
+// ---------------------------------------------------------------------------
+
+/// An `OtpConnection` backed by `otp_send`/`otp_receive` RPC actions on an
+/// otp connection node.
+pub struct RpcOtpConnection {
+    client: SharedClient,
+}
+
+// SAFETY: same as RpcSmartCardConnection
+unsafe impl Send for RpcOtpConnection {}
+
+impl Connection for RpcOtpConnection {
+    type Error = OtpError;
+    fn close(&mut self) {}
+}
+
+impl OtpConnection for RpcOtpConnection {
+    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
+        let result = self
+            .client
+            .borrow_mut()
+            .call("otp_receive", &["otp"], json!({}), None, false)
+            .map_err(|e| OtpError::CommandRejected(format!("{e}")))?;
+
+        let data_hex = result
+            .body
+            .get("data")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        Vec::from_hex(data_hex)
+            .map_err(|e| OtpError::CommandRejected(format!("bad hex from RPC: {e}")))
+    }
+
+    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
+        self.client
+            .borrow_mut()
+            .call(
+                "otp_send",
+                &["otp"],
+                json!({"data": data.encode_hex::<String>()}),
+                None,
+                false,
+            )
+            .map_err(|e| OtpError::CommandRejected(format!("{e}")))?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // RpcDevice
 // ---------------------------------------------------------------------------
 
@@ -191,6 +242,7 @@ pub struct RpcDevice {
     name: String,
     has_ccid: bool,
     has_ctap: bool,
+    has_otp: bool,
 }
 
 impl RpcDevice {
@@ -217,6 +269,7 @@ impl RpcDevice {
 
         let has_ccid = children.get("ccid").is_some();
         let has_ctap = children.get("ctap").is_some();
+        let has_otp = children.get("otp").is_some();
 
         let info = Self::read_device_info(&data);
 
@@ -227,6 +280,7 @@ impl RpcDevice {
             name,
             has_ccid,
             has_ctap,
+            has_otp,
         })
     }
 
@@ -311,7 +365,7 @@ impl RpcDevice {
     }
 }
 
-impl Device for RpcDevice {
+impl YubiKeyDevice for RpcDevice {
     fn info(&self) -> &DeviceInfo {
         &self.info
     }
@@ -342,6 +396,15 @@ impl Device for RpcDevice {
             DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(e.0))))
         })?;
         Ok(Box::new(conn))
+    }
+
+    fn open_otp(&self) -> Result<Box<dyn OtpConnection + Send>, DeviceError> {
+        if !self.has_otp {
+            return Err(DeviceError::NoDeviceFound);
+        }
+        Ok(Box::new(RpcOtpConnection {
+            client: self.client.clone(),
+        }))
     }
 
     fn reinsert(

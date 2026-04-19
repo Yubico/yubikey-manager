@@ -2,7 +2,7 @@
 //! and explicit SCP from CLI flags.
 
 use yubikit::core::Transport;
-use yubikit::device::Device;
+use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::securitydomain::{KeyRef, SecurityDomainSession};
 use yubikit::smartcard::{SmartCardConnection, SmartCardProtocol};
@@ -63,12 +63,12 @@ impl ScpParams {
 }
 
 /// Check if a device is connected over NFC (external reader).
-pub fn is_nfc(dev: &dyn Device) -> bool {
+pub fn is_nfc(dev: &dyn YubiKeyDevice) -> bool {
     dev.transport() == Transport::Nfc
 }
 
 /// Check if automatic SCP11b should be used for a given capability.
-pub fn needs_scp11b(dev: &dyn Device, capability: Capability) -> bool {
+pub fn needs_scp11b(dev: &dyn YubiKeyDevice, capability: Capability) -> bool {
     is_nfc(dev) && dev.info().fips_capable.contains(capability)
 }
 
@@ -78,7 +78,7 @@ pub fn needs_scp11b(dev: &dyn Device, capability: Capability) -> bool {
 /// Otherwise, if the device is NFC + FIPS-capable for the given capability,
 /// auto-negotiate SCP11b.
 pub fn resolve_scp(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     params: &ScpParams,
     capability: Capability,
 ) -> Result<ScpConfig, CliError> {
@@ -200,13 +200,13 @@ pub fn apply_scp<C: SmartCardConnection>(
 
 /// Find SCP11b key parameters from the Security Domain on a separate connection.
 /// Returns (kid, kvn, pk_sd_ecka_bytes).
-pub fn find_scp11b_params(dev: &dyn Device) -> Result<(u8, u8, Vec<u8>), CliError> {
+pub fn find_scp11b_params(dev: &dyn YubiKeyDevice) -> Result<(u8, u8, Vec<u8>), CliError> {
     find_scp11_pk_with_kid(dev, 0x13).map(|(kvn, pk)| (0x13, kvn, pk))
 }
 
 /// Find public key for a given SCP11 kid/kvn from the Security Domain.
 fn find_scp11_pk(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     kid: u8,
     kvn: u8,
     _ca_cert: Option<&[u8]>,
@@ -232,7 +232,7 @@ fn find_scp11_pk(
     extract_ec_pubkey_from_cert(leaf_cert)
 }
 
-fn find_scp11_pk_with_kid(dev: &dyn Device, kid: u8) -> Result<(u8, Vec<u8>), CliError> {
+fn find_scp11_pk_with_kid(dev: &dyn YubiKeyDevice, kid: u8) -> Result<(u8, Vec<u8>), CliError> {
     let conn = dev
         .open_smartcard()
         .map_err(|e| CliError(format!("Failed to open connection for SCP: {e}")))?;

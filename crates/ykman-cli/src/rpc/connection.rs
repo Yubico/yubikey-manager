@@ -6,10 +6,12 @@ use hex::{self, FromHex, ToHex};
 use serde_json::{Value, json};
 
 use yubikit::core::Connection;
-use yubikit::device::YubiKeyDevice;
+use yubikit::device::LocalYubiKeyDevice;
 use yubikit::fido::FidoConnection;
+use yubikit::otp::OtpConnection;
 use yubikit::smartcard::{ScpKeyParams, SmartCardConnection};
 use yubikit::transport::ctaphid::HidFidoConnection;
+use yubikit::transport::otphid::HidOtpConnection;
 use yubikit::transport::pcsc::PcscSmartCardConnection;
 
 use super::ctap2::Ctap2Node;
@@ -22,19 +24,20 @@ pub type SharedConn<T> = Arc<Mutex<Option<T>>>;
 /// Connection node wrapping either a SmartCard or FIDO HID connection.
 pub struct ConnectionNode {
     conn_type: ConnType,
-    device: YubiKeyDevice,
+    device: LocalYubiKeyDevice,
     scp_params: Option<ScpKeyParams>,
 }
 
 enum ConnType {
     SmartCard(SharedConn<PcscSmartCardConnection>),
     Fido(SharedConn<HidFidoConnection>),
+    Otp(SharedConn<HidOtpConnection>),
 }
 
 impl ConnectionNode {
     pub fn new_ccid(
         conn: PcscSmartCardConnection,
-        device: YubiKeyDevice,
+        device: LocalYubiKeyDevice,
         scp_params: Option<ScpKeyParams>,
     ) -> Self {
         Self {
@@ -44,9 +47,17 @@ impl ConnectionNode {
         }
     }
 
-    pub fn new_ctap(conn: HidFidoConnection, device: YubiKeyDevice) -> Self {
+    pub fn new_ctap(conn: HidFidoConnection, device: LocalYubiKeyDevice) -> Self {
         Self {
             conn_type: ConnType::Fido(Arc::new(Mutex::new(Some(conn)))),
+            device,
+            scp_params: None,
+        }
+    }
+
+    pub fn new_otp(conn: HidOtpConnection, device: LocalYubiKeyDevice) -> Self {
+        Self {
+            conn_type: ConnType::Otp(Arc::new(Mutex::new(Some(conn)))),
             device,
             scp_params: None,
         }
@@ -117,6 +128,51 @@ impl ConnectionNode {
             "data": response.encode_hex::<String>(),
         })))
     }
+
+    fn do_otp_receive(&self) -> Result<RpcResponse, RpcError> {
+        let ConnType::Otp(conn) = &self.conn_type else {
+            return Err(RpcError::new(
+                "invalid-command",
+                "otp_receive is only available on otp connections",
+            ));
+        };
+        let mut guard = conn.lock().unwrap();
+        let c = guard
+            .as_mut()
+            .ok_or_else(|| RpcError::new("connection-error", "Connection in use"))?;
+
+        let data = c
+            .otp_receive()
+            .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
+
+        Ok(RpcResponse::new(json!({
+            "data": data.encode_hex::<String>(),
+        })))
+    }
+
+    fn do_otp_send(&self, params: Value) -> Result<RpcResponse, RpcError> {
+        let data_hex = params
+            .get("data")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RpcError::invalid_params("missing 'data' (hex string)"))?;
+        let data = Vec::from_hex(data_hex).map_err(|e| RpcError::invalid_params(format!("{e}")))?;
+
+        let ConnType::Otp(conn) = &self.conn_type else {
+            return Err(RpcError::new(
+                "invalid-command",
+                "otp_send is only available on otp connections",
+            ));
+        };
+        let mut guard = conn.lock().unwrap();
+        let c = guard
+            .as_mut()
+            .ok_or_else(|| RpcError::new("connection-error", "Connection in use"))?;
+
+        c.otp_send(&data)
+            .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
+
+        Ok(RpcResponse::new(json!({})))
+    }
 }
 
 impl RpcNode for ConnectionNode {
@@ -147,6 +203,13 @@ impl RpcNode for ConnectionNode {
                     "capabilities": capabilities,
                 })
             }
+            ConnType::Otp(_) => {
+                json!({
+                    "version": [version.0, version.1, version.2],
+                    "serial": info.serial,
+                    "transport": "otp",
+                })
+            }
         }
     }
 
@@ -154,13 +217,18 @@ impl RpcNode for ConnectionNode {
         match &self.conn_type {
             ConnType::SmartCard(_) => vec!["send_and_receive"],
             ConnType::Fido(_) => vec!["call"],
+            ConnType::Otp(_) => vec!["otp_send", "otp_receive"],
         }
     }
 
     fn list_children(&mut self) -> BTreeMap<String, Value> {
         let mut children = BTreeMap::new();
-        // Both connection types can host a ctap2 child
-        children.insert("ctap2".to_string(), json!({}));
+        match &self.conn_type {
+            ConnType::Otp(_) => {} // OTP connections don't have session children
+            _ => {
+                children.insert("ctap2".to_string(), json!({}));
+            }
+        }
         children
     }
 
@@ -179,6 +247,8 @@ impl RpcNode for ConnectionNode {
         match action {
             "send_and_receive" => self.do_send_and_receive(params),
             "call" => self.do_call(params, signal, cancel),
+            "otp_send" => self.do_otp_send(params),
+            "otp_receive" => self.do_otp_receive(),
             _ => Err(RpcError::no_such_action(action)),
         }
     }
@@ -208,6 +278,7 @@ impl RpcNode for ConnectionNode {
                             self.scp_params.clone(),
                         )?))
                     }
+                    ConnType::Otp(_) => Err(RpcError::no_such_node(name)),
                 }
             }
             _ => Err(RpcError::no_such_node(name)),
@@ -224,6 +295,12 @@ impl RpcNode for ConnectionNode {
             }
             ConnType::Fido(conn) => {
                 let _ = conn.lock().unwrap().take();
+            }
+            ConnType::Otp(conn) => {
+                let mut guard = conn.lock().unwrap();
+                if let Some(mut c) = guard.take() {
+                    c.close();
+                }
             }
         }
     }

@@ -25,7 +25,7 @@ trait YubiOtpOp<R> {
 
 /// Open an OTP session (preferring HID, falling back to SmartCard) and run `op`.
 fn with_otp_session<F: YubiOtpOp<R>, R>(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     f: F,
 ) -> Result<R, CliError> {
@@ -48,7 +48,7 @@ fn with_otp_session<F: YubiOtpOp<R>, R>(
 }
 
 fn with_otp_sc<F: YubiOtpOp<R>, R>(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_config: ScpConfig,
     f: F,
 ) -> Result<R, CliError> {
@@ -175,7 +175,7 @@ fn prompt_for_touch() {
     eprintln!("Touch your YubiKey...");
 }
 
-pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
     struct Info;
     impl YubiOtpOp<()> for Info {
         fn run<C: Connection + 'static>(
@@ -200,7 +200,11 @@ pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliEr
     with_otp_session(dev, scp_params, Info)
 }
 
-pub fn run_swap(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
+pub fn run_swap(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    force: bool,
+) -> Result<(), CliError> {
     if !force && !confirm("Swap the two slot configurations?") {
         return Err(CliError("Aborted.".into()));
     }
@@ -221,7 +225,7 @@ pub fn run_swap(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Res
 }
 
 pub fn run_delete(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: CliOtpSlot,
     access_code: Option<&str>,
@@ -269,7 +273,7 @@ pub fn run_delete(
 }
 
 pub fn run_ndef(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: CliOtpSlot,
     prefix: Option<&str>,
@@ -324,7 +328,7 @@ pub fn run_ndef(
 }
 
 pub fn run_yubiotp(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: CliOtpSlot,
     public_id: Option<&str>,
@@ -543,7 +547,7 @@ pub fn run_yubiotp(
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_static(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: CliOtpSlot,
     password: Option<&str>,
@@ -617,7 +621,7 @@ pub fn run_static(
 }
 
 pub fn run_chalresp(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: CliOtpSlot,
     key: Option<&str>,
@@ -726,7 +730,7 @@ pub fn run_chalresp(
 }
 
 pub fn run_calculate(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: CliOtpSlot,
     challenge: Option<&str>,
@@ -823,7 +827,7 @@ pub fn run_calculate(
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_hotp(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: CliOtpSlot,
     key: Option<&str>,
@@ -955,7 +959,7 @@ pub fn run_hotp(
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_settings(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: CliOtpSlot,
     enter: Option<bool>,

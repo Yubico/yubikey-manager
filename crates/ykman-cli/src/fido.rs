@@ -35,7 +35,7 @@ use yubikit::ctap2::{
     BioEnrollment, ClientPin, Config, CredentialManagement, Ctap2Error, Ctap2Session, CtapStatus,
     Info, Permissions, PinProtocol,
 };
-use yubikit::device::{Device, ReinsertStatus};
+use yubikit::device::{ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
 
 use crate::scp::{self, ScpParams};
@@ -183,7 +183,7 @@ fn map_enroll_error<E: std::error::Error + Send + Sync + 'static>(
 // CLI command implementations
 // ---------------------------------------------------------------------------
 
-pub fn run_info(dev: &dyn Device, scp_params: &ScpParams) -> Result<(), CliError> {
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
     let dev_info = dev.info();
     let transport = dev.transport();
 
@@ -304,7 +304,7 @@ pub fn run_info(dev: &dyn Device, scp_params: &ScpParams) -> Result<(), CliError
 }
 
 pub fn run_reset(
-    dev: &mut dyn Device,
+    dev: &mut dyn YubiKeyDevice,
     scp_params: &ScpParams,
     force: bool,
 ) -> Result<(), CliError> {
@@ -441,7 +441,7 @@ fn run_reset_inner<C: Connection + 'static>(
 }
 
 pub fn run_access_change_pin(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     pin: Option<&str>,
     new_pin: Option<&str>,
@@ -508,7 +508,7 @@ pub fn run_access_change_pin(
 }
 
 pub fn run_access_verify_pin(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
@@ -528,7 +528,7 @@ pub fn run_access_verify_pin(
 }
 
 pub fn run_access_force_change(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
@@ -563,7 +563,7 @@ pub fn run_access_force_change(
 }
 
 pub fn run_access_set_min_length(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     length: u32,
     pin: Option<&str>,
@@ -623,7 +623,7 @@ pub fn run_access_set_min_length(
 }
 
 pub fn run_credentials_list(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     pin: Option<&str>,
     csv: bool,
@@ -762,7 +762,7 @@ pub fn run_credentials_list(
 }
 
 pub fn run_credentials_delete(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     credential_id: &str,
     pin: Option<&str>,
@@ -838,7 +838,7 @@ pub fn run_credentials_delete(
 }
 
 pub fn run_credentials_update(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     credential_id: &str,
     name: Option<&str>,
@@ -926,7 +926,7 @@ pub fn run_credentials_update(
 }
 
 pub fn run_fingerprints_list(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
@@ -971,7 +971,7 @@ pub fn run_fingerprints_list(
 }
 
 pub fn run_fingerprints_add(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     name: &str,
     pin: Option<&str>,
@@ -1061,7 +1061,7 @@ pub fn run_fingerprints_add(
 }
 
 pub fn run_fingerprints_rename(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     template_id: &str,
     name: &str,
@@ -1095,7 +1095,7 @@ pub fn run_fingerprints_rename(
 }
 
 pub fn run_fingerprints_delete(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     template_id: &str,
     pin: Option<&str>,
@@ -1134,7 +1134,7 @@ pub fn run_fingerprints_delete(
 }
 
 pub fn run_config_toggle_always_uv(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     pin: Option<&str>,
 ) -> Result<(), CliError> {
@@ -1185,7 +1185,7 @@ pub fn run_config_toggle_always_uv(
 }
 
 pub fn run_config_enable_ep_attestation(
-    dev: &dyn Device,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     pin: Option<&str>,
 ) -> Result<(), CliError> {

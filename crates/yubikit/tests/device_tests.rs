@@ -19,7 +19,7 @@ use rstest::{fixture, rstest};
 use std::sync::OnceLock;
 use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
-use yubikit::device::{YubiKeyDevice, list_devices};
+use yubikit::device::{LocalYubiKeyDevice, list_devices};
 use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType, UsbInterface};
 use yubikit::securitydomain::SecurityDomainSession;
 use yubikit::transport::pcsc::{PcscSmartCardConnection, list_readers};
@@ -45,7 +45,7 @@ macro_rules! skip_if_needed {
 }
 
 /// Cached device info so we only enumerate once.
-static DEVICE_INFO: OnceLock<(YubiKeyDevice, DeviceInfo)> = OnceLock::new();
+static DEVICE_INFO: OnceLock<(LocalYubiKeyDevice, DeviceInfo)> = OnceLock::new();
 
 /// Cached SCP11b parameters for USB: (kid, kvn, pk_sd_ecka).
 static SCP11B_PARAMS: OnceLock<Option<(u8, u8, Vec<u8>)>> = OnceLock::new();
@@ -74,7 +74,7 @@ fn required_nfc_serial() -> Option<u32> {
     })
 }
 
-fn get_device_and_info() -> &'static (YubiKeyDevice, DeviceInfo) {
+fn get_device_and_info() -> &'static (LocalYubiKeyDevice, DeviceInfo) {
     DEVICE_INFO.get_or_init(|| {
         let serial = required_serial();
         let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)

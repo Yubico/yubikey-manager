@@ -26,7 +26,7 @@ use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
 
 fn open_session<'a>(
-    dev: &'a YubiKeyDevice,
+    dev: &'a dyn YubiKeyDevice,
     scp_params: &ScpParams,
 ) -> Result<PivSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::PIV)?;
@@ -345,7 +345,7 @@ fn parse_object_id(s: &str) -> Result<ObjectId, CliError> {
     }
 }
 
-pub fn run_info(dev: &YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
     let version = session.version();
     println!("PIV version:              {version}");
@@ -492,7 +492,11 @@ fn parse_cert_info(cert_der: &[u8]) -> Option<CertInfo> {
     })
 }
 
-pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<(), CliError> {
+pub fn run_reset(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    force: bool,
+) -> Result<(), CliError> {
     if !force {
         eprintln!("WARNING! This will delete all stored PIV data and restore factory settings.");
         if !confirm("Proceed?") {
@@ -515,7 +519,7 @@ pub fn run_reset(dev: &YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Re
 }
 
 pub fn run_change_pin(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     pin: Option<&str>,
     new_pin: Option<&str>,
@@ -542,7 +546,7 @@ pub fn run_change_pin(
 }
 
 pub fn run_change_puk(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     puk: Option<&str>,
     new_puk: Option<&str>,
@@ -569,7 +573,7 @@ pub fn run_change_puk(
 }
 
 pub fn run_unblock_pin(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     puk: Option<&str>,
     new_pin: Option<&str>,
@@ -596,7 +600,7 @@ pub fn run_unblock_pin(
 }
 
 pub fn run_set_retries(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     pin_retries: u8,
     puk_retries: u8,
@@ -625,7 +629,7 @@ pub fn run_set_retries(
 }
 
 pub fn run_change_management_key(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     mgmt_key: Option<&str>,
     new_mgmt_key: Option<&str>,
@@ -682,7 +686,7 @@ pub fn run_change_management_key(
 }
 
 pub fn run_keys_generate(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: &str,
     output: &str,
@@ -727,7 +731,7 @@ pub fn run_keys_generate(
 }
 
 pub fn run_keys_import(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: &str,
     key_file: &str,
@@ -768,7 +772,7 @@ pub fn run_keys_import(
 }
 
 pub fn run_keys_info(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: &str,
 ) -> Result<(), CliError> {
@@ -794,7 +798,7 @@ pub fn run_keys_info(
 }
 
 pub fn run_keys_attest(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: &str,
     output: &str,
@@ -812,7 +816,7 @@ pub fn run_keys_attest(
 }
 
 pub fn run_keys_export(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: &str,
     output: &str,
@@ -865,7 +869,7 @@ pub fn run_keys_export(
 }
 
 pub fn run_keys_move(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     source: &str,
     dest: &str,
@@ -887,7 +891,7 @@ pub fn run_keys_move(
 }
 
 pub fn run_keys_delete(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: &str,
     mgmt_key: Option<&str>,
@@ -907,7 +911,7 @@ pub fn run_keys_delete(
 }
 
 pub fn run_certificates_export(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: &str,
     output: &str,
@@ -925,7 +929,7 @@ pub fn run_certificates_export(
 }
 
 pub fn run_certificates_import(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: &str,
     cert_file: &str,
@@ -972,7 +976,7 @@ pub fn run_certificates_import(
 }
 
 pub fn run_certificates_delete(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: &str,
     mgmt_key: Option<&str>,
@@ -997,7 +1001,7 @@ pub fn run_certificates_delete(
 }
 
 pub fn run_objects_export(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     object: &str,
     output: &str,
@@ -1015,7 +1019,7 @@ pub fn run_objects_export(
 }
 
 pub fn run_objects_import(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     object: &str,
     data_file: &str,
@@ -1066,7 +1070,7 @@ fn generate_chuid(
 }
 
 pub fn run_objects_generate(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     object: &str,
     management_key: Option<&str>,
@@ -1149,7 +1153,7 @@ pub fn run_objects_generate(
 }
 
 pub fn run_certificates_generate(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: &str,
     subject: &str,
@@ -1207,7 +1211,7 @@ pub fn run_certificates_generate(
 }
 
 pub fn run_certificates_request(
-    dev: &YubiKeyDevice,
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     slot: &str,
     subject: &str,

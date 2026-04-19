@@ -3,7 +3,7 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 use yubikit::core::{Transport, Version, set_override_version};
-use yubikit::device::{YubiKeyDevice, list_devices, scan_usb_devices};
+use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices, scan_usb_devices};
 use yubikit::management::{Capability, ReleaseType, UsbInterface};
 
 mod apdu;
@@ -1595,9 +1595,9 @@ enum SecurityDomainKeysAction {
 /// Which transports to scan when resolving a device.
 /// Select a single YubiKey from a device list, optionally filtered by serial.
 fn select_device(
-    devices: Vec<YubiKeyDevice>,
+    devices: Vec<LocalYubiKeyDevice>,
     serial: Option<u32>,
-) -> Result<YubiKeyDevice, CliError> {
+) -> Result<LocalYubiKeyDevice, CliError> {
     match (serial, devices.len()) {
         (None, 0) => {
             // Check for FIDO-blocked devices that scan can see but list cannot open
@@ -1629,17 +1629,39 @@ fn select_device(
 }
 
 /// Enumerate devices and select one, optionally by serial number.
-fn require_device(serial: Option<u32>) -> Result<YubiKeyDevice, CliError> {
+fn require_device(serial: Option<u32>) -> Result<LocalYubiKeyDevice, CliError> {
     let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
     let devices =
         list_devices(all).map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
     select_device(devices, serial)
 }
 
+/// Get a device, using RPC proxy when RPC=2 is set.
+///
+/// Returns a boxed trait object so the same command code works regardless
+/// of whether we're talking to the device locally or through an RPC
+/// subprocess.
+fn get_device(
+    serial: Option<u32>,
+    rpc_global_args: &[String],
+) -> Result<Box<dyn YubiKeyDevice>, CliError> {
+    if std::env::var("RPC").ok().as_deref() == Some("2") {
+        let client = rpc::client::RpcClient::spawn(rpc_global_args, false)?;
+        let dev = rpc::proxy::RpcDevice::new(client)?;
+        // Always set override so that apps returning DEV_VERSION (0.0.1)
+        // get patched to the real firmware version.
+        set_override_version(dev.info().version);
+        Ok(Box::new(dev))
+    } else {
+        let dev = require_device(serial)?;
+        Ok(Box::new(dev))
+    }
+}
+
 /// Check that a capability is available and enabled on the device.
 ///
 /// Returns an error distinguishing between "not supported" and "disabled".
-fn check_capability(dev: &YubiKeyDevice, capability: Capability) -> Result<(), CliError> {
+fn check_capability(dev: &dyn YubiKeyDevice, capability: Capability) -> Result<(), CliError> {
     let info = dev.info();
     let transport = dev.transport();
     let name = capability_name(capability);
@@ -1698,7 +1720,11 @@ fn capability_name(cap: Capability) -> &'static str {
 }
 
 /// Check that the device firmware version meets a minimum requirement.
-fn check_version(dev: &YubiKeyDevice, required: Version, feature: &str) -> Result<(), CliError> {
+fn check_version(
+    dev: &dyn YubiKeyDevice,
+    required: Version,
+    feature: &str,
+) -> Result<(), CliError> {
     let version = dev.info().version;
     if version < required {
         Err(CliError(format!(
@@ -1710,7 +1736,7 @@ fn check_version(dev: &YubiKeyDevice, required: Version, feature: &str) -> Resul
 }
 
 /// Check that the device supports the SCP parameters being used.
-fn check_scp_version(dev: &YubiKeyDevice, scp: &ScpParams) -> Result<(), CliError> {
+fn check_scp_version(dev: &dyn YubiKeyDevice, scp: &ScpParams) -> Result<(), CliError> {
     if scp.scp03_keys.is_some() {
         check_version(dev, Version(5, 3, 0), "SCP03")?;
     }
@@ -1886,7 +1912,7 @@ fn extract_ec_private_key(der: &[u8]) -> Result<Vec<u8>, CliError> {
     ))
 }
 
-fn apply_version_override(dev: &YubiKeyDevice) {
+fn apply_version_override(dev: &dyn YubiKeyDevice) {
     let info = dev.info();
     if info.version_qualifier.release_type != ReleaseType::Final {
         set_override_version(info.version_qualifier.version);
@@ -2013,98 +2039,6 @@ fn run_fido_via_rpc(
     }
 }
 
-/// Run a FIDO subcommand via the RPC subprocess in proxy mode (RPC=2).
-///
-/// Spawns a TCP RPC subprocess, creates an `RpcDevice` that implements the
-/// `Device` trait, then calls the same `fido::run_*` functions used in
-/// non-RPC mode.
-fn run_fido_via_rpc_proxy(
-    global_args: &[String],
-    action: FidoAction,
-    scp_params: &scp::ScpParams,
-) -> Result<(), CliError> {
-    let client = rpc::client::RpcClient::spawn(global_args, false)?;
-    let mut dev = rpc::proxy::RpcDevice::new(client)?;
-
-    match action {
-        FidoAction::Info => fido::run_info(&dev, scp_params),
-        FidoAction::Reset { force } => fido::run_reset(&mut dev, scp_params, force),
-        FidoAction::Access(access) => match access {
-            FidoAccessAction::ChangePin { pin, new_pin } => {
-                fido::run_access_change_pin(&dev, scp_params, pin.as_deref(), new_pin.as_deref())
-            }
-            FidoAccessAction::VerifyPin { pin } => {
-                fido::run_access_verify_pin(&dev, scp_params, pin.as_deref())
-            }
-            FidoAccessAction::ForceChange { pin } => {
-                fido::run_access_force_change(&dev, scp_params, pin.as_deref())
-            }
-            FidoAccessAction::SetMinLength { length, pin, rp_id } => {
-                fido::run_access_set_min_length(&dev, scp_params, length, pin.as_deref(), &rp_id)
-            }
-        },
-        FidoAction::Credentials(cred) => match cred {
-            FidoCredentialAction::List { pin, csv } => {
-                fido::run_credentials_list(&dev, scp_params, pin.as_deref(), csv)
-            }
-            FidoCredentialAction::Delete {
-                credential_id,
-                pin,
-                force,
-            } => fido::run_credentials_delete(
-                &dev,
-                scp_params,
-                &credential_id,
-                pin.as_deref(),
-                force,
-            ),
-            FidoCredentialAction::Update {
-                credential_id,
-                name,
-                display_name,
-                pin,
-            } => fido::run_credentials_update(
-                &dev,
-                scp_params,
-                &credential_id,
-                name.as_deref(),
-                display_name.as_deref(),
-                pin.as_deref(),
-            ),
-        },
-        FidoAction::Fingerprints(fp) => match fp {
-            FidoFingerprintAction::List { pin } => {
-                fido::run_fingerprints_list(&dev, scp_params, pin.as_deref())
-            }
-            FidoFingerprintAction::Add { name, pin } => {
-                fido::run_fingerprints_add(&dev, scp_params, &name, pin.as_deref())
-            }
-            FidoFingerprintAction::Rename {
-                template_id,
-                name,
-                pin,
-            } => {
-                fido::run_fingerprints_rename(&dev, scp_params, &template_id, &name, pin.as_deref())
-            }
-            FidoFingerprintAction::Delete {
-                template_id,
-                pin,
-                force,
-            } => {
-                fido::run_fingerprints_delete(&dev, scp_params, &template_id, pin.as_deref(), force)
-            }
-        },
-        FidoAction::Config(cfg) => match cfg {
-            FidoConfigAction::ToggleAlwaysUv { pin } => {
-                fido::run_config_toggle_always_uv(&dev, scp_params, pin.as_deref())
-            }
-            FidoConfigAction::EnableEpAttestation { pin } => {
-                fido::run_config_enable_ep_attestation(&dev, scp_params, pin.as_deref())
-            }
-        },
-    }
-}
-
 fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
 
@@ -2153,12 +2087,12 @@ fn run() -> Result<(), CliError> {
             list::run(serials, readers)
         }
         Commands::Info { check_fips } => {
-            let dev = require_device(cli.device)?;
+            let dev = get_device(cli.device, &rpc_global_args)?;
             apply_version_override(&dev);
             info::run(&dev, check_fips)
         }
         Commands::Config { action } => {
-            let dev = require_device(cli.device)?;
+            let dev = get_device(cli.device, &rpc_global_args)?;
             apply_version_override(&dev);
             match action {
                 ConfigAction::Usb {
@@ -2237,7 +2171,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Oath { action } => {
-            let dev = require_device(cli.device)?;
+            let dev = get_device(cli.device, &rpc_global_args)?;
             check_capability(&dev, Capability::OATH)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
@@ -2393,7 +2327,7 @@ fn run() -> Result<(), CliError> {
             access_code,
             action,
         } => {
-            let dev = require_device(cli.device)?;
+            let dev = get_device(cli.device, &rpc_global_args)?;
             check_capability(&dev, Capability::OTP)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
@@ -2584,7 +2518,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Piv { action } => {
-            let dev = require_device(cli.device)?;
+            let dev = get_device(cli.device, &rpc_global_args)?;
             check_capability(&dev, Capability::PIV)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
@@ -2840,18 +2774,13 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Fido { action } => {
-            if std::env::var("RPC").ok().as_deref() == Some("2") {
-                // RPC=2: proxy mode — reuse existing fido:: functions with
-                // an RpcDevice that implements the Device trait.
-                return run_fido_via_rpc_proxy(&rpc_global_args, action, &scp_params);
-            }
             if rpc::client::should_use_fido_rpc() {
                 // On Windows without admin, elevate the subprocess.
                 // On other platforms (RPC=1), no elevation needed.
                 let elevate = cfg!(target_os = "windows");
                 return run_fido_via_rpc(&rpc_global_args, action, elevate);
             }
-            let mut dev = require_device(cli.device)?;
+            let mut dev = get_device(cli.device, &rpc_global_args)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
             match action {
@@ -2968,7 +2897,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Openpgp { action } => {
-            let dev = require_device(cli.device)?;
+            let dev = get_device(cli.device, &rpc_global_args)?;
             check_capability(&dev, Capability::OPENPGP)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
@@ -3106,7 +3035,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Hsmauth { action } => {
-            let dev = require_device(cli.device)?;
+            let dev = get_device(cli.device, &rpc_global_args)?;
             check_capability(&dev, Capability::HSMAUTH)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
@@ -3225,7 +3154,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::SecurityDomain { action } => {
-            let dev = require_device(cli.device)?;
+            let dev = get_device(cli.device, &rpc_global_args)?;
             check_version(&dev, Version(5, 3, 0), "Security Domain")?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);

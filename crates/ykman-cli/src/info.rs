@@ -1,10 +1,32 @@
 use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
-use yubikit::management::Capability;
+use yubikit::management::{Capability, DeviceInfo, UsbInterface};
 
 use crate::util::CliError;
 
-pub fn run(dev: &YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
+/// Derive USB interface flags from the enabled capabilities in device info.
+fn usb_interfaces_from_info(info: &DeviceInfo) -> UsbInterface {
+    let Some(&usb_caps) = info.config.enabled_capabilities.get(&Transport::Usb) else {
+        return UsbInterface(0);
+    };
+    let mut ifaces = UsbInterface(0);
+    if usb_caps.contains(Capability::OTP) {
+        ifaces = ifaces | UsbInterface::OTP;
+    }
+    if usb_caps.contains(Capability::FIDO2) || usb_caps.contains(Capability::U2F) {
+        ifaces = ifaces | UsbInterface::FIDO;
+    }
+    if usb_caps.contains(Capability::PIV)
+        || usb_caps.contains(Capability::OATH)
+        || usb_caps.contains(Capability::OPENPGP)
+        || usb_caps.contains(Capability::HSMAUTH)
+    {
+        ifaces = ifaces | UsbInterface::CCID;
+    }
+    ifaces
+}
+
+pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
     let info = dev.info();
 
     println!("Device type: {}", dev.name());
@@ -23,7 +45,7 @@ pub fn run(dev: &YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
     // Show USB interfaces only when connected via USB
     let is_usb = dev.transport() == Transport::Usb;
     if is_usb {
-        let usb_ifaces = dev.usb_interfaces();
+        let usb_ifaces = usb_interfaces_from_info(info);
         if usb_ifaces.0 != 0 {
             println!("Enabled USB interfaces: {usb_ifaces}");
         }
