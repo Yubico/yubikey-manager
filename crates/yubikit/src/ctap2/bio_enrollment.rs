@@ -228,7 +228,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
             on_keepalive,
             cancel,
         )?;
-        EnrollSampleResult::from_cbor(&resp)
+        EnrollSampleResult::from_cbor_with_template_id(&resp, Some(template_id))
             .ok_or_else(|| Ctap2Error::InvalidResponse("invalid enroll result".into()))
     }
 

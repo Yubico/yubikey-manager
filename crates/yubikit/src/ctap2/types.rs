@@ -330,10 +330,18 @@ pub struct EnrollSampleResult {
 
 impl EnrollSampleResult {
     pub(crate) fn from_cbor(value: &Value) -> Option<Self> {
+        Self::from_cbor_with_template_id(value, None)
+    }
+
+    pub(crate) fn from_cbor_with_template_id(
+        value: &Value,
+        fallback_template_id: Option<&[u8]>,
+    ) -> Option<Self> {
         let template_id = value
             .map_get_int(0x04)
             .and_then(|v| v.as_bytes())
-            .map(|b| b.to_vec())?;
+            .map(|b| b.to_vec())
+            .or_else(|| fallback_template_id.map(|b| b.to_vec()))?;
         let last_sample_status = value.map_get_int(0x05).and_then(|v| v.as_int())? as u32;
         let remaining_samples = value.map_get_int(0x06).and_then(|v| v.as_int())? as u32;
         Some(Self {
