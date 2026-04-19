@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Value, json};
 
 use yubikit::core::Transport;
-use yubikit::device::YubiKeyDevice;
+use yubikit::device::{ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
 use yubikit::smartcard::ScpKeyParams;
 
@@ -16,11 +16,20 @@ use super::rpc::{RpcNode, SignalFn};
 pub struct DeviceNode {
     device: YubiKeyDevice,
     scp_params: Option<ScpKeyParams>,
+    /// Incremented after each reinsert to invalidate cached children.
+    generation: u64,
+    /// Generation at which each child was created.
+    child_generations: BTreeMap<String, u64>,
 }
 
 impl DeviceNode {
     pub fn new(device: YubiKeyDevice, scp_params: Option<ScpKeyParams>) -> Self {
-        Self { device, scp_params }
+        Self {
+            device,
+            scp_params,
+            generation: 0,
+            child_generations: BTreeMap::new(),
+        }
     }
 }
 
@@ -70,42 +79,72 @@ impl RpcNode for DeviceNode {
         children
     }
 
+    fn list_actions(&self) -> Vec<&'static str> {
+        vec!["reinsert"]
+    }
+
     fn retains_children(&self) -> bool {
         true
+    }
+
+    fn is_child_valid(&self, name: &str) -> bool {
+        self.child_generations
+            .get(name)
+            .is_some_and(|&g| g == self.generation)
     }
 
     fn call_action(
         &mut self,
         action: &str,
         _params: Value,
-        _signal: SignalFn,
-        _cancel: &AtomicBool,
+        signal: SignalFn,
+        cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError> {
-        Err(RpcError::no_such_action(action))
+        match action {
+            "reinsert" => {
+                self.device
+                    .reinsert(
+                        &|status| match status {
+                            ReinsertStatus::Remove => {
+                                signal("reinsert", json!({"state": "remove"}));
+                            }
+                            ReinsertStatus::Reinsert => {
+                                signal("reinsert", json!({"state": "insert"}));
+                            }
+                        },
+                        &|| cancel.load(Ordering::Relaxed),
+                    )
+                    .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
+                // Invalidate all cached children since connections are stale.
+                self.generation += 1;
+                Ok(RpcResponse::new(json!({})))
+            }
+            _ => Err(RpcError::no_such_action(action)),
+        }
     }
 
     fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
-        match name {
+        let child: Box<dyn RpcNode> = match name {
             "ccid" => {
                 let conn = self.device.open_smartcard().map_err(|e| {
                     RpcError::connection_error(&self.device.name(), "ccid", &format!("{e:?}"))
                 })?;
-                Ok(Box::new(ConnectionNode::new_ccid(
+                Box::new(ConnectionNode::new_ccid(
                     conn,
                     self.device.clone(),
                     self.scp_params.clone(),
-                )))
+                ))
             }
             "ctap" => {
                 let conn = self.device.open_fido().map_err(|e| {
                     RpcError::connection_error(&self.device.name(), "ctap", &format!("{e:?}"))
                 })?;
-                Ok(Box::new(ConnectionNode::new_ctap(
-                    conn,
-                    self.device.clone(),
-                )))
+                Box::new(ConnectionNode::new_ctap(conn, self.device.clone()))
             }
-            _ => Err(RpcError::no_such_node(name)),
-        }
+            _ => return Err(RpcError::no_such_node(name)),
+        };
+        self.child_generations
+            .insert(name.to_string(), self.generation);
+        Ok(child)
     }
 }
