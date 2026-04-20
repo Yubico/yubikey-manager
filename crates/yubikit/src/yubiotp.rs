@@ -1062,6 +1062,7 @@ impl<C: Connection + 'static> YubiOtpSession<C> {
         config: &[u8],
         cur_acc_code: Option<&[u8]>,
     ) -> Result<(), YubiOtpError<C::Error>> {
+        log::debug!("Writing OTP slot configuration");
         self.inner.write_config(slot, config, cur_acc_code)
     }
 

@@ -405,12 +405,15 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
 
     /// Reset the HSM Auth application to its factory state.
     pub fn reset(&mut self) -> Result<(), HsmAuthError> {
+        log::debug!("Resetting YubiHSM Auth");
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD, &[])?;
+        log::info!("YubiHSM Auth reset");
         Ok(())
     }
 
     /// List all credentials stored on the YubiKey.
     pub fn list_credentials(&mut self) -> Result<Vec<Credential>, HsmAuthError> {
+        log::debug!("Listing YubiHSM Auth credentials");
         let response = self.protocol.send_apdu(0, INS_LIST, 0, 0, &[])?;
         let entries = parse_tlv_list(&response)?;
 
@@ -499,6 +502,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         credential_password: &[u8],
         touch_required: bool,
     ) -> Result<Credential, HsmAuthError> {
+        log::debug!("Storing symmetric credential");
         let aes_key_len = Algorithm::Aes128YubicoAuthentication.key_len();
         if key_enc.len() != aes_key_len || key_mac.len() != aes_key_len {
             return Err(HsmAuthError::InvalidData(format!(
@@ -510,14 +514,16 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         key.extend_from_slice(key_enc);
         key.extend_from_slice(key_mac);
 
-        self.put_credential(
+        let result = self.put_credential(
             management_key,
             label,
             &key,
             Algorithm::Aes128YubicoAuthentication,
             credential_password,
             touch_required,
-        )
+        )?;
+        log::info!("Symmetric credential stored");
+        Ok(result)
     }
 
     /// Store an AES-128 symmetric credential with keys derived from a password.
@@ -529,15 +535,18 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         credential_password: &[u8],
         touch_required: bool,
     ) -> Result<Credential, HsmAuthError> {
+        log::debug!("Storing derived credential");
         let (key_enc, key_mac) = password_to_key(derivation_password);
-        self.put_credential_symmetric(
+        let result = self.put_credential_symmetric(
             management_key,
             label,
             &key_enc,
             &key_mac,
             credential_password,
             touch_required,
-        )
+        )?;
+        log::info!("Derived credential stored");
+        Ok(result)
     }
 
     /// Store an EC P-256 asymmetric credential from an existing private key.
@@ -551,16 +560,19 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         credential_password: &[u8],
         touch_required: bool,
     ) -> Result<Credential, HsmAuthError> {
+        log::debug!("Storing asymmetric credential");
         require_version(self.version, Version(5, 6, 0), "put_credential_asymmetric")?;
         let key_bytes = private_key.to_bytes();
-        self.put_credential(
+        let result = self.put_credential(
             management_key,
             label,
             key_bytes.as_slice(),
             Algorithm::EcP256YubicoAuthentication,
             credential_password,
             touch_required,
-        )
+        )?;
+        log::info!("Asymmetric credential stored");
+        Ok(result)
     }
 
     /// Generate an EC P-256 asymmetric credential on the device.
@@ -574,25 +586,29 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         credential_password: &[u8],
         touch_required: bool,
     ) -> Result<Credential, HsmAuthError> {
+        log::debug!("Generating asymmetric credential");
         require_version(
             self.version,
             Version(5, 6, 0),
             "generate_credential_asymmetric",
         )?;
-        self.put_credential(
+        let result = self.put_credential(
             management_key,
             label,
             &[], // Empty key triggers on-device generation
             Algorithm::EcP256YubicoAuthentication,
             credential_password,
             touch_required,
-        )
+        )?;
+        log::info!("Asymmetric credential generated");
+        Ok(result)
     }
 
     /// Retrieve the public key associated with an asymmetric credential.
     ///
     /// Requires firmware version 5.6.0 or later.
     pub fn get_public_key(&mut self, label: &str) -> Result<p256::PublicKey, HsmAuthError> {
+        log::debug!("Reading public key");
         require_version(self.version, Version(5, 6, 0), "get_public_key")?;
         let data = tlv_encode(TAG_LABEL, &parse_label(label)?);
         let response = self
@@ -608,6 +624,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         management_key: &[u8],
         label: &str,
     ) -> Result<(), HsmAuthError> {
+        log::debug!("Deleting credential");
         validate_management_key(management_key)?;
         let mut data = Vec::new();
         data.extend_from_slice(&tlv_encode(TAG_MANAGEMENT_KEY, management_key));
@@ -616,6 +633,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         self.protocol
             .send_apdu(0, INS_DELETE, 0, 0, &data)
             .map_err(map_pin_error)?;
+        log::info!("Credential deleted");
         Ok(())
     }
 
@@ -641,6 +659,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         credential_password: &[u8],
         new_credential_password: &[u8],
     ) -> Result<(), HsmAuthError> {
+        log::debug!("Changing credential password");
         let parsed_pw = parse_credential_password(credential_password)?;
         let parsed_new_pw = parse_credential_password(new_credential_password)?;
 
@@ -661,6 +680,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         label: &str,
         new_credential_password: &[u8],
     ) -> Result<(), HsmAuthError> {
+        log::debug!("Changing credential password (admin)");
         validate_management_key(management_key)?;
         let parsed_new_pw = parse_credential_password(new_credential_password)?;
 
@@ -678,6 +698,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         management_key: &[u8],
         new_management_key: &[u8],
     ) -> Result<(), HsmAuthError> {
+        log::debug!("Updating management key");
         validate_management_key(management_key)?;
         validate_management_key(new_management_key)?;
 
@@ -688,11 +709,13 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         self.protocol
             .send_apdu(0, INS_PUT_MANAGEMENT_KEY, 0, 0, &data)
             .map_err(map_pin_error)?;
+        log::info!("Management key updated");
         Ok(())
     }
 
     /// Get the number of remaining retry attempts for the management key.
     pub fn get_management_key_retries(&mut self) -> Result<u32, HsmAuthError> {
+        log::debug!("Getting management key retries");
         let response = self
             .protocol
             .send_apdu(0, INS_GET_MANAGEMENT_KEY_RETRIES, 0, 0, &[])?;
@@ -748,6 +771,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         credential_password: &[u8],
         card_crypto: Option<&[u8]>,
     ) -> Result<SessionKeys, HsmAuthError> {
+        log::debug!("Calculating symmetric session keys");
         let response = self.calculate_session_keys_inner(
             label,
             context,
@@ -769,6 +793,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         credential_password: &[u8],
         card_crypto: &[u8],
     ) -> Result<SessionKeys, HsmAuthError> {
+        log::debug!("Calculating asymmetric session keys");
         require_version(
             self.version,
             Version(5, 6, 0),

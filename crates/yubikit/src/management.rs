@@ -1036,6 +1036,7 @@ impl<C: Connection + 'static> ManagementSession<C> {
         cur_lock_code: Option<&[u8]>,
         new_lock_code: Option<&[u8]>,
     ) -> Result<(), ManagementError<C::Error>> {
+        log::debug!("Writing device configuration");
         let data = validate_and_serialize_device_config(
             self.inner.version(),
             config,
@@ -1045,7 +1046,9 @@ impl<C: Connection + 'static> ManagementSession<C> {
         )?;
         self.inner
             .write_config(&data)
-            .map_err(ManagementError::Connection)
+            .map_err(ManagementError::Connection)?;
+        log::info!("Device configuration written");
+        Ok(())
     }
 
     /// Write USB mode configuration (YubiKey NEO/4 style).
@@ -1055,6 +1058,7 @@ impl<C: Connection + 'static> ManagementSession<C> {
         chalresp_timeout: u8,
         auto_eject_timeout: u16,
     ) -> Result<(), ManagementError<C::Error>> {
+        log::debug!("Setting USB mode");
         self.inner
             .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
             .map_err(ManagementError::Connection)
@@ -1093,7 +1097,10 @@ impl<C: SmartCardConnection + 'static> ManagementSession<C> {
 
     /// Global factory reset (YubiKey Bio only, SmartCard-only).
     pub fn device_reset(&mut self) -> Result<(), ManagementError<SmartCardError>> {
-        self.inner.device_reset()
+        log::debug!("Performing device reset");
+        self.inner.device_reset()?;
+        log::info!("Device reset complete");
+        Ok(())
     }
 }
 

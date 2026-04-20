@@ -134,7 +134,9 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<(), Ctap2Error<C::Error>> {
+        log::debug!("Resetting FIDO authenticator");
         self.send_cbor(ctap2_cmd::RESET, None, on_keepalive, cancel)?;
+        log::info!("FIDO authenticator reset");
         Ok(())
     }
 
@@ -148,6 +150,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<(), Ctap2Error<C::Error>> {
+        log::debug!("Requesting authenticator selection");
         self.send_cbor(ctap2_cmd::SELECTION, None, on_keepalive, cancel)?;
         Ok(())
     }
@@ -157,6 +160,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
     /// Returns information about the authenticator's capabilities,
     /// supported protocol versions, extensions, and configuration.
     pub fn get_info(&mut self) -> Result<Info, Ctap2Error<C::Error>> {
+        log::debug!("Getting authenticator info");
         let value = self.send_cbor(ctap2_cmd::GET_INFO, None, None, None)?;
         let map = value
             .as_map()
@@ -192,6 +196,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<AttestationResponse, Ctap2Error<C::Error>> {
+        log::debug!("Creating credential for RP: {}", rp.id);
         let data = build_args_map(&[
             Some(Value::Bytes(client_data_hash.to_vec())), // 0x01
             Some(rp.to_cbor()),                            // 0x02
@@ -239,6 +244,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<AssertionResponse, Ctap2Error<C::Error>> {
+        log::debug!("Getting assertion for RP: {rp_id}");
         let data = build_args_map(&[
             Some(Value::Text(rp_id.to_string())),           // 0x01
             Some(Value::Bytes(client_data_hash.to_vec())),  // 0x02
@@ -259,6 +265,7 @@ impl<C: Connection + 'static> Ctap2Session<C> {
     /// credentials matched (numberOfCredentials > 1). Must be called
     /// immediately after `get_assertion` without any other commands.
     pub fn get_next_assertion(&mut self) -> Result<AssertionResponse, Ctap2Error<C::Error>> {
+        log::debug!("Getting next assertion");
         let value = self.send_cbor(ctap2_cmd::GET_NEXT_ASSERTION, None, None, None)?;
         AssertionResponse::from_cbor(&value).map_err(Ctap2Error::InvalidResponse)
     }

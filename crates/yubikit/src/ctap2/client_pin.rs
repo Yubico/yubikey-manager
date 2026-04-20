@@ -179,6 +179,7 @@ impl<C: Connection + 'static> ClientPin<C> {
     ///
     /// Returns `(retries, power_cycle_state)`.
     pub fn get_pin_retries(&mut self) -> Result<(u32, Option<u32>), Ctap2Error<C::Error>> {
+        log::debug!("Getting PIN retries");
         let resp = self.session.client_pin(
             self.protocol.version(),
             client_pin_cmd::GET_PIN_RETRIES,
@@ -205,6 +206,7 @@ impl<C: Connection + 'static> ClientPin<C> {
 
     /// Get the number of built-in UV retries remaining.
     pub fn get_uv_retries(&mut self) -> Result<u32, Ctap2Error<C::Error>> {
+        log::debug!("Getting UV retries");
         let resp = self.session.client_pin(
             self.protocol.version(),
             client_pin_cmd::GET_UV_RETRIES,
@@ -227,6 +229,7 @@ impl<C: Connection + 'static> ClientPin<C> {
 
     /// Set a PIN on an authenticator that does not have one set.
     pub fn set_pin(&mut self, pin: &str) -> Result<(), Ctap2Error<C::Error>> {
+        log::debug!("Setting PIN");
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
         let pin_padded = pad_pin(pin).map_err(Ctap2Error::InvalidResponse)?;
@@ -251,6 +254,7 @@ impl<C: Connection + 'static> ClientPin<C> {
 
     /// Change the PIN on an authenticator that already has one.
     pub fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> Result<(), Ctap2Error<C::Error>> {
+        log::debug!("Changing PIN");
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
         let mut pin_hash_full = Sha256::digest(old_pin.as_bytes());
@@ -291,6 +295,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         permissions: Option<Permissions>,
         permissions_rpid: Option<&str>,
     ) -> Result<Vec<u8>, Ctap2Error<C::Error>> {
+        log::debug!("Getting PIN token");
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
         let mut pin_hash_full = Sha256::digest(pin.as_bytes());
@@ -345,6 +350,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, Ctap2Error<C::Error>> {
+        log::debug!("Getting UV token");
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
         let resp = self.session.client_pin(

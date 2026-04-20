@@ -640,6 +640,7 @@ impl<C: SmartCardConnection> OathSession<C> {
 
     /// Factory reset the OATH application.
     pub fn reset(&mut self) -> Result<(), OathError> {
+        log::debug!("Resetting OATH application");
         self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD, &[])?;
         let resp = self.protocol.select(Aid::OATH)?;
         let (_, salt, challenge) =
@@ -648,6 +649,7 @@ impl<C: SmartCardConnection> OathSession<C> {
         self.challenge = challenge;
         self.has_key = false;
         self.device_id = get_device_id(&self.salt);
+        log::info!("OATH application reset");
         Ok(())
     }
 
@@ -658,6 +660,7 @@ impl<C: SmartCardConnection> OathSession<C> {
 
     /// Validate (unlock) the session with an access key.
     pub fn validate(&mut self, key: &[u8]) -> Result<(), OathError> {
+        log::debug!("Validating OATH session");
         let challenge = self
             .challenge
             .as_ref()
@@ -680,18 +683,22 @@ impl<C: SmartCardConnection> OathSession<C> {
 
     /// Set an access key.
     pub fn set_key(&mut self, key: &[u8]) -> Result<(), OathError> {
+        log::debug!("Setting OATH access key");
         let challenge: [u8; 8] = rand_bytes();
         let data = build_set_key_data(key, &challenge);
         self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, &data)?;
         self.has_key = true;
+        log::info!("OATH access key set");
         Ok(())
     }
 
     /// Remove the access key.
     pub fn unset_key(&mut self) -> Result<(), OathError> {
+        log::debug!("Removing OATH access key");
         let data = tlv_encode(TAG_KEY, &[]);
         self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, &data)?;
         self.has_key = false;
+        log::info!("OATH access key removed");
         Ok(())
     }
 
@@ -701,6 +708,7 @@ impl<C: SmartCardConnection> OathSession<C> {
         cred_data: &CredentialData,
         touch_required: bool,
     ) -> Result<Credential, OathError> {
+        log::debug!("Adding OATH credential");
         let cred_id = cred_data.get_id();
         let data = build_put_data(
             &cred_id,
@@ -731,6 +739,7 @@ impl<C: SmartCardConnection> OathSession<C> {
         name: &str,
         issuer: Option<&str>,
     ) -> Result<Vec<u8>, OathError> {
+        log::debug!("Renaming OATH credential");
         if self.version < Version(5, 3, 1) {
             return Err(OathError::NotSupported(
                 "Rename requires YubiKey 5.3.1 or later".into(),
@@ -746,6 +755,7 @@ impl<C: SmartCardConnection> OathSession<C> {
 
     /// List all credentials.
     pub fn list_credentials(&mut self) -> Result<Vec<Credential>, OathError> {
+        log::debug!("Listing OATH credentials");
         let resp = self.protocol.send_apdu(0, INS_LIST, 0, 0, &[])?;
         let tlvs = parse_tlv_list(&resp)?;
 
@@ -777,6 +787,7 @@ impl<C: SmartCardConnection> OathSession<C> {
         credential_id: &[u8],
         challenge: &[u8],
     ) -> Result<Vec<u8>, OathError> {
+        log::debug!("Calculating OATH code");
         let mut data = tlv_encode(TAG_NAME, credential_id);
         data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, challenge));
         let resp = self.protocol.send_apdu(0, INS_CALCULATE, 0, 0, &data)?;
@@ -787,8 +798,10 @@ impl<C: SmartCardConnection> OathSession<C> {
 
     /// Delete a credential.
     pub fn delete_credential(&mut self, credential_id: &[u8]) -> Result<(), OathError> {
+        log::debug!("Deleting OATH credential");
         let data = tlv_encode(TAG_NAME, credential_id);
         self.protocol.send_apdu(0, INS_DELETE, 0, 0, &data)?;
+        log::info!("OATH credential deleted");
         Ok(())
     }
 
@@ -797,6 +810,7 @@ impl<C: SmartCardConnection> OathSession<C> {
         &mut self,
         timestamp: u64,
     ) -> Result<Vec<(Credential, Option<Code>)>, OathError> {
+        log::debug!("Calculating all OATH codes");
         let challenge = get_challenge(timestamp, DEFAULT_PERIOD);
         let data = tlv_encode(TAG_CHALLENGE, &challenge);
         let data = self

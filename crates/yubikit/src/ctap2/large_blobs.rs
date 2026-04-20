@@ -97,6 +97,7 @@ impl<C: Connection + 'static> LargeBlobs<C> {
     /// Performs chunked reads and verifies SHA-256 integrity. Returns the
     /// raw CBOR-encoded blob array (without the trailing hash).
     pub fn read_blob_array(&mut self) -> Result<Vec<u8>, Ctap2Error<C::Error>> {
+        log::debug!("Reading large blob array");
         let mut data = Vec::new();
         let mut offset: usize = 0;
 
@@ -154,6 +155,7 @@ impl<C: Connection + 'static> LargeBlobs<C> {
     /// `blob_data` should be the CBOR-encoded blob array (without hash).
     /// This method appends the SHA-256 hash and writes in fragments.
     pub fn write_blob_array(&mut self, blob_data: &[u8]) -> Result<(), Ctap2Error<C::Error>> {
+        log::debug!("Writing large blob array");
         // Append SHA-256 hash (first 16 bytes)
         let digest = Sha256::digest(blob_data);
         let mut data = blob_data.to_vec();
@@ -192,6 +194,7 @@ impl<C: Connection + 'static> LargeBlobs<C> {
             offset = end;
         }
 
+        log::info!("Large blob array written");
         Ok(())
     }
 
@@ -204,6 +207,7 @@ impl<C: Connection + 'static> LargeBlobs<C> {
         &mut self,
         large_blob_key: &[u8],
     ) -> Result<Option<Vec<u8>>, Ctap2Error<C::Error>> {
+        log::debug!("Reading large blob");
         let array_data = self.read_blob_array()?;
         let array = parse_blob_array(&array_data)?;
         for entry in &array {
@@ -223,13 +227,16 @@ impl<C: Connection + 'static> LargeBlobs<C> {
         large_blob_key: &[u8],
         data: &[u8],
     ) -> Result<(), Ctap2Error<C::Error>> {
+        log::debug!("Writing large blob");
         let array_data = self.read_blob_array()?;
         let mut entries = parse_blob_array(&array_data)?;
         // Remove existing entries for this key
         entries.retain(|entry| lb_unpack(large_blob_key, entry).is_err());
         entries.push(lb_pack(large_blob_key, data)?);
         let encoded = cbor::encode(&Value::Array(entries));
-        self.write_blob_array(&encoded)
+        self.write_blob_array(&encoded)?;
+        log::info!("Large blob written");
+        Ok(())
     }
 
     /// Delete any blob(s) stored for a single credential.
@@ -237,6 +244,7 @@ impl<C: Connection + 'static> LargeBlobs<C> {
     /// Reads the blob array, removes any entries matching `large_blob_key`,
     /// and writes back if anything was removed.
     pub fn delete_blob(&mut self, large_blob_key: &[u8]) -> Result<(), Ctap2Error<C::Error>> {
+        log::debug!("Deleting large blob");
         let array_data = self.read_blob_array()?;
         let mut entries = parse_blob_array(&array_data)?;
         let orig_len = entries.len();
@@ -245,6 +253,7 @@ impl<C: Connection + 'static> LargeBlobs<C> {
             let encoded = cbor::encode(&Value::Array(entries));
             self.write_blob_array(&encoded)?;
         }
+        log::info!("Large blob deleted");
         Ok(())
     }
 }

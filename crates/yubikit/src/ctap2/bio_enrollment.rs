@@ -171,6 +171,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
     pub fn get_fingerprint_sensor_info(
         &mut self,
     ) -> Result<FingerprintSensorInfo, Ctap2Error<C::Error>> {
+        log::debug!("Getting fingerprint sensor info");
         let resp = self.call(
             Some(0x01),
             Some(bio_cmd::GET_SENSOR_INFO),
@@ -193,6 +194,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<EnrollSampleResult, Ctap2Error<C::Error>> {
+        log::debug!("Starting fingerprint enrollment");
         let sub_params =
             timeout.map(|t| Value::Map(vec![(Value::Int(0x03), Value::Int(t as i64))]));
         let resp = self.call(
@@ -215,6 +217,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<EnrollSampleResult, Ctap2Error<C::Error>> {
+        log::debug!("Capturing fingerprint sample");
         let mut sub_entries = vec![(Value::Int(0x01), Value::Bytes(template_id.to_vec()))];
         if let Some(t) = timeout {
             sub_entries.push((Value::Int(0x03), Value::Int(t as i64)));
@@ -234,6 +237,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
 
     /// Cancel an ongoing enrollment.
     pub fn enroll_cancel(&mut self) -> Result<(), Ctap2Error<C::Error>> {
+        log::debug!("Cancelling fingerprint enrollment");
         self.call(
             Some(0x01),
             Some(bio_cmd::ENROLL_CANCEL),
@@ -249,6 +253,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
     pub fn enumerate_enrollments(
         &mut self,
     ) -> Result<Vec<FingerprintTemplate>, Ctap2Error<C::Error>> {
+        log::debug!("Listing fingerprint enrollments");
         let resp = self.call(
             Some(0x01),
             Some(bio_cmd::ENUMERATE_ENROLLMENTS),
@@ -271,6 +276,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
 
     /// Set a friendly name for a fingerprint template.
     pub fn set_name(&mut self, template_id: &[u8], name: &str) -> Result<(), Ctap2Error<C::Error>> {
+        log::debug!("Renaming fingerprint template");
         let sub_params = Value::Map(vec![
             (Value::Int(0x01), Value::Bytes(template_id.to_vec())),
             (Value::Int(0x02), Value::Text(name.to_string())),
@@ -283,11 +289,13 @@ impl<C: Connection + 'static> BioEnrollment<C> {
             None,
             None,
         )?;
+        log::info!("Fingerprint template renamed");
         Ok(())
     }
 
     /// Remove a fingerprint enrollment.
     pub fn remove_enrollment(&mut self, template_id: &[u8]) -> Result<(), Ctap2Error<C::Error>> {
+        log::debug!("Removing fingerprint enrollment");
         let sub_params = Value::Map(vec![(Value::Int(0x01), Value::Bytes(template_id.to_vec()))]);
         self.call(
             Some(0x01),
@@ -297,6 +305,7 @@ impl<C: Connection + 'static> BioEnrollment<C> {
             None,
             None,
         )?;
+        log::info!("Fingerprint enrollment removed");
         Ok(())
     }
 }

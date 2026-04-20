@@ -483,6 +483,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     pub fn get_key_information(
         &mut self,
     ) -> Result<HashMap<KeyRef, HashMap<u8, u8>>, SecurityDomainError> {
+        log::debug!("Reading key information");
         let resp = self.get_data(TAG_KEY_INFORMATION, &[])?;
         let entries = parse_tlv_list(&resp)?;
 
@@ -570,6 +571,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         &mut self,
         key: KeyRef,
     ) -> Result<Vec<Vec<u8>>, SecurityDomainError> {
+        log::debug!("Reading certificate bundle");
         let key_tlv = tlv_encode(0xA6, &tlv_encode(0x83, &key.to_bytes()));
 
         match self.get_data(TAG_CERTIFICATE_STORE, &key_tlv) {
@@ -601,6 +603,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     /// Removes all keys and associated data by blocking each key with
     /// repeated failed authentication attempts.
     pub fn reset(&mut self) -> Result<(), SecurityDomainError> {
+        log::debug!("Resetting security domain");
         let keys: Vec<KeyRef> = self.get_key_information()?.into_keys().collect();
         let data = [0u8; 8];
 
@@ -641,6 +644,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
             }
         }
 
+        log::info!("Security domain reset");
         Ok(())
     }
 
@@ -648,6 +652,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     ///
     /// Requires OCE verification (SCP authentication).
     pub fn store_data(&mut self, data: &[u8]) -> Result<(), SecurityDomainError> {
+        log::debug!("Storing security domain data");
         self.protocol.send_apdu(0, INS_STORE_DATA, 0x90, 0, data)?;
         Ok(())
     }
@@ -660,6 +665,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         key: KeyRef,
         certificates: &[&[u8]],
     ) -> Result<(), SecurityDomainError> {
+        log::debug!("Storing certificate bundle");
         let key_tlv = tlv_encode(0xA6, &tlv_encode(0x83, &key.to_bytes()));
         let certs_concat: Vec<u8> = certificates
             .iter()
@@ -669,7 +675,9 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
 
         let mut data = key_tlv;
         data.extend_from_slice(&cert_store_tlv);
-        self.store_data(&data)
+        self.store_data(&data)?;
+        log::info!("Certificate bundle stored");
+        Ok(())
     }
 
     /// Store which certificate serial numbers can be used for a given key.
@@ -681,19 +689,23 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         key: KeyRef,
         serials: &[Vec<u8>],
     ) -> Result<(), SecurityDomainError> {
+        log::debug!("Storing allowlist");
         let key_tlv = tlv_encode(0xA6, &tlv_encode(0x83, &key.to_bytes()));
         let serials_data: Vec<u8> = serials.iter().flat_map(|s| int2asn1(s)).collect();
         let allowlist_tlv = tlv_encode(0x70, &serials_data);
 
         let mut data = key_tlv;
         data.extend_from_slice(&allowlist_tlv);
-        self.store_data(&data)
+        self.store_data(&data)?;
+        log::info!("Allowlist stored");
+        Ok(())
     }
 
     /// Store the SKI (Subject Key Identifier) for the CA of a given key.
     ///
     /// Requires OCE verification.
     pub fn store_ca_issuer(&mut self, key: KeyRef, ski: &[u8]) -> Result<(), SecurityDomainError> {
+        log::debug!("Storing CA issuer");
         let klcc = matches!(
             key.kid,
             x if x == ScpKid::Scp11a as u8
@@ -709,7 +721,9 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         ]
         .concat();
         let data = tlv_encode(0xA6, &inner);
-        self.store_data(&data)
+        self.store_data(&data)?;
+        log::info!("CA issuer stored");
+        Ok(())
     }
 
     /// Delete one or more keys matching the given KID and/or KVN.
@@ -722,6 +736,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         kvn: u8,
         delete_last: bool,
     ) -> Result<(), SecurityDomainError> {
+        log::debug!("Deleting security domain key");
         if kid == 0 && kvn == 0 {
             return Err(SecurityDomainError::InvalidData(
                 "Must specify at least one of kid, kvn".into(),
@@ -751,6 +766,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
 
         self.protocol
             .send_apdu(0x80, INS_DELETE, 0, if delete_last { 1 } else { 0 }, &data)?;
+        log::info!("Security domain key deleted");
         Ok(())
     }
 
@@ -764,6 +780,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         curve: Curve,
         replace_kvn: u8,
     ) -> Result<Vec<u8>, SecurityDomainError> {
+        log::debug!("Generating EC key");
         let mut data = vec![key.kvn];
         data.extend_from_slice(&tlv_encode(KeyType::EccKeyParams as u32, &[curve as u8]));
 
@@ -771,7 +788,9 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
             .protocol
             .send_apdu(0x80, INS_GENERATE_KEY, replace_kvn, key.kid, &data)?;
 
-        Ok(tlv_unpack(KeyType::EccPublicKey as u32, &resp)?)
+        let result = tlv_unpack(KeyType::EccPublicKey as u32, &resp)?;
+        log::info!("EC key generated");
+        Ok(result)
     }
 
     /// Import an SCP03 static key set.
@@ -784,6 +803,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         static_keys: &StaticKeys,
         replace_kvn: u8,
     ) -> Result<(), SecurityDomainError> {
+        log::debug!("Importing static key");
         let dek: &[u8] = self.dek.as_ref().map(|v| v.as_slice()).ok_or_else(|| {
             SecurityDomainError::InvalidData("No DEK available (SCP session required)".into())
         })?;
@@ -830,6 +850,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         curve: Curve,
         replace_kvn: u8,
     ) -> Result<(), SecurityDomainError> {
+        log::debug!("Importing EC private key");
         let dek: &[u8] = self.dek.as_ref().map(|v| v.as_slice()).ok_or_else(|| {
             SecurityDomainError::InvalidData("No DEK available (SCP session required)".into())
         })?;
@@ -865,6 +886,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         curve: Curve,
         replace_kvn: u8,
     ) -> Result<(), SecurityDomainError> {
+        log::debug!("Importing EC public key");
         let mut data = vec![key.kvn];
         data.extend_from_slice(&tlv_encode(KeyType::EccPublicKey as u32, public_key));
         data.extend_from_slice(&tlv_encode(KeyType::EccKeyParams as u32, &[curve as u8]));

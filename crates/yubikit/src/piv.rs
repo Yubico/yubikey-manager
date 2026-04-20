@@ -1177,6 +1177,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Reset the PIV application to factory defaults, blocking PIN and PUK first.
     pub fn reset(&mut self) -> Result<(), PivError> {
+        log::debug!("Resetting PIV application");
         // Check biometrics
         match self.get_bio_metadata() {
             Ok(bio) if bio.configured => {
@@ -1221,6 +1222,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             Err(_) => ManagementKeyType::Tdes,
         };
 
+        log::info!("PIV application reset");
         Ok(())
     }
 
@@ -1230,6 +1232,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Returns the serial number of the YubiKey. Requires firmware ≥ 5.0.3.
     pub fn get_serial(&mut self) -> Result<u32, PivError> {
+        log::debug!("Reading PIV serial number");
         require_version(self.version, Version(5, 0, 3), "get_serial")?;
         let response = self.protocol.send_apdu(0, INS_GET_SERIAL, 0, 0, &[])?;
         Ok(bytes_to_u32(&response))
@@ -1241,6 +1244,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Authenticate with the management key using a mutual-authentication protocol.
     pub fn authenticate(&mut self, management_key: &[u8]) -> Result<(), PivError> {
+        log::debug!("Authenticating with management key");
         let key_type = self.mgmt_key_type;
 
         // Step 1: Request witness from card
@@ -1299,6 +1303,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         management_key: &[u8],
         require_touch: bool,
     ) -> Result<(), PivError> {
+        log::debug!("Setting management key");
         if key_type != ManagementKeyType::Tdes {
             require_version(self.version, Version(5, 4, 0), "AES management key")?;
         }
@@ -1316,6 +1321,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         self.protocol
             .send_apdu(0, INS_SET_MGMKEY, 0xFF, p2, &data)?;
         self.mgmt_key_type = key_type;
+        log::info!("Management key updated");
         Ok(())
     }
 
@@ -1325,6 +1331,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Verify the PIV PIN. On failure, returns [`PivError::InvalidPin`] with remaining attempts.
     pub fn verify_pin(&mut self, pin: &str) -> Result<(), PivError> {
+        log::debug!("Verifying PIN");
         let data = pin_bytes(pin)?;
         match self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, &data) {
             Ok(_) => {
@@ -1349,6 +1356,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         temporary_pin: bool,
         check_only: bool,
     ) -> Result<Option<Vec<u8>>, PivError> {
+        log::debug!("Verifying UV");
         if temporary_pin && check_only {
             return Err(PivError::InvalidData(
                 "Cannot request temporary PIN when doing check-only verification".into(),
@@ -1394,6 +1402,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Verify a temporary PIN obtained from biometric authentication.
     pub fn verify_temporary_pin(&mut self, pin: &[u8]) -> Result<(), PivError> {
+        log::debug!("Verifying temporary PIN");
         if pin.len() != TEMPORARY_PIN_LEN {
             return Err(PivError::InvalidData(format!(
                 "Temporary PIN must be exactly {TEMPORARY_PIN_LEN} bytes"
@@ -1425,6 +1434,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Returns the number of remaining PIN attempts.
     pub fn get_pin_attempts(&mut self) -> Result<u32, PivError> {
+        log::debug!("Getting PIN attempts");
         match self.get_pin_metadata() {
             Ok(meta) => return Ok(meta.attempts_remaining),
             Err(PivError::NotSupported(_)) => {}
@@ -1454,11 +1464,15 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Change the PIV PIN from `old_pin` to `new_pin`.
     pub fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> Result<(), PivError> {
-        self.change_reference(INS_CHANGE_REFERENCE, PIN_P2, old_pin, new_pin)
+        log::debug!("Changing PIN");
+        self.change_reference(INS_CHANGE_REFERENCE, PIN_P2, old_pin, new_pin)?;
+        log::info!("PIN changed");
+        Ok(())
     }
 
     /// Change the PUK from `old_puk` to `new_puk`.
     pub fn change_puk(&mut self, old_puk: &str, new_puk: &str) -> Result<(), PivError> {
+        log::debug!("Changing PUK");
         match self.change_reference(INS_CHANGE_REFERENCE, PUK_P2, old_puk, new_puk) {
             Err(PivError::Connection(SmartCardError::Apdu { sw, .. }))
                 if Sw::from_u16(sw) == Some(Sw::InvalidInstruction) =>
@@ -1467,12 +1481,17 @@ impl<C: SmartCardConnection> PivSession<C> {
                     "Setting PUK is not supported on this YubiKey".into(),
                 ))
             }
+            Ok(()) => {
+                log::info!("PUK changed");
+                Ok(())
+            }
             other => other,
         }
     }
 
     /// Unblock a locked PIN using the PUK and set a new PIN.
     pub fn unblock_pin(&mut self, puk: &str, new_pin: &str) -> Result<(), PivError> {
+        log::debug!("Unblocking PIN");
         match self.change_reference(INS_RESET_RETRY, PIN_P2, puk, new_pin) {
             Err(PivError::Connection(SmartCardError::Apdu { sw, .. }))
                 if Sw::from_u16(sw) == Some(Sw::InvalidInstruction) =>
@@ -1481,12 +1500,17 @@ impl<C: SmartCardConnection> PivSession<C> {
                     "Unblocking PIN is not supported on this YubiKey".into(),
                 ))
             }
+            Ok(()) => {
+                log::info!("PIN unblocked");
+                Ok(())
+            }
             other => other,
         }
     }
 
     /// Set the maximum retry counts for PIN and PUK. Requires prior management-key authentication.
     pub fn set_pin_attempts(&mut self, pin_attempts: u8, puk_attempts: u8) -> Result<(), PivError> {
+        log::debug!("Setting PIN/PUK attempts");
         match self
             .protocol
             .send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts, &[])
@@ -1494,6 +1518,9 @@ impl<C: SmartCardConnection> PivSession<C> {
             Ok(_) => {
                 self.max_pin_retries = pin_attempts as u32;
                 self.current_pin_retries = pin_attempts as u32;
+                log::info!(
+                    "PIN attempts set to {pin_attempts}, PUK attempts set to {puk_attempts}"
+                );
                 Ok(())
             }
             Err(SmartCardError::Apdu { sw, .. })
@@ -1513,16 +1540,19 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Retrieve metadata about the PIV PIN. Requires firmware ≥ 5.3.0.
     pub fn get_pin_metadata(&mut self) -> Result<PinMetadata, PivError> {
+        log::debug!("Reading PIN metadata");
         self.get_pin_puk_metadata(PIN_P2)
     }
 
     /// Retrieve metadata about the PUK. Requires firmware ≥ 5.3.0.
     pub fn get_puk_metadata(&mut self) -> Result<PinMetadata, PivError> {
+        log::debug!("Reading PUK metadata");
         self.get_pin_puk_metadata(PUK_P2)
     }
 
     /// Retrieve metadata about the management key. Requires firmware ≥ 5.3.0.
     pub fn get_management_key_metadata(&mut self) -> Result<ManagementKeyMetadata, PivError> {
+        log::debug!("Reading management key metadata");
         require_version(
             self.version,
             Version(5, 3, 0),
@@ -1565,6 +1595,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Retrieve metadata about the key in a given slot. Requires firmware ≥ 5.3.0.
     pub fn get_slot_metadata(&mut self, slot: Slot) -> Result<SlotMetadata, PivError> {
+        log::debug!("Reading slot metadata for {:?}", slot);
         require_version(self.version, Version(5, 3, 0), "get_slot_metadata")?;
         let response = self
             .protocol
@@ -1608,6 +1639,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Retrieve biometric verification metadata from the YubiKey.
     pub fn get_bio_metadata(&mut self) -> Result<BioMetadata, PivError> {
+        log::debug!("Reading bio metadata");
         let response = match self
             .protocol
             .send_apdu(0, INS_GET_METADATA, 0, SLOT_OCC_AUTH, &[])
@@ -1665,11 +1697,13 @@ impl<C: SmartCardConnection> PivSession<C> {
         key_type: KeyType,
         message: &[u8],
     ) -> Result<Vec<u8>, PivError> {
+        log::debug!("Signing with key in slot {:?}", slot);
         self.use_private_key(slot, key_type, message, false)
     }
 
     /// Decrypt ciphertext with an RSA private key in a slot.
     pub fn decrypt(&mut self, slot: Slot, cipher_text: &[u8]) -> Result<Vec<u8>, PivError> {
+        log::debug!("Decrypting with slot {:?}", slot);
         let key_type = match cipher_text.len() * 8 {
             1024 => KeyType::Rsa1024,
             2048 => KeyType::Rsa2048,
@@ -1690,6 +1724,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         key_type: KeyType,
         peer_public_key: &[u8],
     ) -> Result<Vec<u8>, PivError> {
+        log::debug!("Calculating shared secret with slot {:?}", slot);
         if key_type.algorithm() != Algorithm::Ec {
             return Err(PivError::InvalidData("Unsupported key type".into()));
         }
@@ -1745,6 +1780,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Get certificate from slot as DER bytes.
     pub fn get_certificate(&mut self, slot: Slot) -> Result<Vec<u8>, PivError> {
+        log::debug!("Reading certificate from slot {:?}", slot);
         let obj_data = self.get_object(ObjectId::from_slot(slot))?;
         let entries = parse_tlv_dict(&obj_data)
             .map_err(|_| PivError::InvalidData("Malformed certificate data object".into()))?;
@@ -1776,6 +1812,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         cert_der: &[u8],
         compress: bool,
     ) -> Result<(), PivError> {
+        log::debug!("Importing certificate to slot {:?}", slot);
         let (cert_info, cert_data) = if compress {
             let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
             encoder
@@ -1793,12 +1830,17 @@ impl<C: SmartCardConnection> PivSession<C> {
         data.extend_from_slice(&tlv_encode(TAG_CERT_INFO, &[cert_info]));
         data.extend_from_slice(&tlv_encode(TAG_LRC, &[]));
 
-        self.put_object(ObjectId::from_slot(slot), Some(&data))
+        self.put_object(ObjectId::from_slot(slot), Some(&data))?;
+        log::info!("Certificate imported to slot {:?}", slot);
+        Ok(())
     }
 
     /// Delete the certificate stored in the given slot.
     pub fn delete_certificate(&mut self, slot: Slot) -> Result<(), PivError> {
-        self.put_object(ObjectId::from_slot(slot), None)
+        log::debug!("Deleting certificate from slot {:?}", slot);
+        self.put_object(ObjectId::from_slot(slot), None)?;
+        log::info!("Certificate deleted from slot {:?}", slot);
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -1823,6 +1865,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         pin_policy: PinPolicy,
         touch_policy: TouchPolicy,
     ) -> Result<(), PivError> {
+        log::debug!("Importing key to slot {:?}", slot);
         check_key_support(
             self.version,
             key_type,
@@ -1849,6 +1892,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
         self.protocol
             .send_apdu(0, INS_IMPORT_KEY, key_type as u8, slot as u8, &data)?;
+        log::info!("Key imported to slot {:?}", slot);
         Ok(())
     }
 
@@ -1861,6 +1905,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         pin_policy: PinPolicy,
         touch_policy: TouchPolicy,
     ) -> Result<Vec<u8>, PivError> {
+        log::debug!("Generating {:?} key in slot {:?}", key_type, slot);
         check_key_support(
             self.version,
             key_type,
@@ -1891,11 +1936,14 @@ impl<C: SmartCardConnection> PivSession<C> {
 
         // Convert device encoding to SPKI DER
         let device_bytes = tlv_unpack(0x7F49, &response)?;
-        device_pubkey_to_spki(key_type, &device_bytes)
+        let result = device_pubkey_to_spki(key_type, &device_bytes)?;
+        log::info!("Key generated in slot {:?}", slot);
+        Ok(result)
     }
 
     /// Attest key in slot. Returns DER-encoded X.509 certificate.
     pub fn attest_key(&mut self, slot: Slot) -> Result<Vec<u8>, PivError> {
+        log::debug!("Attesting key in slot {:?}", slot);
         require_version(self.version, Version(4, 3, 0), "attest_key")?;
         let response = self.protocol.send_apdu(0, INS_ATTEST, slot as u8, 0, &[])?;
         Ok(response)
@@ -1903,17 +1951,21 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Move key from one slot to another. Requires firmware >= 5.7.0.
     pub fn move_key(&mut self, from_slot: Slot, to_slot: Slot) -> Result<(), PivError> {
+        log::debug!("Moving key from slot {:?} to {:?}", from_slot, to_slot);
         require_version(self.version, Version(5, 7, 0), "move_key")?;
         self.protocol
             .send_apdu(0, INS_MOVE_KEY, to_slot as u8, from_slot as u8, &[])?;
+        log::info!("Key moved from slot {:?} to {:?}", from_slot, to_slot);
         Ok(())
     }
 
     /// Delete a key in a slot. Requires firmware >= 5.7.0.
     pub fn delete_key(&mut self, slot: Slot) -> Result<(), PivError> {
+        log::debug!("Deleting key in slot {:?}", slot);
         require_version(self.version, Version(5, 7, 0), "delete_key")?;
         self.protocol
             .send_apdu(0, INS_MOVE_KEY, 0xFF, slot as u8, &[])?;
+        log::info!("Key deleted from slot {:?}", slot);
         Ok(())
     }
 

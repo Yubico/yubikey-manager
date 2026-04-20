@@ -152,12 +152,18 @@ impl<C: Connection + 'static> Config<C> {
 
     /// Enable enterprise attestation.
     pub fn enable_enterprise_attestation(&mut self) -> Result<(), Ctap2Error<C::Error>> {
-        self.call(config_cmd::ENABLE_ENTERPRISE_ATT, None)
+        log::debug!("Enabling enterprise attestation");
+        self.call(config_cmd::ENABLE_ENTERPRISE_ATT, None)?;
+        log::info!("Enterprise attestation enabled");
+        Ok(())
     }
 
     /// Toggle the alwaysUv option.
     pub fn toggle_always_uv(&mut self) -> Result<(), Ctap2Error<C::Error>> {
-        self.call(config_cmd::TOGGLE_ALWAYS_UV, None)
+        log::debug!("Toggling always-UV");
+        self.call(config_cmd::TOGGLE_ALWAYS_UV, None)?;
+        log::info!("Always-UV toggled");
+        Ok(())
     }
 
     /// Set minimum PIN length and related policies.
@@ -183,6 +189,9 @@ impl<C: Connection + 'static> Config<C> {
         } else {
             Some(Value::Map(sub_params))
         };
-        self.call(config_cmd::SET_MIN_PIN_LENGTH, params.as_ref())
+        log::debug!("Setting minimum PIN length");
+        self.call(config_cmd::SET_MIN_PIN_LENGTH, params.as_ref())?;
+        log::info!("Minimum PIN length updated");
+        Ok(())
     }
 }

@@ -185,6 +185,7 @@ impl<C: Connection + 'static> CredentialManagement<C> {
     ///
     /// Returns `(existing_credential_count, max_possible_remaining_credentials)`.
     pub fn get_metadata(&mut self) -> Result<(u32, u32), Ctap2Error<C::Error>> {
+        log::debug!("Getting credential metadata");
         let resp = self.call(cred_mgmt_cmd::GET_CREDS_METADATA, None, true)?;
         let existing = resp
             .map_get_int(cred_mgmt_result_key::EXISTING_CRED_COUNT)
@@ -205,6 +206,7 @@ impl<C: Connection + 'static> CredentialManagement<C> {
 
     /// Enumerate all relying parties with stored credentials.
     pub fn enumerate_rps(&mut self) -> Result<Vec<RpInfo>, Ctap2Error<C::Error>> {
+        log::debug!("Enumerating relying parties");
         let first = self.call(cred_mgmt_cmd::ENUMERATE_RPS_BEGIN, None, true)?;
         let total = first
             .map_get_int(cred_mgmt_result_key::TOTAL_RPS)
@@ -228,6 +230,7 @@ impl<C: Connection + 'static> CredentialManagement<C> {
         &mut self,
         rp_id_hash: &[u8],
     ) -> Result<Vec<CredentialInfo>, Ctap2Error<C::Error>> {
+        log::debug!("Enumerating credentials");
         let params = Value::Map(vec![(Value::Int(0x01), Value::Bytes(rp_id_hash.to_vec()))]);
         let first = self.call(cred_mgmt_cmd::ENUMERATE_CREDS_BEGIN, Some(&params), true)?;
         let total = first
@@ -255,8 +258,10 @@ impl<C: Connection + 'static> CredentialManagement<C> {
         &mut self,
         credential_id: &PublicKeyCredentialDescriptor,
     ) -> Result<(), Ctap2Error<C::Error>> {
+        log::debug!("Deleting credential");
         let params = Value::Map(vec![(Value::Int(0x02), credential_id.to_cbor())]);
         self.call(cred_mgmt_cmd::DELETE_CREDENTIAL, Some(&params), true)?;
+        log::info!("Credential deleted");
         Ok(())
     }
 
@@ -268,6 +273,7 @@ impl<C: Connection + 'static> CredentialManagement<C> {
         credential_id: &PublicKeyCredentialDescriptor,
         user: &PublicKeyCredentialUserEntity,
     ) -> Result<(), Ctap2Error<C::Error>> {
+        log::debug!("Updating user info");
         if self.use_legacy {
             return Err(Ctap2Error::InvalidResponse(
                 "updateUserInfo not supported in preview mode".into(),
@@ -278,6 +284,7 @@ impl<C: Connection + 'static> CredentialManagement<C> {
             (Value::Int(0x03), user.to_cbor()),
         ]);
         self.call(cred_mgmt_cmd::UPDATE_USER_INFO, Some(&params), true)?;
+        log::info!("User info updated");
         Ok(())
     }
 }

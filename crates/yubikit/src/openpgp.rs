@@ -1787,17 +1787,20 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     /// Verify the user PIN. If `extended` is true, uses extended mode (PW1 for signing).
     pub fn verify_pin(&mut self, pin: &str, extended: bool) -> Result<(), OpenPgpError> {
+        log::debug!("Verifying OpenPGP PIN");
         let mode = if extended { 1 } else { 0 };
         self.verify_inner(Pw::User, pin, mode)
     }
 
     /// Verify the admin PIN.
     pub fn verify_admin(&mut self, admin_pin: &str) -> Result<(), OpenPgpError> {
+        log::debug!("Verifying OpenPGP admin PIN");
         self.verify_inner(Pw::Admin, admin_pin, 0)
     }
 
     /// Clear the verification state of the given PIN (requires YubiKey 5.6.0+).
     pub fn unverify_pin(&mut self, pw: Pw) -> Result<(), OpenPgpError> {
+        log::debug!("Clearing PIN verification");
         require_version(self.version, Version(5, 6, 0), "unverify_pin")?;
         self.protocol
             .send_apdu(0, INS_VERIFY, 0xFF, pw as u8, &[])?;
@@ -1826,7 +1829,10 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     /// Change the user PIN from `pin` to `new_pin`.
     pub fn change_pin(&mut self, pin: &str, new_pin: &str) -> Result<(), OpenPgpError> {
-        self.change_inner(Pw::User, pin, new_pin)
+        log::debug!("Changing OpenPGP PIN");
+        self.change_inner(Pw::User, pin, new_pin)?;
+        log::info!("OpenPGP PIN changed");
+        Ok(())
     }
 
     /// Change the admin PIN from `admin_pin` to `new_admin_pin`.
@@ -1835,14 +1841,20 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         admin_pin: &str,
         new_admin_pin: &str,
     ) -> Result<(), OpenPgpError> {
-        self.change_inner(Pw::Admin, admin_pin, new_admin_pin)
+        log::debug!("Changing OpenPGP admin PIN");
+        self.change_inner(Pw::Admin, admin_pin, new_admin_pin)?;
+        log::info!("OpenPGP admin PIN changed");
+        Ok(())
     }
 
     /// Set the resetting code used to unblock the user PIN.
     pub fn set_reset_code(&mut self, reset_code: &str) -> Result<(), OpenPgpError> {
+        log::debug!("Setting OpenPGP reset code");
         let kdf = self.get_kdf()?;
         let data = self.process_pin(&kdf, Pw::Reset, reset_code)?;
-        self.put_data(Do::ResettingCode, &data)
+        self.put_data(Do::ResettingCode, &data)?;
+        log::info!("OpenPGP reset code set");
+        Ok(())
     }
 
     /// Reset the user PIN to `new_pin`, optionally using a reset code.
@@ -1853,6 +1865,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         new_pin: &str,
         reset_code: Option<&str>,
     ) -> Result<(), OpenPgpError> {
+        log::debug!("Resetting OpenPGP PIN");
         let kdf = self.get_kdf()?;
         let new_pin_data = self.process_pin(&kdf, Pw::User, new_pin)?;
         let (p1, data) = if let Some(code) = reset_code {
@@ -1867,7 +1880,10 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             .protocol
             .send_apdu(0, INS_RESET_RETRY_COUNTER, p1, Pw::User as u8, &data)
         {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                log::info!("OpenPGP PIN reset");
+                Ok(())
+            }
             Err(SmartCardError::Apdu { sw, .. }) if sw == 0x6982 && reset_code.is_some() => {
                 let attempts = self.get_pin_status()?.attempts_reset as u32;
                 Err(OpenPgpError::InvalidPin(attempts))
@@ -1883,6 +1899,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     /// Set the signature PIN policy (verify once per session or every operation).
     pub fn set_signature_pin_policy(&mut self, pin_policy: PinPolicy) -> Result<(), OpenPgpError> {
+        log::debug!("Setting signature PIN policy");
         self.put_data(Do::PwStatusBytes, &[pin_policy as u8])
     }
 
@@ -1893,6 +1910,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         reset_attempts: u8,
         admin_attempts: u8,
     ) -> Result<(), OpenPgpError> {
+        log::debug!("Setting OpenPGP PIN attempts");
         if self.version.0 == 1 {
             require_version(self.version, Version(1, 0, 7), "set_pin_attempts")?;
         } else {
@@ -1926,6 +1944,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     /// Write a new KDF configuration to the card.
     pub fn set_kdf(&mut self, kdf: &Kdf) -> Result<(), OpenPgpError> {
+        log::debug!("Setting OpenPGP KDF");
         if !self
             .app_data
             .discretionary
@@ -1941,6 +1960,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     /// Perform a factory reset of the OpenPGP applet, erasing all keys and settings.
     pub fn reset(&mut self) -> Result<(), OpenPgpError> {
+        log::debug!("Resetting OpenPGP application");
         require_version(self.version, Version(1, 0, 6), "reset")?;
 
         // Block PINs by sending invalid PINs
@@ -1957,6 +1977,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         // TERMINATE + ACTIVATE
         self.protocol.send_apdu(0, INS_TERMINATE, 0, 0, &[])?;
         self.protocol.send_apdu(0, INS_ACTIVATE, 0, 0, &[])?;
+        log::info!("OpenPGP application reset");
         Ok(())
     }
 
@@ -2057,6 +2078,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         key_ref: KeyRef,
         attributes: &AlgorithmAttributes,
     ) -> Result<(), OpenPgpError> {
+        log::debug!("Setting algorithm attributes for {:?}", key_ref);
         self.put_data(key_ref.algorithm_attributes_do(), &attributes.to_bytes())
     }
 
@@ -2074,6 +2096,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     /// Set the User Interaction Flag (touch policy) for a key slot.
     pub fn set_uif(&mut self, key_ref: KeyRef, uif: Uif) -> Result<(), OpenPgpError> {
+        log::debug!("Setting UIF for {:?}", key_ref);
         require_version(self.version, Version(4, 2, 0), "set_uif")?;
         if key_ref == KeyRef::Att {
             require_version(self.version, Version(5, 2, 1), "set_uif for ATT key")?;
@@ -2120,6 +2143,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         key_ref: KeyRef,
         key_size: RsaSize,
     ) -> Result<Vec<u8>, OpenPgpError> {
+        log::debug!("Generating RSA key for {:?}", key_ref);
         if self.version >= Version(4, 2, 0) && self.version < Version(4, 3, 5) {
             return Err(OpenPgpError::NotSupported(
                 "RSA key generation not supported on this YubiKey".into(),
@@ -2151,6 +2175,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             .protocol
             .send_apdu(0, INS_GENERATE_ASYM, 0x80, 0x00, &crt)?;
         let pk_data = tlv_unpack(TAG_PUBLIC_KEY, &resp)?;
+        log::info!("RSA key generated");
         Ok(pk_data)
     }
 
@@ -2160,6 +2185,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         key_ref: KeyRef,
         curve_oid: &str,
     ) -> Result<Vec<u8>, OpenPgpError> {
+        log::debug!("Generating EC key for {:?}", key_ref);
         require_version(self.version, Version(5, 2, 0), "generate_ec_key")?;
 
         let attributes = AlgorithmAttributes::Ec(EcAttributes::create(key_ref, curve_oid)?);
@@ -2170,6 +2196,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             .protocol
             .send_apdu(0, INS_GENERATE_ASYM, 0x80, 0x00, &crt)?;
         let pk_data = tlv_unpack(TAG_PUBLIC_KEY, &resp)?;
+        log::info!("EC key generated");
         Ok(pk_data)
     }
 
@@ -2191,14 +2218,17 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         key_ref: KeyRef,
         private_key: &OpenPgpPrivateKey,
     ) -> Result<(), OpenPgpError> {
+        log::debug!("Importing key for {:?}", key_ref);
         let template = build_private_key_template(key_ref, private_key);
         self.protocol
             .send_apdu(0, INS_PUT_DATA_ODD, 0x3F, 0xFF, &template)?;
+        log::info!("Key imported");
         Ok(())
     }
 
     /// Delete the key in a slot by resetting its algorithm attributes.
     pub fn delete_key(&mut self, key_ref: KeyRef) -> Result<(), OpenPgpError> {
+        log::debug!("Deleting key for {:?}", key_ref);
         if 0 < self.version.0 && self.version.0 < 4 {
             // NEO: overwrite with a dummy RSA key import is not easily supported
             // without generating a real key; use put_data to change attributes instead
@@ -2222,6 +2252,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
                 RsaImportFormat::Standard,
             )),
         )?;
+        log::info!("Key deleted for {:?}", key_ref);
         Ok(())
     }
 
@@ -2233,6 +2264,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         message: &[u8],
         hash_algorithm: SignHashAlgorithm,
     ) -> Result<Vec<u8>, OpenPgpError> {
+        log::debug!("Signing with {:?}", KeyRef::Sig);
         let attributes = self.get_algorithm_attributes(KeyRef::Sig)?;
         let padded = pad_message(&attributes, message, hash_algorithm)?;
         let response = self.protocol.send_apdu(0, INS_PSO, 0x9E, 0x9A, &padded)?;
@@ -2241,6 +2273,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     /// Perform a decryption operation using the DEC key slot (PSO: DECIPHER).
     pub fn decrypt(&mut self, value: &[u8]) -> Result<Vec<u8>, OpenPgpError> {
+        log::debug!("Decrypting with key");
         let attributes = self.get_algorithm_attributes(KeyRef::Dec)?;
         let data = match &attributes {
             AlgorithmAttributes::Rsa(_) => {
@@ -2321,22 +2354,32 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         key_ref: KeyRef,
         cert_der: &[u8],
     ) -> Result<(), OpenPgpError> {
+        log::debug!("Importing certificate for {:?}", key_ref);
         if key_ref == KeyRef::Att {
             require_version(self.version, Version(5, 2, 0), "ATT certificate")?;
-            return self.put_data(Do::AttCertificate, cert_der);
+            self.put_data(Do::AttCertificate, cert_der)?;
+            log::info!("Certificate imported");
+            return Ok(());
         }
         self.select_certificate(key_ref)?;
-        self.put_data(Do::CardholderCertificate, cert_der)
+        self.put_data(Do::CardholderCertificate, cert_der)?;
+        log::info!("Certificate imported");
+        Ok(())
     }
 
     /// Delete the certificate stored for a key slot.
     pub fn delete_certificate(&mut self, key_ref: KeyRef) -> Result<(), OpenPgpError> {
+        log::debug!("Deleting certificate for {:?}", key_ref);
         if key_ref == KeyRef::Att {
             require_version(self.version, Version(5, 2, 0), "ATT certificate")?;
-            return self.put_data(Do::AttCertificate, &[]);
+            self.put_data(Do::AttCertificate, &[])?;
+            log::info!("Certificate deleted");
+            return Ok(());
         }
         self.select_certificate(key_ref)?;
-        self.put_data(Do::CardholderCertificate, &[])
+        self.put_data(Do::CardholderCertificate, &[])?;
+        log::info!("Certificate deleted");
+        Ok(())
     }
 
     /// Generate an attestation certificate for a key slot (YubiKey 5.2+).
