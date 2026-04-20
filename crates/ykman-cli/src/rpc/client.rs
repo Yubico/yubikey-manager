@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
+use crate::cancel;
 use crate::util::CliError;
 
 /// Handle to the spawned subprocess — platform-specific.
@@ -126,8 +127,8 @@ impl RpcClient {
     /// Send a command and return the response body. Signals are dispatched via
     /// the callback. Returns `Err` for RPC errors.
     ///
-    /// If `cancellable` is true, a Ctrl+C handler is installed that sends a
-    /// cancel signal to the subprocess.
+    /// If `cancellable` is true, Ctrl+C will send a cancel signal to the
+    /// subprocess via the shared cancel mechanism.
     pub fn call(
         &mut self,
         action: &str,
@@ -145,10 +146,10 @@ impl RpcClient {
         self.write_message(&request)
             .map_err(RpcCallError::Transport)?;
 
-        // Install Ctrl+C handler that sends cancel to subprocess
-        if cancellable {
+        // Register a cancel callback that sends cancel signal to subprocess
+        let _guard = if cancellable {
             let writer = self.writer.clone();
-            let _ = ctrlc::set_handler(move || {
+            Some(cancel::on_cancel(move || {
                 let signal = json!({"kind": "signal", "status": "cancel"});
                 let json_str = serde_json::to_string(&signal).unwrap();
                 if let Ok(mut w) = writer.lock() {
@@ -156,8 +157,10 @@ impl RpcClient {
                     let _ = w.write_all(b"\n");
                     let _ = w.flush();
                 }
-            });
-        }
+            }))
+        } else {
+            None
+        };
 
         loop {
             let mut buf = String::new();

@@ -1,5 +1,4 @@
 use std::io::{self, Write};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -13,6 +12,7 @@ use yubikit::yubiotp::{
     YubiOtpSession,
 };
 
+use crate::cancel;
 use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliKeyboardLayout, CliOtpSlot, CliPacing};
 use crate::keyboard::{self, MODHEX_CHARS};
 use crate::scp::{self, ScpConfig, ScpParams};
@@ -781,14 +781,8 @@ pub fn run_calculate(
                 ));
             }
 
-            // Set up Ctrl+C handler for cancellation
-            let cancel = Arc::new(AtomicBool::new(false));
-            let cancel_clone = cancel.clone();
-            let _ = ctrlc::set_handler(move || {
-                cancel_clone.store(true, Ordering::Relaxed);
-            });
-
-            let is_cancelled = || cancel.load(Ordering::Relaxed);
+            // Set up Ctrl+C cancellation
+            cancel::clear();
             let prompted = AtomicBool::new(false);
             let on_keepalive = |status: u8| {
                 if status == 2 && !prompted.swap(true, Ordering::Relaxed) {
@@ -800,7 +794,7 @@ pub fn run_calculate(
                 .calculate_hmac_sha1_with_cancel(
                     self.slot,
                     &self.challenge_bytes,
-                    Some(&is_cancelled),
+                    Some(&cancel::is_cancelled),
                     Some(&on_keepalive),
                 )
                 .map_err(|e| CliError(format!("Failed to calculate: {e}")))?;

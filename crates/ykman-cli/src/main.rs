@@ -26,6 +26,7 @@ mod util;
 
 // Re-export library modules so binary-internal modules can use them via crate::
 use ykman_cli::appdata;
+use ykman_cli::cancel;
 use ykman_cli::keyboard;
 
 use cli_enums::*;

@@ -27,8 +27,6 @@
 
 //! FIDO CLI commands.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use yubikit::core::{Connection, Transport};
 use yubikit::ctap::CtapSession;
 use yubikit::ctap2::{
@@ -38,6 +36,7 @@ use yubikit::ctap2::{
 use yubikit::device::{ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
 
+use crate::cancel;
 use crate::scp::{self, ScpParams};
 use crate::util::CliError;
 
@@ -399,14 +398,8 @@ fn run_reset_inner<C: Connection + 'static>(
         "Touch the YubiKey to confirm."
     };
 
-    // Set up Ctrl+C handler for cancellation
-    let cancel = std::sync::Arc::new(AtomicBool::new(false));
-    let cancel_clone = cancel.clone();
-    let _ = ctrlc::set_handler(move || {
-        cancel_clone.store(true, Ordering::Relaxed);
-    });
-
-    let is_cancelled = || cancel.load(Ordering::Relaxed);
+    // Set up Ctrl+C cancellation
+    cancel::clear();
     let result = ctap2.reset(
         Some(&mut |status| {
             if status == KEEPALIVE_UPNEEDED {
@@ -415,7 +408,7 @@ fn run_reset_inner<C: Connection + 'static>(
                 eprintln!("Reset in progress, DO NOT REMOVE YOUR YUBIKEY!");
             }
         }),
-        Some(&is_cancelled),
+        Some(&cancel::is_cancelled),
     );
 
     match result {
@@ -993,19 +986,13 @@ pub fn run_fingerprints_add(
         let mut bio = BioEnrollment::new(session, protocol, token)
             .map_err(|(e, _)| CliError(format!("Failed to initialize bio enrollment: {e}")))?;
 
-        // Set up Ctrl+C handler for cancellation
-        let cancel = std::sync::Arc::new(AtomicBool::new(false));
-        let cancel_clone = cancel.clone();
-        let _ = ctrlc::set_handler(move || {
-            cancel_clone.store(true, Ordering::Relaxed);
-        });
-
-        let is_cancelled = || cancel.load(Ordering::Relaxed);
+        // Set up Ctrl+C cancellation
+        cancel::clear();
 
         // Begin enrollment
         eprintln!("Place your finger against the sensor now...");
         let resp = bio
-            .enroll_begin(None, Some(&mut |_| {}), Some(&is_cancelled))
+            .enroll_begin(None, Some(&mut |_| {}), Some(&cancel::is_cancelled))
             .map_err(|e| map_enroll_error(e, "Enrollment failed"))?;
 
         let template_id = resp.template_id.clone();
@@ -1023,7 +1010,7 @@ pub fn run_fingerprints_add(
                 &template_id,
                 None,
                 Some(&mut |_| {}),
-                Some(&is_cancelled),
+                Some(&cancel::is_cancelled),
             ) {
                 Ok(resp) => {
                     scans_remaining = resp.remaining_samples;
