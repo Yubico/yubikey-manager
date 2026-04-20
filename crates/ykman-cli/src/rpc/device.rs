@@ -6,7 +6,6 @@ use serde_json::{Value, json};
 use yubikit::core::Transport;
 use yubikit::device::{LocalYubiKeyDevice, ReinsertStatus};
 use yubikit::management::Capability;
-use yubikit::smartcard::ScpKeyParams;
 
 use super::connection::ConnectionNode;
 use super::error::{RpcError, RpcResponse};
@@ -15,7 +14,6 @@ use super::rpc::{RpcNode, SignalFn};
 /// Root RPC node representing a single YubiKey device.
 pub struct DeviceNode {
     device: LocalYubiKeyDevice,
-    scp_params: Option<ScpKeyParams>,
     /// Incremented after each reinsert to invalidate cached children.
     generation: u64,
     /// Generation at which each child was created.
@@ -23,10 +21,9 @@ pub struct DeviceNode {
 }
 
 impl DeviceNode {
-    pub fn new(device: LocalYubiKeyDevice, scp_params: Option<ScpKeyParams>) -> Self {
+    pub fn new(device: LocalYubiKeyDevice) -> Self {
         Self {
             device,
-            scp_params,
             generation: 0,
             child_generations: BTreeMap::new(),
         }
@@ -52,6 +49,20 @@ impl RpcNode for DeviceNode {
             Value::Object(obj)
         };
 
+        let vq = &info.version_qualifier;
+        let version_qualifier = json!({
+            "version": [vq.version.0, vq.version.1, vq.version.2],
+            "release_type": vq.release_type as u8,
+            "iteration": vq.iteration,
+        });
+
+        let opt_version = |v: &Option<yubikit::core::Version>| -> Value {
+            match v {
+                Some(v) => json!([v.0, v.1, v.2]),
+                None => Value::Null,
+            }
+        };
+
         json!({
             "version": [version.0, version.1, version.2],
             "serial": info.serial,
@@ -67,8 +78,17 @@ impl RpcNode for DeviceNode {
             "reset_blocked": cap_to_u16(&info.reset_blocked),
             "is_fips": info.is_fips,
             "is_sky": info.is_sky,
+            "is_locked": info.is_locked,
             "pin_complexity": info.pin_complexity,
             "form_factor": info.form_factor as u8,
+            "part_number": info.part_number,
+            "fps_version": opt_version(&info.fps_version),
+            "stm_version": opt_version(&info.stm_version),
+            "version_qualifier": version_qualifier,
+            "auto_eject_timeout": info.config.auto_eject_timeout,
+            "challenge_response_timeout": info.config.challenge_response_timeout,
+            "device_flags": info.config.device_flags.map(|f| f.0),
+            "nfc_restricted": info.config.nfc_restricted,
         })
     }
 
@@ -83,19 +103,28 @@ impl RpcNode for DeviceNode {
             .copied()
             .unwrap_or(Capability::NONE);
 
-        // "ccid" if a SmartCard connection can be opened
-        if self.device.open_smartcard().is_ok() {
+        // Any SmartCard-based application implies CCID is available
+        let has_ccid = transport == Transport::Nfc
+            || supported.0
+                & (Capability::OATH.0
+                    | Capability::PIV.0
+                    | Capability::OPENPGP.0
+                    | Capability::HSMAUTH.0
+                    | Capability::FIDO2.0)
+                != 0;
+
+        if has_ccid {
             let has_fido2 = supported.contains(Capability::FIDO2);
             children.insert("ccid".to_string(), json!({"fido2": has_fido2}));
         }
 
-        // "ctap" if a FIDO HID connection can be opened
-        if supported.contains(Capability::FIDO2) && self.device.open_fido().is_ok() {
+        // CTAP HID is available when FIDO2 is supported over USB
+        if transport == Transport::Usb && supported.contains(Capability::FIDO2) {
             children.insert("ctap".to_string(), json!({"fido2": true}));
         }
 
-        // "otp" if an OTP HID connection can be opened
-        if supported.contains(Capability::OTP) && self.device.open_otp().is_ok() {
+        // OTP HID is available when OTP is supported over USB
+        if transport == Transport::Usb && supported.contains(Capability::OTP) {
             children.insert("otp".to_string(), json!({}));
         }
 
@@ -152,11 +181,7 @@ impl RpcNode for DeviceNode {
                 let conn = self.device.open_smartcard().map_err(|e| {
                     RpcError::connection_error(&self.device.name(), "ccid", &format!("{e:?}"))
                 })?;
-                Box::new(ConnectionNode::new_ccid(
-                    conn,
-                    self.device.clone(),
-                    self.scp_params.clone(),
-                ))
+                Box::new(ConnectionNode::new_ccid(conn, self.device.clone()))
             }
             "ctap" => {
                 let conn = self.device.open_fido().map_err(|e| {

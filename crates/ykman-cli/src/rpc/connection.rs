@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -9,12 +8,11 @@ use yubikit::core::Connection;
 use yubikit::device::LocalYubiKeyDevice;
 use yubikit::fido::FidoConnection;
 use yubikit::otp::OtpConnection;
-use yubikit::smartcard::{ScpKeyParams, SmartCardConnection};
+use yubikit::smartcard::SmartCardConnection;
 use yubikit::transport::ctaphid::HidFidoConnection;
 use yubikit::transport::otphid::HidOtpConnection;
 use yubikit::transport::pcsc::PcscSmartCardConnection;
 
-use super::ctap2::Ctap2Node;
 use super::error::{RpcError, RpcResponse};
 use super::rpc::{RpcNode, SignalFn};
 
@@ -25,7 +23,6 @@ pub type SharedConn<T> = Arc<Mutex<Option<T>>>;
 pub struct ConnectionNode {
     conn_type: ConnType,
     device: LocalYubiKeyDevice,
-    scp_params: Option<ScpKeyParams>,
 }
 
 enum ConnType {
@@ -35,15 +32,10 @@ enum ConnType {
 }
 
 impl ConnectionNode {
-    pub fn new_ccid(
-        conn: PcscSmartCardConnection,
-        device: LocalYubiKeyDevice,
-        scp_params: Option<ScpKeyParams>,
-    ) -> Self {
+    pub fn new_ccid(conn: PcscSmartCardConnection, device: LocalYubiKeyDevice) -> Self {
         Self {
             conn_type: ConnType::SmartCard(Arc::new(Mutex::new(Some(conn)))),
             device,
-            scp_params,
         }
     }
 
@@ -51,7 +43,6 @@ impl ConnectionNode {
         Self {
             conn_type: ConnType::Fido(Arc::new(Mutex::new(Some(conn)))),
             device,
-            scp_params: None,
         }
     }
 
@@ -59,7 +50,6 @@ impl ConnectionNode {
         Self {
             conn_type: ConnType::Otp(Arc::new(Mutex::new(Some(conn)))),
             device,
-            scp_params: None,
         }
     }
 
@@ -221,22 +211,6 @@ impl RpcNode for ConnectionNode {
         }
     }
 
-    fn list_children(&mut self) -> BTreeMap<String, Value> {
-        let mut children = BTreeMap::new();
-        match &self.conn_type {
-            ConnType::Otp(_) => {} // OTP connections don't have session children
-            _ => {
-                children.insert("ctap2".to_string(), json!({}));
-            }
-        }
-        children
-    }
-
-    fn action_closes_child(&self, _action: &str) -> bool {
-        // Raw command actions don't need to close the ctap2 child
-        false
-    }
-
     fn call_action(
         &mut self,
         action: &str,
@@ -250,38 +224,6 @@ impl RpcNode for ConnectionNode {
             "otp_send" => self.do_otp_send(params),
             "otp_receive" => self.do_otp_receive(),
             _ => Err(RpcError::no_such_action(action)),
-        }
-    }
-
-    fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
-        match name {
-            "ctap2" => {
-                match &self.conn_type {
-                    ConnType::Fido(conn) => {
-                        let c = conn.lock().unwrap().take().ok_or_else(|| {
-                            RpcError::new("connection-error", "Connection in use")
-                        })?;
-                        Ok(Box::new(Ctap2Node::new_hid(
-                            c,
-                            conn.clone(),
-                            self.device.clone(),
-                        )?))
-                    }
-                    ConnType::SmartCard(conn) => {
-                        let c = conn.lock().unwrap().take().ok_or_else(|| {
-                            RpcError::new("connection-error", "Connection in use")
-                        })?;
-                        Ok(Box::new(Ctap2Node::new_smartcard(
-                            c,
-                            conn.clone(),
-                            self.device.clone(),
-                            self.scp_params.clone(),
-                        )?))
-                    }
-                    ConnType::Otp(_) => Err(RpcError::no_such_node(name)),
-                }
-            }
-            _ => Err(RpcError::no_such_node(name)),
         }
     }
 

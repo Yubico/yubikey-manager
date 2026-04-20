@@ -14,6 +14,7 @@ impl RpcResponse {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_flags(body: Value, flags: Vec<&str>) -> Self {
         Self {
             body,
@@ -30,6 +31,7 @@ pub struct RpcError {
     pub body: Value,
 }
 
+#[allow(dead_code)]
 impl RpcError {
     pub fn new(status: &str, message: impl Into<String>) -> Self {
         Self {

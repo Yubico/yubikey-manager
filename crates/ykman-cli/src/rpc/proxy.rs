@@ -287,17 +287,24 @@ impl RpcDevice {
     fn read_device_info(data: &Value) -> DeviceInfo {
         use std::collections::HashMap;
 
-        let version = if let Some(arr) = data.get("version").and_then(|v| v.as_array())
-            && arr.len() == 3
-        {
-            yubikit::core::Version(
-                arr[0].as_u64().unwrap_or(0) as u8,
-                arr[1].as_u64().unwrap_or(0) as u8,
-                arr[2].as_u64().unwrap_or(0) as u8,
-            )
-        } else {
-            yubikit::core::Version(0, 0, 0)
+        let parse_version = |v: &Value| -> yubikit::core::Version {
+            if let Some(arr) = v.as_array()
+                && arr.len() == 3
+            {
+                yubikit::core::Version(
+                    arr[0].as_u64().unwrap_or(0) as u8,
+                    arr[1].as_u64().unwrap_or(0) as u8,
+                    arr[2].as_u64().unwrap_or(0) as u8,
+                )
+            } else {
+                yubikit::core::Version(0, 0, 0)
+            }
         };
+
+        let version = data
+            .get("version")
+            .map(parse_version)
+            .unwrap_or(yubikit::core::Version(0, 0, 0));
 
         let serial = data
             .get("serial")
@@ -329,19 +336,46 @@ impl RpcDevice {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as u8;
 
+        let opt_version = |key: &str| -> Option<yubikit::core::Version> {
+            data.get(key).filter(|v| !v.is_null()).map(&parse_version)
+        };
+
+        let version_qualifier = if let Some(vq) = data.get("version_qualifier") {
+            let vq_version = vq.get("version").map(parse_version).unwrap_or(version);
+            let release_type = yubikit::management::ReleaseType::from_value(
+                vq.get("release_type").and_then(|v| v.as_u64()).unwrap_or(2) as u8,
+            );
+            let iteration = vq.get("iteration").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+            yubikit::management::VersionQualifier::new(vq_version, release_type, iteration)
+        } else {
+            yubikit::management::VersionQualifier::final_release(version)
+        };
+
         DeviceInfo {
             config: yubikit::management::DeviceConfig {
                 enabled_capabilities: parse_cap_map("enabled_capabilities"),
-                auto_eject_timeout: None,
-                challenge_response_timeout: None,
-                device_flags: None,
-                nfc_restricted: None,
+                auto_eject_timeout: data
+                    .get("auto_eject_timeout")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u16),
+                challenge_response_timeout: data
+                    .get("challenge_response_timeout")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u8),
+                device_flags: data
+                    .get("device_flags")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| yubikit::management::DeviceFlag(v as u8)),
+                nfc_restricted: data.get("nfc_restricted").and_then(|v| v.as_bool()),
             },
             serial,
             version,
             form_factor: yubikit::management::FormFactor::from_code(form_factor_raw),
             supported_capabilities: parse_cap_map("supported_capabilities"),
-            is_locked: false,
+            is_locked: data
+                .get("is_locked")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
             is_fips: data
                 .get("is_fips")
                 .and_then(|v| v.as_bool())
@@ -350,7 +384,10 @@ impl RpcDevice {
                 .get("is_sky")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
-            part_number: None,
+            part_number: data
+                .get("part_number")
+                .and_then(|v| v.as_str())
+                .map(String::from),
             fips_capable: parse_cap("fips_capable"),
             fips_approved: parse_cap("fips_approved"),
             pin_complexity: data
@@ -358,9 +395,9 @@ impl RpcDevice {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
             reset_blocked: parse_cap("reset_blocked"),
-            fps_version: None,
-            stm_version: None,
-            version_qualifier: yubikit::management::VersionQualifier::final_release(version),
+            fps_version: opt_version("fps_version"),
+            stm_version: opt_version("stm_version"),
+            version_qualifier,
         }
     }
 }

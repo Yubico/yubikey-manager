@@ -455,20 +455,3 @@ pub(crate) mod windows_elevated {
         })
     }
 }
-
-/// Returns true if FIDO commands should use the RPC mechanism.
-///
-/// On Windows, this is true when the current process is not running as
-/// administrator, since FIDO HID access requires elevation.
-/// On other platforms, this is controlled by the `RPC=1` environment variable
-/// (for development/testing purposes only).
-pub fn should_use_fido_rpc() -> bool {
-    #[cfg(target_os = "windows")]
-    {
-        !windows_elevated::is_admin()
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var("RPC").is_ok()
-    }
-}

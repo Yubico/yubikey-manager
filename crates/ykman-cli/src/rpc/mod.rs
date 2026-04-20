@@ -1,6 +1,5 @@
 pub mod client;
 mod connection;
-mod ctap2;
 pub(crate) mod device;
 pub mod error;
 pub mod proxy;
