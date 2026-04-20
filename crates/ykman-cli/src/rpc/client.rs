@@ -34,6 +34,7 @@ impl RpcClient {
     /// If `elevate` is true (Windows only), the subprocess is launched with
     /// administrator privileges via UAC.
     pub fn spawn(global_args: &[String], elevate: bool) -> Result<Self, CliError> {
+        log::debug!("Spawning RPC subprocess (elevate={elevate})");
         let exe = std::env::current_exe()
             .map_err(|e| CliError(format!("Failed to determine executable path: {e}")))?;
 
@@ -97,6 +98,7 @@ impl RpcClient {
 
         let writer = Arc::new(Mutex::new(stream));
 
+        log::debug!("RPC client connected on port {port}");
         Ok(Self {
             child,
             reader,

@@ -14,7 +14,7 @@ use yubikit::transport::otphid::HidOtpConnection;
 use yubikit::transport::pcsc::PcscSmartCardConnection;
 
 use super::error::{RpcError, RpcResponse};
-use super::rpc::{RpcNode, SignalFn};
+use super::node::{RpcNode, SignalFn};
 
 /// Connection shared between ConnectionNode and its session children.
 pub type SharedConn<T> = Arc<Mutex<Option<T>>>;
@@ -230,15 +230,18 @@ impl RpcNode for ConnectionNode {
     fn close(&mut self) {
         match &self.conn_type {
             ConnType::SmartCard(conn) => {
+                log::debug!("Closing CCID connection");
                 let mut guard = conn.lock().unwrap();
                 if let Some(mut c) = guard.take() {
                     c.close();
                 }
             }
             ConnType::Fido(conn) => {
+                log::debug!("Closing CTAP connection");
                 let _ = conn.lock().unwrap().take();
             }
             ConnType::Otp(conn) => {
+                log::debug!("Closing OTP connection");
                 let mut guard = conn.lock().unwrap();
                 if let Some(mut c) = guard.take() {
                     c.close();

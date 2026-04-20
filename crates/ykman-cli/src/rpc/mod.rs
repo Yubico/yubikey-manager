@@ -2,9 +2,8 @@ pub mod client;
 mod connection;
 pub(crate) mod device;
 pub mod error;
+pub mod node;
 pub mod proxy;
-#[allow(clippy::module_inception)]
-pub mod rpc;
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -13,7 +12,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use serde_json::{Value, json};
 
-use rpc::{NodeHost, RpcNode};
+use node::{NodeHost, RpcNode};
 
 /// Sender/receiver function types for the RPC loop.
 pub type SendFn = Box<dyn Fn(Value) + Send + Sync>;
@@ -21,6 +20,7 @@ pub type RecvLine = Box<dyn FnMut() -> Option<String> + Send>;
 
 /// Run the RPC server loop on stdin/stdout.
 pub fn run(root: Box<dyn RpcNode>) {
+    log::debug!("Starting RPC server on stdio");
     let stdout = Arc::new(Mutex::new(std::io::stdout()));
 
     let send: SendFn = {
@@ -54,6 +54,7 @@ pub fn run(root: Box<dyn RpcNode>) {
 
 /// Run the RPC server loop over TCP.
 pub fn run_tcp(root: Box<dyn RpcNode>, port: u16, nonce: &str) {
+    log::debug!("Starting RPC server on TCP port {port}");
     let mut sock = TcpStream::connect(("127.0.0.1", port)).expect("Failed to connect to TCP port");
     // Send nonce for authentication
     sock.write_all(nonce.as_bytes()).unwrap();
@@ -191,6 +192,10 @@ pub fn run_rpc_loop(root: Box<dyn RpcNode>, send: SendFn, mut recv: RecvLine) {
 
         match host.call(&action, &target, params, &signal_fn, &cancel) {
             Ok(response) => {
+                log::debug!(
+                    "RPC {action} [{target}] → success",
+                    target = target.join("/")
+                );
                 send(json!({
                     "kind": "success",
                     "body": response.body,
@@ -198,6 +203,12 @@ pub fn run_rpc_loop(root: Box<dyn RpcNode>, send: SendFn, mut recv: RecvLine) {
                 }));
             }
             Err(e) => {
+                log::debug!(
+                    "RPC {action} [{target}] → error: {status} {msg}",
+                    target = target.join("/"),
+                    status = e.status,
+                    msg = e.message
+                );
                 send_err(&e.status, &e.message, e.body);
             }
         }

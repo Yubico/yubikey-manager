@@ -9,7 +9,7 @@ use yubikit::management::Capability;
 
 use super::connection::ConnectionNode;
 use super::error::{RpcError, RpcResponse};
-use super::rpc::{RpcNode, SignalFn};
+use super::node::{RpcNode, SignalFn};
 
 /// Root RPC node representing a single YubiKey device.
 pub struct DeviceNode {
@@ -146,6 +146,7 @@ impl RpcNode for DeviceNode {
     ) -> Result<RpcResponse, RpcError> {
         match action {
             "reinsert" => {
+                log::debug!("Reinsert requested");
                 self.device
                     .reinsert(
                         &|status| match status {
@@ -161,6 +162,7 @@ impl RpcNode for DeviceNode {
                     .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
                 // Invalidate all cached children since connections are stale.
                 self.generation += 1;
+                log::info!("Device reinserted, generation {}", self.generation);
                 Ok(RpcResponse::new(json!({})))
             }
             _ => Err(RpcError::no_such_action(action)),
@@ -168,6 +170,7 @@ impl RpcNode for DeviceNode {
     }
 
     fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
+        log::debug!("Opening {name} connection");
         let child: Box<dyn RpcNode> = match name {
             "ccid" => {
                 let conn = self.device.open_smartcard().map_err(|e| {

@@ -250,6 +250,7 @@ impl RpcDevice {
     ///
     /// Reads device info and available connections from the root node.
     pub fn new(mut client: RpcClient) -> Result<Self, CliError> {
+        log::debug!("Initializing RPC device");
         let root = client
             .get(&[])
             .map_err(|e| CliError(format!("Failed to get root node: {e}")))?;
@@ -273,6 +274,9 @@ impl RpcDevice {
 
         let info = Self::read_device_info(&data);
 
+        log::debug!(
+            "RPC device: {name}, transport={transport:?}, ccid={has_ccid}, ctap={has_ctap}, otp={has_otp}"
+        );
         Ok(Self {
             client: Rc::new(RefCell::new(client)),
             info,
@@ -419,6 +423,7 @@ impl YubiKeyDevice for RpcDevice {
         if !self.has_ccid {
             return Err(DeviceError::NoDeviceFound);
         }
+        log::debug!("Opening RPC SmartCard connection");
         Ok(Box::new(RpcSmartCardConnection {
             client: self.client.clone(),
             transport: self.transport,
@@ -429,6 +434,7 @@ impl YubiKeyDevice for RpcDevice {
         if !self.has_ctap {
             return Err(DeviceError::NoDeviceFound);
         }
+        log::debug!("Opening RPC FIDO connection");
         let conn = RpcFidoConnection::from_client(self.client.clone()).map_err(|e| {
             DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(e.0))))
         })?;
@@ -439,6 +445,7 @@ impl YubiKeyDevice for RpcDevice {
         if !self.has_otp {
             return Err(DeviceError::NoDeviceFound);
         }
+        log::debug!("Opening RPC OTP connection");
         Ok(Box::new(RpcOtpConnection {
             client: self.client.clone(),
         }))
@@ -449,6 +456,7 @@ impl YubiKeyDevice for RpcDevice {
         status_cb: &dyn Fn(ReinsertStatus),
         _cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DeviceError> {
+        log::debug!("Requesting reinsert via RPC");
         let signal_handler = |status: &str, body: &Value| {
             if status == "reinsert" {
                 match body.get("state").and_then(|v| v.as_str()) {
