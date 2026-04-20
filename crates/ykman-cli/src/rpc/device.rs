@@ -89,13 +89,17 @@ impl RpcNode for DeviceNode {
             "challenge_response_timeout": info.config.challenge_response_timeout,
             "device_flags": info.config.device_flags.map(|f| f.0),
             "nfc_restricted": info.config.nfc_restricted,
+            "usb_interfaces": self.device.usb_interfaces().0,
         })
     }
 
     fn list_children(&mut self) -> BTreeMap<String, Value> {
+        use yubikit::management::UsbInterface;
+
         let mut children = BTreeMap::new();
         let info = self.device.info();
         let transport = self.device.transport();
+        let usb_ifaces = self.device.usb_interfaces();
 
         let supported = info
             .supported_capabilities
@@ -103,28 +107,16 @@ impl RpcNode for DeviceNode {
             .copied()
             .unwrap_or(Capability::NONE);
 
-        // Any SmartCard-based application implies CCID is available
-        let has_ccid = transport == Transport::Nfc
-            || supported.0
-                & (Capability::OATH.0
-                    | Capability::PIV.0
-                    | Capability::OPENPGP.0
-                    | Capability::HSMAUTH.0
-                    | Capability::FIDO2.0)
-                != 0;
-
-        if has_ccid {
+        if transport == Transport::Nfc || usb_ifaces.contains(UsbInterface::CCID) {
             let has_fido2 = supported.contains(Capability::FIDO2);
             children.insert("ccid".to_string(), json!({"fido2": has_fido2}));
         }
 
-        // CTAP HID is available when FIDO2 is supported over USB
-        if transport == Transport::Usb && supported.contains(Capability::FIDO2) {
+        if transport == Transport::Usb && usb_ifaces.contains(UsbInterface::FIDO) {
             children.insert("ctap".to_string(), json!({"fido2": true}));
         }
 
-        // OTP HID is available when OTP is supported over USB
-        if transport == Transport::Usb && supported.contains(Capability::OTP) {
+        if transport == Transport::Usb && usb_ifaces.contains(UsbInterface::OTP) {
             children.insert("otp".to_string(), json!({}));
         }
 

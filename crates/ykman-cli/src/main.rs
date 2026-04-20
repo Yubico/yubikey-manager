@@ -1644,33 +1644,54 @@ fn get_device(
     serial: Option<u32>,
     rpc_global_args: &[String],
 ) -> Result<Box<dyn YubiKeyDevice>, CliError> {
-    if should_use_rpc() {
-        let elevate = cfg!(target_os = "windows") && !is_admin();
-        let client = rpc::client::RpcClient::spawn(rpc_global_args, elevate)?;
-        let dev = rpc::proxy::RpcDevice::new(client)?;
-        apply_version_override(&dev);
-        Ok(Box::new(dev))
-    } else {
-        let dev = require_device(serial)?;
-        Ok(Box::new(dev))
-    }
+    get_device_with_policy(serial, rpc_global_args, RpcPolicy::Default)
 }
 
-/// Returns true if commands should use the RPC mechanism.
-///
-/// On Windows, this is true when the current process is not running as
-/// administrator, since FIDO HID access requires elevation.
-/// On other platforms, this is controlled by the `RPC` environment variable
-/// (for development/testing purposes only).
-fn should_use_rpc() -> bool {
+/// Policy for when to use RPC on Windows (non-admin).
+enum RpcPolicy {
+    /// Use RPC only if the device has no non-FIDO USB interface.
+    Default,
+    /// Always use RPC (for FIDO commands that require HID access).
+    AlwaysFido,
+}
+
+fn get_device_with_policy(
+    serial: Option<u32>,
+    rpc_global_args: &[String],
+    policy: RpcPolicy,
+) -> Result<Box<dyn YubiKeyDevice>, CliError> {
+    // RPC=1 forces RPC on any OS
+    if std::env::var("RPC").ok().as_deref() == Some("1") {
+        return spawn_rpc_device(rpc_global_args);
+    }
+
+    // On Windows without admin, decide based on policy
     #[cfg(target_os = "windows")]
-    {
-        !is_admin()
+    if !is_admin() {
+        match policy {
+            RpcPolicy::AlwaysFido => return spawn_rpc_device(rpc_global_args),
+            RpcPolicy::Default => {
+                // Check if the device only has FIDO over USB
+                let dev = require_device(serial)?;
+                if dev.transport() == Transport::Usb && dev.usb_interfaces() == UsbInterface::FIDO {
+                    return spawn_rpc_device(rpc_global_args);
+                }
+                return Ok(Box::new(dev));
+            }
+        }
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var("RPC").ok().as_deref() == Some("2")
-    }
+
+    let _ = policy;
+    let dev = require_device(serial)?;
+    Ok(Box::new(dev))
+}
+
+fn spawn_rpc_device(rpc_global_args: &[String]) -> Result<Box<dyn YubiKeyDevice>, CliError> {
+    let elevate = cfg!(target_os = "windows") && !is_admin();
+    let client = rpc::client::RpcClient::spawn(rpc_global_args, elevate)?;
+    let dev = rpc::proxy::RpcDevice::new(client)?;
+    apply_version_override(&dev);
+    Ok(Box::new(dev))
 }
 
 fn is_admin() -> bool {
@@ -1955,30 +1976,6 @@ fn build_rpc_global_args(cli: &Cli) -> Vec<String> {
     if let Some(level) = cli.log_level {
         args.push("--log-level".to_string());
         args.push(format!("{level:?}").to_lowercase());
-    }
-    for cred in &cli.scp_cred {
-        args.push("--scp".to_string());
-        args.push(cred.clone());
-    }
-    if let Some(ref ca) = cli.scp_ca {
-        args.push("--scp-ca".to_string());
-        args.push(ca.clone());
-    }
-    if let Some(ref sd) = cli.scp_sd {
-        args.push("--scp-sd".to_string());
-        for v in sd {
-            args.push(v.clone());
-        }
-    }
-    if let Some(ref oce) = cli.scp_oce {
-        args.push("--scp-oce".to_string());
-        for v in oce {
-            args.push(v.clone());
-        }
-    }
-    if let Some(ref pw) = cli.scp_password {
-        args.push("--scp-password".to_string());
-        args.push(pw.clone());
     }
     args
 }
@@ -2718,7 +2715,8 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Fido { action } => {
-            let mut dev = get_device(cli.device, &rpc_global_args)?;
+            let mut dev =
+                get_device_with_policy(cli.device, &rpc_global_args, RpcPolicy::AlwaysFido)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
             match action {
