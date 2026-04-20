@@ -770,14 +770,9 @@ class PivSession(Session):
         :param check_only: Do not verify the user, instead immediately throw an
             InvalidPinException containing the number of remaining attempts.
         """
-        if temporary_pin and check_only:
-            raise ValueError(
-                "Cannot request temporary PIN when doing check-only verification"
-            )
-
         result = self._native.verify_uv(temporary_pin, check_only)
         if result is not None:
-            return bytes(result)
+            return result
         return None
 
     def verify_temporary_pin(self, pin: bytes) -> None:
@@ -877,7 +872,7 @@ class PivSession(Session):
             PIN_POLICY(pin_policy),
             TOUCH_POLICY(touch_policy),
             generated,
-            bytes(public_key_encoded),
+            public_key_encoded,
         )
 
     def get_bio_metadata(self) -> BioMetadata:
@@ -911,7 +906,7 @@ class PivSession(Session):
         slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
         padded = _pad_message(key_type, message, hash_algorithm, padding)
-        return bytes(self._native.sign(int(slot), int(key_type), padded))
+        return self._native.sign(int(slot), int(key_type), padded)
 
     def decrypt(
         self, slot: SLOT, cipher_text: bytes, padding: AsymmetricPadding
@@ -925,11 +920,7 @@ class PivSession(Session):
         :param padding: The padding of the plain text.
         """
         slot = SLOT(slot)
-        try:
-            getattr(KEY_TYPE, f"RSA{len(cipher_text) * 8}")
-        except AttributeError:
-            raise ValueError("Invalid length of ciphertext")
-        padded = bytes(self._native.decrypt(int(slot), cipher_text))
+        padded = self._native.decrypt(int(slot), cipher_text)
         return _unpad_message(padded, padding)
 
     def calculate_secret(
@@ -948,15 +939,13 @@ class PivSession(Session):
         """
         slot = SLOT(slot)
         key_type = KEY_TYPE.from_public_key(peer_public_key)
-        if key_type.algorithm != ALGORITHM.EC:
-            raise ValueError("Unsupported key type")
         if key_type == KEY_TYPE.X25519:
             data = peer_public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
         else:
             data = peer_public_key.public_bytes(
                 Encoding.X962, PublicFormat.UncompressedPoint
             )
-        return bytes(self._native.calculate_secret(int(slot), int(key_type), data))
+        return self._native.calculate_secret(int(slot), int(key_type), data)
 
     def get_object(self, object_id: int) -> bytes:
         """Get object by ID.
@@ -965,7 +954,7 @@ class PivSession(Session):
 
         :param object_id: The object identifier.
         """
-        return bytes(self._native.get_object(object_id))
+        return self._native.get_object(object_id)
 
     def put_object(self, object_id: int, data: bytes | None = None) -> None:
         """Write data to PIV object.
@@ -983,7 +972,7 @@ class PivSession(Session):
         :param slot: The slot to get the certificate from.
         """
         slot = SLOT(slot)
-        der_bytes = bytes(self._native.get_certificate(int(slot)))
+        der_bytes = self._native.get_certificate(int(slot))
         try:
             return x509.load_der_x509_certificate(der_bytes, default_backend())
         except Exception as e:
@@ -1032,8 +1021,6 @@ class PivSession(Session):
         """
         slot = SLOT(slot)
         key_type = KEY_TYPE.from_public_key(private_key.public_key())
-        self.check_key_support(key_type, pin_policy, touch_policy, False)
-
         if key_type.algorithm == ALGORITHM.RSA:
             key_der = private_key.private_bytes(
                 Encoding.DER, PrivateFormat.TraditionalOpenSSL, NoEncryption()
@@ -1077,18 +1064,14 @@ class PivSession(Session):
         """
         slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
-        self.check_key_support(key_type, pin_policy, touch_policy, True)
-
         logger.debug(
             f"Generating key with pin_policy={pin_policy}, touch_policy={touch_policy}"
         )
-        spki_der = bytes(
-            self._native.generate_key(
-                int(slot),
-                int(key_type),
-                int(pin_policy),
-                int(touch_policy),
-            )
+        spki_der = self._native.generate_key(
+            int(slot),
+            int(key_type),
+            int(pin_policy),
+            int(touch_policy),
         )
 
         return load_der_public_key(spki_der)  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
@@ -1099,9 +1082,8 @@ class PivSession(Session):
         :param slot: The slot where the key has been generated.
         :return: A X.509 certificate.
         """
-        require_version(self.version, (4, 3, 0))
         slot = SLOT(slot)
-        der_bytes = bytes(self._native.attest_key(int(slot)))
+        der_bytes = self._native.attest_key(int(slot))
         return x509.load_der_x509_certificate(der_bytes, default_backend())
 
     def move_key(self, from_slot: SLOT, to_slot: SLOT) -> None:
@@ -1112,7 +1094,6 @@ class PivSession(Session):
         :param from_slot: The slot containing the key to move.
         :param to_slot: The new slot to move the key to.
         """
-        require_version(self.version, (5, 7, 0))
         from_slot = SLOT(from_slot)
         to_slot = SLOT(to_slot)
         self._native.move_key(int(from_slot), int(to_slot))
@@ -1124,7 +1105,6 @@ class PivSession(Session):
 
         :param slot: The slot containing the key to delete.
         """
-        require_version(self.version, (5, 7, 0))
         slot = SLOT(slot)
         self._native.delete_key(int(slot))
 

@@ -84,9 +84,7 @@ class CredentialData:
         )
 
     def get_id(self) -> bytes:
-        return bytes(
-            _format_cred_id(self.issuer, self.name, int(self.oath_type), self.period)
-        )
+        return _format_cred_id(self.issuer, self.name, self.oath_type, self.period)
 
 
 @dataclass
@@ -128,7 +126,7 @@ class Credential:
 
 
 def _format_cred_id(issuer, name, oath_type, period=DEFAULT_PERIOD):
-    return bytes(_format_cred_id_native(issuer, name, int(oath_type), period))
+    return _format_cred_id_native(issuer, name, oath_type, period)
 
 
 class OathSession(Session):
@@ -184,7 +182,7 @@ class OathSession(Session):
 
         :param password: The derivation password.
         """
-        return bytes(self._native.derive_key(password))
+        return self._native.derive_key(password)
 
     def validate(self, key: bytes) -> None:
         """Validate authentication with access key.
@@ -220,8 +218,8 @@ class OathSession(Session):
         d = credential_data
         result = self._native.put_credential(
             name=d.name,
-            oath_type=int(d.oath_type),
-            hash_algorithm=int(d.hash_algorithm),
+            oath_type=d.oath_type,
+            hash_algorithm=d.hash_algorithm,
             secret=d.secret,
             digits=d.digits,
             period=d.period,
@@ -248,8 +246,7 @@ class OathSession(Session):
         :param name: The new name of the credential.
         :param issuer: The credential issuer.
         """
-        result = self._native.rename_credential(credential_id, name, issuer)
-        return bytes(result)
+        return self._native.rename_credential(credential_id, name, issuer)
 
     def list_credentials(self) -> list[Credential]:
         """List OATH credentials."""
@@ -264,7 +261,7 @@ class OathSession(Session):
         :param credential_id: The id of the credential.
         :param challenge: The challenge.
         """
-        return bytes(self._native.calculate(credential_id, challenge))
+        return self._native.calculate(credential_id, challenge)
 
     def delete_credential(self, credential_id: bytes) -> None:
         """Delete an OATH credential.
@@ -304,9 +301,6 @@ class OathSession(Session):
         :param credential: The credential object.
         :param timestamp: The timestamp.
         """
-        if credential.device_id != self.device_id:
-            raise ValueError("Credential does not belong to this YubiKey")
-
         timestamp = int(timestamp or time())
 
         result = self._native.calculate_code(
@@ -314,7 +308,7 @@ class OathSession(Session):
             cred_id=credential.id,
             issuer=credential.issuer,
             name=credential.name,
-            oath_type=int(credential.oath_type),
+            oath_type=credential.oath_type,
             period=credential.period,
             touch_required=credential.touch_required,
             timestamp=timestamp,

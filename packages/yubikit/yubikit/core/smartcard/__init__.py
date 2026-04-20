@@ -35,7 +35,7 @@ from _yubikit_native.core import SmartCardProtocol as _NativeSmartCardProtocol
 from .. import (
     TRANSPORT,
     USB_INTERFACE,
-    ApplicationNotAvailableError,
+    ApplicationNotAvailableError,  # noqa: F401 - re-exported
     BadResponseError,
     Closable,
     CommandError,
@@ -180,26 +180,14 @@ class SmartCardProtocol(Closable):
         :param le: The maximum number of bytes in the data
             field of the response.
         """
-        return bytes(self._native.send_apdu(cla, ins, p1, p2, data, le))
+        return self._native.send_apdu(cla, ins, p1, p2, data, le)
 
     def select(self, aid: bytes) -> bytes:
         """Perform a SELECT instruction.
 
         :param aid: The YubiKey application AID value.
         """
-        try:
-            return bytes(self._native.select(aid))
-        except ApplicationNotAvailableError:
-            raise
-        except ApduError as e:
-            if e.sw in (
-                SW.FILE_NOT_FOUND,
-                SW.APPLET_SELECT_FAILED,
-                SW.INVALID_INSTRUCTION,
-                SW.WRONG_PARAMETERS_P1P2,
-            ):
-                raise ApplicationNotAvailableError()
-            raise
+        return self._native.select(aid)
 
     def init_scp(self, key_params: ScpKeyParams) -> None:
         """Initialize SCP03/SCP11 secure messaging."""

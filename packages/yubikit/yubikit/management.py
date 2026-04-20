@@ -437,10 +437,6 @@ class ManagementSession(Session):
         :param new_lock_code: New lock code.
         """
         require_version(self.version, (5, 0, 0))
-        if cur_lock_code is not None and len(cur_lock_code) != 16:
-            raise ValueError("Lock code must be 16 bytes")
-        if new_lock_code is not None and len(new_lock_code) != 16:
-            raise ValueError("Lock code must be 16 bytes")
         config = config or DeviceConfig()
         logger.debug(
             f"Writing device config: {config}, reboot: {reboot}, "

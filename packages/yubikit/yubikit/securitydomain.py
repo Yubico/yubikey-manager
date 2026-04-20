@@ -94,7 +94,7 @@ class SecurityDomainSession(Session):
 
     def get_data(self, tag: int, data: bytes = b"") -> bytes:
         """Read data from the security domain."""
-        return bytes(self._native.get_data(tag, data))
+        return self._native.get_data(tag, data)
 
     def get_key_information(self) -> Mapping[KeyRef, Mapping[int, int]]:
         """Get information about the currently loaded keys."""
@@ -103,7 +103,7 @@ class SecurityDomainSession(Session):
 
     def get_card_recognition_data(self) -> bytes:
         """Get information about the card."""
-        return bytes(self._native.get_card_recognition_data())
+        return self._native.get_card_recognition_data()
 
     def get_supported_ca_identifiers(
         self, kloc: bool = False, klcc: bool = False
@@ -117,7 +117,7 @@ class SecurityDomainSession(Session):
         :param klcc: Get KLCC CAs.
         """
         raw = self._native.get_supported_ca_identifiers(kloc, klcc)
-        return {KeyRef(kid, kvn): bytes(v) for (kid, kvn), v in raw.items()}
+        return {KeyRef(kid, kvn): v for (kid, kvn), v in raw.items()}
 
     def get_certificate_bundle(self, key: KeyRef) -> Sequence[x509.Certificate]:
         """Get the certificates associated with the given SCP11 private key.
@@ -184,14 +184,6 @@ class SecurityDomainSession(Session):
         All keys matching the given KID and/or KVN will be deleted.
         To delete the final key you must set delete_last = True.
         """
-        if not kid and not kvn:
-            raise ValueError("Must specify at least one of kid, kvn.")
-
-        if kid in (1, 2, 3):
-            if kvn:
-                kid = 0
-            else:
-                raise ValueError("SCP03 keys can only be deleted by KVN")
         self._native.delete_key(kid, kvn, delete_last)
 
     def generate_ec_key(
@@ -207,8 +199,8 @@ class SecurityDomainSession(Session):
             f"Generating new key for {key}"
             + (f", replacing KVN={replace_kvn}" if replace_kvn else "")
         )
-        encoded_point = bytes(
-            self._native.generate_ec_key(key.kid, key.kvn, int(curve), replace_kvn)
+        encoded_point = self._native.generate_ec_key(
+            key.kid, key.kvn, int(curve), replace_kvn
         )
         return ec.EllipticCurvePublicKey.from_encoded_point(curve._curve, encoded_point)
 

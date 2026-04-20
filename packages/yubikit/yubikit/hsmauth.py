@@ -34,10 +34,7 @@ from enum import IntEnum, unique
 from functools import total_ordering
 from typing import NamedTuple
 
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from _yubikit_native.sessions import HsmAuthSession as _NativeHsmAuthSession
 
@@ -92,47 +89,9 @@ class ALGORITHM(IntEnum):
 
 def _parse_credential_password(credential_password: bytes | str) -> bytes:
     if isinstance(credential_password, str):
-        pw = credential_password.encode().ljust(CREDENTIAL_PASSWORD_LEN, b"\0")
+        return credential_password.encode().ljust(CREDENTIAL_PASSWORD_LEN, b"\0")
     else:
-        pw = bytes(credential_password)
-
-    if len(pw) != CREDENTIAL_PASSWORD_LEN:
-        raise ValueError(
-            "Credential password must be %d bytes long" % CREDENTIAL_PASSWORD_LEN
-        )
-    return pw
-
-
-def _parse_label(label: str) -> bytes:
-    try:
-        parsed_label = label.encode()
-    except Exception:
-        raise ValueError(label)
-
-    if len(parsed_label) < MIN_LABEL_LEN or len(parsed_label) > MAX_LABEL_LEN:
-        raise ValueError(
-            "Label must be between %d and %d bytes long"
-            % (MIN_LABEL_LEN, MAX_LABEL_LEN)
-        )
-    return parsed_label
-
-
-def _password_to_key(password: str) -> tuple[bytes, bytes]:
-    """Derive encryption and MAC key from a password.
-
-    :return: A tuple containing the encryption key, and MAC key.
-    """
-    pw_bytes = password.encode()
-
-    key = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=b"Yubico",
-        iterations=10000,
-        backend=default_backend(),
-    ).derive(pw_bytes)
-    key_enc, key_mac = key[:16], key[16:]
-    return key_enc, key_mac
+        return bytes(credential_password)
 
 
 @total_ordering
@@ -319,9 +278,7 @@ class HsmAuthSession(Session):
         require_version(self.version, (5, 6, 0))
 
         sec1_bytes = self._native.get_public_key(label)
-        return ec.EllipticCurvePublicKey.from_encoded_point(
-            ec.SECP256R1(), bytes(sec1_bytes)
-        )
+        return ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), sec1_bytes)
 
     def delete_credential(self, management_key: bytes, label: str) -> None:
         """Delete a YubiHSM Auth credential.
@@ -402,9 +359,9 @@ class HsmAuthSession(Session):
             label, context, pw, card_crypto
         )
         return SessionKeys(
-            key_senc=bytes(result[0]),
-            key_smac=bytes(result[1]),
-            key_srmac=bytes(result[2]),
+            key_senc=result[0],
+            key_smac=result[1],
+            key_srmac=result[2],
         )
 
     def calculate_session_keys_asymmetric(
@@ -441,9 +398,9 @@ class HsmAuthSession(Session):
             label, context, public_key_data, pw, card_crypto
         )
         return SessionKeys(
-            key_senc=bytes(result[0]),
-            key_smac=bytes(result[1]),
-            key_srmac=bytes(result[2]),
+            key_senc=result[0],
+            key_smac=result[1],
+            key_srmac=result[2],
         )
 
     def get_challenge(
@@ -463,4 +420,4 @@ class HsmAuthSession(Session):
         pw: bytes | None = None
         if credential_password is not None:
             pw = _parse_credential_password(credential_password)
-        return bytes(self._native.get_challenge(label, pw))
+        return self._native.get_challenge(label, pw)
