@@ -101,9 +101,6 @@ impl YubiOtpError {
 impl From<SmartCardError> for YubiOtpError<SmartCardError> {
     fn from(e: SmartCardError) -> Self {
         match e {
-            SmartCardError::ApplicationNotAvailable => {
-                YubiOtpError::NotSupported("Application not available".into())
-            }
             SmartCardError::NotSupported(msg) => YubiOtpError::NotSupported(msg),
             SmartCardError::InvalidData(msg) => YubiOtpError::InvalidData(msg),
             other => YubiOtpError::Connection(other),

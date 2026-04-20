@@ -135,9 +135,6 @@ pub enum OpenPgpError {
 impl From<SmartCardError> for OpenPgpError {
     fn from(e: SmartCardError) -> Self {
         match e {
-            SmartCardError::ApplicationNotAvailable => {
-                OpenPgpError::NotSupported("Application not available".into())
-            }
             SmartCardError::NotSupported(msg) => OpenPgpError::NotSupported(msg),
             SmartCardError::InvalidData(msg) => OpenPgpError::InvalidData(msg),
             other => OpenPgpError::Connection(other),

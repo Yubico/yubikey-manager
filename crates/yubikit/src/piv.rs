@@ -101,9 +101,6 @@ pub enum PivError {
 impl From<SmartCardError> for PivError {
     fn from(e: SmartCardError) -> Self {
         match e {
-            SmartCardError::ApplicationNotAvailable => {
-                PivError::NotSupported("Application not available".into())
-            }
             SmartCardError::NotSupported(msg) => PivError::NotSupported(msg),
             SmartCardError::InvalidData(msg) => PivError::InvalidData(msg),
             other => PivError::Connection(other),

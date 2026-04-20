@@ -197,9 +197,6 @@ pub enum OathError {
 impl From<SmartCardError> for OathError {
     fn from(e: SmartCardError) -> Self {
         match e {
-            SmartCardError::ApplicationNotAvailable => {
-                OathError::NotSupported("Application not available".into())
-            }
             SmartCardError::NotSupported(msg) => OathError::NotSupported(msg),
             SmartCardError::InvalidData(msg) => OathError::InvalidData(msg),
             other => OathError::Connection(other),

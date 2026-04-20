@@ -5,11 +5,45 @@ use yubikit::transport::ctaphid::list_fido_devices;
 use crate::py_bridge::{
     BoxedFidoConnection, BoxedOtpConnection, BoxedSmartCardConnection, extract_fido_connection,
     extract_otp_connection, extract_smartcard_connection, restore_fido_connection,
-    restore_otp_connection, restore_smartcard_connection, scp_key_params_from_py,
+    restore_otp_connection, restore_smartcard_connection, scp_key_params_from_py, smartcard_err,
 };
 
 fn management_err(e: impl std::fmt::Display) -> PyErr {
     pyo3::exceptions::PyOSError::new_err(e.to_string())
+}
+
+fn management_ccid_err(
+    e: yubikit::management::ManagementError<yubikit::smartcard::SmartCardError>,
+) -> PyErr {
+    use pyo3::exceptions::*;
+    match e {
+        yubikit::management::ManagementError::Connection(sc) => smartcard_err(sc),
+        yubikit::management::ManagementError::NotSupported(msg) => {
+            Python::with_gil(|py| match py.import("yubikit.core") {
+                Ok(module) => match module.getattr("NotSupportedError") {
+                    Ok(cls) => match cls.call1((msg.clone(),)) {
+                        Ok(exc) => PyErr::from_value(exc),
+                        Err(_) => PyRuntimeError::new_err(msg),
+                    },
+                    Err(_) => PyRuntimeError::new_err(msg),
+                },
+                Err(_) => PyRuntimeError::new_err(msg),
+            })
+        }
+        yubikit::management::ManagementError::InvalidData(msg) => {
+            Python::with_gil(|py| match py.import("yubikit.core") {
+                Ok(module) => match module.getattr("BadResponseError") {
+                    Ok(cls) => match cls.call1((msg.clone(),)) {
+                        Ok(exc) => PyErr::from_value(exc),
+                        Err(_) => PyRuntimeError::new_err(msg),
+                    },
+                    Err(_) => PyRuntimeError::new_err(msg),
+                },
+                Err(_) => PyRuntimeError::new_err(msg),
+            })
+        }
+        other => management_err(other),
+    }
 }
 
 pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObject> {
@@ -103,13 +137,13 @@ impl ManagementSessionCcid {
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
             let inner = ManagementSession::new_with_scp(conn, &scp_params)
-                .map_err(|(e, _)| management_err(e))?;
+                .map_err(|(e, _)| management_ccid_err(e))?;
             Ok(Self {
                 inner: Some(inner),
                 py_connection,
             })
         } else {
-            let inner = ManagementSession::new(conn).map_err(|(e, _)| management_err(e))?;
+            let inner = ManagementSession::new(conn).map_err(|(e, _)| management_ccid_err(e))?;
             Ok(Self {
                 inner: Some(inner),
                 py_connection,
@@ -136,7 +170,7 @@ impl ManagementSessionCcid {
         let info = self
             .session_mut()?
             .read_device_info()
-            .map_err(management_err)?;
+            .map_err(management_ccid_err)?;
         device_info_to_dict(py, &info)
     }
 
@@ -186,7 +220,7 @@ impl ManagementSessionCcid {
 
         self.session_mut()?
             .write_device_config(&config, reboot, cur_lock_code, new_lock_code)
-            .map_err(management_err)
+            .map_err(management_ccid_err)
     }
 
     fn set_mode(
@@ -197,11 +231,13 @@ impl ManagementSessionCcid {
     ) -> PyResult<()> {
         self.session_mut()?
             .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
-            .map_err(management_err)
+            .map_err(management_ccid_err)
     }
 
     fn device_reset(&mut self) -> PyResult<()> {
-        self.session_mut()?.device_reset().map_err(management_err)
+        self.session_mut()?
+            .device_reset()
+            .map_err(management_ccid_err)
     }
 }
 

@@ -30,7 +30,18 @@ fn hsmauth_err(e: hsmauth::HsmAuthError) -> PyErr {
                 }
             })
         }
-        hsmauth::HsmAuthError::NotSupported(msg) => PyRuntimeError::new_err(msg),
+        hsmauth::HsmAuthError::NotSupported(msg) => {
+            Python::with_gil(|py| match py.import("yubikit.core") {
+                Ok(module) => match module.getattr("NotSupportedError") {
+                    Ok(cls) => match cls.call1((msg.clone(),)) {
+                        Ok(exc) => PyErr::from_value(exc),
+                        Err(_) => PyRuntimeError::new_err(msg),
+                    },
+                    Err(_) => PyRuntimeError::new_err(msg),
+                },
+                Err(_) => PyRuntimeError::new_err(msg),
+            })
+        }
         hsmauth::HsmAuthError::InvalidData(msg) => PyValueError::new_err(msg),
         other => PyRuntimeError::new_err(other.to_string()),
     }

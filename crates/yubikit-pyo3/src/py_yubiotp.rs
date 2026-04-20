@@ -5,7 +5,7 @@ use yubikit::yubiotp::{self, ConfigSlot, NdefType, Slot, YubiOtpSession};
 use crate::py_bridge::{
     BoxedOtpConnection, BoxedSmartCardConnection, extract_otp_connection,
     extract_smartcard_connection, restore_otp_connection, restore_smartcard_connection,
-    scp_key_params_from_py,
+    scp_key_params_from_py, smartcard_err,
 };
 
 fn yubiotp_err<E: std::fmt::Debug + std::fmt::Display>(e: yubiotp::YubiOtpError<E>) -> PyErr {
@@ -26,6 +26,13 @@ fn yubiotp_err<E: std::fmt::Debug + std::fmt::Display>(e: yubiotp::YubiOtpError<
         yubiotp::YubiOtpError::InvalidData(msg) => PyValueError::new_err(msg),
         yubiotp::YubiOtpError::Connection(e) => PyRuntimeError::new_err(e.to_string()),
         other => PyRuntimeError::new_err(other.to_string()),
+    }
+}
+
+fn yubiotp_ccid_err(e: yubiotp::YubiOtpError<yubikit::smartcard::SmartCardError>) -> PyErr {
+    match e {
+        yubiotp::YubiOtpError::Connection(sc) => smartcard_err(sc),
+        other => yubiotp_err(other),
     }
 }
 
@@ -85,14 +92,14 @@ impl PyYubiOtpSessionCcid {
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
-            let session =
-                YubiOtpSession::new_with_scp(conn, &scp_params).map_err(|(e, _)| yubiotp_err(e))?;
+            let session = YubiOtpSession::new_with_scp(conn, &scp_params)
+                .map_err(|(e, _)| yubiotp_ccid_err(e))?;
             Ok(Self {
                 session: Some(session),
                 py_connection,
             })
         } else {
-            let session = YubiOtpSession::new(conn).map_err(|(e, _)| yubiotp_err(e))?;
+            let session = YubiOtpSession::new(conn).map_err(|(e, _)| yubiotp_ccid_err(e))?;
             Ok(Self {
                 session: Some(session),
                 py_connection,
@@ -115,7 +122,7 @@ impl PyYubiOtpSessionCcid {
     }
 
     fn get_serial(&mut self) -> PyResult<u32> {
-        self.session_mut()?.get_serial().map_err(yubiotp_err)
+        self.session_mut()?.get_serial().map_err(yubiotp_ccid_err)
     }
 
     /// Returns (version_tuple, flags).
@@ -138,7 +145,7 @@ impl PyYubiOtpSessionCcid {
         let config_slot = s.map(ConfigSlot::Config1, ConfigSlot::Config2);
         self.session_mut()?
             .write_config(config_slot, config, cur_acc_code)
-            .map_err(yubiotp_err)
+            .map_err(yubiotp_ccid_err)
     }
 
     #[pyo3(signature = (slot, config, acc_code=None, cur_acc_code=None))]
@@ -154,11 +161,11 @@ impl PyYubiOtpSessionCcid {
         let config_slot = s.map(ConfigSlot::Update1, ConfigSlot::Update2);
         self.session_mut()?
             .write_config(config_slot, config, cur_acc_code)
-            .map_err(yubiotp_err)
+            .map_err(yubiotp_ccid_err)
     }
 
     fn swap_slots(&mut self) -> PyResult<()> {
-        self.session_mut()?.swap_slots().map_err(yubiotp_err)
+        self.session_mut()?.swap_slots().map_err(yubiotp_ccid_err)
     }
 
     #[pyo3(signature = (slot, cur_acc_code=None))]
@@ -166,14 +173,14 @@ impl PyYubiOtpSessionCcid {
         let s = parse_slot(slot)?;
         self.session_mut()?
             .delete_slot(s, cur_acc_code)
-            .map_err(yubiotp_err)
+            .map_err(yubiotp_ccid_err)
     }
 
     #[pyo3(signature = (scan_map, cur_acc_code=None))]
     fn set_scan_map(&mut self, scan_map: &[u8], cur_acc_code: Option<&[u8]>) -> PyResult<()> {
         self.session_mut()?
             .set_scan_map(scan_map, cur_acc_code)
-            .map_err(yubiotp_err)
+            .map_err(yubiotp_ccid_err)
     }
 
     #[pyo3(signature = (slot, ndef_type, uri=None, cur_acc_code=None))]
@@ -188,7 +195,7 @@ impl PyYubiOtpSessionCcid {
         let nt = parse_ndef_type(ndef_type)?;
         self.session_mut()?
             .set_ndef_configuration(s, uri, cur_acc_code, nt)
-            .map_err(yubiotp_err)
+            .map_err(yubiotp_ccid_err)
     }
 
     fn calculate_hmac_sha1<'py>(
@@ -201,7 +208,7 @@ impl PyYubiOtpSessionCcid {
         let result = self
             .session_mut()?
             .calculate_hmac_sha1(s, challenge)
-            .map_err(yubiotp_err)?;
+            .map_err(yubiotp_ccid_err)?;
         Ok(PyBytes::new(py, &result))
     }
 }
