@@ -187,7 +187,6 @@ class HsmAuthSession(Session):
     def reset(self) -> None:
         """Perform a factory reset on the YubiHSM Auth application."""
         self._native.reset()
-        logger.info("YubiHSM Auth application data reset performed")
 
     def list_credentials(self) -> list[Credential]:
         """List YubiHSM Auth credentials on YubiKey"""
@@ -223,7 +222,6 @@ class HsmAuthSession(Session):
         result = self._native.put_credential_symmetric(
             management_key, label, key_enc, key_mac, pw, touch_required
         )
-        logger.info("Credential imported")
         return Credential(result[0], ALGORITHM(result[1]), result[2], result[3])
 
     def put_credential_derived(
@@ -248,7 +246,6 @@ class HsmAuthSession(Session):
         result = self._native.put_credential_derived(
             management_key, label, derivation_password, pw, touch_required
         )
-        logger.info("Credential imported")
         return Credential(result[0], ALGORITHM(result[1]), result[2], result[3])
 
     def put_credential_asymmetric(
@@ -282,7 +279,6 @@ class HsmAuthSession(Session):
         result = self._native.put_credential_asymmetric(
             management_key, label, raw_key, pw, touch_required
         )
-        logger.info("Credential imported")
         return Credential(result[0], ALGORITHM(result[1]), result[2], result[3])
 
     def generate_credential_asymmetric(
@@ -310,7 +306,6 @@ class HsmAuthSession(Session):
         result = self._native.generate_credential_asymmetric(
             management_key, label, pw, touch_required
         )
-        logger.info("Credential imported")
         return Credential(result[0], ALGORITHM(result[1]), result[2], result[3])
 
     def get_public_key(self, label: str) -> ec.EllipticCurvePublicKey:
@@ -336,7 +331,6 @@ class HsmAuthSession(Session):
         """
 
         self._native.delete_credential(management_key, label)
-        logger.info("Credential deleted")
 
     def change_credential_password(
         self,
@@ -353,7 +347,6 @@ class HsmAuthSession(Session):
         pw = _parse_credential_password(credential_password)
         new_pw = _parse_credential_password(new_credential_password)
         self._native.change_credential_password(label, pw, new_pw)
-        logger.info("Credential password changed")
 
     def change_credential_password_admin(
         self,
@@ -369,7 +362,6 @@ class HsmAuthSession(Session):
         """
         new_pw = _parse_credential_password(new_credential_password)
         self._native.change_credential_password_admin(management_key, label, new_pw)
-        logger.info("Credential password changed")
 
     def put_management_key(
         self,
@@ -383,7 +375,6 @@ class HsmAuthSession(Session):
         """
 
         self._native.put_management_key(management_key, new_management_key)
-        logger.info("New management key set")
 
     def get_management_key_retries(self) -> int:
         """Get retries remaining for Management key"""

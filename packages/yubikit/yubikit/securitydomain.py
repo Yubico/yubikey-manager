@@ -124,7 +124,6 @@ class SecurityDomainSession(Session):
 
         Certificates are returned leaf-last.
         """
-        logger.debug(f"Getting certificate bundle for {key}")
         return [
             x509.load_der_x509_certificate(der)
             for der in self._native.get_certificate_bundle(key.kid, key.kvn)
@@ -136,9 +135,7 @@ class SecurityDomainSession(Session):
         This will remove all keys and associated data, as well as restore the default
         SCP03 static keys, and generate a new (attestable) SCP11b key.
         """
-        logger.debug("Resetting all SCP keys")
         self._native.reset()
-        logger.info("SCP keys reset")
 
     def store_data(self, data: bytes) -> None:
         """Stores data in the security domain.
@@ -156,10 +153,8 @@ class SecurityDomainSession(Session):
 
         Certificates should be in order, with the leaf certificate last.
         """
-        logger.debug(f"Storing certificate bundle for {key}")
         der_certs = [c.public_bytes(serialization.Encoding.DER) for c in certificates]
         self._native.store_certificate_bundle(key.kid, key.kvn, der_certs)
-        logger.info("Certificate bundle stored")
 
     def store_allowlist(self, key: KeyRef, serials: Sequence[int]) -> None:
         """Store which certificate serial numbers that can be used for a given key.
@@ -168,22 +163,18 @@ class SecurityDomainSession(Session):
 
         If no allowlist is stored, any certificate signed by the CA can be used.
         """
-        logger.debug(f"Storing serial allowlist for {key}")
         serial_bytes = [
             s.to_bytes((s.bit_length() + 7) // 8, "big") if s > 0 else b"\x00"
             for s in serials
         ]
         self._native.store_allowlist(key.kid, key.kvn, serial_bytes)
-        logger.info("Serial allowlist stored")
 
     def store_ca_issuer(self, key: KeyRef, ski: bytes) -> None:
         """Store the SKI (Subject Key Identifier) for the CA of a given key.
 
         Requires OCE verification.
         """
-        logger.debug(f"Storing CA issuer SKI for {key}: {ski.hex()}")
         self._native.store_ca_issuer(key.kid, key.kvn, ski)
-        logger.info("CA issuer SKI stored")
 
     def delete_key(self, kid: int = 0, kvn: int = 0, delete_last: bool = False) -> None:
         """Delete one (or more) keys.
@@ -201,9 +192,7 @@ class SecurityDomainSession(Session):
                 kid = 0
             else:
                 raise ValueError("SCP03 keys can only be deleted by KVN")
-        logger.debug(f"Deleting keys with KID={kid or 'ANY'}, KVN={kvn or 'ANY'}")
         self._native.delete_key(kid, kvn, delete_last)
-        logger.info("Keys deleted")
 
     def generate_ec_key(
         self, key: KeyRef, curve: Curve = Curve.SECP256R1, replace_kvn: int = 0
@@ -221,7 +210,6 @@ class SecurityDomainSession(Session):
         encoded_point = bytes(
             self._native.generate_ec_key(key.kid, key.kvn, int(curve), replace_kvn)
         )
-        logger.info("New key generated")
         return ec.EllipticCurvePublicKey.from_encoded_point(curve._curve, encoded_point)
 
     def put_key(
@@ -268,4 +256,3 @@ class SecurityDomainSession(Session):
             )
         else:
             raise TypeError("Unsupported key type")
-        logger.info("Key imported")

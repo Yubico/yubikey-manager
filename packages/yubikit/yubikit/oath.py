@@ -178,7 +178,6 @@ class OathSession(Session):
         """Perform a factory reset on the OATH application."""
         self._native.reset()
         self._device_id = self._native.device_id
-        logger.info("OATH application data reset performed")
 
     def derive_key(self, password: str) -> bytes:
         """Derive an access key from a password.
@@ -194,7 +193,6 @@ class OathSession(Session):
 
         :param key: The access key.
         """
-        logger.debug("Unlocking session")
         self._native.validate(key)
 
     def set_key(self, key: bytes) -> None:
@@ -203,7 +201,6 @@ class OathSession(Session):
         :param key: The access key.
         """
         self._native.set_key(key)
-        logger.info("New access code set")
 
     def unset_key(self) -> None:
         """Remove the access key.
@@ -211,7 +208,6 @@ class OathSession(Session):
         This removes the need to authentication a session before using it.
         """
         self._native.unset_key()
-        logger.info("Access code removed")
 
     def put_credential(
         self, credential_data: CredentialData, touch_required: bool = False
@@ -233,7 +229,6 @@ class OathSession(Session):
             issuer=d.issuer,
             touch_required=touch_required,
         )
-        logger.info("Credential imported")
         return Credential(
             result[0],
             result[1],
@@ -253,14 +248,11 @@ class OathSession(Session):
         :param name: The new name of the credential.
         :param issuer: The credential issuer.
         """
-        logger.debug(f"Renaming credential '{credential_id!r}' to '{issuer}:{name}'")
         result = self._native.rename_credential(credential_id, name, issuer)
-        logger.info("Credential renamed")
         return bytes(result)
 
     def list_credentials(self) -> list[Credential]:
         """List OATH credentials."""
-        logger.debug("Listing OATH credentials...")
         raw = self._native.list_credentials()
         return [
             Credential(r[0], r[1], r[2], r[3], OATH_TYPE(r[4]), r[5], r[6]) for r in raw
@@ -272,7 +264,6 @@ class OathSession(Session):
         :param credential_id: The id of the credential.
         :param challenge: The challenge.
         """
-        logger.debug(f"Calculating response for credential: {credential_id!r}")
         return bytes(self._native.calculate(credential_id, challenge))
 
     def delete_credential(self, credential_id: bytes) -> None:
@@ -280,9 +271,7 @@ class OathSession(Session):
 
         :param credential_id: The id of the credential.
         """
-        logger.debug(f"Deleting crededential: {credential_id!r}")
         self._native.delete_credential(credential_id)
-        logger.info("Credential deleted")
 
     def calculate_all(
         self, timestamp: int | None = None

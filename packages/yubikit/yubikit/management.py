@@ -461,7 +461,6 @@ class ManagementSession(Session):
             int(config.device_flags) if config.device_flags is not None else None,
             config.nfc_restricted,
         )
-        logger.info("Device config written")
 
     def set_mode(
         self,
@@ -519,7 +518,6 @@ class ManagementSession(Session):
                 else:
                     raise ValueError("Touch-eject only applicable for mode: CCID")
             self._native.set_mode(code, chalresp_timeout, auto_eject_timeout or 0)
-            logger.info("Mode configuration written")
 
     def device_reset(self) -> None:
         """Global factory reset.
@@ -528,6 +526,4 @@ class ManagementSession(Session):
         applications. This will factory reset the global PIN as well as the associated
         applications.
         """
-        logger.debug("Performing device reset")
         self._native.device_reset()
-        logger.info("Device reset performed")

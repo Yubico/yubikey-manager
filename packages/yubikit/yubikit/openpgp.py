@@ -1060,7 +1060,6 @@ class OpenPgpSession(Session):
         """
         logger.debug(f"Setting Signature PIN policy to {pin_policy}")
         self._native.set_signature_pin_policy(int(pin_policy))
-        logger.info("Signature PIN policy set")
 
     def reset(self) -> None:
         """Perform a factory reset on the OpenPGP application.
@@ -1068,7 +1067,6 @@ class OpenPgpSession(Session):
         WARNING: This will delete all stored keys, certificates and other data.
         """
         self._native.reset()
-        logger.info("OpenPGP application data reset performed")
 
     def set_pin_attempts(
         self, user_attempts: int, reset_attempts: int, admin_attempts: int
@@ -1084,7 +1082,6 @@ class OpenPgpSession(Session):
         :param admin_attempts: The Admin PIN attempts.
         """
         self._native.set_pin_attempts(user_attempts, reset_attempts, admin_attempts)
-        logger.info("Number of PIN attempts has been changed")
 
     def get_kdf(self) -> Kdf:
         """Get the Key Derivation Function data object."""
@@ -1106,7 +1103,6 @@ class OpenPgpSession(Session):
         :param kdf: The key derivation function.
         """
         self._native.set_kdf(bytes(kdf))
-        logger.info("KDF settings changed")
 
     def verify_pin(self, pin, extended: bool = False):
         """Verify the User PIN.
@@ -1119,7 +1115,6 @@ class OpenPgpSession(Session):
         :param extended: If `False` only sign operations are allowed,
             otherwise sign operations are NOT allowed.
         """
-        logger.debug(f"Verifying User PIN in mode {'82' if extended else '81'}")
         self._native.verify_pin(pin, extended)
 
     def verify_admin(self, admin_pin):
@@ -1129,7 +1124,6 @@ class OpenPgpSession(Session):
 
         :param admin_pin: The Admin PIN.
         """
-        logger.debug("Verifying Admin PIN")
         self._native.verify_admin(admin_pin)
 
     def unverify_pin(self, pw: PW) -> None:
@@ -1166,7 +1160,6 @@ class OpenPgpSession(Session):
         :param reset_code: The Reset Code for User PIN.
         """
         self._native.set_reset_code(reset_code)
-        logger.info("New Reset Code has been set")
 
     def reset_pin(self, new_pin: str, reset_code: str | None = None) -> None:
         """Reset the User PIN to a new value.
@@ -1177,14 +1170,12 @@ class OpenPgpSession(Session):
         :param reset_code: The Reset Code.
         """
         self._native.reset_pin(new_pin, reset_code)
-        logger.info("New User PIN has been set")
 
     def get_algorithm_attributes(self, key_ref: KEY_REF) -> AlgorithmAttributes:
         """Get the algorithm attributes for one of the key slots.
 
         :param key_ref: The key slot.
         """
-        logger.debug(f"Getting Algorithm Attributes for {key_ref.name}")
         raw = self._native.get_algorithm_attributes(int(key_ref))
         return AlgorithmAttributes.parse(raw)
 
@@ -1216,7 +1207,6 @@ class OpenPgpSession(Session):
         :param attributes: The algorithm attributes to set.
         """
         self._native.set_algorithm_attributes(int(key_ref), bytes(attributes))
-        logger.info("Algorithm Attributes have been changed")
 
     def get_uif(self, key_ref: KEY_REF) -> UIF:
         """Get the User Interaction Flag (touch requirement) for a key.
@@ -1234,11 +1224,9 @@ class OpenPgpSession(Session):
         :param uif: The User Interaction Flag.
         """
         self._native.set_uif(int(key_ref), int(uif))
-        logger.info(f"UIF changed for {key_ref.name}")
 
     def get_key_information(self) -> KeyInformation:
         """Get the status of the keys."""
-        logger.debug("Getting Key Information")
         raw = self._native.get_key_information()
         return {KEY_REF(k): KEY_STATUS(v) for k, v in raw.items()}
 
@@ -1283,7 +1271,6 @@ class OpenPgpSession(Session):
 
         :param key_ref: The key slot.
         """
-        logger.debug(f"Getting public key for {key_ref.name}")
         raw = self._native.get_public_key(int(key_ref))
         data = Tlv.parse_dict(raw)
         attributes = self.get_algorithm_attributes(key_ref)
@@ -1304,7 +1291,6 @@ class OpenPgpSession(Session):
         """
         raw = self._native.generate_rsa_key(int(key_ref), int(key_size))
         data = Tlv.parse_dict(raw)
-        logger.info(f"RSA key generated for {key_ref.name}")
         return _parse_rsa_key(data)
 
     def generate_ec_key(self, key_ref: KEY_REF, curve_oid: CurveOid) -> EcPublicKey:
@@ -1317,7 +1303,6 @@ class OpenPgpSession(Session):
         """
         raw = self._native.generate_ec_key(int(key_ref), curve_oid.dotted_string)
         data = Tlv.parse_dict(raw)
-        logger.info(f"EC key generated for {key_ref.name}")
         return _parse_ec_key(curve_oid, data)
 
     def put_key(self, key_ref: KEY_REF, private_key: PrivateKey) -> None:
@@ -1329,7 +1314,6 @@ class OpenPgpSession(Session):
         :param private_key: The private key to import.
         """
 
-        logger.debug(f"Importing a private key for {key_ref.name}")
         attributes = _get_key_attributes(private_key, key_ref, self.version)
         if (
             EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
@@ -1346,7 +1330,6 @@ class OpenPgpSession(Session):
         use_crt = 0 < self.version[0] < 4
         key_type, components = _prepare_private_key_for_native(private_key, use_crt)
         self._native.put_key(int(key_ref), key_type, components)
-        logger.info(f"Private key imported for {key_ref.name}")
 
     def delete_key(self, key_ref: KEY_REF) -> None:
         """Delete the contents of a key slot.
@@ -1362,7 +1345,6 @@ class OpenPgpSession(Session):
 
         :param key_ref: The slot.
         """
-        logger.debug(f"Getting certificate for key {key_ref.name}")
         der = self._native.get_certificate(int(key_ref))
         if not der:
             raise ValueError("No certificate found!")
@@ -1377,9 +1359,7 @@ class OpenPgpSession(Session):
         :param certificate: The X.509 certificate to import.
         """
         cert_data = certificate.public_bytes(Encoding.DER)
-        logger.debug(f"Importing certificate for key {key_ref.name}")
         self._native.put_certificate(int(key_ref), cert_data)
-        logger.info(f"Certificate imported for key {key_ref.name}")
 
     def delete_certificate(self, key_ref: KEY_REF) -> None:
         """Delete a certificate in a slot.
@@ -1388,9 +1368,7 @@ class OpenPgpSession(Session):
 
         :param key_ref: The slot.
         """
-        logger.debug(f"Deleting certificate for key {key_ref.name}")
         self._native.delete_certificate(int(key_ref))
-        logger.info(f"Certificate deleted for key {key_ref.name}")
 
     def attest_key(self, key_ref: KEY_REF) -> x509.Certificate:
         """Create an attestation certificate for a key.
@@ -1403,7 +1381,6 @@ class OpenPgpSession(Session):
         :param key_ref: The key slot.
         """
         der = self._native.attest_key(int(key_ref))
-        logger.info(f"Attestation certificate created for {key_ref.name}")
         return x509.load_der_x509_certificate(bytes(der), default_backend())
 
     def sign(self, message: bytes, hash_algorithm: hashes.HashAlgorithm) -> bytes:
@@ -1417,7 +1394,6 @@ class OpenPgpSession(Session):
         ha_int, prehash = _hash_algorithm_to_int(hash_algorithm)
         response = bytes(self._native.sign(message, ha_int, prehash))
         attributes = self.get_algorithm_attributes(KEY_REF.SIG)
-        logger.info("Message signed")
         if attributes.algorithm_id == 0x13:
             ln = len(response) // 2
             return encode_dss_signature(
@@ -1446,7 +1422,6 @@ class OpenPgpSession(Session):
         else:
             raise ValueError("Value must be a bytes or public key")
         response = bytes(self._native.decrypt(data))
-        logger.info("Value decrypted")
         return response
 
     def authenticate(
@@ -1462,7 +1437,6 @@ class OpenPgpSession(Session):
         ha_int, prehash = _hash_algorithm_to_int(hash_algorithm)
         response = bytes(self._native.authenticate(message, ha_int, prehash))
         attributes = self.get_algorithm_attributes(KEY_REF.AUT)
-        logger.info("Message authenticated")
         if attributes.algorithm_id == 0x13:
             ln = len(response) // 2
             return encode_dss_signature(

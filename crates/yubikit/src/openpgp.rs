@@ -1900,7 +1900,9 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     /// Set the signature PIN policy (verify once per session or every operation).
     pub fn set_signature_pin_policy(&mut self, pin_policy: PinPolicy) -> Result<(), OpenPgpError> {
         log::debug!("Setting signature PIN policy");
-        self.put_data(Do::PwStatusBytes, &[pin_policy as u8])
+        self.put_data(Do::PwStatusBytes, &[pin_policy as u8])?;
+        log::info!("Signature PIN policy set");
+        Ok(())
     }
 
     /// Set the maximum retry attempts for user PIN, reset code, and admin PIN.
@@ -1923,6 +1925,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             0,
             &[user_attempts, reset_attempts, admin_attempts],
         )?;
+        log::info!("OpenPGP PIN attempts set");
         Ok(())
     }
 
@@ -1953,7 +1956,9 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         {
             return Err(OpenPgpError::NotSupported("KDF is not supported".into()));
         }
-        self.put_data(Do::Kdf, &kdf.to_bytes())
+        self.put_data(Do::Kdf, &kdf.to_bytes())?;
+        log::info!("OpenPGP KDF configured");
+        Ok(())
     }
 
     // -- Factory Reset --
@@ -2079,7 +2084,9 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         attributes: &AlgorithmAttributes,
     ) -> Result<(), OpenPgpError> {
         log::debug!("Setting algorithm attributes for {:?}", key_ref);
-        self.put_data(key_ref.algorithm_attributes_do(), &attributes.to_bytes())
+        self.put_data(key_ref.algorithm_attributes_do(), &attributes.to_bytes())?;
+        log::info!("Algorithm attributes set for {:?}", key_ref);
+        Ok(())
     }
 
     // -- UIF (Touch) --
@@ -2112,7 +2119,9 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             ));
         }
 
-        self.put_data(key_ref.uif_do(), &uif.to_bytes())
+        self.put_data(key_ref.uif_do(), &uif.to_bytes())?;
+        log::info!("UIF configured for {:?}", key_ref);
+        Ok(())
     }
 
     // -- Key Metadata --
@@ -2297,6 +2306,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         message: &[u8],
         hash_algorithm: SignHashAlgorithm,
     ) -> Result<Vec<u8>, OpenPgpError> {
+        log::debug!("Authenticating with {:?}", KeyRef::Aut);
         let attributes = self.get_algorithm_attributes(KeyRef::Aut)?;
         let padded = pad_message(&attributes, message, hash_algorithm)?;
         let response =
@@ -2384,6 +2394,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     /// Generate an attestation certificate for a key slot (YubiKey 5.2+).
     pub fn attest_key(&mut self, key_ref: KeyRef) -> Result<Vec<u8>, OpenPgpError> {
+        log::debug!("Attesting key for {:?}", key_ref);
         require_version(self.version, Version(5, 2, 0), "attest_key")?;
         self.protocol
             .send_apdu(0x80, INS_GET_ATTESTATION, key_ref as u8, 0, &[])?;

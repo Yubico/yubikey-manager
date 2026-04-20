@@ -1061,7 +1061,9 @@ impl<C: Connection + 'static> ManagementSession<C> {
         log::debug!("Setting USB mode");
         self.inner
             .set_mode(mode_code, chalresp_timeout, auto_eject_timeout)
-            .map_err(ManagementError::Connection)
+            .map_err(ManagementError::Connection)?;
+        log::info!("USB mode configured");
+        Ok(())
     }
 
     fn from_inner(inner: Box<dyn ManagementOps<C::Error>>) -> Self {

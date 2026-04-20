@@ -831,7 +831,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
     /// Set the SCP state for encrypted messaging.
     fn set_scp_state(&mut self, state: ScpState) {
-        log::debug!("SCP secure channel established");
+        log::info!("SCP secure channel established");
         self.scp_state = Some(state);
     }
 

@@ -720,6 +720,7 @@ impl<C: SmartCardConnection> OathSession<C> {
             cred_data.counter,
         );
         self.protocol.send_apdu(0, INS_PUT, 0, 0, &data)?;
+        log::info!("OATH credential added");
 
         Ok(Credential {
             device_id: self.device_id.clone(),
@@ -750,6 +751,7 @@ impl<C: SmartCardConnection> OathSession<C> {
         let mut data = tlv_encode(TAG_NAME, credential_id);
         data.extend_from_slice(&tlv_encode(TAG_NAME, &new_id));
         self.protocol.send_apdu(0, INS_RENAME, 0, 0, &data)?;
+        log::info!("OATH credential renamed");
         Ok(new_id)
     }
 

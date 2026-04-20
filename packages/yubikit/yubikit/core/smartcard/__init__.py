@@ -187,7 +187,6 @@ class SmartCardProtocol(Closable):
 
         :param aid: The YubiKey application AID value.
         """
-        logger.debug(f"Selecting AID: {aid.hex()}")
         try:
             return bytes(self._native.select(aid))
         except ApplicationNotAvailableError:
@@ -206,7 +205,6 @@ class SmartCardProtocol(Closable):
         """Initialize SCP03/SCP11 secure messaging."""
         try:
             self._native.init_scp(key_params)
-            logger.info("SCP initialized")
         except ApduError as e:
             if e.sw == SW.CLASS_NOT_SUPPORTED:
                 raise NotSupportedError(

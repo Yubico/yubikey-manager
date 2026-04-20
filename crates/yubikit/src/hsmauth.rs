@@ -668,7 +668,9 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, &parsed_pw));
         data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, &parsed_new_pw));
 
-        self.change_credential_password_inner(&data, false)
+        self.change_credential_password_inner(&data, false)?;
+        log::info!("Credential password changed");
+        Ok(())
     }
 
     /// Change the password protecting a credential, authenticating with the management key.
@@ -689,7 +691,9 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         data.extend_from_slice(&tlv_encode(TAG_MANAGEMENT_KEY, management_key));
         data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, &parsed_new_pw));
 
-        self.change_credential_password_inner(&data, true)
+        self.change_credential_password_inner(&data, true)?;
+        log::info!("Credential password changed");
+        Ok(())
     }
 
     /// Replace the management key with a new one.
