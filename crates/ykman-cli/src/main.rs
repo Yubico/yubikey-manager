@@ -255,7 +255,7 @@ enum Commands {
       \n  Get 8 random bytes from the OpenPGP application:\
       \n  $ ykman apdu -a openpgp 84/08=")]
     Apdu {
-        /// APDUs to send (format: [CLA]INS[P1P2][:DATA][/LE][=EXPECTED_SW])
+        /// APDUs to send (format: `[CLA]INS[P1P2][:DATA][/LE][=EXPECTED_SW]`)
         apdus: Vec<String>,
         /// Print only hex output
         #[arg(short = 'x', long)]
