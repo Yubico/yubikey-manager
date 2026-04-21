@@ -1390,28 +1390,28 @@ fn is_pkcs12(data: &[u8]) -> bool {
 
 /// Extract a private key from PKCS#12 data.
 fn extract_private_key_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8>, CliError> {
-    use p12_keystore::{KeyStore, Pkcs12ImportPolicy};
+    use p12_keystore::KeyStore;
 
-    let ks = KeyStore::from_pkcs12(data, password, Pkcs12ImportPolicy::Relaxed)
+    let ks = KeyStore::from_pkcs12(data, password)
         .map_err(|e| CliError(format!("Failed to parse PKCS#12 file: {e}")))?;
     let (_, chain) = ks
         .private_key_chain()
         .ok_or_else(|| CliError("No private key found in PKCS#12 file.".into()))?;
-    Ok(chain.key().as_der().to_vec())
+    Ok(chain.key().to_vec())
 }
 
 /// Extract a certificate from PKCS#12 data.
 fn extract_certificate_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8>, CliError> {
-    use p12_keystore::{KeyStore, KeyStoreEntry, Pkcs12ImportPolicy};
+    use p12_keystore::{KeyStore, KeyStoreEntry};
 
-    let ks = KeyStore::from_pkcs12(data, password, Pkcs12ImportPolicy::Relaxed)
+    let ks = KeyStore::from_pkcs12(data, password)
         .map_err(|e| CliError(format!("Failed to parse PKCS#12 file: {e}")))?;
 
     // Try cert from a key chain first, then standalone certs
     for (_, entry) in ks.entries() {
         match entry {
             KeyStoreEntry::PrivateKeyChain(chain) => {
-                if let Some(cert) = chain.certs().first() {
+                if let Some(cert) = chain.chain().first() {
                     return Ok(cert.as_der().to_vec());
                 }
             }

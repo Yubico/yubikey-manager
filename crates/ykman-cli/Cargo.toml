@@ -40,7 +40,7 @@ dirs = "6"
 ctrlc = "3.5.2"
 flate2 = "1"
 pkcs8 = { version = "0.10.2", features = ["encryption", "pem"] }
-p12-keystore = "0.3.0-rc3"
+p12-keystore = "0.2.1"
 
 
 [target.'cfg(target_os = "linux")'.dependencies]
