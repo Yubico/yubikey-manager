@@ -34,9 +34,44 @@ const KEEPALIVE_UPNEEDED: u8 = 2;
 // Session opening — macro to handle HID vs SmartCard generics
 // ---------------------------------------------------------------------------
 
+/// Check that FIDO_CCID capability is available for FIDO-over-SmartCard.
+///
+/// Returns `Ok(())` if capable and enabled, or an appropriate error message.
+fn check_fido_ccid(dev: &dyn YubiKeyDevice) -> Result<(), CliError> {
+    let info = dev.info();
+    let transport = dev.transport();
+    let supported = info
+        .supported_capabilities
+        .get(&transport)
+        .copied()
+        .unwrap_or(Capability::NONE);
+    let enabled = info
+        .config
+        .enabled_capabilities
+        .get(&transport)
+        .copied()
+        .unwrap_or(Capability::NONE);
+
+    if !supported.contains(Capability::FIDOCCID) {
+        return Err(CliError(
+            "FIDO over CCID is not supported by this YubiKey.".into(),
+        ));
+    }
+    if !enabled.contains(Capability::FIDOCCID) {
+        return Err(CliError(
+            "FIDO over CCID is not enabled. \
+             Use \"ykman config usb --enable FIDO_CCID\" to enable it."
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Opens a FIDO CTAP2 session and executes the body with the session bound.
 ///
 /// Prefers HID when no SCP is required; falls back to SmartCard (NFC/CCID).
+/// When using SmartCard over USB, checks that the FIDO_CCID capability is
+/// enabled.
 /// The body receives `$session: Ctap2Session<C>` and must return
 /// `Result<T, CliError>`.
 macro_rules! with_fido_session {
@@ -56,6 +91,9 @@ macro_rules! with_fido_session {
                 .map_err(|(e, _)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
             $body
         } else {
+            if $dev.transport() == Transport::Usb {
+                check_fido_ccid($dev)?;
+            }
             let conn = $dev
                 .open_smartcard()
                 .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;

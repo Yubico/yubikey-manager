@@ -146,16 +146,24 @@ fn print_app_status_table(
 
     let mut rows = Vec::new();
     for &cap in Capability::ALL {
+        // FIDO_CCID is USB-only; show "N/A" for NFC
         let usb_status = if usb_supported.contains(cap) {
             if usb_enabled.contains(cap) {
-                "Enabled"
+                // FIDO_CCID is "Inactive" when FIDO2 is not also enabled
+                if cap == Capability::FIDOCCID && !usb_enabled.contains(Capability::FIDO2) {
+                    "Inactive"
+                } else {
+                    "Enabled"
+                }
             } else {
                 "Disabled"
             }
         } else {
             "Not available"
         };
-        let nfc_status = if nfc_supported.contains(cap) {
+        let nfc_status = if cap == Capability::FIDOCCID {
+            "N/A"
+        } else if nfc_supported.contains(cap) {
             if nfc_enabled.contains(cap) {
                 "Enabled"
             } else {

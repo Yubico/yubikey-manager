@@ -113,7 +113,7 @@ pub struct Capability(pub u16);
 impl Capability {
     /// Yubico OTP application.
     pub const OTP: Self = Self(0x01);
-    /// FIDO U2F application.
+    /// FIDO U2F / CTAP1 application.
     pub const U2F: Self = Self(0x02);
     /// OpenPGP application.
     pub const OPENPGP: Self = Self(0x08);
@@ -123,8 +123,10 @@ impl Capability {
     pub const OATH: Self = Self(0x20);
     /// YubiHSM Auth application.
     pub const HSMAUTH: Self = Self(0x100);
-    /// FIDO2 / WebAuthn application.
+    /// FIDO2 / WebAuthn / CTAP2 application.
     pub const FIDO2: Self = Self(0x200);
+    /// FIDO2 over USB CCID interface (CTAP2 only, not a separate app).
+    pub const FIDOCCID: Self = Self(0x1000);
     /// No capabilities enabled.
     pub const NONE: Self = Self(0);
 
@@ -168,6 +170,7 @@ impl Capability {
         Self::PIV,
         Self::OPENPGP,
         Self::HSMAUTH,
+        Self::FIDOCCID,
     ];
 
     /// Human-readable display name for this capability.
@@ -180,6 +183,7 @@ impl Capability {
             Self::PIV => "PIV",
             Self::OPENPGP => "OpenPGP",
             Self::HSMAUTH => "YubiHSM Auth",
+            Self::FIDOCCID => "FIDO over USB CCID",
             _ => "Unknown",
         }
     }
@@ -221,6 +225,7 @@ impl fmt::Display for Capability {
             (Self::OATH, "OATH"),
             (Self::HSMAUTH, "HSMAUTH"),
             (Self::FIDO2, "FIDO2"),
+            (Self::FIDOCCID, "FIDO_CCID"),
         ];
         let mut parts = Vec::new();
         for &(cap, name) in names {

@@ -342,13 +342,17 @@ impl CliPacing {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum CliCapability {
     Otp,
+    #[value(alias = "ctap1")]
     #[value(alias = "fido_u2f")]
     U2f,
+    #[value(alias = "ctap2")]
     Fido2,
     Oath,
     Piv,
     Openpgp,
     Hsmauth,
+    #[value(alias = "fido_ccid")]
+    Fidoccid,
 }
 
 impl From<CliCapability> for yubikit::management::Capability {
@@ -361,6 +365,7 @@ impl From<CliCapability> for yubikit::management::Capability {
             CliCapability::Piv => Self::PIV,
             CliCapability::Openpgp => Self::OPENPGP,
             CliCapability::Hsmauth => Self::HSMAUTH,
+            CliCapability::Fidoccid => Self::FIDOCCID,
         }
     }
 }

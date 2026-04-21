@@ -61,6 +61,7 @@ class CAPABILITY(IntFlag):
     PIV = 0x10
     OPENPGP = 0x08
     HSMAUTH = 0x100
+    FIDO_CCID = 0x1000
 
     def __str__(self):
         name = "|".join(c.name or str(c) for c in CAPABILITY if c in self)
