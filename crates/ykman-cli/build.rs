@@ -3,7 +3,7 @@ fn main() {
         let mut res = winresource::WindowsResource::new();
         res.set("CompanyName", "Yubico");
         res.set("FileDescription", "YubiKey Manager CLI");
-        res.set("LegalCopyright", "Copyright (c) 2024 Yubico AB");
+        res.set("LegalCopyright", "Copyright 2024 Yubico AB. Apache-2.0");
         res.set("OriginalFilename", "ykman.exe");
         res.set("ProductName", "YubiKey Manager");
         res.set_manifest_file("ykman.exe.manifest");

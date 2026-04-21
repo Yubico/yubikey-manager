@@ -3,7 +3,7 @@ name = "ykman-cli"
 version = "6.0.0-dev.0"
 edition = "2024"
 description = "YubiKey Manager CLI (Rust)"
-license = "BSD-2-Clause"
+license = "Apache-2.0"
 
 [lib]
 name = "ykman_cli"

@@ -75,6 +75,10 @@ struct Cli {
     #[arg(long = "diagnose")]
     diagnose: bool,
 
+    /// Show third-party license information
+    #[arg(long = "licenses")]
+    licenses: bool,
+
     /// Enable logging at given verbosity level
     #[arg(short = 'l', long = "log-level")]
     log_level: Option<logging::LogLevel>,
@@ -2002,6 +2006,12 @@ fn run() -> Result<(), CliError> {
     // Handle --diagnose
     if cli.diagnose {
         return diagnose::run_diagnose();
+    }
+
+    // Handle --licenses
+    if cli.licenses {
+        print!("{}", include_str!("../../../licenses.txt"));
+        return Ok(());
     }
 
     // Parse SCP params before consuming command
