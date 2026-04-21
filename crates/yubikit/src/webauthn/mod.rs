@@ -22,7 +22,7 @@
 //!
 //! ```no_run
 //! use yubikit::ctap::CtapSession;
-//! use yubikit::ctap2::Ctap2Session;
+//! use yubikit::ctap2::{Ctap2Session, Permissions};
 //! use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
 //! use yubikit::webauthn::{
 //!     WebAuthnClient, ClientDataCollector, CollectedClientData, UserInteraction,
@@ -35,8 +35,9 @@
 //!
 //! # struct MyInteraction;
 //! # impl UserInteraction for MyInteraction {
-//! #     fn request_pin(&self) -> Option<String> { None }
-//! #     fn request_uv(&self) -> bool { true }
+//! #     fn prompt_up(&self) {}
+//! #     fn request_pin(&self, _permissions: Permissions, _rp_id: Option<&str>) -> Option<String> { None }
+//! #     fn request_uv(&self, _permissions: Permissions, _rp_id: Option<&str>) -> bool { true }
 //! # }
 //! # struct MyCollector;
 //! # impl ClientDataCollector for MyCollector {

@@ -33,7 +33,7 @@
 //! let conn = dev.open_smartcard()?;
 //! let mut session = YubiOtpSession::new(conn).map_err(|(e, _)| e)?;
 //!
-//! let status = session.get_config_state()?;
+//! let status = session.get_config_state();
 //! println!("Slot 1 configured: {}", status.is_configured(Slot::One)?);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

@@ -632,9 +632,11 @@ pub fn run_credentials_list(
         let mut credman = CredentialManagement::new(session, protocol, token)
             .map_err(|(e, _)| CliError(format!("Failed to create credential manager: {e}")))?;
 
-        let rps = credman
-            .enumerate_rps()
-            .map_err(|e| CliError(format!("Failed to enumerate RPs: {e}")))?;
+        let rps = match credman.enumerate_rps() {
+            Ok(rps) => rps,
+            Err(Ctap2Error::StatusError(CtapStatus::NoCredentials)) => Vec::new(),
+            Err(e) => return Err(CliError(format!("Failed to enumerate RPs: {e}"))),
+        };
 
         if rps.is_empty() {
             println!("No discoverable credentials.");

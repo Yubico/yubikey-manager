@@ -32,7 +32,7 @@
 //! let mut session = OathSession::new(conn).map_err(|(e, _)| e)?;
 //!
 //! for cred in session.list_credentials()? {
-//!     println!("{}: {:?}", cred.id.name, cred.oath_type);
+//!     println!("{}: {:?}", cred.name, cred.oath_type);
 //! }
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

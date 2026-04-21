@@ -836,13 +836,13 @@ pub fn run_hotp(
     let acc = access_code.map(parse_access_code).transpose()?;
 
     let key_bytes = if let Some(k) = key {
-        parse_b32_key(k).map_err(|_| CliError("Invalid Base32-encoded key.".into()))?
+        parse_hex_key(k)?
     } else {
         loop {
-            let input = util::prompt("Enter a secret key (base32)")?;
-            match parse_b32_key(&input) {
+            let input = util::prompt("Enter a secret key (hex)")?;
+            match parse_hex_key(&input) {
                 Ok(k) => break k,
-                Err(e) => eprintln!("{e}"),
+                Err(e) => eprintln!("{}", e.0),
             }
         }
     };

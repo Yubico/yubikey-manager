@@ -144,9 +144,8 @@ def reset_state(session_or_connection, scp_params):
             if scp_params:
                 p.init_scp(scp_params)
     else:
-        connection._native.disconnect()
-        connection._native.connect()
         with SmartCardProtocol(connection) as p:
+            p.select(AID.OATH)
             p.select(AID.PIV)
             if scp_params:
                 p.init_scp(scp_params)

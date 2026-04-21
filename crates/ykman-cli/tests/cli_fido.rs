@@ -70,7 +70,7 @@ fn test_fido_verify_pin_wrong() {
         .args(["fido", "access", "verify-pin", "--pin", "wrongpin"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("PIN verification failed"));
+        .stderr(predicate::str::contains("Wrong PIN"));
 }
 
 #[test]

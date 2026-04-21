@@ -35,7 +35,7 @@
 //! let mut session = OpenPgpSession::new(conn).map_err(|(e, _)| e)?;
 //!
 //! let app_data = session.get_application_related_data()?;
-//! println!("OpenPGP version: {}", app_data.version);
+//! println!("AID: {:?}", app_data.aid);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
