@@ -2010,7 +2010,15 @@ fn run() -> Result<(), CliError> {
 
     // Handle --licenses
     if cli.licenses {
-        print!("{}", include_str!("../../../licenses.txt"));
+        use flate2::read::DeflateDecoder;
+        use std::io::Read;
+        static LICENSES_DEFLATE: &[u8] =
+            include_bytes!(concat!(env!("OUT_DIR"), "/licenses.deflate"));
+        let mut text = String::new();
+        DeflateDecoder::new(LICENSES_DEFLATE)
+            .read_to_string(&mut text)
+            .expect("Failed to decompress license data");
+        print!("{text}");
         return Ok(());
     }
 

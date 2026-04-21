@@ -38,6 +38,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 dirs = "6"
 ctrlc = "3.5.2"
+flate2 = "1"
 pkcs8 = { version = "0.10.2", features = ["encryption", "pem"] }
 p12-keystore = "0.3.0-rc3"
 
@@ -56,6 +57,7 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_
 keyring = "3"
 
 [build-dependencies]
+flate2 = "1"
 winresource = "0.1"
 
 [dev-dependencies]

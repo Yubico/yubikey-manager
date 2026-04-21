@@ -3759,6 +3759,7 @@ dependencies = [
  "dirs",
  "elliptic-curve",
  "fernet",
+ "flate2",
  "getrandom 0.3.4",
  "hex",
  "keyring",
