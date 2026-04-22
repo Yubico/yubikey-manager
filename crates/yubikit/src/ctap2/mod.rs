@@ -207,11 +207,19 @@ pub enum CtapStatus {
     /// PIN authentication is blocked until the next power cycle.
     PinAuthBlocked = 0x34,
     /// No PIN has been set on the authenticator.
-    PinNotSet = 0x36,
+    PinNotSet = 0x35,
+    /// A PIN/UV auth token is required but not provided.
+    PuatRequired = 0x36,
     /// The new PIN violates the authenticator's PIN policy.
     PinPolicyViolation = 0x37,
+    /// The PIN/UV auth token has expired.
+    PinTokenExpired = 0x38,
     /// The serialized request is too large for the authenticator.
     RequestTooLarge = 0x39,
+    /// The action timed out.
+    ActionTimeout = 0x3A,
+    /// User presence is required.
+    UpRequired = 0x3B,
     /// Built-in user verification is blocked.
     UvBlocked = 0x3C,
     /// An integrity check failed.
@@ -264,9 +272,13 @@ impl CtapStatus {
             0x32 => Self::PinBlocked,
             0x33 => Self::PinAuthInvalid,
             0x34 => Self::PinAuthBlocked,
-            0x36 => Self::PinNotSet,
+            0x35 => Self::PinNotSet,
+            0x36 => Self::PuatRequired,
             0x37 => Self::PinPolicyViolation,
+            0x38 => Self::PinTokenExpired,
             0x39 => Self::RequestTooLarge,
+            0x3A => Self::ActionTimeout,
+            0x3B => Self::UpRequired,
             0x3C => Self::UvBlocked,
             0x3D => Self::IntegrityFailure,
             0x3E => Self::InvalidSubcommand,
