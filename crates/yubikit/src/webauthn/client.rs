@@ -245,6 +245,8 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             ResidentKeyRequirement::Required | ResidentKeyRequirement::Preferred
         );
 
+        log::debug!("makeCredential: rp_id={rp_id}, rk={rk}, uv={uv_requirement:?}");
+
         // Convert WebAuthn RP to CTAP2 (different field requirements)
         let ctap2_rp = options.rp.to_ctap2(&rp_id);
 
@@ -267,6 +269,10 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
 
             // Pre-flight filtering of exclude list
             let exclude_cred = if let Some(ref exclude_list) = options.exclude_credentials {
+                log::debug!(
+                    "Filtering exclude list ({} credentials)",
+                    exclude_list.len()
+                );
                 self.filter_creds(&rp_id, exclude_list, protocol, token.as_deref())?
             } else {
                 None
@@ -327,8 +333,9 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                     self.restore_session(session);
                     // Authenticator requires UV — retry with Required
                     if is_puat_required(&e)
-                        && uv_requirement == UserVerificationRequirement::Discouraged
+                        && uv_requirement != UserVerificationRequirement::Required
                     {
+                        log::debug!("Got PuatRequired, retrying with uv=required");
                         uv_requirement = UserVerificationRequirement::Required;
                         continue;
                     }
@@ -336,6 +343,8 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 }
             }
         };
+
+        log::info!("Credential created (fmt={})", att_resp.fmt);
 
         // Build the attestation object CBOR (fmt, authData, attStmt)
         let att_obj_cbor = cbor::encode(&cbor::Value::Map(vec![
@@ -395,6 +404,12 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         let client_data_hash = client_data.hash();
 
         let mut uv_requirement = options.user_verification.unwrap_or_default();
+        let allow_count = options
+            .allow_credentials
+            .as_ref()
+            .map(|c| c.len())
+            .unwrap_or(0);
+        log::debug!("getAssertion: rp_id={rp_id}, uv={uv_requirement:?}, allow_list={allow_count}");
 
         // These are populated inside the retry loop and used after
         let first;
@@ -422,6 +437,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             let selected_cred_id: Option<Vec<u8>>;
             let filtered_allow: Option<Vec<PublicKeyCredentialDescriptor>>;
             let allow_slice = if let Some(ref allow_list) = options.allow_credentials {
+                log::debug!("Filtering allow list ({} credentials)", allow_list.len());
                 let selected = self.filter_creds(&rp_id, allow_list, protocol, token.as_deref())?;
                 if let Some(cred) = selected {
                     selected_cred_id = Some(cred.id.clone());
@@ -491,8 +507,9 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                     self.restore_session(session);
                     // Authenticator requires UV — retry with Required
                     if is_puat_required(&e)
-                        && uv_requirement == UserVerificationRequirement::Discouraged
+                        && uv_requirement != UserVerificationRequirement::Required
                     {
+                        log::debug!("Got PuatRequired, retrying with uv=required");
                         uv_requirement = UserVerificationRequirement::Required;
                         continue;
                     }
@@ -502,6 +519,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         }
 
         let total = first.number_of_credentials.unwrap_or(1) as usize;
+        log::info!("Got {total} assertion(s) for rp_id={rp_id}");
         let client_data_json = client_data.as_bytes().to_vec();
 
         // Parse extension outputs for the first assertion
@@ -1026,6 +1044,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
 
             match result {
                 Ok(resp) => {
+                    log::debug!("Pre-flight filter: credential matched in chunk");
                     if chunk.len() == 1 {
                         // Credential ID may be omitted from single-cred responses
                         return Ok(Some(chunk.into_iter().next().unwrap()));
@@ -1065,6 +1084,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         rp_id: Option<&str>,
     ) -> Result<(Option<Vec<u8>>, Option<PinProtocol>, bool), ClientError<C::Error>> {
         if !self.should_use_uv(uv_requirement, permissions)? {
+            log::debug!("UV not needed for uv={uv_requirement:?}");
             return Ok((None, None, false));
         }
 
@@ -1084,7 +1104,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
     #[allow(clippy::result_large_err)]
     fn obtain_token(
         &self,
-        session: Ctap2Session<C>,
+        mut session: Ctap2Session<C>,
         permissions: Permissions,
         rp_id: Option<&str>,
     ) -> Result<
@@ -1096,7 +1116,11 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         ),
         (Ctap2Session<C>, ClientError<C::Error>),
     > {
-        let info = session.info().clone();
+        // Fetch current info — mutable state (clientPin, uv) may have changed
+        let info = match session.get_info() {
+            Ok(info) => info,
+            Err(e) => return Err((session, e.into())),
+        };
 
         // Select protocol before creating ClientPin so we keep the session on failure
         let protocol = if info.pin_uv_protocols.contains(&2) {
@@ -1119,19 +1143,22 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             && info.options.get("pinUvAuthToken").copied().unwrap_or(false)
         {
             if self.user_interaction.request_uv(permissions, rp_id) {
+                log::debug!("Attempting UV token (protocol {protocol:?})");
                 match client_pin.get_uv_token(Some(permissions), rp_id, None, None) {
                     Ok(token) => {
+                        log::debug!("UV token obtained");
                         let session = client_pin.into_session();
                         return Ok((session, Some(token), protocol, false));
                     }
-                    Err(_) => {
-                        // UV failed, fall through to PIN
+                    Err(e) => {
+                        log::debug!("UV token failed: {e}, falling through to PIN");
                     }
                 }
             }
         } else if info.options.get("uv").copied().unwrap_or(false) {
             // Device has internal UV but no pinUvAuthToken — use internal UV
             if self.user_interaction.request_uv(permissions, rp_id) {
+                log::debug!("Using internal UV (no pinUvAuthToken)");
                 let session = client_pin.into_session();
                 return Ok((session, None, protocol, true));
             }
@@ -1140,8 +1167,10 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         // Fall back to PIN
         if info.options.get("clientPin").copied().unwrap_or(false) {
             if let Some(pin) = self.user_interaction.request_pin(permissions, rp_id) {
+                log::debug!("Attempting PIN token (protocol {protocol:?})");
                 match client_pin.get_pin_token(&pin, Some(permissions), rp_id) {
                     Ok(token) => {
+                        log::debug!("PIN token obtained");
                         let session = client_pin.into_session();
                         return Ok((session, Some(token), protocol, false));
                     }
@@ -1151,6 +1180,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                     }
                 }
             } else {
+                log::debug!("PIN required but not provided");
                 let session = client_pin.into_session();
                 return Err((session, ClientError::PinRequired));
             }
@@ -1165,11 +1195,22 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
 
     /// Determine whether user verification should be performed.
     fn should_use_uv(
-        &self,
+        &mut self,
         uv_requirement: UserVerificationRequirement,
         permissions: Permissions,
     ) -> Result<bool, ClientError<C::Error>> {
-        let info = self.session().info();
+        // Fetch current info — mutable state (clientPin, uv) may have changed
+        let mut session = self.take_session();
+        let info = match session.get_info() {
+            Ok(info) => {
+                self.restore_session(session);
+                info
+            }
+            Err(e) => {
+                self.restore_session(session);
+                return Err(e.into());
+            }
+        };
 
         let uv_configured = info.options.get("uv").copied().unwrap_or(false)
             || info.options.get("clientPin").copied().unwrap_or(false)

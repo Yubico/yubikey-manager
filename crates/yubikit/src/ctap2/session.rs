@@ -34,6 +34,12 @@ use crate::webauthn::types::{
 /// and responses are parsed as `[status_byte] ++ cbor_data`.
 pub struct Ctap2Session<C: Connection> {
     session: CtapSession<C>,
+    /// Authenticator info captured at session creation.
+    ///
+    /// Reflects the authenticator's *initial* capabilities (supported protocols,
+    /// extensions, max sizes, etc.).  Mutable state such as `clientPin` or `uv`
+    /// may change during the session (e.g. after setting a PIN), so code that
+    /// needs current state should call [`get_info()`](Self::get_info) instead.
     pub(crate) cached_info: Info,
 }
 
