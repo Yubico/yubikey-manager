@@ -248,6 +248,23 @@ impl LocalYubiKeyDevice {
         self.reader_name.as_deref()
     }
 
+    /// Open a device from a PC/SC reader name.
+    ///
+    /// Connects to the given reader, reads device info, and returns a
+    /// `LocalYubiKeyDevice`. Useful for NFC readers where the device is
+    /// not discovered via USB enumeration.
+    pub fn open_reader(reader_name: &str) -> Result<Self, DeviceError> {
+        let (info, transport) = read_info_reader(reader_name)?;
+        Ok(LocalYubiKeyDevice {
+            reader_name: Some(reader_name.to_string()),
+            hid_path: None,
+            fido_path: None,
+            pid: None,
+            transport,
+            info,
+        })
+    }
+
     /// Returns the HID device path, if this device was found over HID.
     pub fn hid_path(&self) -> Option<&str> {
         self.hid_path.as_deref()
