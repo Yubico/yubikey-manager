@@ -443,22 +443,29 @@ impl LocalYubiKeyDevice {
                 if new_n != n_devs {
                     return Err(DeviceError::WrongDevice);
                 }
-                match devs
-                    .into_iter()
-                    .find(|d| d.info.serial == my_serial && d.info.version == my_version)
-                {
-                    Some(found) => {
+                // The device may not be fully ready yet (interfaces still
+                // initializing), so we may fail to read info. Only match
+                // once we can confirm serial; keep waiting otherwise.
+                let mut found_different = false;
+                for d in &devs {
+                    if d.info.serial == my_serial && d.info.version == my_version {
                         log::debug!("Device reinserted");
-                        self.reader_name = found.reader_name;
-                        self.hid_path = found.hid_path;
-                        self.fido_path = found.fido_path;
+                        let found = d;
+                        self.reader_name = found.reader_name.clone();
+                        self.hid_path = found.hid_path.clone();
+                        self.fido_path = found.fido_path.clone();
                         self.pid = found.pid;
-                        self.info = found.info;
+                        self.info = found.info.clone();
                         return Ok(());
                     }
-                    None => {
-                        return Err(DeviceError::WrongDevice);
+                    if d.info.serial.is_some() {
+                        found_different = true;
                     }
+                }
+                // If a device with a different serial was found, it's wrong.
+                // If serial couldn't be read, keep waiting for it to settle.
+                if found_different {
+                    return Err(DeviceError::WrongDevice);
                 }
             }
         }
