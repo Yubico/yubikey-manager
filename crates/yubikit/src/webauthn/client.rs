@@ -235,7 +235,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
 
         // Determine resident key and UV requirements
         let selection = options.authenticator_selection.as_ref();
-        let uv_requirement = selection
+        let mut uv_requirement = selection
             .and_then(|s| s.user_verification)
             .unwrap_or_default();
         let rk_requirement = selection.and_then(|s| s.resident_key).unwrap_or_default();
@@ -245,33 +245,6 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             ResidentKeyRequirement::Required | ResidentKeyRequirement::Preferred
         );
 
-        // Need GET_ASSERTION permission if we have an exclude list to filter
-        let mut permissions = Permissions::MAKE_CREDENTIAL;
-        if options.exclude_credentials.is_some() {
-            permissions |= Permissions::GET_ASSERTION;
-        }
-
-        // Get PIN/UV token
-        let (token, protocol, internal_uv) =
-            self.get_token(uv_requirement, permissions, Some(&rp_id))?;
-
-        // Pre-flight filtering of exclude list
-        let exclude_cred = if let Some(ref exclude_list) = options.exclude_credentials {
-            self.filter_creds(&rp_id, exclude_list, protocol, token.as_deref())?
-        } else {
-            None
-        };
-
-        // Compute pin_uv_param for the actual request
-        let (pin_uv_param, pin_uv_protocol) =
-            compute_pin_uv_param(token.as_deref(), protocol, &client_data_hash);
-
-        let authenticator_options = AuthenticatorOptions {
-            rk: Some(rk),
-            uv: if internal_uv { Some(true) } else { None },
-            up: None,
-        };
-
         // Convert WebAuthn RP to CTAP2 (different field requirements)
         let ctap2_rp = options.rp.to_ctap2(&rp_id);
 
@@ -280,47 +253,87 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             _ => None,
         };
 
-        // Build the filtered exclude list (single matching cred, or None)
-        let filtered_exclude: Option<Vec<PublicKeyCredentialDescriptor>>;
-        let exclude_slice = if let Some(cred) = exclude_cred {
-            filtered_exclude = Some(vec![cred]);
-            filtered_exclude.as_deref()
-        } else {
-            None
-        };
-
-        // Build extension inputs
-        let (ext_cbor, hmac_state) = self.build_make_credential_extensions(options, protocol)?;
-
-        let mut session = self.take_session();
-        let interaction = &self.user_interaction;
-        let mut on_keepalive = |status: u8| {
-            if status == 0x02 {
-                interaction.prompt_up();
+        let hmac_state_out;
+        let att_resp = loop {
+            // Need GET_ASSERTION permission if we have an exclude list to filter
+            let mut permissions = Permissions::MAKE_CREDENTIAL;
+            if options.exclude_credentials.is_some() {
+                permissions |= Permissions::GET_ASSERTION;
             }
-        };
 
-        let att_resp = match session.make_credential(
-            &client_data_hash,
-            &ctap2_rp,
-            &options.user,
-            &options.pub_key_cred_params,
-            exclude_slice,
-            ext_cbor,
-            Some(&authenticator_options),
-            pin_uv_param.as_deref(),
-            pin_uv_protocol,
-            enterprise_attestation,
-            Some(&mut on_keepalive),
-            None,
-        ) {
-            Ok(resp) => {
-                self.restore_session(session);
-                resp
-            }
-            Err(e) => {
-                self.restore_session(session);
-                return Err(e.into());
+            // Get PIN/UV token
+            let (token, protocol, internal_uv) =
+                self.get_token(uv_requirement, permissions, Some(&rp_id))?;
+
+            // Pre-flight filtering of exclude list
+            let exclude_cred = if let Some(ref exclude_list) = options.exclude_credentials {
+                self.filter_creds(&rp_id, exclude_list, protocol, token.as_deref())?
+            } else {
+                None
+            };
+
+            // Compute pin_uv_param for the actual request
+            let (pin_uv_param, pin_uv_protocol) =
+                compute_pin_uv_param(token.as_deref(), protocol, &client_data_hash);
+
+            let authenticator_options = AuthenticatorOptions {
+                rk: Some(rk),
+                uv: if internal_uv { Some(true) } else { None },
+                up: None,
+            };
+
+            // Build the filtered exclude list (single matching cred, or None)
+            let filtered_exclude: Option<Vec<PublicKeyCredentialDescriptor>>;
+            let exclude_slice = if let Some(cred) = exclude_cred {
+                filtered_exclude = Some(vec![cred]);
+                filtered_exclude.as_deref()
+            } else {
+                None
+            };
+
+            // Build extension inputs (must be inside loop — ECDH key agreement
+            // for hmac-secret is tied to the PIN protocol session)
+            let (ext_cbor, hmac_state) =
+                self.build_make_credential_extensions(options, protocol)?;
+
+            let mut session = self.take_session();
+            let interaction = &self.user_interaction;
+            let mut on_keepalive = |status: u8| {
+                if status == 0x02 {
+                    interaction.prompt_up();
+                }
+            };
+
+            match session.make_credential(
+                &client_data_hash,
+                &ctap2_rp,
+                &options.user,
+                &options.pub_key_cred_params,
+                exclude_slice,
+                ext_cbor,
+                Some(&authenticator_options),
+                pin_uv_param.as_deref(),
+                pin_uv_protocol,
+                enterprise_attestation,
+                Some(&mut on_keepalive),
+                None,
+            ) {
+                Ok(resp) => {
+                    self.restore_session(session);
+                    hmac_state_out = hmac_state;
+                    break resp;
+                }
+                Err(e) => {
+                    self.restore_session(session);
+                    // Authenticator requires UV — retry with Required
+                    if is_puat_required(&e)
+                        && uv_requirement == UserVerificationRequirement::Discouraged
+                    {
+                        uv_requirement = UserVerificationRequirement::Required;
+                        continue;
+                    }
+                    return Err(e.into());
+                }
             }
         };
 
@@ -345,7 +358,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         let ext_outputs = self.parse_registration_extensions(
             options,
             &att_resp.auth_data,
-            hmac_state.as_ref(),
+            hmac_state_out.as_ref(),
             att_resp.large_blob_key.is_some(),
             rk,
         );
@@ -381,86 +394,112 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             .map_err(ClientError::BadRequest)?;
         let client_data_hash = client_data.hash();
 
-        let uv_requirement = options.user_verification.unwrap_or_default();
+        let mut uv_requirement = options.user_verification.unwrap_or_default();
 
-        let mut permissions = Permissions::GET_ASSERTION;
+        // These are populated inside the retry loop and used after
+        let first;
+        let mut token;
+        let mut protocol;
+        let hmac_state_out;
 
-        // Large blob write requires an additional permission
-        if let Some(ref ext) = options.extensions
-            && let Some(ref lb) = ext.large_blob
-            && lb.write.is_some()
-        {
-            permissions |= Permissions::LARGE_BLOB_WRITE;
-        }
+        loop {
+            let mut permissions = Permissions::GET_ASSERTION;
 
-        let (token, protocol, internal_uv) =
-            self.get_token(uv_requirement, permissions, Some(&rp_id))?;
+            // Large blob write requires an additional permission
+            if let Some(ref ext) = options.extensions
+                && let Some(ref lb) = ext.large_blob
+                && lb.write.is_some()
+            {
+                permissions |= Permissions::LARGE_BLOB_WRITE;
+            }
 
-        // Pre-flight filtering of allow list
-        let selected_cred_id: Option<Vec<u8>>;
-        let filtered_allow: Option<Vec<PublicKeyCredentialDescriptor>>;
-        let allow_slice = if let Some(ref allow_list) = options.allow_credentials {
-            let selected = self.filter_creds(&rp_id, allow_list, protocol, token.as_deref())?;
-            if let Some(cred) = selected {
-                selected_cred_id = Some(cred.id.clone());
-                filtered_allow = Some(vec![cred]);
-                filtered_allow.as_deref()
-            } else if !allow_list.is_empty() {
-                selected_cred_id = None;
-                filtered_allow = Some(vec![PublicKeyCredentialDescriptor {
-                    type_: allow_list[0].type_,
-                    id: vec![0],
-                    transports: None,
-                }]);
-                filtered_allow.as_deref()
+            let (tok, proto, internal_uv) =
+                self.get_token(uv_requirement, permissions, Some(&rp_id))?;
+            token = tok;
+            protocol = proto;
+
+            // Pre-flight filtering of allow list
+            let selected_cred_id: Option<Vec<u8>>;
+            let filtered_allow: Option<Vec<PublicKeyCredentialDescriptor>>;
+            let allow_slice = if let Some(ref allow_list) = options.allow_credentials {
+                let selected = self.filter_creds(&rp_id, allow_list, protocol, token.as_deref())?;
+                if let Some(cred) = selected {
+                    selected_cred_id = Some(cred.id.clone());
+                    filtered_allow = Some(vec![cred]);
+                    filtered_allow.as_deref()
+                } else if !allow_list.is_empty() {
+                    selected_cred_id = None;
+                    filtered_allow = Some(vec![PublicKeyCredentialDescriptor {
+                        type_: allow_list[0].type_,
+                        id: vec![0],
+                        transports: None,
+                    }]);
+                    filtered_allow.as_deref()
+                } else {
+                    selected_cred_id = None;
+                    None
+                }
             } else {
                 selected_cred_id = None;
                 None
+            };
+
+            // Compute pin_uv_param for the actual request
+            let (pin_uv_param, pin_uv_protocol) =
+                compute_pin_uv_param(token.as_deref(), protocol, &client_data_hash);
+
+            let authenticator_options = AuthenticatorOptions {
+                rk: None,
+                uv: if internal_uv { Some(true) } else { None },
+                up: None,
+            };
+
+            // Build extension inputs (must be inside loop — ECDH key agreement
+            // for hmac-secret is tied to the PIN protocol session)
+            let (ext_cbor, hmac_state) = self.build_get_assertion_extensions(
+                options,
+                protocol,
+                selected_cred_id.as_deref(),
+            )?;
+
+            let mut session = self.take_session();
+            let interaction = &self.user_interaction;
+            let mut on_keepalive = |status: u8| {
+                if status == 0x02 {
+                    interaction.prompt_up();
+                }
+            };
+
+            match session.get_assertion(
+                &rp_id,
+                &client_data_hash,
+                allow_slice,
+                ext_cbor,
+                Some(&authenticator_options),
+                pin_uv_param.as_deref(),
+                pin_uv_protocol,
+                Some(&mut on_keepalive),
+                None,
+            ) {
+                Ok(resp) => {
+                    self.restore_session(session);
+                    hmac_state_out = hmac_state;
+                    first = resp;
+                    break;
+                }
+                Err(e) => {
+                    self.restore_session(session);
+                    // Authenticator requires UV — retry with Required
+                    if is_puat_required(&e)
+                        && uv_requirement == UserVerificationRequirement::Discouraged
+                    {
+                        uv_requirement = UserVerificationRequirement::Required;
+                        continue;
+                    }
+                    return Err(e.into());
+                }
             }
-        } else {
-            selected_cred_id = None;
-            None
-        };
-
-        // Compute pin_uv_param for the actual request
-        let (pin_uv_param, pin_uv_protocol) =
-            compute_pin_uv_param(token.as_deref(), protocol, &client_data_hash);
-
-        let authenticator_options = AuthenticatorOptions {
-            rk: None,
-            uv: if internal_uv { Some(true) } else { None },
-            up: None,
-        };
-
-        // Build extension inputs
-        let (ext_cbor, hmac_state) =
-            self.build_get_assertion_extensions(options, protocol, selected_cred_id.as_deref())?;
-
-        let mut session = self.take_session();
-        let interaction = &self.user_interaction;
-        let mut on_keepalive = |status: u8| {
-            if status == 0x02 {
-                interaction.prompt_up();
-            }
-        };
-
-        let first = match session.get_assertion(
-            &rp_id,
-            &client_data_hash,
-            allow_slice,
-            ext_cbor,
-            Some(&authenticator_options),
-            pin_uv_param.as_deref(),
-            pin_uv_protocol,
-            Some(&mut on_keepalive),
-            None,
-        ) {
-            Ok(resp) => resp,
-            Err(e) => {
-                self.restore_session(session);
-                return Err(e.into());
-            }
-        };
+        }
 
         let total = first.number_of_credentials.unwrap_or(1) as usize;
         let client_data_json = client_data.as_bytes().to_vec();
@@ -472,10 +511,14 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             .map(|c| c.id.clone())
             .unwrap_or_default();
 
-        let ext_outputs =
-            self.parse_authentication_extensions(options, &first.auth_data, hmac_state.as_ref());
+        let ext_outputs = self.parse_authentication_extensions(
+            options,
+            &first.auth_data,
+            hmac_state_out.as_ref(),
+        );
 
         // Handle large blob read/write if requested
+        let mut session = self.take_session();
         let large_blob_output = if let Some(ref ext) = options.extensions {
             if let Some(ref lb_input) = ext.large_blob {
                 let (s, output) = self.process_large_blob(
@@ -529,8 +572,11 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 .map(|c| c.id.clone())
                 .unwrap_or_default();
 
-            let next_ext_outputs =
-                self.parse_authentication_extensions(options, &next.auth_data, hmac_state.as_ref());
+            let next_ext_outputs = self.parse_authentication_extensions(
+                options,
+                &next.auth_data,
+                hmac_state_out.as_ref(),
+            );
 
             responses.push(AuthenticationResponse {
                 id: credential_id,
@@ -1184,6 +1230,11 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Check whether a CTAP2 error is `PuatRequired`.
+fn is_puat_required<E: std::error::Error + Send + Sync + 'static>(e: &Ctap2Error<E>) -> bool {
+    matches!(e, Ctap2Error::StatusError(CtapStatus::PuatRequired))
+}
 
 /// Compute the `pin_uv_param` and protocol version from a token and protocol.
 fn compute_pin_uv_param(
