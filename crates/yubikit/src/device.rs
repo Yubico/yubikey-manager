@@ -147,6 +147,8 @@ pub trait YubiKeyDevice {
     fn transport(&self) -> Transport;
     /// Returns the product name derived from device info.
     fn name(&self) -> String;
+    /// Returns the USB interfaces available on this device.
+    fn usb_interfaces(&self) -> UsbInterface;
     /// Open a SmartCard (CCID) connection, returning a trait object.
     fn open_smartcard(&self) -> Result<Box<dyn SmartCardConnection + Send>, DeviceError>;
     /// Open a FIDO HID (CTAP) connection, returning a trait object.
@@ -170,6 +172,9 @@ impl YubiKeyDevice for Box<dyn YubiKeyDevice> {
     }
     fn name(&self) -> String {
         (**self).name()
+    }
+    fn usb_interfaces(&self) -> UsbInterface {
+        (**self).usb_interfaces()
     }
     fn open_smartcard(&self) -> Result<Box<dyn SmartCardConnection + Send>, DeviceError> {
         (**self).open_smartcard()
@@ -251,40 +256,6 @@ impl LocalYubiKeyDevice {
     /// Returns the FIDO HID device path, if this device was found over FIDO.
     pub fn fido_path(&self) -> Option<&str> {
         self.fido_path.as_deref()
-    }
-
-    /// Returns detected USB interfaces based on enabled capabilities.
-    pub fn usb_interfaces(&self) -> UsbInterface {
-        // Derive from enabled USB capabilities in the device info
-        if let Some(&usb_caps) = self.info.config.enabled_capabilities.get(&Transport::Usb) {
-            let mut ifaces = UsbInterface(0);
-            if usb_caps.contains(Capability::OTP) {
-                ifaces = ifaces | UsbInterface::OTP;
-            }
-            if usb_caps.contains(Capability::FIDO2) || usb_caps.contains(Capability::U2F) {
-                ifaces = ifaces | UsbInterface::FIDO;
-            }
-            // CCID: any of PIV, OATH, OpenPGP, HSMAUTH, or Management
-            if usb_caps.contains(Capability::PIV)
-                || usb_caps.contains(Capability::OATH)
-                || usb_caps.contains(Capability::OPENPGP)
-                || usb_caps.contains(Capability::HSMAUTH)
-            {
-                ifaces = ifaces | UsbInterface::CCID;
-            }
-            ifaces
-        } else {
-            // Fallback: infer from which transports were discovered
-            let mut ifaces = UsbInterface(0);
-            if self.reader_name.is_some() {
-                ifaces = ifaces | UsbInterface::CCID;
-                ifaces = ifaces | UsbInterface::FIDO;
-            }
-            if self.hid_path.is_some() {
-                ifaces = ifaces | UsbInterface::OTP;
-            }
-            ifaces
-        }
     }
 
     /// Open a SmartCard (PC/SC) connection to this device.
@@ -557,6 +528,31 @@ impl YubiKeyDevice for LocalYubiKeyDevice {
 
     fn name(&self) -> String {
         self.name()
+    }
+
+    fn usb_interfaces(&self) -> UsbInterface {
+        self.pid.map(usb_interfaces_from_pid).unwrap_or_else(|| {
+            // Derive from enabled USB capabilities in the device info
+            if let Some(&usb_caps) = self.info.config.enabled_capabilities.get(&Transport::Usb) {
+                let mut ifaces = UsbInterface(0);
+                if usb_caps.contains(Capability::OTP) {
+                    ifaces = ifaces | UsbInterface::OTP;
+                }
+                if usb_caps.contains(Capability::FIDO2) || usb_caps.contains(Capability::U2F) {
+                    ifaces = ifaces | UsbInterface::FIDO;
+                }
+                if usb_caps.contains(Capability::PIV)
+                    || usb_caps.contains(Capability::OATH)
+                    || usb_caps.contains(Capability::OPENPGP)
+                    || usb_caps.contains(Capability::HSMAUTH)
+                {
+                    ifaces = ifaces | UsbInterface::CCID;
+                }
+                ifaces
+            } else {
+                UsbInterface(0)
+            }
+        })
     }
 
     fn open_smartcard(&self) -> Result<Box<dyn SmartCardConnection + Send>, DeviceError> {

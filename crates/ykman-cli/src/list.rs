@@ -1,7 +1,7 @@
 use yubikit::core::Transport;
 use yubikit::device::{
-    LocalYubiKeyDevice, get_name, list_devices, list_readers, name_from_pid, scan_usb_devices,
-    usb_interfaces_from_pid,
+    LocalYubiKeyDevice, YubiKeyDevice, get_name, list_devices, list_readers, name_from_pid,
+    scan_usb_devices, usb_interfaces_from_pid,
 };
 use yubikit::management::UsbInterface;
 

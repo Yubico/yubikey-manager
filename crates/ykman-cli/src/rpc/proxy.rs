@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use yubikit::core::{Connection, Transport};
 use yubikit::device::{DeviceError, ReinsertStatus, YubiKeyDevice};
 use yubikit::fido::FidoConnection;
-use yubikit::management::{Capability, DeviceInfo};
+use yubikit::management::{Capability, DeviceInfo, UsbInterface};
 use yubikit::otp::{OtpConnection, OtpError};
 use yubikit::smartcard::{SmartCardConnection, SmartCardError};
 use yubikit::transport::ctaphid::{CtapHidCapability, FidoError};
@@ -240,6 +240,7 @@ pub struct RpcDevice {
     info: DeviceInfo,
     transport: Transport,
     name: String,
+    usb_ifaces: UsbInterface,
     has_ccid: bool,
     has_ctap: bool,
     has_otp: bool,
@@ -272,6 +273,12 @@ impl RpcDevice {
         let has_ctap = children.get("ctap").is_some();
         let has_otp = children.get("otp").is_some();
 
+        let usb_ifaces = UsbInterface(
+            data.get("usb_interfaces")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u8,
+        );
+
         let info = Self::read_device_info(&data);
 
         log::debug!(
@@ -282,6 +289,7 @@ impl RpcDevice {
             info,
             transport,
             name,
+            usb_ifaces,
             has_ccid,
             has_ctap,
             has_otp,
@@ -417,6 +425,10 @@ impl YubiKeyDevice for RpcDevice {
 
     fn name(&self) -> String {
         self.name.clone()
+    }
+
+    fn usb_interfaces(&self) -> UsbInterface {
+        self.usb_ifaces
     }
 
     fn open_smartcard(&self) -> Result<Box<dyn SmartCardConnection + Send>, DeviceError> {

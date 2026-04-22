@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::{Value, json};
 
 use yubikit::core::Transport;
-use yubikit::device::{LocalYubiKeyDevice, ReinsertStatus};
+use yubikit::device::{LocalYubiKeyDevice, ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
 
 use super::connection::ConnectionNode;

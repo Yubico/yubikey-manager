@@ -21,6 +21,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use yubikit::device;
+use yubikit::device::YubiKeyDevice;
 use yubikit::management;
 
 fn device_err(e: device::DeviceError) -> PyErr {
