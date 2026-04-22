@@ -62,7 +62,9 @@ pub mod extensions;
 pub mod types;
 
 /// Client-side WebAuthn types: data collector, error, user interaction, and client.
-pub use client::{ClientDataCollector, ClientError, UserInteraction, WebAuthnClient};
+pub use client::{
+    ClientDataCollector, ClientError, DefaultClientDataCollector, UserInteraction, WebAuthnClient,
+};
 /// Re-exported WebAuthn types used in the public API.
 pub use types::{
     AttestationConveyancePreference, AuthenticationResponse, AuthenticatorAssertionResponse,

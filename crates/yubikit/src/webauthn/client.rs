@@ -98,6 +98,87 @@ pub trait ClientDataCollector {
     ) -> Result<(CollectedClientData, String), String>;
 }
 
+/// Default [`ClientDataCollector`] with a fixed origin.
+///
+/// When `rp.id` is absent from the options, the effective RP ID is derived
+/// from the origin's host (per the WebAuthn spec).
+pub struct DefaultClientDataCollector {
+    origin: String,
+}
+
+impl DefaultClientDataCollector {
+    /// Create a new collector with the given origin (e.g. `"https://example.com"`).
+    pub fn new(origin: impl Into<String>) -> Self {
+        Self {
+            origin: origin.into(),
+        }
+    }
+
+    /// Derive the effective RP ID from the options, falling back to the
+    /// origin's host when `rp.id` / `rp_id` is `None`.
+    fn effective_rp_id_create(
+        &self,
+        options: &PublicKeyCredentialCreationOptions,
+    ) -> Result<String, String> {
+        if let Some(id) = &options.rp.id {
+            return Ok(id.clone());
+        }
+        self.rp_id_from_origin()
+    }
+
+    fn effective_rp_id_get(
+        &self,
+        options: &PublicKeyCredentialRequestOptions,
+    ) -> Result<String, String> {
+        if let Some(id) = &options.rp_id {
+            return Ok(id.clone());
+        }
+        self.rp_id_from_origin()
+    }
+
+    fn rp_id_from_origin(&self) -> Result<String, String> {
+        // Parse "https://host[:port][/...]" without pulling in the url crate.
+        let rest = self
+            .origin
+            .strip_prefix("https://")
+            .ok_or("RP ID required for non-https origin")?;
+        let host = rest.split('/').next().unwrap_or(rest);
+        // Strip port if present
+        let host = if let Some(bracket_end) = host.find(']') {
+            // IPv6: [::1]:port
+            &host[..bracket_end + 1]
+        } else {
+            host.split(':').next().unwrap_or(host)
+        };
+        if host.is_empty() {
+            return Err("Origin has no host".to_string());
+        }
+        Ok(host.to_string())
+    }
+}
+
+impl ClientDataCollector for DefaultClientDataCollector {
+    fn collect_create(
+        &self,
+        options: &PublicKeyCredentialCreationOptions,
+    ) -> Result<(CollectedClientData, String), String> {
+        let rp_id = self.effective_rp_id_create(options)?;
+        let client_data =
+            CollectedClientData::create("webauthn.create", &options.challenge, &self.origin, false);
+        Ok((client_data, rp_id))
+    }
+
+    fn collect_get(
+        &self,
+        options: &PublicKeyCredentialRequestOptions,
+    ) -> Result<(CollectedClientData, String), String> {
+        let rp_id = self.effective_rp_id_get(options)?;
+        let client_data =
+            CollectedClientData::create("webauthn.get", &options.challenge, &self.origin, false);
+        Ok((client_data, rp_id))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // WebAuthn client
 // ---------------------------------------------------------------------------
