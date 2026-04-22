@@ -33,9 +33,9 @@
 //! let dev = devices.first().expect("no FIDO device found");
 //! let conn = HidFidoConnection::open(dev)?;
 //! let ctap = CtapSession::new_fido(conn).map_err(|(e, _)| e)?;
-//! let session = Ctap2Session::new(ctap).map_err(|(e, _)| e)?;
+//! let mut session = Ctap2Session::new(ctap).map_err(|(e, _)| e)?;
 //!
-//! println!("Authenticator: {:?}", session.info().versions);
+//! println!("Authenticator: {:?}", session.get_info()?.versions);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 

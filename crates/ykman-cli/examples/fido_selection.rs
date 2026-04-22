@@ -34,7 +34,9 @@ fn run_selection_hid(conn: HidFidoConnection) {
         }
     };
 
-    println!("CTAP2 initialized, AAGUID: {}", ctap2.info().aaguid);
+    if let Ok(info) = ctap2.get_info() {
+        println!("CTAP2 initialized, AAGUID: {}", info.aaguid);
+    }
     run_selection_inner(&mut ctap2);
 }
 
@@ -62,7 +64,9 @@ fn run_selection_smartcard(conn: PcscSmartCardConnection, reader: &str) {
         }
     };
 
-    println!("CTAP2 initialized, AAGUID: {}", ctap2.info().aaguid);
+    if let Ok(info) = ctap2.get_info() {
+        println!("CTAP2 initialized, AAGUID: {}", info.aaguid);
+    }
     run_selection_inner(&mut ctap2);
 }
 

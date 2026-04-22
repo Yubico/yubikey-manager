@@ -87,7 +87,8 @@ macro_rules! with_fido_session {
         {
             let ctap = CtapSession::new_fido(conn)
                 .map_err(|(e, _)| CliError(format!("Failed to initialize CTAP: {e}")))?;
-            let $session = Ctap2Session::new(ctap)
+            #[allow(unused_mut)]
+            let mut $session = Ctap2Session::new(ctap)
                 .map_err(|(e, _)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
             $body
         } else {
@@ -107,7 +108,8 @@ macro_rules! with_fido_session {
                 CtapSession::new(conn)
             }
             .map_err(|(e, _)| CliError(format!("Failed to initialize CTAP: {e}")))?;
-            let $session = Ctap2Session::new(ctap)
+            #[allow(unused_mut)]
+            let mut $session = Ctap2Session::new(ctap)
                 .map_err(|(e, _)| CliError(format!("Failed to initialize CTAP2: {e}")))?;
             $body
         }
@@ -220,7 +222,9 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
 
     if fido2_enabled {
         with_fido_session!(dev, scp_params, |ctap2| {
-            let ctap_info = ctap2.info().clone();
+            let ctap_info = ctap2
+                .get_info()
+                .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
 
             // FIPS status
             if dev_info.fips_capable.contains(Capability::FIDO2) {
@@ -399,7 +403,9 @@ fn run_reset_inner<C: Connection + 'static>(
     mut ctap2: Ctap2Session<C>,
     transport: Transport,
 ) -> Result<(), CliError> {
-    let ctap_info = ctap2.info().clone();
+    let ctap_info = ctap2
+        .get_info()
+        .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
 
     // Check transport restrictions
     let transports_for_reset = &ctap_info.transports_for_reset;
@@ -465,7 +471,10 @@ pub fn run_access_change_pin(
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
     with_fido_session!(dev, scp_params, |ctap2| {
-        let pin_is_set = ctap2.info().options.get("clientPin") == Some(&true);
+        let ctap_info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
+        let pin_is_set = ctap_info.options.get("clientPin") == Some(&true);
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
 
@@ -531,7 +540,10 @@ pub fn run_access_verify_pin(
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     with_fido_session!(dev, scp_params, |ctap2| {
-        let pin_str = require_pin_from_info(ctap2.info(), pin, "PIN verification")?;
+        let ctap_info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
+        let pin_str = require_pin_from_info(&ctap_info, pin, "PIN verification")?;
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
 
@@ -551,8 +563,10 @@ pub fn run_access_force_change(
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     with_fido_session!(dev, scp_params, |ctap2| {
-        if !ctap2
-            .info()
+        let ctap_info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
+        if !ctap_info
             .options
             .get("setMinPINLength")
             .copied()
@@ -562,7 +576,7 @@ pub fn run_access_force_change(
                 "Force change PIN is not supported on this YubiKey.".to_string(),
             ));
         }
-        let pin_str = require_pin_from_info(ctap2.info(), pin, "Force change PIN")?;
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Force change PIN")?;
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
@@ -588,8 +602,10 @@ pub fn run_access_set_min_length(
     rp_ids: &[String],
 ) -> Result<(), CliError> {
     with_fido_session!(dev, scp_params, |ctap2| {
+        let info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
         {
-            let info = ctap2.info();
             if !info
                 .options
                 .get("setMinPINLength")
@@ -617,7 +633,7 @@ pub fn run_access_set_min_length(
             }
         }
 
-        let pin_str = require_pin_from_info(ctap2.info(), pin, "Set minimum PIN length")?;
+        let pin_str = require_pin_from_info(&info, pin, "Set minimum PIN length")?;
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
@@ -647,11 +663,13 @@ pub fn run_credentials_list(
     csv: bool,
 ) -> Result<(), CliError> {
     with_fido_session!(dev, scp_params, |ctap2| {
-        if !ctap2
-            .info()
+        let ctap_info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
+        if !ctap_info
             .options
             .get("credMgmt")
-            .or(ctap2.info().options.get("credentialMgmtPreview"))
+            .or(ctap_info.options.get("credentialMgmtPreview"))
             .copied()
             .unwrap_or(false)
         {
@@ -660,7 +678,7 @@ pub fn run_credentials_list(
             ));
         }
 
-        let pin_str = require_pin_from_info(ctap2.info(), pin, "Credential Management")?;
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Credential Management")?;
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
@@ -789,7 +807,10 @@ pub fn run_credentials_delete(
     force: bool,
 ) -> Result<(), CliError> {
     with_fido_session!(dev, scp_params, |ctap2| {
-        let pin_str = require_pin_from_info(ctap2.info(), pin, "Credential Management")?;
+        let ctap_info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Credential Management")?;
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
@@ -872,7 +893,10 @@ pub fn run_credentials_update(
     }
 
     with_fido_session!(dev, scp_params, |ctap2| {
-        let pin_str = require_pin_from_info(ctap2.info(), pin, "Credential Management")?;
+        let ctap_info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Credential Management")?;
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
@@ -951,13 +975,16 @@ pub fn run_fingerprints_list(
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     with_fido_session!(dev, scp_params, |ctap2| {
-        if !ctap2.info().options.contains_key("bioEnroll") {
+        let ctap_info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
+        if !ctap_info.options.contains_key("bioEnroll") {
             return Err(CliError(
                 "Fingerprints are not supported on this YubiKey.".to_string(),
             ));
         }
 
-        let pin_str = require_pin_from_info(ctap2.info(), pin, "Biometrics")?;
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Biometrics")?;
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
@@ -1003,7 +1030,10 @@ pub fn run_fingerprints_add(
     }
 
     with_fido_session!(dev, scp_params, |ctap2| {
-        let pin_str = require_pin_from_info(ctap2.info(), pin, "Biometrics")?;
+        let ctap_info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Biometrics")?;
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
@@ -1088,7 +1118,10 @@ pub fn run_fingerprints_rename(
     }
 
     with_fido_session!(dev, scp_params, |ctap2| {
-        let pin_str = require_pin_from_info(ctap2.info(), pin, "Biometrics")?;
+        let ctap_info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Biometrics")?;
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
@@ -1116,7 +1149,10 @@ pub fn run_fingerprints_delete(
     force: bool,
 ) -> Result<(), CliError> {
     with_fido_session!(dev, scp_params, |ctap2| {
-        let pin_str = require_pin_from_info(ctap2.info(), pin, "Biometrics")?;
+        let ctap_info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Biometrics")?;
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) =
@@ -1153,7 +1189,10 @@ pub fn run_config_toggle_always_uv(
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     with_fido_session!(dev, scp_params, |ctap2| {
-        let always_uv = match ctap2.info().options.get("alwaysUv") {
+        let ctap_info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
+        let always_uv = match ctap_info.options.get("alwaysUv") {
             Some(&v) => v,
             None => {
                 return Err(CliError(
@@ -1169,7 +1208,6 @@ pub fn run_config_toggle_always_uv(
             ));
         }
 
-        let ctap_info = ctap2.info().clone();
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) = get_optional_pin_token_inner(
@@ -1204,8 +1242,11 @@ pub fn run_config_enable_ep_attestation(
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     with_fido_session!(dev, scp_params, |ctap2| {
+        let ctap_info = ctap2
+            .get_info()
+            .map_err(|e| CliError(format!("Failed to get info: {e}")))?;
         {
-            let options = &ctap2.info().options;
+            let options = &ctap_info.options;
             if !options.contains_key("ep") {
                 return Err(CliError(
                     "Enterprise Attestation is not supported on this YubiKey.".to_string(),
@@ -1219,7 +1260,6 @@ pub fn run_config_enable_ep_attestation(
             }
         }
 
-        let ctap_info = ctap2.info().clone();
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
         let (token, protocol) = get_optional_pin_token_inner(

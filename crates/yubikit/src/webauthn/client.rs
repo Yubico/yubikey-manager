@@ -210,6 +210,14 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         self.session.as_ref().expect("session already taken")
     }
 
+    /// Access the session's cached (initial) authenticator info.
+    ///
+    /// Use for static capabilities (extensions, max sizes, protocols).
+    /// For mutable state (clientPin, uv) use `get_info()` on the session.
+    fn cached_info(&self) -> &crate::ctap2::Info {
+        &self.session().cached_info
+    }
+
     fn take_session(&mut self) -> Ctap2Session<C> {
         self.session.take().expect("session already taken")
     }
@@ -631,29 +639,28 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
 
         let mut entries: Vec<(String, cbor::Value)> = Vec::new();
         let mut hmac_state = None;
+        let info = self.cached_info().clone();
 
         // PRF / hmac-secret
-        if let Some(ref prf_input) = ext.prf {
-            let info = self.session().info().clone();
-            if info.extensions.iter().any(|e| e == "hmac-secret") {
-                if let Some(ref eval) = prf_input.eval {
-                    // hmac-secret-mc: need key agreement + salt encryption
-                    if let Some(state) = self.get_hmac_secret_state(protocol)? {
-                        for entry in prf::make_credential_salts_cbor(eval, &state) {
-                            entries.push(entry);
-                        }
-                        hmac_state = Some(state);
+        if let Some(ref prf_input) = ext.prf
+            && info.extensions.iter().any(|e| e == "hmac-secret")
+        {
+            if let Some(ref eval) = prf_input.eval {
+                // hmac-secret-mc: need key agreement + salt encryption
+                if let Some(state) = self.get_hmac_secret_state(protocol)? {
+                    for entry in prf::make_credential_salts_cbor(eval, &state) {
+                        entries.push(entry);
                     }
-                } else {
-                    // Simple enable
-                    entries.push(prf::make_credential_enable_cbor());
+                    hmac_state = Some(state);
                 }
+            } else {
+                // Simple enable
+                entries.push(prf::make_credential_enable_cbor());
             }
         }
 
         // credProtect
         if let Some(ref cp) = ext.cred_protect {
-            let info = self.session().info().clone();
             if cp.enforce && !info.extensions.iter().any(|e| e == "credProtect") {
                 return Err(ClientError::ConfigurationUnsupported(
                     "credProtect not supported by authenticator".into(),
@@ -663,25 +670,23 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         }
 
         // credBlob
-        if let Some(ref cb) = ext.cred_blob {
-            let info = self.session().info().clone();
-            if info.extensions.iter().any(|e| e == "credBlob") {
-                if let Some(max_len) = info.max_cred_blob_length
-                    && cb.blob.len() > max_len
-                {
-                    return Err(ClientError::BadRequest(format!(
-                        "credBlob too large: {} > {}",
-                        cb.blob.len(),
-                        max_len,
-                    )));
-                }
-                entries.push(extensions::cred_blob::make_credential_to_cbor(&cb.blob));
+        if let Some(ref cb) = ext.cred_blob
+            && info.extensions.iter().any(|e| e == "credBlob")
+        {
+            if let Some(max_len) = info.max_cred_blob_length
+                && cb.blob.len() > max_len
+            {
+                return Err(ClientError::BadRequest(format!(
+                    "credBlob too large: {} > {}",
+                    cb.blob.len(),
+                    max_len,
+                )));
             }
+            entries.push(extensions::cred_blob::make_credential_to_cbor(&cb.blob));
         }
 
         // largeBlobKey
         if let Some(ref lb) = ext.large_blob {
-            let info = self.session().info().clone();
             let supported = info.extensions.iter().any(|e| e == "largeBlobKey");
             if lb.support == extensions::large_blob::LargeBlobSupport::Required && !supported {
                 return Err(ClientError::ConfigurationUnsupported(
@@ -694,11 +699,8 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         }
 
         // minPinLength
-        if ext.min_pin_length == Some(true) {
-            let info = self.session().info().clone();
-            if info.extensions.iter().any(|e| e == "minPinLength") {
-                entries.push(extensions::min_pin_length::to_cbor());
-            }
+        if ext.min_pin_length == Some(true) && info.extensions.iter().any(|e| e == "minPinLength") {
+            entries.push(extensions::min_pin_length::to_cbor());
         }
 
         Ok((extensions::build_extensions_cbor(entries), hmac_state))
@@ -718,33 +720,26 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
 
         let mut entries: Vec<(String, cbor::Value)> = Vec::new();
         let mut hmac_state = None;
+        let info = self.cached_info().clone();
 
         // PRF / hmac-secret
-        if let Some(ref prf_input) = ext.prf {
-            let info = self.session().info().clone();
-            if info.extensions.iter().any(|e| e == "hmac-secret")
-                && let Some(eval) = prf::select_eval(prf_input, selected_cred_id)
-                && let Some(state) = self.get_hmac_secret_state(protocol)?
-            {
-                entries.push(prf::get_assertion_cbor(eval, &state));
-                hmac_state = Some(state);
-            }
+        if let Some(ref prf_input) = ext.prf
+            && info.extensions.iter().any(|e| e == "hmac-secret")
+            && let Some(eval) = prf::select_eval(prf_input, selected_cred_id)
+            && let Some(state) = self.get_hmac_secret_state(protocol)?
+        {
+            entries.push(prf::get_assertion_cbor(eval, &state));
+            hmac_state = Some(state);
         }
 
         // credBlob (getCredBlob)
-        if ext.get_cred_blob == Some(true) {
-            let info = self.session().info().clone();
-            if info.extensions.iter().any(|e| e == "credBlob") {
-                entries.push(extensions::cred_blob::get_assertion_to_cbor());
-            }
+        if ext.get_cred_blob == Some(true) && info.extensions.iter().any(|e| e == "credBlob") {
+            entries.push(extensions::cred_blob::get_assertion_to_cbor());
         }
 
         // largeBlobKey
-        if ext.large_blob.is_some() {
-            let info = self.session().info().clone();
-            if info.extensions.iter().any(|e| e == "largeBlobKey") {
-                entries.push(extensions::large_blob::to_cbor());
-            }
+        if ext.large_blob.is_some() && info.extensions.iter().any(|e| e == "largeBlobKey") {
+            entries.push(extensions::large_blob::to_cbor());
         }
 
         Ok((extensions::build_extensions_cbor(entries), hmac_state))
@@ -758,8 +753,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         let proto = match protocol {
             Some(p) => p,
             None => {
-                // Select a protocol for key agreement
-                let info = self.session().info().clone();
+                let info = self.cached_info();
                 if info.pin_uv_protocols.contains(&2) {
                     PinProtocol::V2
                 } else if info.pin_uv_protocols.contains(&1) {
@@ -994,7 +988,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         protocol: Option<PinProtocol>,
         token: Option<&[u8]>,
     ) -> Result<Option<PublicKeyCredentialDescriptor>, ClientError<C::Error>> {
-        let info = self.session().info().clone();
+        let info = self.cached_info();
 
         // Filter out credential IDs that are too long
         let filtered: Vec<&PublicKeyCredentialDescriptor> =

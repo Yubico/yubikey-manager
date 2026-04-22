@@ -241,7 +241,7 @@ pub struct HsmAuthDiag {
     pub management_key_retries: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct Ctap2InfoDiag {
     pub versions: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -557,9 +557,17 @@ fn probe_hsmauth(
 }
 
 fn probe_ctap2_pin<C: Connection + 'static>(
-    ctap2: Ctap2Session<C>,
+    mut ctap2: Ctap2Session<C>,
 ) -> (ResultOrError<PinStatusDiag>, Ctap2Session<C>) {
-    let info = ctap2.info().clone();
+    let info = match ctap2.get_info() {
+        Ok(i) => i,
+        Err(e) => {
+            return (
+                ResultOrError::Err(format!("Failed to get info: {e}")),
+                ctap2,
+            );
+        }
+    };
     if info.options.get("clientPin") != Some(&true) {
         return (
             ResultOrError::Ok(PinStatusDiag {
@@ -818,8 +826,10 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
                         if caps.has_cbor() {
                             let (ctap2, mgmt) = match CtapSession::new_fido(conn) {
                                 Ok(ctap) => match Ctap2Session::new(ctap) {
-                                    Ok(ctap2) => {
-                                        let info_diag = ctap2_info_diag(ctap2.info());
+                                    Ok(mut ctap2) => {
+                                        let info = ctap2.get_info().ok();
+                                        let info_diag =
+                                            info.as_ref().map(ctap2_info_diag).unwrap_or_default();
                                         let (pin, ctap2) = probe_ctap2_pin(ctap2);
                                         let ctap2_diag = ResultOrError::Ok(Ctap2Diag {
                                             info: info_diag,
