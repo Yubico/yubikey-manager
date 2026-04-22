@@ -164,7 +164,9 @@ impl PyWebAuthnClientFido {
             .client
             .as_mut()
             .ok_or_else(|| PyRuntimeError::new_err("client has been closed"))?;
-        let resp = client.make_credential(&options).map_err(webauthn_err)?;
+        let resp = client
+            .make_credential(&options, None)
+            .map_err(webauthn_err)?;
         resp.to_json()
             .map_err(|e| PyRuntimeError::new_err(format!("failed to serialize response: {e}")))
     }
@@ -176,7 +178,7 @@ impl PyWebAuthnClientFido {
             .client
             .as_mut()
             .ok_or_else(|| PyRuntimeError::new_err("client has been closed"))?;
-        let responses = client.get_assertion(&options).map_err(webauthn_err)?;
+        let responses = client.get_assertion(&options, None).map_err(webauthn_err)?;
         responses
             .iter()
             .map(|r| {
@@ -252,7 +254,9 @@ impl PyWebAuthnClientCcid {
             .client
             .as_mut()
             .ok_or_else(|| PyRuntimeError::new_err("client has been closed"))?;
-        let resp = client.make_credential(&options).map_err(webauthn_err)?;
+        let resp = client
+            .make_credential(&options, None)
+            .map_err(webauthn_err)?;
         resp.to_json()
             .map_err(|e| PyRuntimeError::new_err(format!("failed to serialize response: {e}")))
     }
@@ -264,7 +268,7 @@ impl PyWebAuthnClientCcid {
             .client
             .as_mut()
             .ok_or_else(|| PyRuntimeError::new_err("client has been closed"))?;
-        let responses = client.get_assertion(&options).map_err(webauthn_err)?;
+        let responses = client.get_assertion(&options, None).map_err(webauthn_err)?;
         responses
             .iter()
             .map(|r| {

@@ -234,6 +234,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
     pub fn make_credential(
         &mut self,
         options: &PublicKeyCredentialCreationOptions,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<RegistrationResponse, ClientError<C::Error>> {
         let (client_data, rp_id) = self
             .client_data_collector
@@ -330,7 +331,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 pin_uv_protocol,
                 enterprise_attestation,
                 Some(&mut on_keepalive),
-                None,
+                cancel,
             ) {
                 Ok(resp) => {
                     self.restore_session(session);
@@ -404,6 +405,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
     pub fn get_assertion(
         &mut self,
         options: &PublicKeyCredentialRequestOptions,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<AuthenticationResponse>, ClientError<C::Error>> {
         let (client_data, rp_id) = self
             .client_data_collector
@@ -503,7 +505,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 pin_uv_param.as_deref(),
                 pin_uv_protocol,
                 Some(&mut on_keepalive),
-                None,
+                cancel,
             ) {
                 Ok(resp) => {
                     self.restore_session(session);

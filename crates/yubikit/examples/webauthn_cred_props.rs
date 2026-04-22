@@ -73,7 +73,7 @@ fn main() {
         }),
     };
 
-    match client.make_credential(&create_options) {
+    match client.make_credential(&create_options, None) {
         Ok(reg) => {
             println!("✅ Credential: {}", hex(&reg.id));
             if let Some(ref ext) = reg.client_extension_results {
@@ -122,7 +122,7 @@ fn main() {
         }),
     };
 
-    match client.make_credential(&create_options_rk) {
+    match client.make_credential(&create_options_rk, None) {
         Ok(reg) => {
             println!("✅ Credential: {}", hex(&reg.id));
             if let Some(ref ext) = reg.client_extension_results {

@@ -68,7 +68,7 @@ fn main() {
         }),
     };
 
-    let reg = match client.make_credential(&create_options) {
+    let reg = match client.make_credential(&create_options, None) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Registration failed: {e}");
@@ -103,7 +103,7 @@ fn main() {
         }),
     };
 
-    let assertions = match client.get_assertion(&get_options) {
+    let assertions = match client.get_assertion(&get_options, None) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("Authentication failed: {e}");
