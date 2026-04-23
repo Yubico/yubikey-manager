@@ -37,7 +37,8 @@ exits its ``with`` block.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from threading import Event
+from typing import Any, Callable
 
 from _yubikit_native.sessions import BioEnrollmentCcid as _BioEnrollmentCcid
 from _yubikit_native.sessions import BioEnrollmentFido as _BioEnrollmentFido
@@ -117,8 +118,8 @@ class Ctap2Session(Session):
 
     def selection(
         self,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> None:
         self._native.selection(event, on_keepalive)
 
@@ -126,15 +127,15 @@ class Ctap2Session(Session):
         self,
         cmd: int,
         data: bytes | None = None,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes:
         return self._native.send_cbor(cmd, data, event, on_keepalive)
 
     def reset(
         self,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> None:
         self._native.reset(event, on_keepalive)
 
@@ -207,8 +208,8 @@ class ClientPin(Closable):
         self,
         permissions: int | None = None,
         permissions_rpid: str | None = None,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes:
         return self._native.get_uv_token(
             permissions, permissions_rpid, event, on_keepalive
@@ -378,8 +379,8 @@ class BioEnrollment(Closable):
     def enroll_begin(
         self,
         timeout: int | None = None,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> dict[int, Any]:
         return self._native.enroll_begin(timeout, event, on_keepalive)
 
@@ -387,8 +388,8 @@ class BioEnrollment(Closable):
         self,
         template_id: bytes,
         timeout: int | None = None,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> dict[int, Any]:
         return self._native.enroll_capture_next(
             template_id, timeout, event, on_keepalive

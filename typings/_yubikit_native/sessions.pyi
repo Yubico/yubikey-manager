@@ -1,4 +1,5 @@
-from typing import Any
+from threading import Event
+from typing import Any, Callable
 
 def py_list_fido_devices() -> list[dict[str, Any]]: ...
 
@@ -465,8 +466,8 @@ class YubiOtpSessionOtp:
         self,
         slot: int,
         challenge: bytes,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes: ...
 
 class Ctap2SessionCcid:
@@ -476,21 +477,21 @@ class Ctap2SessionCcid:
     def version(self) -> tuple[int, int, int]: ...
     def selection(
         self,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> None: ...
     def get_info(self) -> dict[str, Any]: ...
     def send_cbor(
         self,
         cmd: int,
         data: bytes | None = None,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes: ...
     def reset(
         self,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> None: ...
 
 class Ctap2SessionFido:
@@ -500,21 +501,21 @@ class Ctap2SessionFido:
     def version(self) -> tuple[int, int, int]: ...
     def selection(
         self,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> None: ...
     def get_info(self) -> dict[str, Any]: ...
     def send_cbor(
         self,
         cmd: int,
         data: bytes | None = None,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes: ...
     def reset(
         self,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> None: ...
 
 class PinProtocol:
@@ -544,8 +545,8 @@ class ClientPinCcid:
         self,
         permissions: int | None = None,
         permissions_rpid: str | None = None,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes: ...
     def close(self, session: Ctap2SessionCcid) -> None: ...
 
@@ -571,8 +572,8 @@ class ClientPinFido:
         self,
         permissions: int | None = None,
         permissions_rpid: str | None = None,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes: ...
     def close(self, session: Ctap2SessionFido) -> None: ...
 
@@ -653,15 +654,15 @@ class BioEnrollmentCcid:
     def enroll_begin(
         self,
         timeout: int | None = None,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> dict[int, Any]: ...
     def enroll_capture_next(
         self,
         template_id: bytes,
         timeout: int | None = None,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> dict[int, Any]: ...
     def enroll_cancel(self) -> None: ...
     def enumerate_enrollments(self) -> dict[int, Any]: ...
@@ -680,15 +681,15 @@ class BioEnrollmentFido:
     def enroll_begin(
         self,
         timeout: int | None = None,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> dict[int, Any]: ...
     def enroll_capture_next(
         self,
         template_id: bytes,
         timeout: int | None = None,
-        event: object | None = None,
-        on_keepalive: object | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> dict[int, Any]: ...
     def enroll_cancel(self) -> None: ...
     def enumerate_enrollments(self) -> dict[int, Any]: ...
@@ -731,8 +732,10 @@ class WebAuthnClientFido:
         user_interaction: Any,
         client_data_collector: Any,
     ) -> None: ...
-    def make_credential(self, options_json: str) -> str: ...
-    def get_assertion(self, options_json: str) -> list[str]: ...
+    def make_credential(self, options_json: str, event: Event | None = None) -> str: ...
+    def get_assertion(
+        self, options_json: str, event: Event | None = None
+    ) -> list[str]: ...
     def close(self) -> None: ...
 
 class WebAuthnClientCcid:
@@ -743,6 +746,8 @@ class WebAuthnClientCcid:
         client_data_collector: Any,
         scp_key_params: Any | None = None,
     ) -> None: ...
-    def make_credential(self, options_json: str) -> str: ...
-    def get_assertion(self, options_json: str) -> list[str]: ...
+    def make_credential(self, options_json: str, event: Event | None = None) -> str: ...
+    def get_assertion(
+        self, options_json: str, event: Event | None = None
+    ) -> list[str]: ...
     def close(self) -> None: ...

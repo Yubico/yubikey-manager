@@ -48,7 +48,7 @@ fn make_keepalive_fn(on_keepalive: &Option<PyObject>) -> impl FnMut(u8) + '_ {
     }
 }
 
-fn make_cancel_fn(event: &Option<PyObject>) -> impl Fn() -> bool + '_ {
+pub(crate) fn make_cancel_fn(event: &Option<PyObject>) -> impl Fn() -> bool + '_ {
     move || {
         if let Some(evt) = event {
             Python::with_gil(|py| {

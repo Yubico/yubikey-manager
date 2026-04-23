@@ -11,6 +11,7 @@ use crate::py_bridge::{
     BoxedFidoConnection, BoxedSmartCardConnection, extract_fido_connection,
     extract_smartcard_connection, restore_fido_connection, restore_smartcard_connection,
 };
+use crate::py_ctap::make_cancel_fn;
 
 // ---------------------------------------------------------------------------
 // Error mapping
@@ -157,28 +158,48 @@ impl PyWebAuthnClientFido {
         })
     }
 
-    fn make_credential(&mut self, options_json: &str) -> PyResult<String> {
+    #[pyo3(signature = (options_json, event=None))]
+    fn make_credential(&mut self, options_json: &str, event: Option<PyObject>) -> PyResult<String> {
         let options = PublicKeyCredentialCreationOptions::from_json(options_json)
             .map_err(|e| PyValueError::new_err(format!("invalid options JSON: {e}")))?;
         let client = self
             .client
             .as_mut()
             .ok_or_else(|| PyRuntimeError::new_err("client has been closed"))?;
+        let cancel_fn = make_cancel_fn(&event);
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
         let resp = client
-            .make_credential(&options, None)
+            .make_credential(&options, cancel_ref)
             .map_err(webauthn_err)?;
         resp.to_json()
             .map_err(|e| PyRuntimeError::new_err(format!("failed to serialize response: {e}")))
     }
 
-    fn get_assertion(&mut self, options_json: &str) -> PyResult<Vec<String>> {
+    #[pyo3(signature = (options_json, event=None))]
+    fn get_assertion(
+        &mut self,
+        options_json: &str,
+        event: Option<PyObject>,
+    ) -> PyResult<Vec<String>> {
         let options = PublicKeyCredentialRequestOptions::from_json(options_json)
             .map_err(|e| PyValueError::new_err(format!("invalid options JSON: {e}")))?;
         let client = self
             .client
             .as_mut()
             .ok_or_else(|| PyRuntimeError::new_err("client has been closed"))?;
-        let responses = client.get_assertion(&options, None).map_err(webauthn_err)?;
+        let cancel_fn = make_cancel_fn(&event);
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
+        let responses = client
+            .get_assertion(&options, cancel_ref)
+            .map_err(webauthn_err)?;
         responses
             .iter()
             .map(|r| {
@@ -247,28 +268,48 @@ impl PyWebAuthnClientCcid {
         })
     }
 
-    fn make_credential(&mut self, options_json: &str) -> PyResult<String> {
+    #[pyo3(signature = (options_json, event=None))]
+    fn make_credential(&mut self, options_json: &str, event: Option<PyObject>) -> PyResult<String> {
         let options = PublicKeyCredentialCreationOptions::from_json(options_json)
             .map_err(|e| PyValueError::new_err(format!("invalid options JSON: {e}")))?;
         let client = self
             .client
             .as_mut()
             .ok_or_else(|| PyRuntimeError::new_err("client has been closed"))?;
+        let cancel_fn = make_cancel_fn(&event);
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
         let resp = client
-            .make_credential(&options, None)
+            .make_credential(&options, cancel_ref)
             .map_err(webauthn_err)?;
         resp.to_json()
             .map_err(|e| PyRuntimeError::new_err(format!("failed to serialize response: {e}")))
     }
 
-    fn get_assertion(&mut self, options_json: &str) -> PyResult<Vec<String>> {
+    #[pyo3(signature = (options_json, event=None))]
+    fn get_assertion(
+        &mut self,
+        options_json: &str,
+        event: Option<PyObject>,
+    ) -> PyResult<Vec<String>> {
         let options = PublicKeyCredentialRequestOptions::from_json(options_json)
             .map_err(|e| PyValueError::new_err(format!("invalid options JSON: {e}")))?;
         let client = self
             .client
             .as_mut()
             .ok_or_else(|| PyRuntimeError::new_err("client has been closed"))?;
-        let responses = client.get_assertion(&options, None).map_err(webauthn_err)?;
+        let cancel_fn = make_cancel_fn(&event);
+        let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
+            Some(&cancel_fn)
+        } else {
+            None
+        };
+        let responses = client
+            .get_assertion(&options, cancel_ref)
+            .map_err(webauthn_err)?;
         responses
             .iter()
             .map(|r| {

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import abc
 import logging
+from threading import Event
 
 from _yubikit_native.sessions import WebAuthnClientCcid as _WebAuthnClientCcid
 from _yubikit_native.sessions import WebAuthnClientFido as _WebAuthnClientFido
@@ -157,24 +158,28 @@ class WebAuthnClient(Closable):
 
         logger.debug("WebAuthn client initialized")
 
-    def make_credential(self, options_json: str) -> str:
+    def make_credential(self, options_json: str, event: Event | None = None) -> str:
         """Perform a WebAuthn registration ceremony.
 
         :param options_json: JSON-encoded
             ``PublicKeyCredentialCreationOptions``.
+        :param event: Optional :class:`~threading.Event` for cancelling
+            the operation.
         :return: JSON-encoded ``RegistrationResponse``.
         """
-        return self._native.make_credential(options_json)
+        return self._native.make_credential(options_json, event)
 
-    def get_assertion(self, options_json: str) -> list[str]:
+    def get_assertion(self, options_json: str, event: Event | None = None) -> list[str]:
         """Perform a WebAuthn authentication ceremony.
 
         :param options_json: JSON-encoded
             ``PublicKeyCredentialRequestOptions``.
+        :param event: Optional :class:`~threading.Event` for cancelling
+            the operation.
         :return: List of JSON-encoded ``AuthenticationResponse``
             objects, one per assertion.
         """
-        return self._native.get_assertion(options_json)
+        return self._native.get_assertion(options_json, event)
 
     def close(self) -> None:
         """Close the client and release the underlying connection."""

@@ -1,4 +1,5 @@
-from typing import Any
+from threading import Event
+from typing import Any, Callable
 
 def calculate_crc(data: bytes) -> int: ...
 def check_crc(data: bytes) -> bool: ...
@@ -40,7 +41,7 @@ class OtpProtocol:
         slot: int,
         data: bytes | None = None,
         expected_len: int | None = None,
-        event: Any | None = None,
-        on_keepalive: Any | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
     ) -> bytes | None: ...
     def read_status(self) -> bytes: ...
