@@ -605,6 +605,7 @@ mod piv {
     #[case(TestConnection::UsbSmartCard)]
     fn test_piv_generate_key_ec_p256(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(4, 0, 0));
         require_capability!(Capability::PIV);
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
@@ -629,6 +630,7 @@ mod piv {
     #[case(TestConnection::UsbSmartCard)]
     fn test_piv_generate_key_rsa2048(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(4, 0, 0));
         require_capability!(Capability::PIV);
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
@@ -653,6 +655,7 @@ mod piv {
     #[case(TestConnection::UsbSmartCard)]
     fn test_piv_sign_ec_p256(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(4, 0, 0));
         require_capability!(Capability::PIV);
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
@@ -697,6 +700,7 @@ mod piv {
     #[case(TestConnection::UsbSmartCard)]
     fn test_piv_self_signed_cert_ec(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(4, 0, 0));
         require_capability!(Capability::PIV);
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
@@ -783,6 +787,7 @@ mod piv {
     #[case(TestConnection::UsbSmartCard)]
     fn test_piv_generate_csr(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(4, 0, 0));
         require_capability!(Capability::PIV);
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
@@ -844,6 +849,7 @@ mod piv {
     #[case(TestConnection::UsbSmartCard)]
     fn test_piv_self_signed_cert_rsa(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(4, 0, 0));
         require_capability!(Capability::PIV);
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
@@ -905,6 +911,7 @@ mod piv {
     #[case(TestConnection::UsbSmartCard)]
     fn test_piv_decrypt_rsa(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(4, 0, 0));
         require_capability!(Capability::PIV);
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
@@ -949,6 +956,7 @@ mod piv {
     #[case(TestConnection::UsbSmartCard)]
     fn test_piv_ecdh_p256(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(4, 0, 0));
         require_capability!(Capability::PIV);
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
