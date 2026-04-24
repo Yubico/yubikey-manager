@@ -4,7 +4,7 @@ from functools import partial
 
 import pytest
 
-from ykman.device import list_all_devices
+from yubikit.device import list_all_devices
 from yubikit.core import TRANSPORT, _override_version
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection

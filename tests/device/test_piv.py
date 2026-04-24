@@ -16,7 +16,6 @@ from ykman.piv import (
     get_pivman_protected_data,
     pivman_set_mgm_key,
 )
-from ykman.util import parse_certificates, parse_private_key
 from yubikit.core import TRANSPORT, NotSupportedError
 from yubikit.core.smartcard import AID, ApduError, SmartCardProtocol
 from yubikit.management import CAPABILITY, RELEASE_TYPE, ManagementSession
@@ -55,12 +54,12 @@ ECDH_KEY_TYPES = [KEY_TYPE.ECCP256, KEY_TYPE.ECCP384, KEY_TYPE.X25519]
 
 def get_test_cert():
     with open_file("rsa_2048_cert.pem") as f:
-        return parse_certificates(f.read(), None)[0]
+        return x509.load_pem_x509_certificate(f.read())
 
 
 def get_test_key():
     with open_file("rsa_2048_key.pem") as f:
-        return parse_private_key(f.read(), None)
+        return serialization.load_pem_private_key(f.read(), password=None)
 
 
 @pytest.fixture

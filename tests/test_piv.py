@@ -4,15 +4,9 @@ from datetime import date
 
 import pytest
 
-from ykman.piv import (
-    generate_chuid,
-    generate_random_management_key,
-    _parse_rfc4514_string,
-)
 from yubikit.core import BadResponseError, NotSupportedError, Version
 from yubikit.piv import (
     KEY_TYPE,
-    MANAGEMENT_KEY_TYPE,
     PIN_POLICY,
     TOUCH_POLICY,
     Chuid,
@@ -22,38 +16,7 @@ from yubikit.piv import (
 )
 
 
-@pytest.mark.parametrize(
-    "value",
-    [
-        r"UID=jsmith,DC=example,DC=net",
-        r"OU=Sales+CN=J.  Smith,DC=example,DC=net",
-        r"CN=James \"Jim\" Smith\, III,DC=example,DC=net",
-        r"CN=Before\0dAfter,DC=example,DC=net",
-        r"1.3.6.1.4.1.1466.0=#04024869",
-        r"CN=Lu\C4\8Di\C4\87",
-        r"1.2.840.113549.1.9.1=user@example.com",
-    ],
-)
-def test_parse_rfc4514_string(value):
-    name = _parse_rfc4514_string(value)
-    name2 = _parse_rfc4514_string(name.rfc4514_string())
-    assert name == name2
-
-
 class TestPivFunctions:
-    def test_generate_random_management_key(self):
-        output1 = generate_random_management_key(MANAGEMENT_KEY_TYPE.TDES)
-        output2 = generate_random_management_key(MANAGEMENT_KEY_TYPE.TDES)
-        assert isinstance(output1, bytes)
-        assert isinstance(output2, bytes)
-        assert output1 != output2
-
-        assert 24 == len(generate_random_management_key(MANAGEMENT_KEY_TYPE.TDES))
-
-        assert 16 == len(generate_random_management_key(MANAGEMENT_KEY_TYPE.AES128))
-        assert 24 == len(generate_random_management_key(MANAGEMENT_KEY_TYPE.AES192))
-        assert 32 == len(generate_random_management_key(MANAGEMENT_KEY_TYPE.AES256))
-
     def test_supported_algorithms(self):
         with pytest.raises(NotSupportedError):
             _do_check_key_support(
@@ -164,12 +127,6 @@ def test_chuid_deserialize():
     )
 
     assert Chuid.from_bytes(bytes(chuid)) == chuid
-
-
-def test_chuid_generate():
-    chuid = Chuid.from_bytes(generate_chuid())
-    assert chuid.expiration_date == date(2030, 1, 1)
-    assert chuid.fasc_n.agency_code == 9999
 
 
 class TestDecompressCertificate:
