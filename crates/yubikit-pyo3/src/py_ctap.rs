@@ -140,7 +140,7 @@ fn algorithms_to_py(py: Python<'_>, info: &Info) -> PyResult<PyObject> {
     let list = PyList::empty(py);
     for alg in &info.algorithms {
         let d = PyDict::new(py);
-        d.set_item("type", alg.type_.as_str())?;
+        d.set_item("type", alg.type_.to_string())?;
         d.set_item("alg", alg.alg)?;
         list.append(d)?;
     }
@@ -783,7 +783,7 @@ fn credential_info_to_py(py: Python<'_>, info: &CredentialInfo) -> PyResult<PyOb
     }
     dict.set_item(6u32, user_dict)?;
     let cred_dict = PyDict::new(py);
-    cred_dict.set_item("type", info.credential_id.type_.as_str())?;
+    cred_dict.set_item("type", info.credential_id.type_.to_string())?;
     cred_dict.set_item("id", PyBytes::new(py, &info.credential_id.id))?;
     dict.set_item(7u32, cred_dict)?;
     dict.set_item(8u32, cbor_value_to_py(py, &info.public_key)?)?;

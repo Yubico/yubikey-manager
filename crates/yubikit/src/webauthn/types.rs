@@ -74,197 +74,139 @@ mod base64url_opt {
 // String enums
 // ---------------------------------------------------------------------------
 
-/// The type of a public key credential (§5.8.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PublicKeyCredentialType {
-    /// The `"public-key"` credential type.
-    #[serde(rename = "public-key")]
-    PublicKey,
-}
-
-impl PublicKeyCredentialType {
-    /// Returns the string representation (`"public-key"`).
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::PublicKey => "public-key",
+/// Define an enum whose variants map to kebab-case string values.
+///
+/// Generates:
+/// - The enum with `Serialize`/`Deserialize` (using `rename_all = "kebab-case"`)
+/// - `from_str(&str)` → `Option<Self>` (via serde deserialization)
+/// - `Display` (via serde serialization)
+macro_rules! string_enum {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $Name:ident {
+            $(
+                $(#[$vmeta:meta])*
+                $Variant:ident
+            ),+
+            $(,)?
         }
-    }
-
-    pub(crate) fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "public-key" => Some(Self::PublicKey),
-            _ => None,
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+        #[serde(rename_all = "kebab-case")]
+        $vis enum $Name {
+            $(
+                $(#[$vmeta])*
+                $Variant,
+            )+
         }
-    }
-}
 
-impl std::fmt::Display for PublicKeyCredentialType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// Attestation conveyance preference (§5.4.7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AttestationConveyancePreference {
-    /// The RP is not interested in attestation.
-    #[default]
-    None,
-    /// The RP prefers an attestation conveyance yielding verifiable
-    /// attestation statements, but allows the client to decide.
-    Indirect,
-    /// The RP wants to receive the attestation statement as generated
-    /// by the authenticator.
-    Direct,
-    /// The RP wants to receive an attestation statement that may
-    /// identify the authenticator uniquely.
-    Enterprise,
-}
-
-impl AttestationConveyancePreference {
-    /// Returns the string representation of this preference.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Indirect => "indirect",
-            Self::Direct => "direct",
-            Self::Enterprise => "enterprise",
+        impl $Name {
+            #[allow(dead_code)]
+            pub(crate) fn from_str(s: &str) -> Option<Self> {
+                serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
+            }
         }
+
+        impl std::fmt::Display for $Name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let json = serde_json::to_string(self).map_err(|_| std::fmt::Error)?;
+                f.write_str(json.trim_matches('"'))
+            }
+        }
+    };
+}
+
+string_enum! {
+    /// The type of a public key credential (§5.8.2).
+    pub enum PublicKeyCredentialType {
+        /// The `"public-key"` credential type.
+        PublicKey,
     }
 }
 
-/// User verification requirement (§5.8.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum UserVerificationRequirement {
-    /// The RP requires user verification.
-    Required,
-    /// The RP prefers user verification if available (default).
-    #[default]
-    Preferred,
-    /// The RP does not want user verification.
-    Discouraged,
-}
-
-impl UserVerificationRequirement {
-    /// Returns the string representation of this requirement.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Required => "required",
-            Self::Preferred => "preferred",
-            Self::Discouraged => "discouraged",
-        }
+string_enum! {
+    /// Attestation conveyance preference (§5.4.7).
+    #[derive(Default)]
+    pub enum AttestationConveyancePreference {
+        /// The RP is not interested in attestation.
+        #[default]
+        None,
+        /// The RP prefers an attestation conveyance yielding verifiable
+        /// attestation statements, but allows the client to decide.
+        Indirect,
+        /// The RP wants to receive the attestation statement as generated
+        /// by the authenticator.
+        Direct,
+        /// The RP wants to receive an attestation statement that may
+        /// identify the authenticator uniquely.
+        Enterprise,
     }
 }
 
-/// Resident key requirement (§5.4.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ResidentKeyRequirement {
-    /// A discoverable (resident) credential is required.
-    Required,
-    /// A discoverable credential is preferred if supported (default).
-    #[default]
-    Preferred,
-    /// A server-side (non-discoverable) credential is preferred.
-    Discouraged,
-}
-
-impl ResidentKeyRequirement {
-    /// Returns the string representation of this requirement.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Required => "required",
-            Self::Preferred => "preferred",
-            Self::Discouraged => "discouraged",
-        }
+string_enum! {
+    /// User verification requirement (§5.8.6).
+    #[derive(Default)]
+    pub enum UserVerificationRequirement {
+        /// The RP requires user verification.
+        Required,
+        /// The RP prefers user verification if available (default).
+        #[default]
+        Preferred,
+        /// The RP does not want user verification.
+        Discouraged,
     }
 }
 
-/// Authenticator attachment modality (§5.4.5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AuthenticatorAttachment {
-    /// A platform authenticator (built into the device).
-    #[serde(rename = "platform")]
-    Platform,
-    /// A roaming (cross-platform) authenticator such as a security key.
-    #[serde(rename = "cross-platform")]
-    CrossPlatform,
-}
-
-impl AuthenticatorAttachment {
-    /// Returns the string representation of this attachment modality.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Platform => "platform",
-            Self::CrossPlatform => "cross-platform",
-        }
+string_enum! {
+    /// Resident key requirement (§5.4.4).
+    #[derive(Default)]
+    pub enum ResidentKeyRequirement {
+        /// A discoverable (resident) credential is required.
+        Required,
+        /// A discoverable credential is preferred if supported (default).
+        #[default]
+        Preferred,
+        /// A server-side (non-discoverable) credential is preferred.
+        Discouraged,
     }
 }
 
-/// Transport hint for authenticator communication (§5.8.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AuthenticatorTransport {
-    /// USB HID transport.
-    Usb,
-    /// Near-Field Communication transport.
-    Nfc,
-    /// Bluetooth Low Energy transport.
-    Ble,
-    /// Hybrid (caBLE) transport.
-    Hybrid,
-    /// Client-device internal transport (platform authenticator).
-    Internal,
-}
-
-impl AuthenticatorTransport {
-    /// Returns the string representation of this transport.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Usb => "usb",
-            Self::Nfc => "nfc",
-            Self::Ble => "ble",
-            Self::Hybrid => "hybrid",
-            Self::Internal => "internal",
-        }
-    }
-
-    pub(crate) fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "usb" => Some(Self::Usb),
-            "nfc" => Some(Self::Nfc),
-            "ble" => Some(Self::Ble),
-            "hybrid" => Some(Self::Hybrid),
-            "internal" => Some(Self::Internal),
-            _ => None,
-        }
+string_enum! {
+    /// Authenticator attachment modality (§5.4.5).
+    pub enum AuthenticatorAttachment {
+        /// A platform authenticator (built into the device).
+        Platform,
+        /// A roaming (cross-platform) authenticator such as a security key.
+        CrossPlatform,
     }
 }
 
-/// Hint to the client about preferred authenticator type (§5.8.7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PublicKeyCredentialHint {
-    /// Prefer a roaming security key.
-    #[serde(rename = "security-key")]
-    SecurityKey,
-    /// Prefer the client device's built-in authenticator.
-    #[serde(rename = "client-device")]
-    ClientDevice,
-    /// Prefer a hybrid (caBLE) authenticator.
-    #[serde(rename = "hybrid")]
-    Hybrid,
+string_enum! {
+    /// Transport hint for authenticator communication (§5.8.4).
+    pub enum AuthenticatorTransport {
+        /// USB HID transport.
+        Usb,
+        /// Near-Field Communication transport.
+        Nfc,
+        /// Bluetooth Low Energy transport.
+        Ble,
+        /// Hybrid (caBLE) transport.
+        Hybrid,
+        /// Client-device internal transport (platform authenticator).
+        Internal,
+    }
 }
 
-impl PublicKeyCredentialHint {
-    /// Returns the string representation of this hint.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::SecurityKey => "security-key",
-            Self::ClientDevice => "client-device",
-            Self::Hybrid => "hybrid",
-        }
+string_enum! {
+    /// Hint to the client about preferred authenticator type (§5.8.7).
+    pub enum PublicKeyCredentialHint {
+        /// Prefer a roaming security key.
+        SecurityKey,
+        /// Prefer the client device's built-in authenticator.
+        ClientDevice,
+        /// Prefer a hybrid (caBLE) authenticator.
+        Hybrid,
     }
 }
 
@@ -359,7 +301,7 @@ impl PublicKeyCredentialParameters {
         Value::Map(vec![
             (
                 Value::Text("type".into()),
-                Value::Text(self.type_.as_str().to_string()),
+                Value::Text(self.type_.to_string()),
             ),
             (Value::Text("alg".into()), Value::Int(self.alg)),
         ])
@@ -396,7 +338,7 @@ impl PublicKeyCredentialDescriptor {
         let mut entries = vec![
             (
                 Value::Text("type".into()),
-                Value::Text(self.type_.as_str().to_string()),
+                Value::Text(self.type_.to_string()),
             ),
             (Value::Text("id".into()), Value::Bytes(self.id.clone())),
         ];
@@ -406,7 +348,7 @@ impl PublicKeyCredentialDescriptor {
                 Value::Array(
                     transports
                         .iter()
-                        .map(|t| Value::Text(t.as_str().to_string()))
+                        .map(|t| Value::Text(t.to_string()))
                         .collect(),
                 ),
             ));
@@ -836,24 +778,33 @@ mod tests {
 
     #[test]
     fn test_enum_str_values() {
-        assert_eq!(PublicKeyCredentialType::PublicKey.as_str(), "public-key");
-        assert_eq!(AttestationConveyancePreference::None.as_str(), "none");
-        assert_eq!(AttestationConveyancePreference::Direct.as_str(), "direct");
-        assert_eq!(UserVerificationRequirement::Required.as_str(), "required");
-        assert_eq!(UserVerificationRequirement::Preferred.as_str(), "preferred");
+        assert_eq!(PublicKeyCredentialType::PublicKey.to_string(), "public-key");
+        assert_eq!(AttestationConveyancePreference::None.to_string(), "none");
         assert_eq!(
-            UserVerificationRequirement::Discouraged.as_str(),
+            AttestationConveyancePreference::Direct.to_string(),
+            "direct"
+        );
+        assert_eq!(
+            UserVerificationRequirement::Required.to_string(),
+            "required"
+        );
+        assert_eq!(
+            UserVerificationRequirement::Preferred.to_string(),
+            "preferred"
+        );
+        assert_eq!(
+            UserVerificationRequirement::Discouraged.to_string(),
             "discouraged"
         );
-        assert_eq!(ResidentKeyRequirement::Required.as_str(), "required");
-        assert_eq!(AuthenticatorAttachment::Platform.as_str(), "platform");
+        assert_eq!(ResidentKeyRequirement::Required.to_string(), "required");
+        assert_eq!(AuthenticatorAttachment::Platform.to_string(), "platform");
         assert_eq!(
-            AuthenticatorAttachment::CrossPlatform.as_str(),
+            AuthenticatorAttachment::CrossPlatform.to_string(),
             "cross-platform"
         );
-        assert_eq!(AuthenticatorTransport::Usb.as_str(), "usb");
+        assert_eq!(AuthenticatorTransport::Usb.to_string(), "usb");
         assert_eq!(
-            PublicKeyCredentialHint::SecurityKey.as_str(),
+            PublicKeyCredentialHint::SecurityKey.to_string(),
             "security-key"
         );
     }
