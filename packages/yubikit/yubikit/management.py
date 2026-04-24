@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag, unique
-from typing import Any, Mapping
+from typing import Mapping
 
 from _yubikit_native.sessions import (
     ManagementSessionCcid as _NativeManagementSessionCcid,
@@ -376,27 +376,25 @@ class ManagementSession(Session):
         connection: OtpConnection | SmartCardConnection | FidoConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
-        self._native: Any = None
+        self._native: (
+            _NativeManagementSessionOtp
+            | _NativeManagementSessionCcid
+            | _NativeManagementSessionFido
+        )
+
+        if scp_key_params and not isinstance(connection, SmartCardConnection):
+            raise ValueError("SCP can only be used with SmartCardConnection")
 
         if isinstance(connection, OtpConnection):
-            if scp_key_params:
-                raise ValueError("SCP can only be used with SmartCardConnection")
-            native: (
-                _NativeManagementSessionOtp
-                | _NativeManagementSessionCcid
-                | _NativeManagementSessionFido
-            ) = _NativeManagementSessionOtp(connection)  # type: ignore[arg-type]
+            self._native = _NativeManagementSessionOtp(connection)
         elif isinstance(connection, SmartCardConnection):
-            native = _NativeManagementSessionCcid(connection, scp_key_params)
+            self._native = _NativeManagementSessionCcid(connection, scp_key_params)
         elif isinstance(connection, FidoConnection):
-            if scp_key_params:
-                raise ValueError("SCP can only be used with SmartCardConnection")
-            native = _NativeManagementSessionFido(connection)
+            self._native = _NativeManagementSessionFido(connection)
         else:
             raise TypeError("Unsupported connection type")
 
-        self._native = native
-        self._version = Version(*native.version)
+        self._version = Version(*self._native.version)
 
         if self._version == (0, 0, 1):
             logger.debug("Overriding development version...")
@@ -523,4 +521,6 @@ class ManagementSession(Session):
         applications. This will factory reset the global PIN as well as the associated
         applications.
         """
+        if not isinstance(self._native, _NativeManagementSessionCcid):
+            raise NotImplementedError("Device reset is only supported over CCID")
         self._native.device_reset()
