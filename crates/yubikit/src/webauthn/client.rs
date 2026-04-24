@@ -1144,7 +1144,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         }
 
         Err(ClientError::ConfigurationUnsupported(
-            "user verification not configured".into(),
+            "user verification required but not configured/supported".into(),
         ))
     }
 
@@ -1166,21 +1166,8 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             || info.options.contains_key("bioEnroll");
 
         match uv_requirement {
-            UserVerificationRequirement::Required => {
-                if !uv_configured {
-                    return Err(ClientError::ConfigurationUnsupported(
-                        "user verification required but not configured".into(),
-                    ));
-                }
-                Ok(true)
-            }
-            UserVerificationRequirement::Preferred => {
-                if uv_supported && uv_configured {
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
-            }
+            UserVerificationRequirement::Required => Ok(true),
+            UserVerificationRequirement::Preferred => Ok(uv_supported),
             UserVerificationRequirement::Discouraged => {
                 // Even if discouraged, UV may still be needed:
                 // - alwaysUv option
