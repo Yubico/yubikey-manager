@@ -1775,6 +1775,7 @@ mod securitydomain {
     #[case(TestConnection::NfcSmartCard)]
     fn test_scp03_authenticate(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(5, 7, 2));
         let conn = open_smartcard_connection(&tc);
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
@@ -1833,6 +1834,7 @@ mod securitydomain {
     #[case(TestConnection::NfcSmartCard)]
     fn test_scp03_change_key(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(5, 7, 2));
         let conn = open_smartcard_connection(&tc);
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
@@ -1901,6 +1903,7 @@ mod securitydomain {
     #[case(TestConnection::NfcSmartCard)]
     fn test_scp11b_ok(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(5, 7, 2));
         let conn = open_smartcard_connection(&tc);
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
@@ -1948,6 +1951,7 @@ mod securitydomain {
     #[case(TestConnection::NfcSmartCard)]
     fn test_scp11b_import(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(5, 7, 2));
         let conn = open_smartcard_connection(&tc);
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
@@ -2010,6 +2014,7 @@ mod securitydomain {
     #[case(TestConnection::NfcSmartCard)]
     fn test_scp11a_ok(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(5, 7, 2));
         let conn = open_smartcard_connection(&tc);
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
@@ -2059,6 +2064,7 @@ mod securitydomain {
     #[case(TestConnection::NfcSmartCard)]
     fn test_scp11a_allowlist(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(5, 7, 2));
         let conn = open_smartcard_connection(&tc);
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
@@ -2123,6 +2129,7 @@ mod securitydomain {
     #[case(TestConnection::NfcSmartCard)]
     fn test_scp11a_allowlist_blocked(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(5, 7, 2));
         let conn = open_smartcard_connection(&tc);
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
@@ -2215,6 +2222,7 @@ mod securitydomain {
     #[case(TestConnection::NfcSmartCard)]
     fn test_scp11c_ok(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
+        require_version!(Version(5, 7, 2));
         let conn = open_smartcard_connection(&tc);
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
