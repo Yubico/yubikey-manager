@@ -44,7 +44,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa,
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.x509.oid import NameOID
-from yubikit.core import BadResponseError, NotSupportedError, Tlv
+from yubikit.core import BadResponseError, NotSupportedError, Tlv, int2bytes
 from yubikit.core.smartcard import SW, ApduError
 from yubikit.piv import (
     ALGORITHM,
@@ -59,7 +59,13 @@ from yubikit.piv import (
     SlotMetadata,
 )
 
-from .util import display_serial
+
+def _display_serial(serial: int) -> str:
+    """Displays an x509 certificate serial number in a readable format."""
+    if serial >= 0x10000000000000000:
+        return ":".join(f"{b:02x}" for b in int2bytes(serial, 20))
+    return f"{serial} ({hex(serial)})"
+
 
 if TYPE_CHECKING:
     # These types arent't available on cryptography <40.
@@ -658,7 +664,7 @@ def get_piv_info(session: PivSession):
             cert_data["Public key type"] = key_algo
             cert_data["Subject DN"] = subject_dn
             cert_data["Issuer DN"] = issuer_dn
-            cert_data["Serial"] = display_serial(serial)
+            cert_data["Serial"] = _display_serial(serial)
             cert_data["Fingerprint"] = fingerprint
             if not_before:
                 cert_data["Not before"] = not_before.isoformat()
