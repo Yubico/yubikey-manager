@@ -17,11 +17,12 @@
 use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::cbor::Value;
 use crate::core::Connection;
 
 use super::pin_protocol::{CoseKey, PinProtocol};
 use super::session::Ctap2Session;
-use super::{Ctap2Error, Info};
+use super::{Ctap2Error, Info, build_args_map, ctap2_cmd};
 
 /// ClientPin sub-command identifiers (§6.5.5).
 mod client_pin_cmd {
@@ -162,13 +163,42 @@ impl<C: Connection + 'static> ClientPin<C> {
         self.session
     }
 
+    /// Send a clientPin command, building the CBOR args map.
+    #[allow(clippy::too_many_arguments)]
+    fn send(
+        &mut self,
+        sub_cmd: u8,
+        key_agreement: Option<&CoseKey>,
+        pin_uv_param: Option<&[u8]>,
+        new_pin_enc: Option<&[u8]>,
+        pin_hash_enc: Option<&[u8]>,
+        permissions: Option<u8>,
+        permissions_rpid: Option<&str>,
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Value, Ctap2Error<C::Error>> {
+        let data = build_args_map(&[
+            Some(Value::Int(self.protocol.version() as i64)), // 0x01
+            Some(Value::Int(sub_cmd as i64)),                 // 0x02
+            key_agreement.cloned(),                           // 0x03
+            pin_uv_param.map(|b| Value::Bytes(b.to_vec())),   // 0x04
+            new_pin_enc.map(|b| Value::Bytes(b.to_vec())),    // 0x05
+            pin_hash_enc.map(|b| Value::Bytes(b.to_vec())),   // 0x06
+            None,                                             // 0x07 (unused)
+            None,                                             // 0x08 (unused)
+            permissions.map(|p| Value::Int(p as i64)),        // 0x09
+            permissions_rpid.map(|s| Value::Text(s.to_string())), // 0x0A
+        ]);
+        self.session
+            .send_cbor(ctap2_cmd::CLIENT_PIN, Some(&data), on_keepalive, cancel)
+    }
+
     /// Get the number of PIN retries remaining.
     ///
     /// Returns `(retries, power_cycle_state)`.
     pub fn get_pin_retries(&mut self) -> Result<(u32, Option<u32>), Ctap2Error<C::Error>> {
         log::debug!("Getting PIN retries");
-        let resp = self.session.client_pin(
-            self.protocol.version(),
+        let resp = self.send(
             client_pin_cmd::GET_PIN_RETRIES,
             None,
             None,
@@ -194,8 +224,7 @@ impl<C: Connection + 'static> ClientPin<C> {
     /// Get the number of built-in UV retries remaining.
     pub fn get_uv_retries(&mut self) -> Result<u32, Ctap2Error<C::Error>> {
         log::debug!("Getting UV retries");
-        let resp = self.session.client_pin(
-            self.protocol.version(),
+        let resp = self.send(
             client_pin_cmd::GET_UV_RETRIES,
             None,
             None,
@@ -223,8 +252,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         let new_pin_enc = self.protocol.encrypt(&shared_secret, &pin_padded);
         let pin_uv_param = self.protocol.authenticate(&shared_secret, &new_pin_enc);
 
-        self.session.client_pin(
-            self.protocol.version(),
+        self.send(
             client_pin_cmd::SET_PIN,
             Some(&key_agreement),
             Some(&pin_uv_param),
@@ -255,8 +283,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         auth_msg.extend_from_slice(&pin_hash_enc);
         let pin_uv_param = self.protocol.authenticate(&shared_secret, &auth_msg);
 
-        self.session.client_pin(
-            self.protocol.version(),
+        self.send(
             client_pin_cmd::CHANGE_PIN,
             Some(&key_agreement),
             Some(&pin_uv_param),
@@ -300,8 +327,7 @@ impl<C: Connection + 'static> ClientPin<C> {
                 (client_pin_cmd::GET_TOKEN_USING_PIN_LEGACY, None, None)
             };
 
-        let resp = self.session.client_pin(
-            self.protocol.version(),
+        let resp = self.send(
             sub_cmd,
             Some(&key_agreement),
             None,
@@ -340,8 +366,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         log::debug!("Getting UV token");
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
-        let resp = self.session.client_pin(
-            self.protocol.version(),
+        let resp = self.send(
             client_pin_cmd::GET_TOKEN_USING_UV,
             Some(&key_agreement),
             None,
@@ -394,9 +419,8 @@ impl<C: Connection + 'static> ClientPin<C> {
         ))
     }
 
-    fn get_shared_secret(&mut self) -> Result<(CoseKey, Vec<u8>), Ctap2Error<C::Error>> {
-        let resp = self.session.client_pin(
-            self.protocol.version(),
+    pub(crate) fn get_shared_secret(&mut self) -> Result<(CoseKey, Vec<u8>), Ctap2Error<C::Error>> {
+        let resp = self.send(
             client_pin_cmd::GET_KEY_AGREEMENT,
             None,
             None,

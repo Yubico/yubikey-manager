@@ -206,24 +206,38 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         self.session.expect("session already taken")
     }
 
-    fn session(&self) -> &Ctap2Session<C> {
-        self.session.as_ref().expect("session already taken")
-    }
-
     /// Access the session's cached (initial) authenticator info.
     ///
     /// Use for static capabilities (extensions, max sizes, protocols).
     /// For mutable state (clientPin, uv) use `get_info()` on the session.
     fn cached_info(&self) -> &crate::ctap2::Info {
-        &self.session().cached_info
+        &self
+            .session
+            .as_ref()
+            .expect("session already taken")
+            .cached_info
     }
 
-    fn take_session(&mut self) -> Ctap2Session<C> {
-        self.session.take().expect("session already taken")
-    }
-
-    fn restore_session(&mut self, session: Ctap2Session<C>) {
+    /// Temporarily take the session, run `f`, and restore it afterward.
+    fn with_session<R>(&mut self, f: impl FnOnce(&mut Ctap2Session<C>) -> R) -> R {
+        let mut session = self.session.take().expect("session already taken");
+        let result = f(&mut session);
         self.session = Some(session);
+        result
+    }
+
+    /// Temporarily wrap the session in a [`ClientPin`] with the given protocol,
+    /// run `f`, and restore the session afterward.
+    fn with_client_pin<R>(
+        &mut self,
+        protocol: PinProtocol,
+        f: impl FnOnce(&mut ClientPin<C>) -> R,
+    ) -> R {
+        let session = self.session.take().expect("session already taken");
+        let mut client_pin = ClientPin::new_with_protocol(session, protocol);
+        let result = f(&mut client_pin);
+        self.session = Some(client_pin.into_session());
+        result
     }
 
     // -----------------------------------------------------------------------
@@ -311,15 +325,14 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             let (ext_cbor, hmac_state) =
                 self.build_make_credential_extensions(options, protocol)?;
 
-            let mut session = self.take_session();
+            let mut session = self.session.take().expect("session already taken");
             let interaction = &self.user_interaction;
             let mut on_keepalive = |status: u8| {
                 if status == 0x02 {
                     interaction.prompt_up();
                 }
             };
-
-            match session.make_credential(
+            let result = session.make_credential(
                 &client_data_hash,
                 &ctap2_rp,
                 &options.user,
@@ -332,14 +345,14 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 enterprise_attestation,
                 Some(&mut on_keepalive),
                 cancel,
-            ) {
+            );
+            self.session = Some(session);
+            match result {
                 Ok(resp) => {
-                    self.restore_session(session);
                     hmac_state_out = hmac_state;
                     break resp;
                 }
                 Err(e) => {
-                    self.restore_session(session);
                     // Authenticator requires UV — retry with Required
                     if is_puat_required(&e)
                         && uv_requirement != UserVerificationRequirement::Required
@@ -488,7 +501,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 selected_cred_id.as_deref(),
             )?;
 
-            let mut session = self.take_session();
+            let mut session = self.session.take().expect("session already taken");
             let interaction = &self.user_interaction;
             let mut on_keepalive = |status: u8| {
                 if status == 0x02 {
@@ -508,13 +521,13 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 cancel,
             ) {
                 Ok(resp) => {
-                    self.restore_session(session);
+                    self.session = Some(session);
                     hmac_state_out = hmac_state;
                     first = resp;
                     break;
                 }
                 Err(e) => {
-                    self.restore_session(session);
+                    self.session = Some(session);
                     // Authenticator requires UV — retry with Required
                     if is_puat_required(&e)
                         && uv_requirement != UserVerificationRequirement::Required
@@ -546,9 +559,9 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         );
 
         // Handle large blob read/write if requested
-        let mut session = self.take_session();
         let large_blob_output = if let Some(ref ext) = options.extensions {
             if let Some(ref lb_input) = ext.large_blob {
+                let session = self.session.take().expect("session already taken");
                 let (s, output) = self.process_large_blob(
                     session,
                     lb_input,
@@ -556,7 +569,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                     token.as_deref(),
                     protocol,
                 );
-                session = s;
+                self.session = Some(s);
                 output
             } else {
                 None
@@ -587,13 +600,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
 
         // Additional assertions (getNextAssertion)
         for _ in 1..total {
-            let next = match session.get_next_assertion() {
-                Ok(resp) => resp,
-                Err(e) => {
-                    self.restore_session(session);
-                    return Err(e.into());
-                }
-            };
+            let next = self.with_session(|session| session.get_next_assertion())?;
             let credential_id = next
                 .credential
                 .as_ref()
@@ -620,7 +627,6 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             });
         }
 
-        self.restore_session(session);
         Ok(responses)
     }
 
@@ -766,30 +772,14 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             }
         };
 
-        // Get authenticator's key agreement key via clientPin
-        let mut session = self.take_session();
-        let result = session.client_pin(
-            proto.version(),
-            0x02, // getKeyAgreement
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
-        self.restore_session(session);
+        // Get authenticator's key agreement key via ClientPin
+        let (peer_key, shared_secret) = self.with_client_pin(proto, |cp| cp.get_shared_secret())?;
 
-        let resp = result.map_err(ClientError::Ctap)?;
-        let peer_key = resp
-            .map_get_int(0x01) // keyAgreement
-            .ok_or_else(|| ClientError::BadRequest("missing keyAgreement in response".into()))?;
-
-        prf::HmacSecretState::new(proto, peer_key)
-            .map(Some)
-            .map_err(|e| ClientError::BadRequest(format!("hmac-secret key agreement failed: {e}")))
+        Ok(Some(prf::HmacSecretState::new(
+            proto,
+            peer_key,
+            shared_secret,
+        )))
     }
 
     /// Parse extension outputs from a makeCredential response.
@@ -1024,19 +1014,19 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 .map(|c| (*c).clone())
                 .collect();
 
-            let mut session = self.take_session();
-            let result = session.get_assertion(
-                rp_id,
-                &dummy_hash,
-                Some(&chunk),
-                None,
-                Some(&no_up),
-                pin_uv_param.as_deref(),
-                pin_uv_protocol,
-                None,
-                None,
-            );
-            self.restore_session(session);
+            let result = self.with_session(|session| {
+                session.get_assertion(
+                    rp_id,
+                    &dummy_hash,
+                    Some(&chunk),
+                    None,
+                    Some(&no_up),
+                    pin_uv_param.as_deref(),
+                    pin_uv_protocol,
+                    None,
+                    None,
+                )
+            });
 
             match result {
                 Ok(resp) => {
@@ -1084,55 +1074,27 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             return Ok((None, None, false));
         }
 
-        let session = self.take_session();
-        match self.obtain_token(session, permissions, rp_id) {
-            Ok((session, token, protocol, internal_uv)) => {
-                self.restore_session(session);
-                Ok((token, Some(protocol), internal_uv))
-            }
-            Err((session, e)) => {
-                self.restore_session(session);
-                Err(e)
-            }
-        }
+        self.obtain_token(permissions, rp_id)
     }
 
-    #[allow(clippy::result_large_err)]
     fn obtain_token(
-        &self,
-        mut session: Ctap2Session<C>,
+        &mut self,
         permissions: Permissions,
         rp_id: Option<&str>,
-    ) -> Result<
-        (
-            Ctap2Session<C>,
-            Option<Vec<u8>>,
-            crate::ctap2::PinProtocol,
-            bool,
-        ),
-        (Ctap2Session<C>, ClientError<C::Error>),
-    > {
+    ) -> Result<(Option<Vec<u8>>, Option<PinProtocol>, bool), ClientError<C::Error>> {
         // Fetch current info — mutable state (clientPin, uv) may have changed
-        let info = match session.get_info() {
-            Ok(info) => info,
-            Err(e) => return Err((session, e.into())),
-        };
+        let info = self.with_session(|session| session.get_info())?;
 
-        // Select protocol before creating ClientPin so we keep the session on failure
+        // Select protocol
         let protocol = if info.pin_uv_protocols.contains(&2) {
             crate::ctap2::PinProtocol::V2
         } else if info.pin_uv_protocols.contains(&1) {
             crate::ctap2::PinProtocol::V1
         } else {
-            return Err((
-                session,
-                ClientError::ConfigurationUnsupported("no supported PIN/UV protocol".into()),
+            return Err(ClientError::ConfigurationUnsupported(
+                "no supported PIN/UV protocol".into(),
             ));
         };
-
-        let mut client_pin = ClientPin::new_with_protocol(session, protocol);
-
-        let protocol = client_pin.protocol();
 
         // Try UV first if supported
         if info.options.get("uv").copied().unwrap_or(false)
@@ -1140,11 +1102,13 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         {
             if self.user_interaction.request_uv(permissions, rp_id) {
                 log::debug!("Attempting UV token (protocol {protocol:?})");
-                match client_pin.get_uv_token(Some(permissions), rp_id, None, None) {
+                let result = self.with_client_pin(protocol, |cp| {
+                    cp.get_uv_token(Some(permissions), rp_id, None, None)
+                });
+                match result {
                     Ok(token) => {
                         log::debug!("UV token obtained");
-                        let session = client_pin.into_session();
-                        return Ok((session, Some(token), protocol, false));
+                        return Ok((Some(token), Some(protocol), false));
                     }
                     Err(e) => {
                         log::debug!("UV token failed: {e}, falling through to PIN");
@@ -1155,8 +1119,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             // Device has internal UV but no pinUvAuthToken — use internal UV
             if self.user_interaction.request_uv(permissions, rp_id) {
                 log::debug!("Using internal UV (no pinUvAuthToken)");
-                let session = client_pin.into_session();
-                return Ok((session, None, protocol, true));
+                return Ok((None, Some(protocol), true));
             }
         }
 
@@ -1164,28 +1127,24 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         if info.options.get("clientPin").copied().unwrap_or(false) {
             if let Some(pin) = self.user_interaction.request_pin(permissions, rp_id) {
                 log::debug!("Attempting PIN token (protocol {protocol:?})");
-                match client_pin.get_pin_token(&pin, Some(permissions), rp_id) {
+                let result = self.with_client_pin(protocol, |cp| {
+                    cp.get_pin_token(&pin, Some(permissions), rp_id)
+                });
+                match result {
                     Ok(token) => {
                         log::debug!("PIN token obtained");
-                        let session = client_pin.into_session();
-                        return Ok((session, Some(token), protocol, false));
+                        return Ok((Some(token), Some(protocol), false));
                     }
-                    Err(e) => {
-                        let session = client_pin.into_session();
-                        return Err((session, ClientError::Ctap(e)));
-                    }
+                    Err(e) => return Err(ClientError::Ctap(e)),
                 }
             } else {
                 log::debug!("PIN required but not provided");
-                let session = client_pin.into_session();
-                return Err((session, ClientError::PinRequired));
+                return Err(ClientError::PinRequired);
             }
         }
 
-        let session = client_pin.into_session();
-        Err((
-            session,
-            ClientError::ConfigurationUnsupported("user verification not configured".into()),
+        Err(ClientError::ConfigurationUnsupported(
+            "user verification not configured".into(),
         ))
     }
 
@@ -1196,17 +1155,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         permissions: Permissions,
     ) -> Result<bool, ClientError<C::Error>> {
         // Fetch current info — mutable state (clientPin, uv) may have changed
-        let mut session = self.take_session();
-        let info = match session.get_info() {
-            Ok(info) => {
-                self.restore_session(session);
-                info
-            }
-            Err(e) => {
-                self.restore_session(session);
-                return Err(e.into());
-            }
-        };
+        let info = self.with_session(|session| session.get_info())?;
 
         let uv_configured = info.options.get("uv").copied().unwrap_or(false)
             || info.options.get("clientPin").copied().unwrap_or(false)

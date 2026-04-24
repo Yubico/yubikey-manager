@@ -257,35 +257,4 @@ impl<C: Connection + 'static> Ctap2Session<C> {
         let value = self.send_cbor(ctap2_cmd::GET_NEXT_ASSERTION, None, None, None)?;
         AssertionResponse::from_cbor(&value).map_err(Ctap2Error::InvalidResponse)
     }
-
-    /// Send a raw authenticatorClientPIN command and return the parsed CBOR response.
-    ///
-    /// This is the low-level interface used by [`ClientPin`](crate::ctap2::ClientPin) for all PIN/UV operations.
-    pub(crate) fn client_pin(
-        &mut self,
-        pin_uv_protocol: u32,
-        sub_cmd: u8,
-        key_agreement: Option<&Value>,
-        pin_uv_param: Option<&[u8]>,
-        new_pin_enc: Option<&[u8]>,
-        pin_hash_enc: Option<&[u8]>,
-        permissions: Option<u8>,
-        permissions_rpid: Option<&str>,
-        on_keepalive: Option<&mut dyn FnMut(u8)>,
-        cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Value, Ctap2Error<C::Error>> {
-        let data = build_args_map(&[
-            Some(Value::Int(pin_uv_protocol as i64)),             // 0x01
-            Some(Value::Int(sub_cmd as i64)),                     // 0x02
-            key_agreement.cloned(),                               // 0x03
-            pin_uv_param.map(|b| Value::Bytes(b.to_vec())),       // 0x04
-            new_pin_enc.map(|b| Value::Bytes(b.to_vec())),        // 0x05
-            pin_hash_enc.map(|b| Value::Bytes(b.to_vec())),       // 0x06
-            None,                                                 // 0x07 (unused)
-            None,                                                 // 0x08 (unused)
-            permissions.map(|p| Value::Int(p as i64)),            // 0x09
-            permissions_rpid.map(|s| Value::Text(s.to_string())), // 0x0A
-        ]);
-        self.send_cbor(ctap2_cmd::CLIENT_PIN, Some(&data), on_keepalive, cancel)
-    }
 }

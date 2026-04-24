@@ -137,14 +137,13 @@ pub(crate) struct HmacSecretState {
 }
 
 impl HmacSecretState {
-    /// Create state by performing ECDH key agreement.
-    pub fn new(protocol: PinProtocol, authenticator_key: &Value) -> Result<Self, String> {
-        let (platform_key, shared_secret) = protocol.encapsulate(authenticator_key)?;
-        Ok(Self {
-            key_agreement: platform_key,
+    /// Create state from a pre-computed key agreement.
+    pub fn new(protocol: PinProtocol, key_agreement: Value, shared_secret: Vec<u8>) -> Self {
+        Self {
+            key_agreement,
             shared_secret: Zeroizing::new(shared_secret),
             protocol,
-        })
+        }
     }
 
     /// Encrypt salts and compute authentication tag.
