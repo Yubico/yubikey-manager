@@ -16,7 +16,7 @@
 //! Only run against a test/development YubiKey.
 
 use rstest::{fixture, rstest};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
 use yubikit::device::{LocalYubiKeyDevice, list_devices};
@@ -47,8 +47,12 @@ macro_rules! skip_if_needed {
 /// Cached device info so we only enumerate once.
 static DEVICE_INFO: OnceLock<(LocalYubiKeyDevice, DeviceInfo)> = OnceLock::new();
 
+/// Whether the USB device supports SCP11b (version >= 5.7.2).
+static SCP11B_SUPPORTED: OnceLock<bool> = OnceLock::new();
+
 /// Cached SCP11b parameters for USB: (kid, kvn, pk_sd_ecka).
-static SCP11B_PARAMS: OnceLock<Option<(u8, u8, Vec<u8>)>> = OnceLock::new();
+/// Uses Mutex instead of OnceLock so it can be invalidated after SD reset tests.
+static SCP11B_PARAMS: Mutex<Option<Option<(u8, u8, Vec<u8>)>>> = Mutex::new(None);
 
 /// Cached SCP11b parameters for NFC: (kid, kvn, pk_sd_ecka).
 static NFC_SCP11B_PARAMS: OnceLock<Option<(u8, u8, Vec<u8>)>> = OnceLock::new();
@@ -154,15 +158,30 @@ fn detect_scp11b_params(conn: PcscSmartCardConnection) -> Option<(u8, u8, Vec<u8
     Some((key_ref.kid, key_ref.kvn, pk))
 }
 
-fn get_scp11b_params() -> &'static Option<(u8, u8, Vec<u8>)> {
-    SCP11B_PARAMS.get_or_init(|| {
+fn scp11b_supported() -> bool {
+    *SCP11B_SUPPORTED.get_or_init(|| {
         let (_, info) = get_device_and_info();
-        if info.version < Version(5, 7, 2) {
-            return None;
-        }
-        let conn = open_usb_smartcard();
-        detect_scp11b_params(conn)
+        info.version >= Version(5, 7, 2)
     })
+}
+
+fn get_scp11b_params() -> Option<(u8, u8, Vec<u8>)> {
+    let mut cached = SCP11B_PARAMS.lock().unwrap();
+    if let Some(ref params) = *cached {
+        return params.clone();
+    }
+    if !scp11b_supported() {
+        *cached = Some(None);
+        return None;
+    }
+    let conn = open_usb_smartcard();
+    let result = detect_scp11b_params(conn);
+    *cached = Some(result.clone());
+    result
+}
+
+fn invalidate_scp11b_params() {
+    *SCP11B_PARAMS.lock().unwrap() = None;
 }
 
 fn get_nfc_device_version() -> &'static Option<Version> {
@@ -195,10 +214,10 @@ fn open_smartcard_connection(tc: &TestConnection) -> PcscSmartCardConnection {
     }
 }
 
-fn scp_params(tc: &TestConnection) -> Option<&'static (u8, u8, Vec<u8>)> {
+fn scp_params(tc: &TestConnection) -> Option<(u8, u8, Vec<u8>)> {
     match tc {
-        TestConnection::UsbSmartCardScp11b => get_scp11b_params().as_ref(),
-        TestConnection::NfcSmartCardScp11b => get_nfc_scp11b_params().as_ref(),
+        TestConnection::UsbSmartCardScp11b => get_scp11b_params(),
+        TestConnection::NfcSmartCardScp11b => get_nfc_scp11b_params().clone(),
         _ => None,
     }
 }
@@ -362,8 +381,8 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
         }
         _ => {
             let conn = open_smartcard_connection(&tc);
-            let mut session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
-                let params = make_scp_key_params(*kid, *kvn, pk);
+            let mut session = if let Some((kid, kvn, ref pk)) = scp_params(&tc) {
+                let params = make_scp_key_params(kid, kvn, pk);
                 ManagementSession::new_with_scp(conn, &params).expect("ManagementSession with SCP")
             } else {
                 ManagementSession::new(conn).expect("ManagementSession::new (CCID)")
@@ -406,7 +425,7 @@ mod oath {
     fn open_oath_session(tc: &TestConnection) -> OathSession<PcscSmartCardConnection> {
         let conn = open_smartcard_connection(tc);
         if let Some((kid, kvn, pk)) = scp_params(tc) {
-            let params = make_scp_key_params(*kid, *kvn, pk);
+            let params = make_scp_key_params(kid, kvn, &pk);
             OathSession::new_with_scp(conn, &params).expect("OathSession with SCP")
         } else {
             OathSession::new(conn).expect("OathSession::new")
@@ -531,7 +550,7 @@ mod piv {
     fn open_piv_session(tc: &TestConnection) -> PivSession<PcscSmartCardConnection> {
         let conn = open_smartcard_connection(tc);
         if let Some((kid, kvn, pk)) = scp_params(tc) {
-            let params = make_scp_key_params(*kid, *kvn, pk);
+            let params = make_scp_key_params(kid, kvn, &pk);
             PivSession::new_with_scp(conn, &params).expect("PivSession with SCP")
         } else {
             PivSession::new(conn).expect("PivSession::new")
@@ -993,7 +1012,7 @@ mod openpgp {
     fn open_openpgp_session(tc: &TestConnection) -> OpenPgpSession<PcscSmartCardConnection> {
         let conn = open_smartcard_connection(tc);
         if let Some((kid, kvn, pk)) = scp_params(tc) {
-            let params = make_scp_key_params(*kid, *kvn, pk);
+            let params = make_scp_key_params(kid, kvn, &pk);
             OpenPgpSession::new_with_scp(conn, &params).expect("OpenPgpSession with SCP")
         } else {
             OpenPgpSession::new(conn).expect("OpenPgpSession::new")
@@ -1284,8 +1303,8 @@ mod yubiotp {
             }
             _ => {
                 let conn = open_smartcard_connection(&tc);
-                let session = if let Some((kid, kvn, pk)) = scp_params(&tc) {
-                    let params = make_scp_key_params(*kid, *kvn, pk);
+                let session = if let Some((kid, kvn, ref pk)) = scp_params(&tc) {
+                    let params = make_scp_key_params(kid, kvn, pk);
                     YubiOtpSession::new_with_scp(conn, &params).expect("YubiOtpSession with SCP")
                 } else {
                     YubiOtpSession::new(conn).expect("YubiOtpSession::new")
@@ -1429,7 +1448,7 @@ mod hsmauth {
     fn open_hsmauth_session(tc: &TestConnection) -> HsmAuthSession<PcscSmartCardConnection> {
         let conn = open_smartcard_connection(tc);
         if let Some((kid, kvn, pk)) = scp_params(tc) {
-            let params = make_scp_key_params(*kid, *kvn, pk);
+            let params = make_scp_key_params(kid, kvn, &pk);
             HsmAuthSession::new_with_scp(conn, &params).expect("HsmAuthSession with SCP")
         } else {
             HsmAuthSession::new(conn).expect("HsmAuthSession::new")
@@ -1616,6 +1635,7 @@ mod securitydomain {
         let key_info = session.get_key_information().expect("get_key_information");
         if !key_info.contains_key(&default_key) {
             session.reset().expect("reset to restore default keys");
+            invalidate_scp11b_params();
         }
     }
 
@@ -1764,10 +1784,9 @@ mod securitydomain {
             }
         };
         ensure_default_keys(&mut session);
-        drop(session);
+        let conn = session.into_connection();
 
         // Authenticate with default SCP03 keys (0x40..0x4F)
-        let conn = open_smartcard_connection(&tc);
         let params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
             key_enc: std::array::from_fn(|i| 0x40 + i as u8),
@@ -1795,10 +1814,9 @@ mod securitydomain {
             }
         };
         ensure_default_keys(&mut session);
-        drop(session);
+        let conn = session.into_connection();
 
         // Try authenticating with wrong keys
-        let conn = open_smartcard_connection(&tc);
         let params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
             key_enc: [0x01u8; 16],
@@ -1824,10 +1842,9 @@ mod securitydomain {
             }
         };
         ensure_default_keys(&mut session);
-        drop(session);
+        let conn = session.into_connection();
 
         // Authenticate with default keys
-        let conn = open_smartcard_connection(&tc);
         let default_params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
             key_enc: std::array::from_fn(|i| 0x40 + i as u8),
@@ -1851,10 +1868,9 @@ mod securitydomain {
         session
             .put_key_static(new_ref, &new_keys, 0)
             .expect("put new SCP03 keys");
-        drop(session);
+        let conn = session.into_connection();
 
         // Verify new keys work
-        let conn = open_smartcard_connection(&tc);
         let new_params = ScpKeyParams::Scp03 {
             kvn: 0x02,
             key_enc: new_enc,
@@ -1865,17 +1881,18 @@ mod securitydomain {
             .map_err(|(e, _)| e)
             .expect("SCP03 auth with new keys");
         verify_auth(&mut session);
-        drop(session);
+        let conn = session.into_connection();
 
         // Verify old default keys no longer work
-        let conn = open_smartcard_connection(&tc);
-        let result = SecurityDomainSession::new_with_scp(conn, &default_params).map_err(|(e, _)| e);
-        assert!(result.is_err(), "Default keys should fail after key change");
+        let conn = match SecurityDomainSession::new_with_scp(conn, &default_params) {
+            Err((_, conn)) => conn,
+            Ok(_) => panic!("Default keys should fail after key change"),
+        };
 
         // Reset to restore defaults
-        let conn = open_smartcard_connection(&tc);
         let mut session = SecurityDomainSession::new(conn).expect("open session for reset");
         session.reset().expect("reset");
+        invalidate_scp11b_params();
         eprintln!("  PASS {tc:?}");
     }
 
@@ -1904,10 +1921,9 @@ mod securitydomain {
         }
         let leaf_cert = chain.last().unwrap();
         let pk = extract_ec_p256_pubkey(leaf_cert).expect("extract public key from leaf cert");
-        drop(session);
+        let conn = session.into_connection();
 
         // Authenticate with SCP11b
-        let conn = open_smartcard_connection(&tc);
         let params = ScpKeyParams::Scp11b {
             kid: 0x13,
             kvn: 0x01,
@@ -1941,10 +1957,9 @@ mod securitydomain {
             }
         };
         ensure_default_keys(&mut session);
-        drop(session);
+        let conn = session.into_connection();
 
         // Authenticate with SCP03 to get write access
-        let conn = open_smartcard_connection(&tc);
         let scp03_params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
             key_enc: std::array::from_fn(|i| 0x40 + i as u8),
@@ -1970,23 +1985,23 @@ mod securitydomain {
         let pk = sk.public_key();
         use elliptic_curve::sec1::ToEncodedPoint;
         let pk_bytes = pk.to_encoded_point(false);
-        drop(session);
+        let conn = session.into_connection();
 
         // Authenticate with the imported SCP11b key
-        let conn = open_smartcard_connection(&tc);
         let params = ScpKeyParams::Scp11b {
             kid: 0x13,
             kvn: 0x02,
             pk_sd_ecka: pk_bytes.as_bytes().to_vec(),
         };
-        let _session = SecurityDomainSession::new_with_scp(conn, &params)
+        let session = SecurityDomainSession::new_with_scp(conn, &params)
             .map_err(|(e, _)| e)
             .expect("SCP11b auth with imported key");
+        let conn = session.into_connection();
 
         // Clean up: reset to restore defaults
-        let conn = open_smartcard_connection(&tc);
         let mut session = SecurityDomainSession::new(conn).expect("open session for reset");
         session.reset().expect("reset");
+        invalidate_scp11b_params();
         eprintln!("  PASS {tc:?}");
     }
 
@@ -2004,10 +2019,9 @@ mod securitydomain {
             }
         };
         ensure_default_keys(&mut session);
-        drop(session);
+        let conn = session.into_connection();
 
         // Authenticate with SCP03
-        let conn = open_smartcard_connection(&tc);
         let scp03_params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
             key_enc: std::array::from_fn(|i| 0x40 + i as u8),
@@ -2020,10 +2034,9 @@ mod securitydomain {
 
         let kvn = 0x03;
         let params = load_scp11_keys(&mut session, ScpKid::Scp11a as u8, kvn);
-        drop(session);
+        let conn = session.into_connection();
 
         // Authenticate with SCP11a
-        let conn = open_smartcard_connection(&tc);
         let mut session = SecurityDomainSession::new_with_scp(conn, &params)
             .map_err(|(e, _)| e)
             .expect("SCP11a authentication");
@@ -2032,11 +2045,12 @@ mod securitydomain {
         session
             .delete_key(0, kvn, false)
             .expect("delete keys by kvn");
+        let conn = session.into_connection();
 
         // Reset to restore defaults
-        let conn = open_smartcard_connection(&tc);
         let mut session = SecurityDomainSession::new(conn).expect("open session for reset");
         session.reset().expect("reset");
+        invalidate_scp11b_params();
         eprintln!("  PASS {tc:?}");
     }
 
@@ -2054,10 +2068,9 @@ mod securitydomain {
             }
         };
         ensure_default_keys(&mut session);
-        drop(session);
+        let conn = session.into_connection();
 
         // Authenticate with SCP03
-        let conn = open_smartcard_connection(&tc);
         let scp03_params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
             key_enc: std::array::from_fn(|i| 0x40 + i as u8),
@@ -2085,10 +2098,9 @@ mod securitydomain {
         session
             .store_allowlist(oce_ref, &serials)
             .expect("store_allowlist");
-        drop(session);
+        let conn = session.into_connection();
 
         // Authenticate with SCP11a
-        let conn = open_smartcard_connection(&tc);
         let mut session = SecurityDomainSession::new_with_scp(conn, &params)
             .map_err(|(e, _)| e)
             .expect("SCP11a auth with allowlist");
@@ -2097,11 +2109,12 @@ mod securitydomain {
         session
             .delete_key(0, kvn, false)
             .expect("delete keys by kvn");
+        let conn = session.into_connection();
 
         // Reset to restore defaults
-        let conn = open_smartcard_connection(&tc);
         let mut session = SecurityDomainSession::new(conn).expect("open session for reset");
         session.reset().expect("reset");
+        invalidate_scp11b_params();
         eprintln!("  PASS {tc:?}");
     }
 
@@ -2119,10 +2132,9 @@ mod securitydomain {
             }
         };
         ensure_default_keys(&mut session);
-        drop(session);
+        let conn = session.into_connection();
 
         // Authenticate with SCP03
-        let conn = open_smartcard_connection(&tc);
         let scp03_params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
             key_enc: std::array::from_fn(|i| 0x40 + i as u8),
@@ -2162,15 +2174,15 @@ mod securitydomain {
         session
             .store_allowlist(oce_ref, &wrong_serials)
             .expect("store wrong allowlist");
-        drop(session);
+        let conn = session.into_connection();
 
         // Attempt SCP11a auth — should fail due to wrong allowlist
-        let conn = open_smartcard_connection(&tc);
-        let result = SecurityDomainSession::new_with_scp(conn, &params).map_err(|(e, _)| e);
-        assert!(result.is_err(), "SCP11a should fail with wrong allowlist");
+        let conn = match SecurityDomainSession::new_with_scp(conn, &params) {
+            Err((_, conn)) => conn,
+            Ok(_) => panic!("SCP11a should fail with wrong allowlist"),
+        };
 
         // Remove allowlist by authenticating with new SCP03 keys
-        let conn = open_smartcard_connection(&tc);
         let new_scp03_params = ScpKeyParams::Scp03 {
             kvn: 0x02,
             key_enc: new_enc,
@@ -2183,18 +2195,18 @@ mod securitydomain {
         session
             .store_allowlist(oce_ref, &[])
             .expect("remove allowlist");
-        drop(session);
+        let conn = session.into_connection();
 
         // Now SCP11a should work
-        let conn = open_smartcard_connection(&tc);
-        let _session = SecurityDomainSession::new_with_scp(conn, &params)
+        let session = SecurityDomainSession::new_with_scp(conn, &params)
             .map_err(|(e, _)| e)
             .expect("SCP11a auth after removing allowlist");
+        let conn = session.into_connection();
 
         // Reset to restore defaults
-        let conn = open_smartcard_connection(&tc);
         let mut session = SecurityDomainSession::new(conn).expect("open session for reset");
         session.reset().expect("reset");
+        invalidate_scp11b_params();
         eprintln!("  PASS {tc:?}");
     }
 
@@ -2212,10 +2224,9 @@ mod securitydomain {
             }
         };
         ensure_default_keys(&mut session);
-        drop(session);
+        let conn = session.into_connection();
 
         // Authenticate with SCP03
-        let conn = open_smartcard_connection(&tc);
         let scp03_params = ScpKeyParams::Scp03 {
             kvn: 0xFF,
             key_enc: std::array::from_fn(|i| 0x40 + i as u8),
@@ -2228,10 +2239,9 @@ mod securitydomain {
 
         let kvn = 0x03;
         let params = load_scp11_keys(&mut session, ScpKid::Scp11c as u8, kvn);
-        drop(session);
+        let conn = session.into_connection();
 
         // Authenticate with SCP11c
-        let conn = open_smartcard_connection(&tc);
         let mut session = SecurityDomainSession::new_with_scp(conn, &params)
             .map_err(|(e, _)| e)
             .expect("SCP11c authentication");
@@ -2242,11 +2252,12 @@ mod securitydomain {
             result.is_err(),
             "SCP11c should not allow key deletion (read-only)"
         );
+        let conn = session.into_connection();
 
         // Reset to restore defaults
-        let conn = open_smartcard_connection(&tc);
         let mut session = SecurityDomainSession::new(conn).expect("open session for reset");
         session.reset().expect("reset");
+        invalidate_scp11b_params();
         eprintln!("  PASS {tc:?}");
     }
 }
