@@ -250,7 +250,19 @@ impl RpcDevice {
     /// Create a new RPC device from a spawned RPC client.
     ///
     /// Reads device info and available connections from the root node.
-    pub fn new(mut client: RpcClient) -> Result<Self, CliError> {
+    pub fn new(client: RpcClient) -> Result<Self, CliError> {
+        Self::from_client(client)
+    }
+
+    /// Create an RPC device from a service-connected client targeting a specific
+    /// device child node. Sets the client's target prefix so all subsequent
+    /// calls are routed to that device.
+    pub fn from_client_at(mut client: RpcClient, device_name: &str) -> Result<Self, CliError> {
+        client.set_target_prefix(vec![device_name.to_string()]);
+        Self::from_client(client)
+    }
+
+    fn from_client(mut client: RpcClient) -> Result<Self, CliError> {
         log::debug!("Initializing RPC device");
         let root = client
             .get(&[])

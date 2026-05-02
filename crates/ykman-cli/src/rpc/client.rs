@@ -1,10 +1,15 @@
-//! RPC client — spawns `ykman rpc --tcp` as a subprocess and communicates via TCP.
+//! RPC client — connects to ykman-svc Named Pipe or spawns `ykman rpc --tcp`
+//! as a subprocess.
 //!
 //! On Windows, if not running as administrator the subprocess is launched
 //! elevated via `ShellExecuteExW` with the `runas` verb, since FIDO HID
 //! access requires administrator rights.
+//!
+//! The preferred path on Windows is to connect to the ykman-svc Named Pipe
+//! service (`connect_pipe`). If the service is unavailable, it falls back to
+//! subprocess spawning.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 
@@ -21,15 +26,126 @@ enum ChildProcess {
     Elevated(windows_elevated::ElevatedProcess),
 }
 
-/// An RPC client connected to a `ykman rpc` subprocess over TCP.
+/// Transport abstraction for the RPC client's read/write streams.
+enum Transport {
+    /// TCP connection to a spawned subprocess.
+    Tcp {
+        reader: BufReader<TcpStream>,
+        writer: Arc<Mutex<TcpStream>>,
+        _listener: TcpListener,
+    },
+    /// Generic stream (Named Pipe file handle, Unix socket, etc).
+    Stream {
+        reader: BufReader<Box<dyn Read + Send>>,
+        writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    },
+}
+
+/// An RPC client connected to a ykman RPC server.
 pub struct RpcClient {
-    child: ChildProcess,
-    reader: BufReader<TcpStream>,
-    writer: Arc<Mutex<TcpStream>>,
-    _listener: TcpListener,
+    child: Option<ChildProcess>,
+    transport: Transport,
+    /// Optional prefix prepended to all target paths (for service child routing).
+    target_prefix: Vec<String>,
+}
+
+/// Thread-safe writer handle for sending cancel signals from the Ctrl+C handler.
+enum CancelWriter {
+    Tcp(Arc<Mutex<TcpStream>>),
+    Stream(Arc<Mutex<Box<dyn Write + Send>>>),
+}
+
+// SAFETY: TcpStream is Send+Sync, Box<dyn Write + Send> is Send.
+// The Arc<Mutex<>> wrapper ensures thread-safe access.
+unsafe impl Send for CancelWriter {}
+unsafe impl Sync for CancelWriter {}
+
+impl CancelWriter {
+    fn send_cancel(&self, data: &[u8]) {
+        match self {
+            Self::Tcp(writer) => {
+                if let Ok(mut w) = writer.lock() {
+                    let _ = w.write_all(data);
+                    let _ = w.write_all(b"\n");
+                    let _ = w.flush();
+                }
+            }
+            Self::Stream(writer) => {
+                if let Ok(mut w) = writer.lock() {
+                    let _ = w.write_all(data);
+                    let _ = w.write_all(b"\n");
+                    let _ = w.flush();
+                }
+            }
+        }
+    }
 }
 
 impl RpcClient {
+    /// Connect to the ykman-svc Named Pipe (Windows) or Unix socket (dev).
+    ///
+    /// Returns `Err` if the service is not available.
+    pub fn connect_pipe() -> Result<Self, CliError> {
+        #[cfg(target_os = "windows")]
+        {
+            use std::fs::OpenOptions;
+            use std::os::windows::fs::OpenOptionsExt;
+
+            let pipe_path = r"\\.\pipe\ykman-svc";
+            log::debug!("Connecting to Named Pipe: {pipe_path}");
+
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags(0) // FILE_FLAG_NORMAL
+                .open(pipe_path)
+                .map_err(|e| CliError(format!("Failed to connect to ykman-svc pipe: {e}")))?;
+
+            let reader: Box<dyn Read + Send> = Box::new(
+                file.try_clone()
+                    .map_err(|e| CliError(format!("Failed to clone pipe handle: {e}")))?,
+            );
+            let writer: Box<dyn Write + Send> = Box::new(file);
+
+            log::debug!("Connected to ykman-svc pipe");
+            Ok(Self {
+                child: None,
+                target_prefix: vec![],
+                transport: Transport::Stream {
+                    reader: BufReader::new(reader),
+                    writer: Arc::new(Mutex::new(writer)),
+                },
+            })
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            use std::os::unix::net::UnixStream;
+
+            let socket_path = "/tmp/ykman-svc.sock";
+            log::debug!("Connecting to Unix socket: {socket_path}");
+
+            let stream = UnixStream::connect(socket_path)
+                .map_err(|e| CliError(format!("Failed to connect to ykman-svc socket: {e}")))?;
+
+            let reader: Box<dyn Read + Send> = Box::new(
+                stream
+                    .try_clone()
+                    .map_err(|e| CliError(format!("Failed to clone socket: {e}")))?,
+            );
+            let writer: Box<dyn Write + Send> = Box::new(stream);
+
+            log::debug!("Connected to ykman-svc socket");
+            Ok(Self {
+                child: None,
+                target_prefix: vec![],
+                transport: Transport::Stream {
+                    reader: BufReader::new(reader),
+                    writer: Arc::new(Mutex::new(writer)),
+                },
+            })
+        }
+    }
+
     /// Spawn `ykman rpc --tcp PORT NONCE` and connect over TCP.
     ///
     /// If `elevate` is true (Windows only), the subprocess is launched with
@@ -101,27 +217,54 @@ impl RpcClient {
 
         log::debug!("RPC client connected on port {port}");
         Ok(Self {
-            child,
-            reader,
-            writer,
-            _listener: listener,
+            child: Some(child),
+            target_prefix: vec![],
+            transport: Transport::Tcp {
+                reader,
+                writer,
+                _listener: listener,
+            },
         })
     }
 
     fn write_message(&self, msg: &Value) -> Result<(), CliError> {
         let json_str = serde_json::to_string(msg)
             .map_err(|e| CliError(format!("Failed to serialize RPC message: {e}")))?;
-        let mut writer = self.writer.lock().unwrap();
-        writer
-            .write_all(json_str.as_bytes())
-            .map_err(|e| CliError(format!("Failed to write to RPC subprocess: {e}")))?;
-        writer
-            .write_all(b"\n")
-            .map_err(|e| CliError(format!("Failed to write to RPC subprocess: {e}")))?;
-        writer
-            .flush()
-            .map_err(|e| CliError(format!("Failed to flush RPC subprocess: {e}")))?;
+        match &self.transport {
+            Transport::Tcp { writer, .. } => {
+                let mut writer = writer.lock().unwrap();
+                writer
+                    .write_all(json_str.as_bytes())
+                    .map_err(|e| CliError(format!("Failed to write to RPC: {e}")))?;
+                writer
+                    .write_all(b"\n")
+                    .map_err(|e| CliError(format!("Failed to write to RPC: {e}")))?;
+                writer
+                    .flush()
+                    .map_err(|e| CliError(format!("Failed to flush RPC: {e}")))?;
+            }
+            Transport::Stream { writer, .. } => {
+                let mut writer = writer.lock().unwrap();
+                writer
+                    .write_all(json_str.as_bytes())
+                    .map_err(|e| CliError(format!("Failed to write to RPC: {e}")))?;
+                writer
+                    .write_all(b"\n")
+                    .map_err(|e| CliError(format!("Failed to write to RPC: {e}")))?;
+                writer
+                    .flush()
+                    .map_err(|e| CliError(format!("Failed to flush RPC: {e}")))?;
+            }
+        }
         Ok(())
+    }
+
+    /// Get a clone of the writer for cancel signal sending.
+    fn cancel_writer(&self) -> CancelWriter {
+        match &self.transport {
+            Transport::Tcp { writer, .. } => CancelWriter::Tcp(writer.clone()),
+            Transport::Stream { writer, .. } => CancelWriter::Stream(writer.clone()),
+        }
     }
 
     /// Send a command and return the response body. Signals are dispatched via
@@ -137,26 +280,28 @@ impl RpcClient {
         signal_handler: Option<&dyn Fn(&str, &Value)>,
         cancellable: bool,
     ) -> Result<RpcResult, RpcCallError> {
+        let full_target: Vec<&str> = self
+            .target_prefix
+            .iter()
+            .map(|s| s.as_str())
+            .chain(target.iter().copied())
+            .collect();
         let request = json!({
             "kind": "command",
             "action": action,
-            "target": target,
+            "target": full_target,
             "body": body,
         });
         self.write_message(&request)
             .map_err(RpcCallError::Transport)?;
 
-        // Register a cancel callback that sends cancel signal to subprocess
+        // Register a cancel callback that sends cancel signal
         let _guard = if cancellable {
-            let writer = self.writer.clone();
+            let writer = self.cancel_writer();
             Some(cancel::on_cancel(move || {
                 let signal = json!({"kind": "signal", "status": "cancel"});
                 let json_str = serde_json::to_string(&signal).unwrap();
-                if let Ok(mut w) = writer.lock() {
-                    let _ = w.write_all(json_str.as_bytes());
-                    let _ = w.write_all(b"\n");
-                    let _ = w.flush();
-                }
+                writer.send_cancel(json_str.as_bytes());
             }))
         } else {
             None
@@ -164,10 +309,8 @@ impl RpcClient {
 
         loop {
             let mut buf = String::new();
-            let n = self.reader.read_line(&mut buf).map_err(|e| {
-                RpcCallError::Transport(CliError(format!(
-                    "Failed to read from RPC subprocess: {e}"
-                )))
+            let n = self.read_line(&mut buf).map_err(|e| {
+                RpcCallError::Transport(CliError(format!("Failed to read from RPC: {e}")))
             })?;
             if n == 0 {
                 return Err(RpcCallError::Transport(CliError(
@@ -246,21 +389,43 @@ impl RpcClient {
     pub fn get(&mut self, target: &[&str]) -> Result<RpcResult, RpcCallError> {
         self.call("get", target, json!({}), None, false)
     }
+
+    /// Set a target prefix that will be prepended to all RPC calls.
+    /// Used when connected to ykman-svc and targeting a specific device child.
+    pub fn set_target_prefix(&mut self, prefix: Vec<String>) {
+        self.target_prefix = prefix;
+    }
+
+    fn read_line(&mut self, buf: &mut String) -> std::io::Result<usize> {
+        match &mut self.transport {
+            Transport::Tcp { reader, .. } => reader.read_line(buf),
+            Transport::Stream { reader, .. } => reader.read_line(buf),
+        }
+    }
 }
 
 impl Drop for RpcClient {
     fn drop(&mut self) {
-        // Shut down the write side to signal the subprocess to exit
-        if let Ok(w) = self.writer.lock() {
-            let _ = w.shutdown(std::net::Shutdown::Write);
-        }
-        match &mut self.child {
-            ChildProcess::Std(child) => {
-                let _ = child.wait();
+        // Shut down the write side to signal the server to exit
+        match &self.transport {
+            Transport::Tcp { writer, .. } => {
+                if let Ok(w) = writer.lock() {
+                    let _ = w.shutdown(std::net::Shutdown::Write);
+                }
             }
-            #[cfg(target_os = "windows")]
-            ChildProcess::Elevated(proc) => {
-                proc.wait();
+            Transport::Stream { .. } => {
+                // Stream drops will close the handle
+            }
+        }
+        if let Some(child) = &mut self.child {
+            match child {
+                ChildProcess::Std(child) => {
+                    let _ = child.wait();
+                }
+                #[cfg(target_os = "windows")]
+                ChildProcess::Elevated(proc) => {
+                    proc.wait();
+                }
             }
         }
     }

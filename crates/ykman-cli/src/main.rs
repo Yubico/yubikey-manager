@@ -2,6 +2,7 @@
 use std::process;
 
 use clap::{Parser, Subcommand};
+use serde_json::json;
 use yubikit::core::{Transport, Version, set_override_version};
 use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices, scan_usb_devices};
 use yubikit::management::{Capability, ReleaseType, UsbInterface};
@@ -1692,6 +1693,45 @@ fn get_device_with_policy(
 }
 
 fn spawn_rpc_device(rpc_global_args: &[String]) -> Result<Box<dyn YubiKeyDevice>, CliError> {
+    // Try connecting to ykman-svc pipe/socket first
+    match rpc::client::RpcClient::connect_pipe() {
+        Ok(mut client) => {
+            log::debug!("Connected to ykman-svc service");
+            // Ask the service to scan devices, then navigate to the first device
+            let _ = client.call("update_children", &[], json!({}), None, false);
+            let root = client.get(&[]).map_err(|e| CliError(format!("{e}")))?;
+            let children = root
+                .body
+                .get("children")
+                .and_then(|v| v.as_object())
+                .cloned()
+                .unwrap_or_default();
+
+            if children.is_empty() {
+                return Err(CliError("No YubiKeys found via service".into()));
+            }
+
+            // Pick the first (or only) device
+            let device_name = children.keys().next().unwrap().clone();
+            log::debug!("Using service device: {device_name}");
+
+            // Navigate to the device child — now the client's context is at
+            // the device level which matches what RpcDevice::new expects.
+            let _dev_get = client
+                .get(&[&device_name])
+                .map_err(|e| CliError(format!("{e}")))?;
+
+            // Create RpcDevice using the device child as root context
+            let dev = rpc::proxy::RpcDevice::from_client_at(client, &device_name)?;
+            apply_version_override(&dev);
+            return Ok(Box::new(dev));
+        }
+        Err(e) => {
+            log::debug!("ykman-svc not available: {}", e.0);
+        }
+    }
+
+    // Fall back to spawning a subprocess
     let elevate = cfg!(target_os = "windows") && !is_admin();
     let client = rpc::client::RpcClient::spawn(rpc_global_args, elevate)?;
     let dev = rpc::proxy::RpcDevice::new(client)?;
