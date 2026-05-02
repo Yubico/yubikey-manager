@@ -44,7 +44,11 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
     use std::fs::File;
     use std::os::windows::io::FromRawHandle;
 
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE, LocalFree};
+    use windows_sys::Win32::Security::{SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR};
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
     use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
     use windows_sys::Win32::System::Pipes::{
         ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
@@ -53,6 +57,46 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
 
     let pipe_name = crate::PIPE_NAME;
     let pipe_name_w: Vec<u16> = pipe_name.encode_utf16().chain(std::iter::once(0)).collect();
+
+    // Build a security descriptor that allows Authenticated Users (AU) to
+    // read and write the pipe.  Without an explicit DACL, a pipe created by
+    // an elevated (admin) process gets the high-integrity default DACL, which
+    // denies access to standard (medium-integrity) user processes.
+    //
+    // SDDL "D:(A;;GRGW;;;AU)":
+    //   D:      = DACL
+    //   A       = Allow
+    //   GRGW    = GENERIC_READ | GENERIC_WRITE
+    //   AU      = Authenticated Users
+    let sddl: Vec<u16> = "D:(A;;GRGW;;;AU)"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut sd_ptr: *mut SECURITY_DESCRIPTOR = std::ptr::null_mut();
+    let ok = unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            SDDL_REVISION_1,
+            &mut sd_ptr as *mut *mut SECURITY_DESCRIPTOR as *mut *mut core::ffi::c_void,
+            std::ptr::null_mut(),
+        )
+    };
+    if ok == 0 {
+        log::error!(
+            "ConvertStringSecurityDescriptorToSecurityDescriptorW failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let mut sa = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: sd_ptr as *mut core::ffi::c_void,
+        bInheritHandle: 0,
+    };
+    let sa_ptr = if sd_ptr.is_null() {
+        std::ptr::null()
+    } else {
+        &mut sa as *mut SECURITY_ATTRIBUTES
+    };
 
     log::info!("Listening on {pipe_name}");
 
@@ -67,7 +111,7 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
                 4096,
                 4096,
                 0,
-                std::ptr::null(),
+                sa_ptr,
             )
         };
 
@@ -119,6 +163,12 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
             let session = ClientSession::new(manager);
             session.run(file);
         });
+    }
+
+    // Free the LocalAlloc'd security descriptor returned by
+    // ConvertStringSecurityDescriptorToSecurityDescriptorW.
+    if !sd_ptr.is_null() {
+        unsafe { LocalFree(sd_ptr as *mut core::ffi::c_void) };
     }
 
     log::info!("Pipe server stopped");
