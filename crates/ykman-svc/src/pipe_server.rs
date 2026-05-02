@@ -16,6 +16,12 @@ pub fn run_standalone() {
     ctrlc::set_handler(move || {
         log::info!("Ctrl+C received, shutting down");
         stop_clone.store(true, Ordering::Relaxed);
+        // Unblock the blocking ConnectNamedPipe call by briefly connecting to the pipe.
+        #[cfg(target_os = "windows")]
+        let _ = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(crate::PIPE_NAME);
     })
     .expect("Failed to set Ctrl+C handler");
 

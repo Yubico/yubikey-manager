@@ -271,14 +271,6 @@ enum Commands {
         #[arg(short = 's', long = "send-apdu")]
         send_apdu: Vec<String>,
     },
-    /// Start RPC mode for programmatic access over stdin/stdout
-    #[command(hide = true)]
-    Rpc {
-        /// Use TCP instead of stdin/stdout. Connects to localhost:PORT and
-        /// sends NONCE for authentication.
-        #[arg(long, num_args = 2, value_names = ["PORT", "NONCE"])]
-        tcp: Option<Vec<String>>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -1641,113 +1633,59 @@ fn require_device(serial: Option<u32>) -> Result<LocalYubiKeyDevice, CliError> {
     select_device(devices, serial)
 }
 
-/// Get a device, using RPC proxy when RPC=2 is set.
-///
-/// Returns a boxed trait object so the same command code works regardless
-/// of whether we're talking to the device locally or through an RPC
-/// subprocess.
-fn get_device(
-    serial: Option<u32>,
-    rpc_global_args: &[String],
-) -> Result<Box<dyn YubiKeyDevice>, CliError> {
-    get_device_with_policy(serial, rpc_global_args, RpcPolicy::Default)
-}
+/// Try to get a device through the ykman-svc service.
+/// Returns the first device if `serial` is None, or the specific device by serial.
+#[cfg(target_os = "windows")]
+fn try_service_device(serial: Option<u32>) -> Result<Box<dyn YubiKeyDevice>, CliError> {
+    let mut client = rpc::client::RpcClient::connect_pipe()?;
+    log::debug!("Connected to ykman-svc service");
+    let _ = client.call("update_children", &[], json!({}), None, false);
+    let root = client.get(&[]).map_err(|e| CliError(format!("{e}")))?;
+    let children = root
+        .body
+        .get("children")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
 
-/// Policy for when to use RPC on Windows (non-admin).
-enum RpcPolicy {
-    /// Use RPC only if the device has no non-FIDO USB interface.
-    Default,
-    /// Always use RPC (for FIDO commands that require HID access).
-    AlwaysFido,
-}
-
-fn get_device_with_policy(
-    serial: Option<u32>,
-    rpc_global_args: &[String],
-    policy: RpcPolicy,
-) -> Result<Box<dyn YubiKeyDevice>, CliError> {
-    // RPC=1 forces RPC on any OS
-    if std::env::var("RPC").ok().as_deref() == Some("1") {
-        return spawn_rpc_device(rpc_global_args);
+    if children.is_empty() {
+        return Err(CliError("No YubiKeys found via service".into()));
     }
 
-    // On Windows without admin, decide based on policy
-    #[cfg(target_os = "windows")]
-    if !is_admin() {
-        match policy {
-            RpcPolicy::AlwaysFido => return spawn_rpc_device(rpc_global_args),
-            RpcPolicy::Default => {
-                // Check if the device only has FIDO over USB
-                let dev = require_device(serial)?;
-                if dev.transport() == Transport::Usb && dev.usb_interfaces() == UsbInterface::FIDO {
-                    return spawn_rpc_device(rpc_global_args);
-                }
-                return Ok(Box::new(dev));
-            }
+    let device_name = if let Some(serial) = serial {
+        let key = serial.to_string();
+        if children.contains_key(&key) {
+            key
+        } else {
+            return Err(CliError(format!(
+                "Device '{serial}' not found via service"
+            )));
         }
-    }
+    } else {
+        children.keys().next().unwrap().clone()
+    };
 
-    let _ = policy;
-    let dev = require_device(serial)?;
-    Ok(Box::new(dev))
-}
+    log::debug!("Using service device: {device_name}");
+    let _dev_get = client
+        .get(&[&device_name])
+        .map_err(|e| CliError(format!("{e}")))?;
 
-fn spawn_rpc_device(rpc_global_args: &[String]) -> Result<Box<dyn YubiKeyDevice>, CliError> {
-    // Try connecting to ykman-svc pipe/socket first
-    match rpc::client::RpcClient::connect_pipe() {
-        Ok(mut client) => {
-            log::debug!("Connected to ykman-svc service");
-            // Ask the service to scan devices, then navigate to the first device
-            let _ = client.call("update_children", &[], json!({}), None, false);
-            let root = client.get(&[]).map_err(|e| CliError(format!("{e}")))?;
-            let children = root
-                .body
-                .get("children")
-                .and_then(|v| v.as_object())
-                .cloned()
-                .unwrap_or_default();
-
-            if children.is_empty() {
-                return Err(CliError("No YubiKeys found via service".into()));
-            }
-
-            // Pick the first (or only) device
-            let device_name = children.keys().next().unwrap().clone();
-            log::debug!("Using service device: {device_name}");
-
-            // Navigate to the device child — now the client's context is at
-            // the device level which matches what RpcDevice::new expects.
-            let _dev_get = client
-                .get(&[&device_name])
-                .map_err(|e| CliError(format!("{e}")))?;
-
-            // Create RpcDevice using the device child as root context
-            let dev = rpc::proxy::RpcDevice::from_client_at(client, &device_name)?;
-            apply_version_override(&dev);
-            return Ok(Box::new(dev));
-        }
-        Err(e) => {
-            log::debug!("ykman-svc not available: {}", e.0);
-        }
-    }
-
-    // Fall back to spawning a subprocess
-    let elevate = cfg!(target_os = "windows") && !is_admin();
-    let client = rpc::client::RpcClient::spawn(rpc_global_args, elevate)?;
-    let dev = rpc::proxy::RpcDevice::new(client)?;
+    let dev = rpc::proxy::RpcDevice::from_client_at(client, &device_name)?;
     apply_version_override(&dev);
     Ok(Box::new(dev))
 }
 
-fn is_admin() -> bool {
+/// Get a YubiKey device. On Windows, always tries the ykman-svc service first,
+/// then falls back to direct access.
+fn get_device(serial: Option<u32>) -> Result<Box<dyn YubiKeyDevice>, CliError> {
     #[cfg(target_os = "windows")]
-    {
-        rpc::client::windows_elevated::is_admin()
+    match try_service_device(serial) {
+        Ok(dev) => return Ok(dev),
+        Err(e) => log::debug!("ykman-svc not available ({}), using direct access", e.0),
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        true
-    }
+
+    let dev = require_device(serial)?;
+    Ok(Box::new(dev))
 }
 
 /// Check that a capability is available and enabled on the device.
@@ -2011,20 +1949,6 @@ fn apply_version_override(dev: &dyn YubiKeyDevice) {
     }
 }
 
-/// Build global CLI arguments for forwarding to `ykman rpc`.
-fn build_rpc_global_args(cli: &Cli) -> Vec<String> {
-    let mut args = Vec::new();
-    if let Some(serial) = cli.device {
-        args.push("--device".to_string());
-        args.push(serial.to_string());
-    }
-    if let Some(level) = cli.log_level {
-        args.push("--log-level".to_string());
-        args.push(format!("{level:?}").to_lowercase());
-    }
-    args
-}
-
 fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
 
@@ -2065,9 +1989,6 @@ fn run() -> Result<(), CliError> {
     // Parse SCP params before consuming command
     let scp_params = parse_scp_params(&cli)?;
 
-    // Extract fields needed for RPC forwarding before moving command
-    let rpc_global_args = build_rpc_global_args(&cli);
-
     let command = match cli.command {
         Some(cmd) => cmd,
         None => {
@@ -2087,12 +2008,12 @@ fn run() -> Result<(), CliError> {
             list::run(serials, readers)
         }
         Commands::Info { check_fips } => {
-            let dev = get_device(cli.device, &rpc_global_args)?;
+            let dev = get_device(cli.device)?;
             apply_version_override(&dev);
             info::run(&dev, check_fips)
         }
         Commands::Config { action } => {
-            let dev = get_device(cli.device, &rpc_global_args)?;
+            let dev = get_device(cli.device)?;
             apply_version_override(&dev);
             match action {
                 ConfigAction::Usb {
@@ -2171,7 +2092,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Oath { action } => {
-            let dev = get_device(cli.device, &rpc_global_args)?;
+            let dev = get_device(cli.device)?;
             check_capability(&dev, Capability::OATH)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
@@ -2327,7 +2248,7 @@ fn run() -> Result<(), CliError> {
             access_code,
             action,
         } => {
-            let dev = get_device(cli.device, &rpc_global_args)?;
+            let dev = get_device(cli.device)?;
             check_capability(&dev, Capability::OTP)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
@@ -2518,7 +2439,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Piv { action } => {
-            let dev = get_device(cli.device, &rpc_global_args)?;
+            let dev = get_device(cli.device)?;
             check_capability(&dev, Capability::PIV)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
@@ -2775,7 +2696,7 @@ fn run() -> Result<(), CliError> {
         }
         Commands::Fido { action } => {
             let mut dev =
-                get_device_with_policy(cli.device, &rpc_global_args, RpcPolicy::AlwaysFido)?;
+                get_device(cli.device)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
             match action {
@@ -2892,7 +2813,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Openpgp { action } => {
-            let dev = get_device(cli.device, &rpc_global_args)?;
+            let dev = get_device(cli.device)?;
             check_capability(&dev, Capability::OPENPGP)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
@@ -3030,7 +2951,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Hsmauth { action } => {
-            let dev = get_device(cli.device, &rpc_global_args)?;
+            let dev = get_device(cli.device)?;
             check_capability(&dev, Capability::HSMAUTH)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
@@ -3149,7 +3070,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::SecurityDomain { action } => {
-            let dev = get_device(cli.device, &rpc_global_args)?;
+            let dev = get_device(cli.device)?;
             check_version(&dev, Version(5, 3, 0), "Security Domain")?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
@@ -3252,20 +3173,6 @@ fn run() -> Result<(), CliError> {
                 short,
                 &send_apdu,
             )
-        }
-        Commands::Rpc { tcp } => {
-            let dev = require_device(cli.device)?;
-            let root = rpc::device::DeviceNode::new(dev);
-            if let Some(args) = tcp {
-                let port: u16 = args[0]
-                    .parse()
-                    .map_err(|_| CliError(format!("Invalid port: {}", args[0])))?;
-                let nonce = args[1].clone();
-                rpc::run_tcp(Box::new(root), port, &nonce);
-            } else {
-                rpc::run(Box::new(root));
-            }
-            Ok(())
         }
     }
 }

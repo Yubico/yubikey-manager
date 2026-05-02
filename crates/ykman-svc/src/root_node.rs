@@ -25,6 +25,8 @@ pub struct ServiceRootNode {
     multi_device: bool,
     /// Cached list of device names for list_children.
     cached_children: BTreeMap<String, Value>,
+    /// Device names locked by this session (released on drop).
+    opened_devices: Vec<String>,
 }
 
 impl ServiceRootNode {
@@ -33,6 +35,18 @@ impl ServiceRootNode {
             manager,
             multi_device: false,
             cached_children: BTreeMap::new(),
+            opened_devices: Vec::new(),
+        }
+    }
+}
+
+impl Drop for ServiceRootNode {
+    fn drop(&mut self) {
+        for name in &self.opened_devices {
+            self.manager.release_device(name);
+        }
+        if !self.opened_devices.is_empty() {
+            log::debug!("Released {} device lock(s) on session end", self.opened_devices.len());
         }
     }
 }
@@ -101,7 +115,9 @@ impl RpcNode for ServiceRootNode {
     }
 
     fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
-        self.manager.open_device(name)
+        let node = self.manager.open_device(name)?;
+        self.opened_devices.push(name.to_string());
+        Ok(node)
     }
 
     fn is_child_valid(&self, name: &str) -> bool {

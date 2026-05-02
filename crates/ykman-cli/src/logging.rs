@@ -88,6 +88,7 @@ fn print_box(lines: &[&str]) -> String {
 
 enum Output {
     Stderr,
+    Stdout,
     File(Mutex<File>),
 }
 
@@ -148,6 +149,9 @@ impl Log for YkmanLogger {
             Output::Stderr => {
                 eprint!("{msg}");
             }
+            Output::Stdout => {
+                print!("{msg}");
+            }
             Output::File(file) => {
                 if let Ok(mut f) = file.lock() {
                     let _ = f.write_all(msg.as_bytes());
@@ -160,6 +164,9 @@ impl Log for YkmanLogger {
         match &self.output {
             Output::Stderr => {
                 let _ = std::io::stderr().flush();
+            }
+            Output::Stdout => {
+                let _ = std::io::stdout().flush();
             }
             Output::File(file) => {
                 if let Ok(mut f) = file.lock() {
@@ -189,6 +196,17 @@ pub fn init_logging(level: LogLevel, log_file: Option<&str>) -> Result<(), Strin
     }
     set_log_level(level);
 
+    Ok(())
+}
+
+/// Initialize logging to stdout (for standalone service mode).
+pub fn init_logging_stdout(level: LogLevel) -> Result<(), String> {
+    let logger = YkmanLogger {
+        level,
+        output: Output::Stdout,
+    };
+    log::set_boxed_logger(Box::new(logger)).map_err(|e| format!("Failed to set logger: {e}"))?;
+    log::set_max_level(level.to_level_filter());
     Ok(())
 }
 

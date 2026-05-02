@@ -33,9 +33,17 @@ enum Commands {
 }
 
 fn main() {
-    let _ = ykman_cli::logging::init_logging(ykman_cli::logging::LogLevel::Warning, None);
-
     let cli = Cli::parse();
+
+    match &cli.command {
+        Commands::Standalone => {
+            let _ = ykman_cli::logging::init_logging_stdout(ykman_cli::logging::LogLevel::Info);
+        }
+        _ => {
+            let _ = ykman_cli::logging::init_logging(ykman_cli::logging::LogLevel::Warning, None);
+        }
+    }
+
     match cli.command {
         Commands::Install => {
             #[cfg(target_os = "windows")]
