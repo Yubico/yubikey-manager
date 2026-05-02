@@ -45,8 +45,9 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
     use std::os::windows::io::FromRawHandle;
 
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
     use windows_sys::Win32::System::Pipes::{
-        ConnectNamedPipe, CreateNamedPipeW, PIPE_ACCESS_DUPLEX, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
+        ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
         PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
     };
 
@@ -106,13 +107,17 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         }
 
         let manager = manager.clone();
+        // SAFETY: We own this handle exclusively; HANDLEs are safe to send across threads.
+        let handle_addr = handle as usize;
         std::thread::spawn(move || {
-            // SAFETY: handle is a valid pipe handle that we own exclusively in this thread
-            let read_file = unsafe { File::from_raw_handle(handle as _) };
-            let write_file = read_file.try_clone().expect("clone pipe handle");
+            let handle = handle_addr as *mut core::ffi::c_void;
+            // SAFETY: handle is a valid pipe handle that we own exclusively in this thread.
+            // The sequential session loop never has concurrent ReadFile + WriteFile
+            // pending on the same endpoint, so no synchronous I/O deadlock can occur.
+            let file = unsafe { File::from_raw_handle(handle) };
 
             let session = ClientSession::new(manager);
-            session.run(read_file, write_file);
+            session.run(file);
         });
     }
 
@@ -145,10 +150,8 @@ fn run_unix_socket_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
                 log::info!("Client connected");
                 let manager = manager.clone();
                 std::thread::spawn(move || {
-                    let read = stream;
-                    let write = read.try_clone().expect("clone unix socket");
                     let session = ClientSession::new(manager);
-                    session.run(read, write);
+                    session.run(stream);
                 });
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {

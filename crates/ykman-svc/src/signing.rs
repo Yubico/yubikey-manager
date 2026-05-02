@@ -12,7 +12,7 @@ use std::fmt;
 ///
 /// Returns Ok(()) if verification passes or is skipped (unsigned service).
 #[cfg(target_os = "windows")]
-pub fn verify_client(pipe_handle: isize) -> Result<(), SigningError> {
+pub fn verify_client(pipe_handle: windows_sys::Win32::Foundation::HANDLE) -> Result<(), SigningError> {
     use windows_sys::Win32::System::Pipes::GetNamedPipeClientProcessId;
 
     // Get the service's own certificate
@@ -91,7 +91,6 @@ fn get_process_image_path(pid: u32) -> Result<std::path::PathBuf, SigningError> 
 /// Get the code signing certificate (DER-encoded) from an executable.
 #[cfg(target_os = "windows")]
 fn get_signing_cert(path: &std::path::Path) -> Result<Vec<u8>, SigningError> {
-    use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
 
     use windows_sys::Win32::Security::Cryptography::{
@@ -107,7 +106,7 @@ fn get_signing_cert(path: &std::path::Path) -> Result<Vec<u8>, SigningError> {
 
     let mut cert_store = std::ptr::null_mut();
     let mut msg = std::ptr::null_mut();
-    let mut context = std::ptr::null();
+    let mut context: *mut core::ffi::c_void = std::ptr::null_mut();
 
     let ok = unsafe {
         CryptQueryObject(
@@ -135,7 +134,7 @@ fn get_signing_cert(path: &std::path::Path) -> Result<Vec<u8>, SigningError> {
 
     // Get the signer certificate from the message
     // For now we extract the first certificate from the embedded signature
-    use windows_sys::Win32::Security::Cryptography::{CERT_CONTEXT, CertEnumCertificatesInStore};
+    use windows_sys::Win32::Security::Cryptography::CertEnumCertificatesInStore;
 
     let cert_ctx = unsafe { CertEnumCertificatesInStore(cert_store, std::ptr::null()) };
     if cert_ctx.is_null() {
