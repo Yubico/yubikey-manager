@@ -41,6 +41,48 @@ def cyan(value):
     return f"\u001b[36;1m{value}\u001b[0m"
 
 
+def _is_named_pipe(path: str) -> bool:
+    """Return True if *path* looks like a Windows Named Pipe path."""
+    normalized = path.replace("/", "\\").lower()
+    return normalized.startswith("\\\\.\\pipe\\")
+
+
+class NamedPipeStream:
+    """Bidirectional text stream backed by a Windows Named Pipe.
+
+    Used as both the *stdin* and *stdout* arguments to :class:`RpcShell`
+    so that a single pipe connection handles both send and receive.
+    """
+
+    def __init__(self, path: str) -> None:
+        # Open in binary, unbuffered read/write mode.
+        self._pipe = open(path, "r+b", buffering=0)  # noqa: WPS515
+        self._buf = b""
+
+    # ---- write-side (stdin interface) --------------------------------
+
+    def write(self, text: str) -> None:
+        self._pipe.write(text.encode("utf-8"))
+
+    def flush(self) -> None:
+        pass  # Pipe is unbuffered; nothing to flush.
+
+    # ---- read-side (stdout interface) --------------------------------
+
+    def readline(self) -> str:
+        """Block until a newline-terminated line is available and return it."""
+        while b"\n" not in self._buf:
+            chunk = self._pipe.read(4096)
+            if not chunk:
+                return ""
+            self._buf += chunk
+        idx = self._buf.index(b"\n")
+        line, self._buf = self._buf[: idx + 1], self._buf[idx + 1 :]
+        return line.decode("utf-8")
+
+    def close(self) -> None:
+        self._pipe.close()
+
 class RpcShell(cmd.Cmd):
     def __init__(self, stdin, stdout):
         super().__init__()
@@ -240,21 +282,32 @@ def log_stderr(stderr):
 
 
 def main():
-    helper = subprocess.Popen(  # noqa: S603
-        sys.argv[1:],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        encoding="utf8",
-    )
+    if len(sys.argv) == 2 and _is_named_pipe(sys.argv[1]):
+        pipe_path = sys.argv[1]
+        print(f"Connecting to {pipe_path}...")
+        stream = NamedPipeStream(pipe_path)
+        try:
+            shell = RpcShell(stream, stream)
+            shell.cmdloop()
+        finally:
+            stream.close()
+        print("Stopping...")
+    else:
+        helper = subprocess.Popen(  # noqa: S603
+            sys.argv[1:],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="utf8",
+        )
 
-    Thread(daemon=True, target=log_stderr, args=(helper.stderr,)).start()
+        Thread(daemon=True, target=log_stderr, args=(helper.stderr,)).start()
 
-    print("Shell starting...")
-    shell = RpcShell(helper.stdin, cast(IO[str], helper.stdout))
-    shell.cmdloop()
-    print("Stopping...")
-    helper.communicate()
+        print("Shell starting...")
+        shell = RpcShell(helper.stdin, cast(IO[str], helper.stdout))
+        shell.cmdloop()
+        print("Stopping...")
+        helper.communicate()
 
 
 if __name__ == "__main__":
