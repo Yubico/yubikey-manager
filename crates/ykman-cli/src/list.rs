@@ -158,7 +158,7 @@ fn list_via_service(serials: bool) -> Result<bool, CliError> {
 
 /// Format a service device description from its children JSON data.
 #[cfg(target_os = "windows")]
-fn describe_svc_device(name: &str, info: &serde_json::Value) -> String {
+pub(crate) fn describe_svc_device(name: &str, info: &serde_json::Value) -> String {
     let dev_name = info
         .get("name")
         .and_then(|v| v.as_str())

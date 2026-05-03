@@ -1634,7 +1634,9 @@ fn require_device(serial: Option<u32>) -> Result<LocalYubiKeyDevice, CliError> {
 }
 
 /// Try to get a device through the ykman-svc service.
-/// Returns the first device if `serial` is None, or the specific device by serial.
+/// If `serial` is None and exactly one device is connected, returns it.
+/// If `serial` is None and multiple devices are connected, returns an error listing them.
+/// If `serial` is Some, returns the matching device or an error.
 #[cfg(target_os = "windows")]
 fn try_service_device(serial: Option<u32>) -> Result<Box<dyn YubiKeyDevice>, CliError> {
     let mut client = rpc::client::RpcClient::connect_pipe()?;
@@ -1662,7 +1664,21 @@ fn try_service_device(serial: Option<u32>) -> Result<Box<dyn YubiKeyDevice>, Cli
             )));
         }
     } else {
-        children.keys().next().unwrap().clone()
+        match children.len() {
+            0 => unreachable!("empty check above"),
+            1 => children.keys().next().unwrap().clone(),
+            n => {
+                let mut msg = format!("Multiple YubiKeys detected ({n}):");
+                for (name, info) in &children {
+                    msg.push_str(&format!(
+                        "\n- {}",
+                        crate::list::describe_svc_device(name, info)
+                    ));
+                }
+                msg.push_str("\nUse --device SERIAL to specify which one to use.");
+                return Err(CliError(msg));
+            }
+        }
     };
 
     log::debug!("Using service device: {device_name}");
