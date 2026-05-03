@@ -85,6 +85,50 @@ impl DeviceManager {
             );
         }
 
+        // Deduplicate: remove name-based entries (no serial in key) whose
+        // firmware version matches a serial-keyed entry. This guards against
+        // the same device appearing twice — once via CCID (full info, serial
+        // readable) and once via FIDO/OTP fallback (partial info, serial=null).
+        let versions_with_serial: HashSet<(u8, u8, u8)> = new_devices
+            .iter()
+            .filter(|(k, _)| k.parse::<u32>().is_ok())
+            .filter_map(|(_, v)| {
+                let arr = v.get("version")?.as_array()?;
+                if arr.len() == 3 {
+                    Some((
+                        arr[0].as_u64()? as u8,
+                        arr[1].as_u64()? as u8,
+                        arr[2].as_u64()? as u8,
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        new_devices.retain(|name, info| {
+            if name.parse::<u32>().is_ok() {
+                return true; // always keep serial-keyed entries
+            }
+            if let Some(arr) = info.get("version").and_then(|v| v.as_array())
+                && arr.len() == 3
+            {
+                let ver = (
+                    arr[0].as_u64().unwrap_or(0) as u8,
+                    arr[1].as_u64().unwrap_or(0) as u8,
+                    arr[2].as_u64().unwrap_or(0) as u8,
+                );
+                if versions_with_serial.contains(&ver) {
+                    log::warn!(
+                        "Dropping duplicate device entry '{name}' \
+                         (v{}.{}.{} already present under serial key)",
+                        ver.0, ver.1, ver.2
+                    );
+                    return false;
+                }
+            }
+            true
+        });
+
         // Remove locks for devices that are no longer present
         state
             .locked_devices
