@@ -88,6 +88,7 @@ fn print_box(lines: &[&str]) -> String {
 
 enum Output {
     Stderr,
+    #[allow(dead_code)]
     Stdout,
     File(Mutex<File>),
 }
@@ -200,6 +201,7 @@ pub fn init_logging(level: LogLevel, log_file: Option<&str>) -> Result<(), Strin
 }
 
 /// Initialize logging to stdout (for standalone service mode).
+#[allow(dead_code)]
 pub fn init_logging_stdout(level: LogLevel) -> Result<(), String> {
     let logger = YkmanLogger {
         level,

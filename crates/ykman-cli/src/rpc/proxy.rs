@@ -260,13 +260,6 @@ pub struct RpcDevice {
 }
 
 impl RpcDevice {
-    /// Create a new RPC device from a spawned RPC client.
-    ///
-    /// Reads device info and available connections from the root node.
-    pub fn new(client: RpcClient) -> Result<Self, CliError> {
-        Self::from_client(client)
-    }
-
     /// Create an RPC device from a service-connected client targeting a specific
     /// device child node. Sets the client's target prefix so all subsequent
     /// calls are routed to that device.
@@ -275,19 +268,23 @@ impl RpcDevice {
         Self::from_client(client)
     }
 
+    #[allow(dead_code)]
     pub fn has_ccid(&self) -> bool {
         self.has_ccid
     }
 
+    #[allow(dead_code)]
     pub fn has_ctap(&self) -> bool {
         self.has_ctap
     }
 
+    #[allow(dead_code)]
     pub fn has_otp(&self) -> bool {
         self.has_otp
     }
 
     /// Parse device info from a JSON value (children map entry from the service).
+    #[allow(dead_code)]
     pub fn parse_device_info(data: &serde_json::Value) -> yubikit::management::DeviceInfo {
         Self::read_device_info(data)
     }

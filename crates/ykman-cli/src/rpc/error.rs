@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use serde_json::Value;
 
 /// An RPC response — body + optional flags.
