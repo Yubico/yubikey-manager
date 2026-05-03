@@ -63,6 +63,11 @@ pub trait RpcNode {
         true
     }
 
+    /// Called on this node when one of its child nodes has been closed.
+    /// Allows the parent to release resources (e.g., device locks) eagerly
+    /// rather than waiting until the whole session ends.
+    fn on_child_closed(&mut self, _name: &str) {}
+
     /// Called on parent nodes when a child action returns a response with flags.
     /// Allows parent nodes to react to flags (e.g., refresh data on "device_info",
     /// invalidate state on "device_closed").
@@ -90,19 +95,25 @@ impl NodeHost {
 
     fn close_child(&mut self) {
         if let Some(mut child) = self.child.take() {
-            log::debug!("Closing child: {:?}", self.child_name);
+            let name = self.child_name.take().unwrap_or_default();
+            log::debug!("Closing child: {:?}", &name);
             child.close();
+            self.node.on_child_closed(&name);
+        } else {
+            self.child_name = None;
         }
-        self.child_name = None;
     }
 
     fn close(&mut self) {
         self.close_child();
-        for (name, child) in self.retained_children.iter_mut() {
-            log::debug!("Closing retained child: {name}");
-            child.close();
+        let retained: Vec<String> = self.retained_children.keys().cloned().collect();
+        for name in &retained {
+            if let Some(mut child) = self.retained_children.remove(name) {
+                log::debug!("Closing retained child: {name}");
+                child.close();
+                self.node.on_child_closed(name);
+            }
         }
-        self.retained_children.clear();
         self.node.close();
     }
 
@@ -115,6 +126,7 @@ impl NodeHost {
             {
                 log::debug!("Closing invalid retained child: {name}");
                 child.close();
+                self.node.on_child_closed(name);
             }
             if !self.retained_children.contains_key(name) {
                 let child_node = self.node.create_child(name)?;

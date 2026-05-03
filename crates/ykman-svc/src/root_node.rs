@@ -58,6 +58,14 @@ impl RpcNode for ServiceRootNode {
         })
     }
 
+    fn on_child_closed(&mut self, name: &str) {
+        if self.opened_devices.contains(&name.to_string()) {
+            self.manager.release_device(name);
+            self.opened_devices.retain(|n| n != name);
+            log::debug!("Released device lock for '{name}'");
+        }
+    }
+
     fn list_actions(&self) -> Vec<&'static str> {
         vec!["multi_device", "update_children"]
     }
