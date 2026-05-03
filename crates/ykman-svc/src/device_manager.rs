@@ -25,6 +25,8 @@ struct ManagerState {
     last_fingerprint: u64,
     /// Current device inventory: name → device info for list_children.
     devices: BTreeMap<String, Value>,
+    /// Cached device objects for fast re-open without re-enumeration.
+    device_objects: BTreeMap<String, LocalYubiKeyDevice>,
     /// Devices that are currently opened by a client session.
     locked_devices: HashSet<String>,
 }
@@ -35,6 +37,7 @@ impl DeviceManager {
             state: Mutex::new(ManagerState {
                 last_fingerprint: 0,
                 devices: BTreeMap::new(),
+                device_objects: BTreeMap::new(),
                 locked_devices: HashSet::new(),
             }),
         }
@@ -67,6 +70,7 @@ impl DeviceManager {
         };
 
         let mut new_devices = BTreeMap::new();
+        let mut new_device_objects: BTreeMap<String, LocalYubiKeyDevice> = BTreeMap::new();
         let mut serial_counts: HashMap<String, usize> = HashMap::new();
 
         for dev in &devices {
@@ -74,7 +78,7 @@ impl DeviceManager {
             let info = dev.info();
             let version = &info.version;
             new_devices.insert(
-                name,
+                name.clone(),
                 json!({
                     "serial": info.serial,
                     "version": [version.0, version.1, version.2],
@@ -83,6 +87,7 @@ impl DeviceManager {
                     "form_factor": info.form_factor as u8,
                 }),
             );
+            new_device_objects.insert(name, dev.clone());
         }
 
         // Deduplicate: remove name-based entries (no serial in key) whose
@@ -123,6 +128,7 @@ impl DeviceManager {
                          (v{}.{}.{} already present under serial key)",
                         ver.0, ver.1, ver.2
                     );
+                    new_device_objects.remove(name);
                     return false;
                 }
             }
@@ -135,6 +141,7 @@ impl DeviceManager {
             .retain(|name| new_devices.contains_key(name));
 
         state.devices = new_devices.clone();
+        state.device_objects = new_device_objects;
         new_devices
     }
 
@@ -159,15 +166,14 @@ impl DeviceManager {
             ));
         }
 
-        // Open the actual device
-        let interfaces = UsbInterface::CCID | UsbInterface::FIDO | UsbInterface::OTP;
-        let devices = list_devices(interfaces)
-            .map_err(|e| RpcError::new("device-error", format!("Failed to list devices: {e}")))?;
-
-        let device = find_device_by_name(&devices, name)
-            .ok_or_else(|| RpcError::new("device-error", format!("Device '{name}' not found")))?;
+        let device = state
+            .device_objects
+            .get(name)
+            .ok_or_else(|| RpcError::new("device-error", format!("Device '{name}' not cached")))?
+            .clone();
 
         state.locked_devices.insert(name.to_string());
+        log::debug!("Opened device '{name}' from cache");
         Ok(Box::new(DeviceNode::new(device)))
     }
 
@@ -206,25 +212,4 @@ fn device_name(dev: &LocalYubiKeyDevice, counts: &mut HashMap<String, usize>) ->
     } else {
         base
     }
-}
-
-/// Find a device matching a name in the device list.
-fn find_device_by_name(devices: &[LocalYubiKeyDevice], name: &str) -> Option<LocalYubiKeyDevice> {
-    // Try matching by serial first
-    if let Ok(serial) = name.parse::<u32>()
-        && let Some(dev) = devices.iter().find(|d| d.info().serial == Some(serial))
-    {
-        return Some(dev.clone());
-    }
-
-    // Fallback: match by generated name
-    let mut counts: HashMap<String, usize> = HashMap::new();
-    for dev in devices {
-        let dev_name = device_name(dev, &mut counts);
-        if dev_name == name {
-            return Some(dev.clone());
-        }
-    }
-
-    None
 }
