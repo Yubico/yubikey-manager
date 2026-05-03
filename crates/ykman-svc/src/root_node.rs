@@ -1,7 +1,6 @@
 //! Root RPC node for the ykman-svc service.
 //!
 //! Provides:
-//! - `logging` action: set log level
 //! - `multi_device` action: toggle multi-device mode for the session
 //! - `update_children` action: refresh device list
 
@@ -60,7 +59,7 @@ impl RpcNode for ServiceRootNode {
     }
 
     fn list_actions(&self) -> Vec<&'static str> {
-        vec!["logging", "multi_device", "update_children"]
+        vec!["multi_device", "update_children"]
     }
 
     fn list_children(&mut self) -> BTreeMap<String, Value> {
@@ -80,17 +79,6 @@ impl RpcNode for ServiceRootNode {
         _cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError> {
         match action {
-            "logging" => {
-                let level = params
-                    .get("level")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("WARNING");
-                let log_level: ykman_cli::logging::LogLevel = level
-                    .parse()
-                    .unwrap_or(ykman_cli::logging::LogLevel::Warning);
-                ykman_cli::logging::set_log_level(log_level);
-                Ok(RpcResponse::new(json!({})))
-            }
             "multi_device" => {
                 let enabled = params
                     .get("enabled")

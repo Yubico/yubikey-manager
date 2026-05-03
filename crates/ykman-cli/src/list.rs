@@ -56,6 +56,12 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
         return Ok(());
     }
 
+    // On Windows, prefer listing devices via the service.
+    #[cfg(target_os = "windows")]
+    if list_via_service(serials)? {
+        return Ok(());
+    }
+
     let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
     let devices =
         list_devices(all).map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
@@ -104,6 +110,86 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
     }
 
     Ok(())
+}
+
+/// Try to list devices via the ykman-svc service.
+/// Returns Ok(true) if devices were successfully listed from service,
+/// Ok(false) if service is unavailable (caller should fall back to local listing).
+#[cfg(target_os = "windows")]
+fn list_via_service(serials: bool) -> Result<bool, CliError> {
+    use serde_json::json;
+
+    let mut client = match crate::rpc::client::RpcClient::connect_pipe() {
+        Ok(c) => c,
+        Err(_) => return Ok(false),
+    };
+
+    let _ = client.call("update_children", &[], json!({}), None, false);
+    let root = match client.get(&[]) {
+        Ok(r) => r,
+        Err(_) => return Ok(false),
+    };
+
+    let children = match root
+        .body
+        .get("children")
+        .and_then(|v| v.as_object())
+    {
+        Some(c) if !c.is_empty() => c.clone(),
+        _ => {
+            println!("No YubiKeys detected.");
+            return Ok(true);
+        }
+    };
+
+    for (name, info) in &children {
+        if serials {
+            // Device names are serial numbers when available
+            if info.get("serial").and_then(|v| v.as_u64()).is_some() {
+                println!("{name}");
+            }
+        } else {
+            println!("{}", describe_svc_device(name, info));
+        }
+    }
+
+    Ok(true)
+}
+
+/// Format a service device description from its children JSON data.
+#[cfg(target_os = "windows")]
+fn describe_svc_device(name: &str, info: &serde_json::Value) -> String {
+    let dev_name = info
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("YubiKey");
+
+    let version = if let Some(arr) = info.get("version").and_then(|v| v.as_array())
+        && arr.len() == 3
+    {
+        format!(
+            "{}.{}.{}",
+            arr[0].as_u64().unwrap_or(0),
+            arr[1].as_u64().unwrap_or(0),
+            arr[2].as_u64().unwrap_or(0)
+        )
+    } else {
+        "?.?.?".to_string()
+    };
+
+    let ifaces_str = if let Some(raw) = info.get("usb_interfaces").and_then(|v| v.as_u64()) {
+        format_interfaces(UsbInterface(raw as u8))
+    } else {
+        String::new()
+    };
+
+    let serial_str = if let Some(serial) = info.get("serial").and_then(|v| v.as_u64()) {
+        format!(" Serial: {serial}")
+    } else {
+        format!(" [{name}]")
+    };
+
+    format!("{dev_name} ({version}){ifaces_str}{serial_str}")
 }
 
 fn print_blocked_device(pid: u16) {

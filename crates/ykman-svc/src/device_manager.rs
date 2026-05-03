@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 use serde_json::{Value, json};
 
-use yubikit::device::{LocalYubiKeyDevice, list_devices, scan_usb_devices};
+use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices, scan_usb_devices};
 use yubikit::management::UsbInterface;
 
 use ykman_cli::rpc::device::DeviceNode;
@@ -79,6 +79,7 @@ impl DeviceManager {
                     "serial": info.serial,
                     "version": [version.0, version.1, version.2],
                     "name": dev.name(),
+                    "usb_interfaces": dev.usb_interfaces().0,
                 }),
             );
         }

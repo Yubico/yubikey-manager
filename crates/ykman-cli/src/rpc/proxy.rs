@@ -40,11 +40,14 @@ unsafe impl Send for RpcSmartCardConnection {}
 
 impl Connection for RpcSmartCardConnection {
     type Error = SmartCardError;
-    fn close(&mut self) {}
+    fn close(&mut self) {
+        log::debug!("Closing RPC SmartCard connection");
+    }
 }
 
 impl SmartCardConnection for RpcSmartCardConnection {
     fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+        yubikit::log_traffic!(">> {}", apdu.encode_hex::<String>());
         let result = self
             .client
             .borrow_mut()
@@ -66,6 +69,7 @@ impl SmartCardConnection for RpcSmartCardConnection {
             .map_err(|e| SmartCardError::InvalidData(format!("bad hex from RPC: {e}")))?;
         let sw = result.body.get("sw").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
 
+        yubikit::log_traffic!("<< {} {:04x}", data_hex, sw);
         Ok((data, sw))
     }
 
@@ -125,7 +129,9 @@ impl RpcFidoConnection {
 
 impl Connection for RpcFidoConnection {
     type Error = FidoError;
-    fn close(&mut self) {}
+    fn close(&mut self) {
+        log::debug!("Closing RPC FIDO connection");
+    }
 }
 
 impl FidoConnection for RpcFidoConnection {
@@ -168,6 +174,8 @@ impl FidoConnection for RpcFidoConnection {
             .get("data")
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        yubikit::log_traffic!("CTAP cmd={:02x} >> {}", cmd, data.encode_hex::<String>());
+        yubikit::log_traffic!("CTAP cmd={:02x} << {}", cmd, data_hex);
         Vec::from_hex(data_hex).map_err(|e| FidoError::Other(format!("bad hex from RPC: {e}")))
     }
 
@@ -195,7 +203,9 @@ unsafe impl Send for RpcOtpConnection {}
 
 impl Connection for RpcOtpConnection {
     type Error = OtpError;
-    fn close(&mut self) {}
+    fn close(&mut self) {
+        log::debug!("Closing RPC OTP connection");
+    }
 }
 
 impl OtpConnection for RpcOtpConnection {
@@ -211,11 +221,14 @@ impl OtpConnection for RpcOtpConnection {
             .get("data")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        Vec::from_hex(data_hex)
-            .map_err(|e| OtpError::CommandRejected(format!("bad hex from RPC: {e}")))
+        let data = Vec::from_hex(data_hex)
+            .map_err(|e| OtpError::CommandRejected(format!("bad hex from RPC: {e}")))?;
+        yubikit::log_traffic!("otp_receive << {}", data_hex);
+        Ok(data)
     }
 
     fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
+        yubikit::log_traffic!("otp_send >> {}", data.encode_hex::<String>());
         self.client
             .borrow_mut()
             .call(
@@ -260,6 +273,23 @@ impl RpcDevice {
     pub fn from_client_at(mut client: RpcClient, device_name: &str) -> Result<Self, CliError> {
         client.set_target_prefix(vec![device_name.to_string()]);
         Self::from_client(client)
+    }
+
+    pub fn has_ccid(&self) -> bool {
+        self.has_ccid
+    }
+
+    pub fn has_ctap(&self) -> bool {
+        self.has_ctap
+    }
+
+    pub fn has_otp(&self) -> bool {
+        self.has_otp
+    }
+
+    /// Parse device info from a JSON value (children map entry from the service).
+    pub fn parse_device_info(data: &serde_json::Value) -> yubikit::management::DeviceInfo {
+        Self::read_device_info(data)
     }
 
     fn from_client(mut client: RpcClient) -> Result<Self, CliError> {
@@ -501,6 +531,12 @@ impl YubiKeyDevice for RpcDevice {
             })?;
 
         Ok(())
+    }
+}
+
+impl Drop for RpcDevice {
+    fn drop(&mut self) {
+        log::debug!("RPC device disconnected: {}", self.name);
     }
 }
 
