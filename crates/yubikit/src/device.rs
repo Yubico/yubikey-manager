@@ -47,6 +47,8 @@ use crate::transport::ctaphid::{FidoDeviceInfo, HidFidoConnection, list_fido_dev
 use crate::transport::otphid::{HidDeviceInfo, HidError, HidOtpConnection, list_otp_devices};
 /// Re-export of [`list_readers`] for enumerating PC/SC smart card readers.
 pub use crate::transport::pcsc::list_readers;
+/// Re-export of [`list_readers_with_state`] for fingerprint-aware scanning.
+pub use crate::transport::pcsc::list_readers_with_state;
 use crate::transport::pcsc::{PcscError, PcscSmartCardConnection, is_reader_usb};
 #[cfg(windows)]
 use crate::transport::setupdi::list_setupdi_devices;
@@ -711,11 +713,16 @@ pub fn scan_usb_devices() -> (HashMap<u16, usize>, u64) {
 
     // Scan PC/SC readers
     let mut transport_counts: HashMap<u16, usize> = HashMap::new();
-    if let Ok(readers) = list_readers() {
-        for reader in readers {
+    if let Ok(readers) = list_readers_with_state() {
+        for (reader, card_present) in readers {
             if let Some(pid) = pid_from_reader_name(&reader) {
+                // USB-connected YubiKey reader: track by name (reader appears/disappears with key)
                 *transport_counts.entry(pid).or_insert(0) += 1;
                 fingerprints.push(reader);
+            } else {
+                // NFC reader: always include name + card-present state so
+                // tapping/removing a card changes the fingerprint
+                fingerprints.push(format!("{reader}:{}", if card_present { "present" } else { "absent" }));
             }
         }
     }

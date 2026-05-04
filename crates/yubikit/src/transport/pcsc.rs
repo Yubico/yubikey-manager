@@ -74,6 +74,44 @@ pub fn list_readers() -> Result<Vec<String>, PcscError> {
     Ok(names)
 }
 
+/// List PC/SC readers together with their current card-present state.
+///
+/// Each entry is `(reader_name, card_is_present)`. Uses `get_status_change`
+/// with a zero timeout so it returns the current snapshot immediately.
+pub fn list_readers_with_state() -> Result<Vec<(String, bool)>, PcscError> {
+    let ctx = Context::establish(Scope::User)?;
+    let len = ctx.list_readers_len()?;
+    let mut buf = vec![0u8; len];
+    let names: Vec<String> = ctx
+        .list_readers(&mut buf)?
+        .map(|r| r.to_string_lossy().into_owned())
+        .collect();
+
+    if names.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut reader_states: Vec<::pcsc::ReaderState> = names
+        .iter()
+        .filter_map(|name| std::ffi::CString::new(name.as_str()).ok())
+        .map(|cname| ::pcsc::ReaderState::new(cname, ::pcsc::State::UNAWARE))
+        .collect();
+
+    // Zero timeout → return immediately with current state; ignore timeout errors.
+    let _ = ctx.get_status_change(Some(std::time::Duration::ZERO), &mut reader_states);
+
+    let result = names
+        .into_iter()
+        .zip(reader_states.iter())
+        .map(|(name, rs)| {
+            let present = rs.event_state().contains(::pcsc::State::PRESENT);
+            (name, present)
+        })
+        .collect();
+
+    Ok(result)
+}
+
 /// Try to kill `scdaemon` (GPG smart card daemon) which may hold an exclusive
 /// lock on PC/SC readers. Returns `true` if a process was killed.
 fn kill_scdaemon() -> bool {

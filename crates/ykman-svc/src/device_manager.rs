@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 
 use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices, scan_usb_devices};
 use yubikit::management::UsbInterface;
+use yubikit::core::Transport;
 
 use ykman_cli::rpc::device::DeviceNode;
 use ykman_cli::rpc::error::RpcError;
@@ -77,6 +78,10 @@ impl DeviceManager {
             let name = device_name(dev, &mut serial_counts);
             let info = dev.info();
             let version = &info.version;
+            let transport_str = match dev.transport() {
+                Transport::Usb => "usb",
+                Transport::Nfc => "nfc",
+            };
             new_devices.insert(
                 name.clone(),
                 json!({
@@ -85,6 +90,7 @@ impl DeviceManager {
                     "name": dev.name(),
                     "usb_interfaces": dev.usb_interfaces().0,
                     "form_factor": info.form_factor as u8,
+                    "transport": transport_str,
                 }),
             );
             new_device_objects.insert(name, dev.clone());
