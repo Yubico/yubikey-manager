@@ -145,8 +145,7 @@ impl ClientSession {
 
 /// Serialize `data` as JSON followed by a newline and write it to `w`.
 fn write_response<W: Write>(w: &mut W, data: &Value) -> std::io::Result<()> {
-    let mut bytes = serde_json::to_vec(data)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let mut bytes = serde_json::to_vec(data).map_err(std::io::Error::other)?;
     bytes.push(b'\n');
     w.write_all(&bytes)
 }

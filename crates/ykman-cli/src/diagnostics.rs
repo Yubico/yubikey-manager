@@ -1188,12 +1188,8 @@ fn probe_svc_otp(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<OtpDeviceD
             ResultOrError::Ok(OtpConfigDiag {
                 slot1_configured: state.is_configured(yubikit::yubiotp::Slot::One).ok(),
                 slot2_configured: state.is_configured(yubikit::yubiotp::Slot::Two).ok(),
-                slot1_touch_triggered: state
-                    .is_touch_triggered(yubikit::yubiotp::Slot::One)
-                    .ok(),
-                slot2_touch_triggered: state
-                    .is_touch_triggered(yubikit::yubiotp::Slot::Two)
-                    .ok(),
+                slot1_touch_triggered: state.is_touch_triggered(yubikit::yubiotp::Slot::One).ok(),
+                slot2_touch_triggered: state.is_touch_triggered(yubikit::yubiotp::Slot::Two).ok(),
                 led_inverted: state.is_led_inverted(),
             })
         }

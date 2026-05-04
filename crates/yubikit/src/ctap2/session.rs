@@ -44,6 +44,15 @@ pub struct Ctap2Session<C: Connection> {
 }
 
 impl<C: Connection + 'static> Ctap2Session<C> {
+    /// Returns a reference to the authenticator info captured at session creation.
+    ///
+    /// This reflects the authenticator's *initial* capabilities.  Mutable state
+    /// (e.g. `clientPin`) may have changed since; use [`get_info()`](Self::get_info)
+    /// for a fresh snapshot.
+    pub fn info(&self) -> &Info {
+        &self.cached_info
+    }
+
     /// Create a new `Ctap2Session` wrapping the given [`CtapSession`](crate::ctap::CtapSession).
     ///
     /// Calls `get_info()` to cache the authenticator's capabilities.

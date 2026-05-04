@@ -83,6 +83,7 @@ class NamedPipeStream:
     def close(self) -> None:
         self._pipe.close()
 
+
 class RpcShell(cmd.Cmd):
     def __init__(self, stdin, stdout):
         super().__init__()

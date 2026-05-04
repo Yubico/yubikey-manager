@@ -259,6 +259,7 @@ pub struct RpcDevice {
     has_otp: bool,
 }
 
+#[allow(dead_code)]
 impl RpcDevice {
     /// Create an RPC device from a service-connected client targeting a specific
     /// device child node. Sets the client's target prefix so all subsequent

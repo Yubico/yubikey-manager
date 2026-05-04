@@ -8,9 +8,9 @@ use std::sync::Mutex;
 
 use serde_json::{Value, json};
 
+use yubikit::core::Transport;
 use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices, scan_usb_devices};
 use yubikit::management::UsbInterface;
-use yubikit::core::Transport;
 
 use ykman_cli::rpc::device::DeviceNode;
 use ykman_cli::rpc::error::RpcError;
@@ -132,7 +132,9 @@ impl DeviceManager {
                     log::warn!(
                         "Dropping duplicate device entry '{name}' \
                          (v{}.{}.{} already present under serial key)",
-                        ver.0, ver.1, ver.2
+                        ver.0,
+                        ver.1,
+                        ver.2
                     );
                     new_device_objects.remove(name);
                     return false;

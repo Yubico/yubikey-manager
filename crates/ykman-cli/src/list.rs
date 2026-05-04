@@ -130,11 +130,7 @@ fn list_via_service(serials: bool) -> Result<bool, CliError> {
         Err(_) => return Ok(false),
     };
 
-    let children = match root
-        .body
-        .get("children")
-        .and_then(|v| v.as_object())
-    {
+    let children = match root.body.get("children").and_then(|v| v.as_object()) {
         Some(c) if !c.is_empty() => c.clone(),
         _ => {
             println!("No YubiKeys detected.");

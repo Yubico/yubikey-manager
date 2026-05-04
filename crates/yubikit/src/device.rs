@@ -722,7 +722,10 @@ pub fn scan_usb_devices() -> (HashMap<u16, usize>, u64) {
             } else {
                 // NFC reader: always include name + card-present state so
                 // tapping/removing a card changes the fingerprint
-                fingerprints.push(format!("{reader}:{}", if card_present { "present" } else { "absent" }));
+                fingerprints.push(format!(
+                    "{reader}:{}",
+                    if card_present { "present" } else { "absent" }
+                ));
             }
         }
     }

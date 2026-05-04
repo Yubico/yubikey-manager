@@ -45,7 +45,10 @@ impl Drop for ServiceRootNode {
             self.manager.release_device(name);
         }
         if !self.opened_devices.is_empty() {
-            log::debug!("Released {} device lock(s) on session end", self.opened_devices.len());
+            log::debug!(
+                "Released {} device lock(s) on session end",
+                self.opened_devices.len()
+            );
         }
     }
 }

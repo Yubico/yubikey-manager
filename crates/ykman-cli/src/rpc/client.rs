@@ -9,6 +9,7 @@ use crate::cancel;
 use crate::util::CliError;
 
 /// Transport abstraction for the RPC client's read/write streams.
+#[allow(dead_code)]
 enum Transport {
     /// Generic stream (Named Pipe file handle, Unix socket, etc).
     Stream {
@@ -41,6 +42,7 @@ impl CancelWriter {
     }
 }
 
+#[allow(dead_code)]
 impl RpcClient {
     /// Connect to the ykman-svc Named Pipe (Windows) or Unix socket (dev).
     ///

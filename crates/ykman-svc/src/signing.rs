@@ -12,7 +12,9 @@ use std::fmt;
 ///
 /// Returns Ok(()) if verification passes or is skipped (unsigned service).
 #[cfg(target_os = "windows")]
-pub fn verify_client(pipe_handle: windows_sys::Win32::Foundation::HANDLE) -> Result<(), SigningError> {
+pub fn verify_client(
+    pipe_handle: windows_sys::Win32::Foundation::HANDLE,
+) -> Result<(), SigningError> {
     use windows_sys::Win32::System::Pipes::GetNamedPipeClientProcessId;
 
     // Get the service's own certificate

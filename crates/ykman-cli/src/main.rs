@@ -2,6 +2,7 @@
 use std::process;
 
 use clap::{Parser, Subcommand};
+#[cfg(target_os = "windows")]
 use serde_json::json;
 use yubikit::core::{Transport, Version, set_override_version};
 use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices, scan_usb_devices};
@@ -1659,9 +1660,7 @@ fn try_service_device(serial: Option<u32>) -> Result<Box<dyn YubiKeyDevice>, Cli
         if children.contains_key(&key) {
             key
         } else {
-            return Err(CliError(format!(
-                "Device '{serial}' not found via service"
-            )));
+            return Err(CliError(format!("Device '{serial}' not found via service")));
         }
     } else {
         match children.len() {
@@ -2711,8 +2710,7 @@ fn run() -> Result<(), CliError> {
             }
         }
         Commands::Fido { action } => {
-            let mut dev =
-                get_device(cli.device)?;
+            let mut dev = get_device(cli.device)?;
             check_scp_version(&dev, &scp_params)?;
             apply_version_override(&dev);
             match action {
