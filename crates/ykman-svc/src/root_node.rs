@@ -10,8 +10,8 @@ use std::sync::atomic::AtomicBool;
 
 use serde_json::{Value, json};
 
-use ykman_cli::rpc::error::{RpcError, RpcResponse};
-use ykman_cli::rpc::node::{RpcNode, SignalFn};
+use ykman::rpc::error::{RpcError, RpcResponse};
+use ykman::rpc::node::{RpcNode, SignalFn};
 
 use crate::device_manager::DeviceManager;
 

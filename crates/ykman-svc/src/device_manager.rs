@@ -12,9 +12,9 @@ use yubikit::core::Transport;
 use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices, scan_usb_devices};
 use yubikit::management::UsbInterface;
 
-use ykman_cli::rpc::device::DeviceNode;
-use ykman_cli::rpc::error::RpcError;
-use ykman_cli::rpc::node::RpcNode;
+use ykman::rpc::device::DeviceNode;
+use ykman::rpc::error::RpcError;
+use ykman::rpc::node::RpcNode;
 
 /// Manages device inventory and exclusive access.
 pub struct DeviceManager {

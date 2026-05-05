@@ -5,10 +5,6 @@ edition = "2024"
 description = "YubiKey Manager CLI (Rust)"
 license = "Apache-2.0"
 
-[lib]
-name = "ykman_cli"
-path = "src/lib.rs"
-
 [[bin]]
 name = "ykman"
 path = "src/main.rs"
@@ -18,6 +14,7 @@ name = "fido_selection"
 path = "examples/fido_selection.rs"
 
 [dependencies]
+ykman = { path = "../ykman" }
 yubikit = { path = "../yubikit" }
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
@@ -33,28 +30,15 @@ sha2 = "0.10"
 quick-xml = "0.37"
 rpassword = "7"
 x509-cert = { version = "0.2.5", features = ["pem"] }
-fernet = { version = "0.2", default-features = false, features = ["rustcrypto"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-dirs = "6"
 ctrlc = "3.5.2"
 flate2 = "1"
 pkcs8 = { version = "0.10.2", features = ["encryption", "pem"] }
 p12-keystore = "0.2.1"
 
-
-[target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3", features = ["apple-native"] }
-
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = { version = "3", features = ["windows-native"] }
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell"] }
-
-[target.'cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))'.dependencies]
-keyring = "3"
 
 [build-dependencies]
 flate2 = "1"

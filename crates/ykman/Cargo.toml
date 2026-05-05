@@ -1,0 +1,41 @@
+[package]
+name = "ykman"
+version = "6.0.0-dev.0"
+edition = "2024"
+description = "YubiKey Manager library (Rust)"
+license = "Apache-2.0"
+
+[lib]
+name = "ykman"
+path = "src/lib.rs"
+
+[dependencies]
+yubikit = { path = "../yubikit" }
+chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3.5.2"
+hex = "0.4.3"
+log = { version = "0.4", features = ["std"] }
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+dirs = "6"
+fernet = { version = "0.2", default-features = false, features = ["rustcrypto"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))'.dependencies]
+keyring = "3"
+
+[dev-dependencies]
+base64 = "0.22.1"
+
+[lints]
+workspace = true

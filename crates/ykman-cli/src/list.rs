@@ -119,7 +119,7 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
 fn list_via_service(serials: bool) -> Result<bool, CliError> {
     use serde_json::json;
 
-    let mut client = match crate::rpc::client::RpcClient::connect_pipe() {
+    let mut client = match ykman::rpc::client::RpcClient::connect_pipe() {
         Ok(c) => c,
         Err(_) => return Ok(false),
     };

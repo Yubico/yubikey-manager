@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/yubikit", "crates/yubikit-pyo3", "crates/ykman-cli", "crates/ykman-svc"]
+members = ["crates/yubikit", "crates/yubikit-pyo3", "crates/ykman", "crates/ykman-cli", "crates/ykman-svc"]
 resolver = "3"
 
 [workspace.lints.clippy]

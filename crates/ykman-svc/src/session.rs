@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Value, json};
 
-use ykman_cli::rpc::node::NodeHost;
+use ykman::rpc::node::NodeHost;
 
 use crate::device_manager::DeviceManager;
 use crate::root_node::ServiceRootNode;

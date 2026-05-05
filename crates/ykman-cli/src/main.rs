@@ -16,20 +16,21 @@ mod fido;
 mod hsmauth;
 mod info;
 mod list;
-mod logging;
 mod oath;
 mod openpgp;
 mod otp;
 mod piv;
-mod rpc;
 mod scp;
 mod securitydomain;
 mod util;
 
 // Re-export library modules so binary-internal modules can use them via crate::
-use ykman_cli::appdata;
-use ykman_cli::cancel;
-use ykman_cli::keyboard;
+use ykman::appdata;
+use ykman::cancel;
+use ykman::keyboard;
+use ykman::logging;
+#[cfg(target_os = "windows")]
+use ykman::rpc;
 
 use cli_enums::*;
 

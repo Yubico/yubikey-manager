@@ -57,7 +57,7 @@ fn pretty_print(value: &Value, level: usize) -> Vec<String> {
 }
 
 pub fn run_diagnose() -> Result<(), CliError> {
-    let report = ykman_cli::diagnostics::run_diagnostics();
+    let report = ykman::diagnostics::run_diagnostics();
     let json = serde_json::to_value(&report).unwrap();
     for line in pretty_print(&json, 0) {
         println!("{line}");

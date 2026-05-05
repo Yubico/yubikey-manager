@@ -100,7 +100,7 @@ fn service_main(_arguments: Vec<OsString>) {
 
 #[cfg(target_os = "windows")]
 fn run_service_inner() -> Result<(), Box<dyn std::error::Error>> {
-    let _ = ykman_cli::logging::init_logging(ykman_cli::logging::LogLevel::Warning, None);
+    let _ = ykman::logging::init_logging(ykman::logging::LogLevel::Warning, None);
 
     let stop = Arc::new(AtomicBool::new(false));
     let stop_clone = stop.clone();

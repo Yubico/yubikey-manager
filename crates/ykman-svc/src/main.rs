@@ -37,10 +37,10 @@ fn main() {
 
     match &cli.command {
         Commands::Standalone => {
-            let _ = ykman_cli::logging::init_logging_stdout(ykman_cli::logging::LogLevel::Info);
+            let _ = ykman::logging::init_logging_stdout(ykman::logging::LogLevel::Info);
         }
         _ => {
-            let _ = ykman_cli::logging::init_logging(ykman_cli::logging::LogLevel::Warning, None);
+            let _ = ykman::logging::init_logging(ykman::logging::LogLevel::Warning, None);
         }
     }
 
