@@ -85,6 +85,7 @@ impl DeviceManager {
             new_devices.insert(
                 name.clone(),
                 json!({
+                    "pid": dev.pid(),
                     "serial": info.serial,
                     "version": [version.0, version.1, version.2],
                     "name": dev.name(),

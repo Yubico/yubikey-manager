@@ -248,11 +248,13 @@ impl OtpConnection for RpcOtpConnection {
 // ---------------------------------------------------------------------------
 
 /// A `Device` backed by an RPC client, proxying all operations to a subprocess.
+#[derive(Clone)]
 pub struct RpcDevice {
     client: SharedClient,
     info: DeviceInfo,
     transport: Transport,
     name: String,
+    pid: Option<u16>,
     usb_ifaces: UsbInterface,
     has_ccid: bool,
     has_ctap: bool,
@@ -284,6 +286,11 @@ impl RpcDevice {
         self.has_otp
     }
 
+    #[allow(dead_code)]
+    pub fn pid(&self) -> Option<u16> {
+        self.pid
+    }
+
     /// Parse device info from a JSON value (children map entry from the service).
     #[allow(dead_code)]
     pub fn parse_device_info(data: &serde_json::Value) -> yubikit::management::DeviceInfo {
@@ -309,6 +316,8 @@ impl RpcDevice {
             .unwrap_or("YubiKey")
             .to_string();
 
+        let pid = data.get("pid").and_then(|v| v.as_u64()).map(|p| p as u16);
+
         let has_ccid = children.get("ccid").is_some();
         let has_ctap = children.get("ctap").is_some();
         let has_otp = children.get("otp").is_some();
@@ -329,6 +338,7 @@ impl RpcDevice {
             info,
             transport,
             name,
+            pid,
             usb_ifaces,
             has_ccid,
             has_ctap,

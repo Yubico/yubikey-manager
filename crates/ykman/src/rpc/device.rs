@@ -66,6 +66,7 @@ impl RpcNode for DeviceNode {
         };
 
         json!({
+            "pid": self.device.pid(),
             "version": [version.0, version.1, version.2],
             "serial": info.serial,
             "name": self.device.name(),
