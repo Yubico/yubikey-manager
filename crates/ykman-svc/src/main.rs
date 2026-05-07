@@ -29,15 +29,28 @@ enum Commands {
     /// Run as a Windows service (called by SCM)
     Run,
     /// Run in standalone mode (foreground, for testing)
-    Standalone,
+    Standalone {
+        /// Enable logging at given verbosity level (ERROR, WARNING, INFO, DEBUG, TRAFFIC)
+        #[arg(short = 'l', long = "log-level")]
+        log_level: Option<ykman::logging::LogLevel>,
+
+        /// Write log to FILE instead of stderr (requires --log-level)
+        #[arg(long = "log-file", value_name = "FILE")]
+        log_file: Option<String>,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Standalone => {
-            let _ = ykman::logging::init_logging_stdout(ykman::logging::LogLevel::Info);
+        Commands::Standalone { log_level, log_file } => {
+            let level = log_level.unwrap_or(ykman::logging::LogLevel::Info);
+            if let Some(path) = log_file {
+                let _ = ykman::logging::init_logging(level, Some(path.as_str()));
+            } else {
+                let _ = ykman::logging::init_logging_stdout(level);
+            }
         }
         _ => {
             let _ = ykman::logging::init_logging(ykman::logging::LogLevel::Warning, None);
@@ -81,7 +94,7 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Standalone => {
+        Commands::Standalone { .. } => {
             log::info!("Running in standalone mode");
             pipe_server::run_standalone();
         }

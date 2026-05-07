@@ -139,7 +139,7 @@ impl ClientSession {
             }
         }
 
-        log::debug!("Client session ended");
+        log::info!("Client disconnected");
     }
 }
 
