@@ -329,16 +329,20 @@ def is_yk4_fips(info: DeviceInfo) -> bool:
     return info.version[0] == 4 and info.is_fips
 
 
-def _fileno(f) -> int:
+def _is_stdout(f) -> bool:
+    """Check if a file object represents stdout."""
+    if f is sys.stdout:
+        return True
+    if hasattr(sys.stdout, "buffer") and f is sys.stdout.buffer:
+        return True
     try:
-        return f.fileno()
+        return f.fileno() == sys.stdout.fileno()
     except Exception:
-        return -1
+        return False
 
 
 def log_or_echo(message: str, log: logging.Logger, *files) -> None:
-    fno = _fileno(sys.stdout)
-    if any(_fileno(f) == fno for f in files):
+    if any(_is_stdout(f) for f in files):
         log.info(message)
     else:
         click.echo(f"{message}.")
