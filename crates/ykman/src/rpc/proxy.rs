@@ -49,13 +49,11 @@ impl Connection for RpcSmartCardConnection {
 impl SmartCardConnection for RpcSmartCardConnection {
     fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
         yubikit::log_traffic!(">> {}", apdu.encode_hex::<String>());
-        self.client
-            .borrow_mut()
-            .set_target_prefix(self.device_prefix.clone());
         let result = self
             .client
             .borrow_mut()
-            .call(
+            .call_prefixed(
+                &self.device_prefix,
                 "send_and_receive",
                 &["ccid"],
                 json!({"apdu": apdu.encode_hex::<String>()}),
@@ -99,12 +97,9 @@ unsafe impl Send for RpcFidoConnection {}
 
 impl RpcFidoConnection {
     fn from_client(client: SharedClient, device_prefix: Vec<String>) -> Result<Self, CliError> {
-        client
-            .borrow_mut()
-            .set_target_prefix(device_prefix.clone());
         let info = client
             .borrow_mut()
-            .get(&["ctap"])
+            .get_prefixed(&device_prefix, &["ctap"])
             .map_err(|e| CliError(format!("{e}")))?;
         let data = info.body.get("data").cloned().unwrap_or(json!({}));
 
@@ -164,13 +159,11 @@ impl FidoConnection for RpcFidoConnection {
                 })
             });
 
-        self.client
-            .borrow_mut()
-            .set_target_prefix(self.device_prefix.clone());
         let result = self
             .client
             .borrow_mut()
-            .call(
+            .call_prefixed(
+                &self.device_prefix,
                 "call",
                 &["ctap"],
                 json!({"cmd": cmd, "data": data.encode_hex::<String>()}),
@@ -223,13 +216,17 @@ impl Connection for RpcOtpConnection {
 
 impl OtpConnection for RpcOtpConnection {
     fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
-        self.client
-            .borrow_mut()
-            .set_target_prefix(self.device_prefix.clone());
         let result = self
             .client
             .borrow_mut()
-            .call("otp_receive", &["otp"], json!({}), None, false)
+            .call_prefixed(
+                &self.device_prefix,
+                "otp_receive",
+                &["otp"],
+                json!({}),
+                None,
+                false,
+            )
             .map_err(|e| OtpError::CommandRejected(format!("{e}")))?;
 
         let data_hex = result
@@ -247,10 +244,8 @@ impl OtpConnection for RpcOtpConnection {
         yubikit::log_traffic!("otp_send >> {}", data.encode_hex::<String>());
         self.client
             .borrow_mut()
-            .set_target_prefix(self.device_prefix.clone());
-        self.client
-            .borrow_mut()
-            .call(
+            .call_prefixed(
+                &self.device_prefix,
                 "otp_send",
                 &["otp"],
                 json!({"data": data.encode_hex::<String>()}),
@@ -281,54 +276,44 @@ pub struct RpcDevice {
     has_otp: bool,
 }
 
-#[allow(dead_code)]
 impl RpcDevice {
     /// Create an RPC device from a client owning its connection exclusively,
     /// targeting a specific device by name.
-    pub fn from_client_at(mut client: RpcClient, device_name: &str) -> Result<Self, CliError> {
+    pub fn from_client_at(client: RpcClient, device_name: &str) -> Result<Self, CliError> {
         let prefix = vec![device_name.to_string()];
-        client.set_target_prefix(prefix.clone());
         Self::from_shared_inner(Rc::new(RefCell::new(client)), prefix)
     }
 
     /// Create an RPC device from an already-shared client, targeting a specific
     /// device by name.
     ///
-    /// Sets `target_prefix` on the shared client to `[device_name]` and stores
-    /// the prefix in each proxy connection so it is re-applied before every call,
-    /// regardless of what intervening operations (e.g. device scanning) may have
-    /// changed the prefix to.
+    /// Stores the prefix in the device and passes it to every RPC call,
+    /// so concurrent use of the shared client for different devices is safe.
     pub fn from_shared_at(
         client: Rc<RefCell<RpcClient>>,
         device_name: &str,
     ) -> Result<Self, CliError> {
         let prefix = vec![device_name.to_string()];
-        client.borrow_mut().set_target_prefix(prefix.clone());
         Self::from_shared_inner(client, prefix)
     }
 
-    #[allow(dead_code)]
     pub fn has_ccid(&self) -> bool {
         self.has_ccid
     }
 
-    #[allow(dead_code)]
     pub fn has_ctap(&self) -> bool {
         self.has_ctap
     }
 
-    #[allow(dead_code)]
     pub fn has_otp(&self) -> bool {
         self.has_otp
     }
 
-    #[allow(dead_code)]
     pub fn pid(&self) -> Option<u16> {
         self.pid
     }
 
     /// Parse device info from a JSON value (children map entry from the service).
-    #[allow(dead_code)]
     pub fn parse_device_info(data: &serde_json::Value) -> yubikit::management::DeviceInfo {
         Self::read_device_info(data)
     }
@@ -344,7 +329,7 @@ impl RpcDevice {
         log::debug!("Initializing RPC device");
         let root = client
             .borrow_mut()
-            .get(&[])
+            .get_prefixed(&prefix, &[])
             .map_err(|e| CliError(format!("Failed to get root node: {e}")))?;
         let data = root.body.get("data").cloned().unwrap_or(json!({}));
         let children = root.body.get("children").cloned().unwrap_or(json!({}));
@@ -543,10 +528,10 @@ impl YubiKeyDevice for RpcDevice {
             return Err(DeviceError::NoDeviceFound);
         }
         log::debug!("Opening RPC FIDO connection");
-        let conn =
-            RpcFidoConnection::from_client(self.client.clone(), self.prefix.clone()).map_err(
-                |e| DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(e.0)))),
-            )?;
+        let conn = RpcFidoConnection::from_client(self.client.clone(), self.prefix.clone())
+            .map_err(|e| {
+                DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(e.0))))
+            })?;
         Ok(Box::new(conn))
     }
 
@@ -579,7 +564,14 @@ impl YubiKeyDevice for RpcDevice {
 
         self.client
             .borrow_mut()
-            .call("reinsert", &[], json!({}), Some(&signal_handler), true)
+            .call_prefixed(
+                &self.prefix,
+                "reinsert",
+                &[],
+                json!({}),
+                Some(&signal_handler),
+                true,
+            )
             .map_err(|e| {
                 DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(
                     format!("{e}"),

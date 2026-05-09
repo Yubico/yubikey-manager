@@ -9,7 +9,6 @@ use crate::cancel;
 use crate::util::CliError;
 
 /// Transport abstraction for the RPC client's read/write streams.
-#[allow(dead_code)]
 enum Transport {
     /// Generic stream (Named Pipe file handle, Unix socket, etc).
     Stream {
@@ -21,8 +20,6 @@ enum Transport {
 /// An RPC client connected to a ykman RPC server.
 pub struct RpcClient {
     transport: Transport,
-    /// Optional prefix prepended to all target paths (for service child routing).
-    target_prefix: Vec<String>,
 }
 
 /// Thread-safe writer handle for sending cancel signals from the Ctrl+C handler.
@@ -42,7 +39,6 @@ impl CancelWriter {
     }
 }
 
-#[allow(dead_code)]
 impl RpcClient {
     /// Connect to the ykman-svc Named Pipe (Windows) or Unix socket (dev).
     ///
@@ -71,7 +67,6 @@ impl RpcClient {
 
             log::debug!("Connected to ykman-svc pipe");
             Ok(Self {
-                target_prefix: vec![],
                 transport: Transport::Stream {
                     reader: BufReader::new(reader),
                     writer: Arc::new(Mutex::new(writer)),
@@ -97,7 +92,6 @@ impl RpcClient {
 
             log::debug!("Connected to ykman-svc socket");
             Ok(Self {
-                target_prefix: vec![],
                 transport: Transport::Stream {
                     reader: BufReader::new(reader),
                     writer: Arc::new(Mutex::new(writer)),
@@ -141,8 +135,21 @@ impl RpcClient {
         signal_handler: Option<&dyn Fn(&str, &Value)>,
         cancellable: bool,
     ) -> Result<RpcResult, RpcCallError> {
-        let full_target: Vec<&str> = self
-            .target_prefix
+        self.call_prefixed(&[], action, target, body, signal_handler, cancellable)
+    }
+
+    /// Send a command with a prefix prepended to the target path.
+    /// Used when targeting a specific device child on the service.
+    pub fn call_prefixed(
+        &mut self,
+        prefix: &[String],
+        action: &str,
+        target: &[&str],
+        body: Value,
+        signal_handler: Option<&dyn Fn(&str, &Value)>,
+        cancellable: bool,
+    ) -> Result<RpcResult, RpcCallError> {
+        let full_target: Vec<&str> = prefix
             .iter()
             .map(|s| s.as_str())
             .chain(target.iter().copied())
@@ -179,20 +186,12 @@ impl RpcClient {
                 )));
             }
 
-            // TCP messages are prefixed: "O" = output/JSON, "E" = stderr/log
             let line = buf.trim();
-            let (prefix, json_str) = if line.starts_with('O') || line.starts_with('E') {
-                (line.as_bytes()[0], &line[1..])
-            } else {
-                (b'O', line)
-            };
-
-            if prefix == b'E' {
-                eprint!("{json_str}");
+            if line.is_empty() {
                 continue;
             }
 
-            let resp: Value = serde_json::from_str(json_str).map_err(|e| {
+            let resp: Value = serde_json::from_str(line).map_err(|e| {
                 RpcCallError::Transport(CliError(format!("Invalid JSON from RPC subprocess: {e}")))
             })?;
 
@@ -251,10 +250,13 @@ impl RpcClient {
         self.call("get", target, json!({}), None, false)
     }
 
-    /// Set a target prefix that will be prepended to all RPC calls.
-    /// Used when connected to ykman-svc and targeting a specific device child.
-    pub fn set_target_prefix(&mut self, prefix: Vec<String>) {
-        self.target_prefix = prefix;
+    /// Call `get` with a prefix prepended to the target path.
+    pub fn get_prefixed(
+        &mut self,
+        prefix: &[String],
+        target: &[&str],
+    ) -> Result<RpcResult, RpcCallError> {
+        self.call_prefixed(prefix, "get", target, json!({}), None, false)
     }
 
     fn read_line(&mut self, buf: &mut String) -> std::io::Result<usize> {
@@ -272,7 +274,6 @@ impl Drop for RpcClient {
 /// Successful RPC response.
 pub struct RpcResult {
     pub body: Value,
-    #[allow(dead_code)]
     pub flags: Vec<String>,
 }
 

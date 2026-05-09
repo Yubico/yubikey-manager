@@ -44,7 +44,10 @@ fn main() {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Standalone { log_level, log_file } => {
+        Commands::Standalone {
+            log_level,
+            log_file,
+        } => {
             let level = log_level.unwrap_or(ykman::logging::LogLevel::Info);
             if let Some(path) = log_file {
                 let _ = ykman::logging::init_logging(level, Some(path.as_str()));

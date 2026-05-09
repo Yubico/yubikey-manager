@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use serde_json::Value;
 
 /// An RPC response — body + optional flags.
@@ -16,7 +14,6 @@ impl RpcResponse {
         }
     }
 
-    #[allow(dead_code)]
     pub fn with_flags(body: Value, flags: Vec<&str>) -> Self {
         Self {
             body,
@@ -33,7 +30,6 @@ pub struct RpcError {
     pub body: Value,
 }
 
-#[allow(dead_code)]
 impl RpcError {
     pub fn new(status: &str, message: impl Into<String>) -> Self {
         Self {
@@ -126,7 +122,6 @@ pub struct ChildResetException {
 }
 
 /// Secret store state.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecretStore {
     Unknown,
