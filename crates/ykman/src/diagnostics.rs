@@ -984,8 +984,8 @@ fn probe_svc_windows() -> ResultOrError<SvcDiag> {
         Err(e) => return ResultOrError::Err(format!("Service not available: {}", e.0)),
     };
 
-    let _ = client.call("update_children", &[], json!({}), None, false);
-    let root = match client.get(&[]) {
+    let _ = client.call("update_children", &[] as &[&str], json!({}), None, false);
+    let root = match client.get(&[] as &[&str]) {
         Ok(r) => r,
         Err(e) => return ResultOrError::Err(format!("Failed to get device list: {e}")),
     };

@@ -130,34 +130,16 @@ impl RpcClient {
     pub fn call(
         &mut self,
         action: &str,
-        target: &[&str],
+        target: &[impl AsRef<str>],
         body: Value,
         signal_handler: Option<&dyn Fn(&str, &Value)>,
         cancellable: bool,
     ) -> Result<RpcResult, RpcCallError> {
-        self.call_prefixed(&[], action, target, body, signal_handler, cancellable)
-    }
-
-    /// Send a command with a prefix prepended to the target path.
-    /// Used when targeting a specific device child on the service.
-    pub fn call_prefixed(
-        &mut self,
-        prefix: &[String],
-        action: &str,
-        target: &[&str],
-        body: Value,
-        signal_handler: Option<&dyn Fn(&str, &Value)>,
-        cancellable: bool,
-    ) -> Result<RpcResult, RpcCallError> {
-        let full_target: Vec<&str> = prefix
-            .iter()
-            .map(|s| s.as_str())
-            .chain(target.iter().copied())
-            .collect();
+        let target_strs: Vec<&str> = target.iter().map(|s| s.as_ref()).collect();
         let request = json!({
             "kind": "command",
             "action": action,
-            "target": full_target,
+            "target": target_strs,
             "body": body,
         });
         self.write_message(&request)
@@ -246,17 +228,8 @@ impl RpcClient {
     }
 
     /// Call `get` on a target to retrieve node info.
-    pub fn get(&mut self, target: &[&str]) -> Result<RpcResult, RpcCallError> {
+    pub fn get(&mut self, target: &[impl AsRef<str>]) -> Result<RpcResult, RpcCallError> {
         self.call("get", target, json!({}), None, false)
-    }
-
-    /// Call `get` with a prefix prepended to the target path.
-    pub fn get_prefixed(
-        &mut self,
-        prefix: &[String],
-        target: &[&str],
-    ) -> Result<RpcResult, RpcCallError> {
-        self.call_prefixed(prefix, "get", target, json!({}), None, false)
     }
 
     fn read_line(&mut self, buf: &mut String) -> std::io::Result<usize> {

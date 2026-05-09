@@ -22,6 +22,15 @@ use crate::util::CliError;
 
 type SharedClient = Rc<RefCell<RpcClient>>;
 
+/// Build a full target path from a device prefix and a sub-path.
+fn target(prefix: &[String], path: &[&str]) -> Vec<String> {
+    prefix
+        .iter()
+        .cloned()
+        .chain(path.iter().map(|s| s.to_string()))
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // RpcSmartCardConnection
 // ---------------------------------------------------------------------------
@@ -52,10 +61,9 @@ impl SmartCardConnection for RpcSmartCardConnection {
         let result = self
             .client
             .borrow_mut()
-            .call_prefixed(
-                &self.device_prefix,
+            .call(
                 "send_and_receive",
-                &["ccid"],
+                &target(&self.device_prefix, &["ccid"]),
                 json!({"apdu": apdu.encode_hex::<String>()}),
                 None,
                 false,
@@ -99,7 +107,7 @@ impl RpcFidoConnection {
     fn from_client(client: SharedClient, device_prefix: Vec<String>) -> Result<Self, CliError> {
         let info = client
             .borrow_mut()
-            .get_prefixed(&device_prefix, &["ctap"])
+            .get(&target(&device_prefix, &["ctap"]))
             .map_err(|e| CliError(format!("{e}")))?;
         let data = info.body.get("data").cloned().unwrap_or(json!({}));
 
@@ -162,10 +170,9 @@ impl FidoConnection for RpcFidoConnection {
         let result = self
             .client
             .borrow_mut()
-            .call_prefixed(
-                &self.device_prefix,
+            .call(
                 "call",
-                &["ctap"],
+                &target(&self.device_prefix, &["ctap"]),
                 json!({"cmd": cmd, "data": data.encode_hex::<String>()}),
                 signal_handler
                     .as_ref()
@@ -219,10 +226,9 @@ impl OtpConnection for RpcOtpConnection {
         let result = self
             .client
             .borrow_mut()
-            .call_prefixed(
-                &self.device_prefix,
+            .call(
                 "otp_receive",
-                &["otp"],
+                &target(&self.device_prefix, &["otp"]),
                 json!({}),
                 None,
                 false,
@@ -244,10 +250,9 @@ impl OtpConnection for RpcOtpConnection {
         yubikit::log_traffic!("otp_send >> {}", data.encode_hex::<String>());
         self.client
             .borrow_mut()
-            .call_prefixed(
-                &self.device_prefix,
+            .call(
                 "otp_send",
-                &["otp"],
+                &target(&self.device_prefix, &["otp"]),
                 json!({"data": data.encode_hex::<String>()}),
                 None,
                 false,
@@ -329,7 +334,7 @@ impl RpcDevice {
         log::debug!("Initializing RPC device");
         let root = client
             .borrow_mut()
-            .get_prefixed(&prefix, &[])
+            .get(&prefix)
             .map_err(|e| CliError(format!("Failed to get root node: {e}")))?;
         let data = root.body.get("data").cloned().unwrap_or(json!({}));
         let children = root.body.get("children").cloned().unwrap_or(json!({}));
@@ -564,10 +569,9 @@ impl YubiKeyDevice for RpcDevice {
 
         self.client
             .borrow_mut()
-            .call_prefixed(
-                &self.prefix,
+            .call(
                 "reinsert",
-                &[],
+                &self.prefix,
                 json!({}),
                 Some(&signal_handler),
                 true,
