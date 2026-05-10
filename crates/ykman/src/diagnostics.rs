@@ -981,7 +981,7 @@ fn probe_svc_windows() -> ResultOrError<SvcDiag> {
 
     let mut client = match crate::rpc::client::RpcClient::connect_pipe() {
         Ok(c) => c,
-        Err(e) => return ResultOrError::Err(format!("Service not available: {}", e.0)),
+        Err(e) => return ResultOrError::Err(format!("Service not available: {e}")),
     };
 
     let _ = client.call("update_children", &[] as &[&str], json!({}), None, false);
@@ -1015,8 +1015,8 @@ fn probe_svc_device(name: &str, info: &serde_json::Value) -> SvcDeviceDiag {
 
     // Open a fresh connection to this device node for probing.
     let rpc_dev = match crate::rpc::client::RpcClient::connect_pipe()
-        .map_err(|e| e.0)
-        .and_then(|c| RpcDevice::from_client_at(c, name).map_err(|e| e.0))
+        .map_err(|e| e.to_string())
+        .and_then(|c| RpcDevice::from_client_at(c, name).map_err(|e| e.to_string()))
     {
         Ok(dev) => dev,
         Err(e) => {
