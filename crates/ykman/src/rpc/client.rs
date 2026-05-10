@@ -47,6 +47,7 @@ impl RpcClient {
         {
             use std::fs::OpenOptions;
             use std::os::windows::fs::OpenOptionsExt;
+            use std::os::windows::io::AsRawHandle;
 
             let pipe_path = r"\\.\pipe\ykman-svc";
             log::debug!("Connecting to Named Pipe: {pipe_path}");
@@ -59,6 +60,9 @@ impl RpcClient {
                 .map_err(|e| {
                     RpcCallError::Transport(format!("Failed to connect to ykman-svc pipe: {e}"))
                 })?;
+
+            // Verify the server is signed with the same certificate as us
+            Self::verify_pipe_server(file.as_raw_handle() as _)?;
 
             let reader: Box<dyn Read + Send> = Box::new(file.try_clone().map_err(|e| {
                 RpcCallError::Transport(format!("Failed to clone pipe handle: {e}"))
@@ -98,6 +102,28 @@ impl RpcClient {
                 },
             })
         }
+    }
+
+    /// Verify that the server on the other end of the pipe is signed with
+    /// the same certificate as this process. Skipped if unsigned (dev mode).
+    #[cfg(target_os = "windows")]
+    fn verify_pipe_server(
+        pipe_handle: windows_sys::Win32::Foundation::HANDLE,
+    ) -> Result<(), RpcCallError> {
+        use crate::signing::{SigningError, verify_peer_by_pid};
+        use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
+
+        let mut server_pid: u32 = 0;
+        let ok = unsafe { GetNamedPipeServerProcessId(pipe_handle, &mut server_pid) };
+        if ok == 0 {
+            return Err(RpcCallError::Transport(format!(
+                "GetNamedPipeServerProcessId failed: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+
+        verify_peer_by_pid(server_pid)
+            .map_err(|e| RpcCallError::Transport(format!("Server verification failed: {e}")))
     }
 
     fn write_message(&self, msg: &Value) -> Result<(), RpcCallError> {
