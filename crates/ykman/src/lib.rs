@@ -6,4 +6,3 @@ pub mod diagnostics;
 pub mod keyboard;
 pub mod logging;
 pub mod rpc;
-pub mod util;

@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 use serde_json::{Value, json};
 
 use crate::cancel;
-use crate::util::CliError;
 
 /// Transport abstraction for the RPC client's read/write streams.
 enum Transport {
@@ -43,7 +42,7 @@ impl RpcClient {
     /// Connect to the ykman-svc Named Pipe (Windows) or Unix socket (dev).
     ///
     /// Returns `Err` if the service is not available.
-    pub fn connect_pipe() -> Result<Self, CliError> {
+    pub fn connect_pipe() -> Result<Self, RpcCallError> {
         #[cfg(target_os = "windows")]
         {
             use std::fs::OpenOptions;
@@ -57,12 +56,13 @@ impl RpcClient {
                 .write(true)
                 .custom_flags(0) // FILE_FLAG_NORMAL
                 .open(pipe_path)
-                .map_err(|e| CliError(format!("Failed to connect to ykman-svc pipe: {e}")))?;
+                .map_err(|e| {
+                    RpcCallError::Transport(format!("Failed to connect to ykman-svc pipe: {e}"))
+                })?;
 
-            let reader: Box<dyn Read + Send> = Box::new(
-                file.try_clone()
-                    .map_err(|e| CliError(format!("Failed to clone pipe handle: {e}")))?,
-            );
+            let reader: Box<dyn Read + Send> = Box::new(file.try_clone().map_err(|e| {
+                RpcCallError::Transport(format!("Failed to clone pipe handle: {e}"))
+            })?);
             let writer: Box<dyn Write + Send> = Box::new(file);
 
             log::debug!("Connected to ykman-svc pipe");
@@ -80,14 +80,14 @@ impl RpcClient {
             let socket_path = "/tmp/ykman-svc.sock";
             log::debug!("Connecting to Unix socket: {socket_path}");
 
-            let stream = UnixStream::connect(socket_path)
-                .map_err(|e| CliError(format!("Failed to connect to ykman-svc socket: {e}")))?;
+            let stream = UnixStream::connect(socket_path).map_err(|e| {
+                RpcCallError::Transport(format!("Failed to connect to ykman-svc socket: {e}"))
+            })?;
 
-            let reader: Box<dyn Read + Send> = Box::new(
-                stream
-                    .try_clone()
-                    .map_err(|e| CliError(format!("Failed to clone socket: {e}")))?,
-            );
+            let reader: Box<dyn Read + Send> =
+                Box::new(stream.try_clone().map_err(|e| {
+                    RpcCallError::Transport(format!("Failed to clone socket: {e}"))
+                })?);
             let writer: Box<dyn Write + Send> = Box::new(stream);
 
             log::debug!("Connected to ykman-svc socket");
@@ -100,20 +100,21 @@ impl RpcClient {
         }
     }
 
-    fn write_message(&self, msg: &Value) -> Result<(), CliError> {
-        let json_str = serde_json::to_string(msg)
-            .map_err(|e| CliError(format!("Failed to serialize RPC message: {e}")))?;
+    fn write_message(&self, msg: &Value) -> Result<(), RpcCallError> {
+        let json_str = serde_json::to_string(msg).map_err(|e| {
+            RpcCallError::Transport(format!("Failed to serialize RPC message: {e}"))
+        })?;
         let Transport::Stream { writer, .. } = &self.transport;
         let mut writer = writer.lock().unwrap();
         writer
             .write_all(json_str.as_bytes())
-            .map_err(|e| CliError(format!("Failed to write to RPC: {e}")))?;
+            .map_err(|e| RpcCallError::Transport(format!("Failed to write to RPC: {e}")))?;
         writer
             .write_all(b"\n")
-            .map_err(|e| CliError(format!("Failed to write to RPC: {e}")))?;
+            .map_err(|e| RpcCallError::Transport(format!("Failed to write to RPC: {e}")))?;
         writer
             .flush()
-            .map_err(|e| CliError(format!("Failed to flush RPC: {e}")))?;
+            .map_err(|e| RpcCallError::Transport(format!("Failed to flush RPC: {e}")))?;
         Ok(())
     }
 
@@ -142,8 +143,7 @@ impl RpcClient {
             "target": target_strs,
             "body": body,
         });
-        self.write_message(&request)
-            .map_err(RpcCallError::Transport)?;
+        self.write_message(&request)?;
 
         // Register a cancel callback that sends cancel signal
         let _guard = if cancellable {
@@ -159,13 +159,13 @@ impl RpcClient {
 
         loop {
             let mut buf = String::new();
-            let n = self.read_line(&mut buf).map_err(|e| {
-                RpcCallError::Transport(CliError(format!("Failed to read from RPC: {e}")))
-            })?;
+            let n = self
+                .read_line(&mut buf)
+                .map_err(|e| RpcCallError::Transport(format!("Failed to read from RPC: {e}")))?;
             if n == 0 {
-                return Err(RpcCallError::Transport(CliError(
+                return Err(RpcCallError::Transport(
                     "RPC subprocess closed unexpectedly".into(),
-                )));
+                ));
             }
 
             let line = buf.trim();
@@ -174,7 +174,7 @@ impl RpcClient {
             }
 
             let resp: Value = serde_json::from_str(line).map_err(|e| {
-                RpcCallError::Transport(CliError(format!("Invalid JSON from RPC subprocess: {e}")))
+                RpcCallError::Transport(format!("Invalid JSON from RPC subprocess: {e}"))
             })?;
 
             match resp.get("kind").and_then(|v| v.as_str()) {
@@ -218,10 +218,10 @@ impl RpcClient {
                     }
                 }
                 _ => {
-                    return Err(RpcCallError::Transport(CliError(format!(
+                    return Err(RpcCallError::Transport(format!(
                         "Unexpected RPC response kind: {}",
                         resp.get("kind").unwrap_or(&json!(null))
-                    ))));
+                    )));
                 }
             }
         }
@@ -272,7 +272,7 @@ impl std::fmt::Display for RpcClientError {
 #[derive(Debug)]
 pub enum RpcCallError {
     /// Transport or protocol error (not from the RPC server).
-    Transport(CliError),
+    Transport(String),
     /// Structured error response from the RPC server.
     Rpc(RpcClientError),
 }
@@ -280,22 +280,10 @@ pub enum RpcCallError {
 impl std::fmt::Display for RpcCallError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Transport(e) => write!(f, "{}", e.0),
+            Self::Transport(e) => write!(f, "{e}"),
             Self::Rpc(e) => write!(f, "RPC error ({}): {}", e.status, e.message),
         }
     }
 }
 
 impl std::error::Error for RpcCallError {}
-
-impl From<RpcCallError> for CliError {
-    fn from(e: RpcCallError) -> Self {
-        match e {
-            RpcCallError::Transport(e) => e,
-            RpcCallError::Rpc(e) => CliError(format!(
-                "RPC error ({}): {} {}",
-                e.status, e.message, e.body
-            )),
-        }
-    }
-}

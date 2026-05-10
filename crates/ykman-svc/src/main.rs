@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 
+mod connection;
+mod device;
 mod device_manager;
 mod pipe_server;
 mod root_node;

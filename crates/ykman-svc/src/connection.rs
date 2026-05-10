@@ -13,14 +13,14 @@ use yubikit::transport::ctaphid::HidFidoConnection;
 use yubikit::transport::otphid::HidOtpConnection;
 use yubikit::transport::pcsc::PcscSmartCardConnection;
 
-use super::error::{RpcError, RpcResponse};
-use super::node::{RpcNode, SignalFn};
+use ykman::rpc::error::{RpcError, RpcResponse};
+use ykman::rpc::node::{RpcNode, SignalFn};
 
 /// Connection shared between ConnectionNode and its session children.
-pub type SharedConn<T> = Arc<Mutex<Option<T>>>;
+pub(super) type SharedConn<T> = Arc<Mutex<Option<T>>>;
 
 /// Connection node wrapping either a SmartCard or FIDO HID connection.
-pub struct ConnectionNode {
+pub(super) struct ConnectionNode {
     conn_type: ConnType,
     device: LocalYubiKeyDevice,
 }

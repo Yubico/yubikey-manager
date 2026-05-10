@@ -7,9 +7,10 @@ use yubikit::core::Transport;
 use yubikit::device::{LocalYubiKeyDevice, ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
 
-use super::connection::ConnectionNode;
-use super::error::{RpcError, RpcResponse};
-use super::node::{RpcNode, SignalFn};
+use ykman::rpc::error::{RpcError, RpcResponse};
+use ykman::rpc::node::{RpcNode, SignalFn};
+
+use crate::connection::ConnectionNode;
 
 /// Root RPC node representing a single YubiKey device.
 pub struct DeviceNode {

@@ -1,6 +1,16 @@
 use std::io::{self, Read, Write};
 
-pub use ykman::util::CliError;
+use ykman::rpc::client::RpcCallError;
+
+/// CLI error type for user-facing error messages.
+#[derive(Debug)]
+pub struct CliError(pub String);
+
+impl From<RpcCallError> for CliError {
+    fn from(e: RpcCallError) -> Self {
+        CliError(format!("{e}"))
+    }
+}
 
 /// Prompt the user for visible text input.
 pub fn prompt(prompt: &str) -> Result<String, CliError> {

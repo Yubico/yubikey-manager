@@ -17,8 +17,7 @@ use yubikit::otp::{OtpConnection, OtpError};
 use yubikit::smartcard::{SmartCardConnection, SmartCardError};
 use yubikit::transport::ctaphid::{CtapHidCapability, FidoError};
 
-use super::client::RpcClient;
-use crate::util::CliError;
+use super::client::{RpcCallError, RpcClient};
 
 type SharedClient = Rc<RefCell<RpcClient>>;
 
@@ -104,11 +103,11 @@ pub struct RpcFidoConnection {
 unsafe impl Send for RpcFidoConnection {}
 
 impl RpcFidoConnection {
-    fn from_client(client: SharedClient, device_prefix: Vec<String>) -> Result<Self, CliError> {
+    fn from_client(client: SharedClient, device_prefix: Vec<String>) -> Result<Self, RpcCallError> {
         let info = client
             .borrow_mut()
             .get(&target(&device_prefix, &["ctap"]))
-            .map_err(|e| CliError(format!("{e}")))?;
+            .map_err(|e| RpcCallError::Transport(format!("{e}")))?;
         let data = info.body.get("data").cloned().unwrap_or(json!({}));
 
         let device_version = if let Some(arr) =
@@ -284,7 +283,7 @@ pub struct RpcDevice {
 impl RpcDevice {
     /// Create an RPC device from a client owning its connection exclusively,
     /// targeting a specific device by name.
-    pub fn from_client_at(client: RpcClient, device_name: &str) -> Result<Self, CliError> {
+    pub fn from_client_at(client: RpcClient, device_name: &str) -> Result<Self, RpcCallError> {
         let prefix = vec![device_name.to_string()];
         Self::from_shared_inner(Rc::new(RefCell::new(client)), prefix)
     }
@@ -297,7 +296,7 @@ impl RpcDevice {
     pub fn from_shared_at(
         client: Rc<RefCell<RpcClient>>,
         device_name: &str,
-    ) -> Result<Self, CliError> {
+    ) -> Result<Self, RpcCallError> {
         let prefix = vec![device_name.to_string()];
         Self::from_shared_inner(client, prefix)
     }
@@ -323,19 +322,19 @@ impl RpcDevice {
         Self::read_device_info(data)
     }
 
-    fn from_client(client: RpcClient) -> Result<Self, CliError> {
+    fn from_client(client: RpcClient) -> Result<Self, RpcCallError> {
         Self::from_shared_inner(Rc::new(RefCell::new(client)), vec![])
     }
 
     fn from_shared_inner(
         client: Rc<RefCell<RpcClient>>,
         prefix: Vec<String>,
-    ) -> Result<Self, CliError> {
+    ) -> Result<Self, RpcCallError> {
         log::debug!("Initializing RPC device");
         let root = client
             .borrow_mut()
             .get(&prefix)
-            .map_err(|e| CliError(format!("Failed to get root node: {e}")))?;
+            .map_err(|e| RpcCallError::Transport(format!("Failed to get root node: {e}")))?;
         let data = root.body.get("data").cloned().unwrap_or(json!({}));
         let children = root.body.get("children").cloned().unwrap_or(json!({}));
 
@@ -535,7 +534,9 @@ impl YubiKeyDevice for RpcDevice {
         log::debug!("Opening RPC FIDO connection");
         let conn = RpcFidoConnection::from_client(self.client.clone(), self.prefix.clone())
             .map_err(|e| {
-                DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(e.0))))
+                DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(
+                    format!("{e}"),
+                ))))
             })?;
         Ok(Box::new(conn))
     }
