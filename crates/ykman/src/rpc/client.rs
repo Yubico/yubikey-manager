@@ -110,7 +110,7 @@ impl RpcClient {
     fn verify_pipe_server(
         pipe_handle: windows_sys::Win32::Foundation::HANDLE,
     ) -> Result<(), RpcCallError> {
-        use crate::signing::verify_peer_by_pid;
+        use super::signing::verify_peer_by_pid;
         use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
 
         let mut server_pid: u32 = 0;

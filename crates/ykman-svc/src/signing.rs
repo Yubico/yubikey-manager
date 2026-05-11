@@ -10,9 +10,9 @@
 #[cfg(target_os = "windows")]
 pub fn verify_client(
     pipe_handle: windows_sys::Win32::Foundation::HANDLE,
-) -> Result<(), ykman::signing::SigningError> {
+) -> Result<(), ykman::rpc::signing::SigningError> {
     use windows_sys::Win32::System::Pipes::GetNamedPipeClientProcessId;
-    use ykman::signing::{SigningError, verify_peer_by_pid};
+    use ykman::rpc::signing::{SigningError, verify_peer_by_pid};
 
     let mut client_pid: u32 = 0;
     let ok = unsafe { GetNamedPipeClientProcessId(pipe_handle, &mut client_pid) };
