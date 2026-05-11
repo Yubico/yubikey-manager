@@ -977,7 +977,6 @@ fn probe_svc() -> ResultOrError<SvcDiag> {
 
 #[cfg(target_os = "windows")]
 fn probe_svc_windows() -> ResultOrError<SvcDiag> {
-    use serde_json::json;
 
     let mut client = match crate::rpc::client::RpcClient::connect_pipe() {
         Ok(c) => c,

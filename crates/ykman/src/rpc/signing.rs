@@ -56,8 +56,8 @@ fn verify_authenticode(path: &Path) -> Result<(), SigningError> {
 
     use windows_sys::Win32::Security::WinTrust::{
         WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO,
-        WTD_CHOICE_FILE, WTD_REVOKE_WHOLECHAIN, WTD_STATEACTION_VERIFY, WTD_UI_NONE,
-        WinVerifyTrust,
+        WTD_CHOICE_FILE, WTD_REVOKE_WHOLECHAIN, WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY,
+        WTD_UI_NONE, WinVerifyTrust,
     };
 
     let path_w: Vec<u16> = path
@@ -92,11 +92,17 @@ fn verify_authenticode(path: &Path) -> Result<(), SigningError> {
     };
 
     let mut action_id = WINTRUST_ACTION_GENERIC_VERIFY_V2;
-
     // INVALID_HANDLE_VALUE means "no parent window" — verification runs silently.
     let hwnd = -1isize as windows_sys::Win32::Foundation::HWND;
+
     let status =
         unsafe { WinVerifyTrust(hwnd, &mut action_id, &mut trust_data as *mut _ as *mut _) };
+
+    // Free the state data allocated by WTD_STATEACTION_VERIFY.
+    if !trust_data.hWVTStateData.is_null() {
+        trust_data.dwStateAction = WTD_STATEACTION_CLOSE;
+        unsafe { WinVerifyTrust(hwnd, &mut action_id, &mut trust_data as *mut _ as *mut _) };
+    }
 
     if status != 0 {
         return Err(SigningError(format!(
