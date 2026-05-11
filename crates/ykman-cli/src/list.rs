@@ -117,8 +117,6 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
 /// Ok(false) if service is unavailable (caller should fall back to local listing).
 #[cfg(target_os = "windows")]
 fn list_via_service(serials: bool) -> Result<bool, CliError> {
-    use serde_json::json;
-
     let mut client = match ykman::rpc::client::RpcClient::connect_pipe() {
         Ok(c) => c,
         Err(_) => return Ok(false),

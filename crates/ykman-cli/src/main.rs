@@ -2,8 +2,6 @@
 use std::process;
 
 use clap::{Parser, Subcommand};
-#[cfg(target_os = "windows")]
-use serde_json::json;
 use yubikit::core::{Transport, Version, set_override_version};
 use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices, scan_usb_devices};
 use yubikit::management::{Capability, ReleaseType, UsbInterface};
