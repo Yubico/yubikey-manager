@@ -9,3 +9,5 @@ accepted = [
     "Unicode-3.0",
     "Zlib",
 ]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
