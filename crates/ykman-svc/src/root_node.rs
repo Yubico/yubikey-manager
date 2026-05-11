@@ -2,7 +2,6 @@
 //!
 //! Provides:
 //! - `multi_device` action: toggle multi-device mode for the session
-//! - `update_children` action: refresh device list
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -70,10 +69,15 @@ impl RpcNode for ServiceRootNode {
     }
 
     fn list_actions(&self) -> Vec<&'static str> {
-        vec!["multi_device", "update_children"]
+        vec!["multi_device"]
     }
 
     fn list_children(&mut self) -> BTreeMap<String, Value> {
+        let children = self.manager.update_devices();
+        self.cached_children = children
+            .iter()
+            .map(|(name, info)| (name.clone(), info.clone()))
+            .collect();
         self.cached_children.clone()
     }
 
@@ -98,16 +102,6 @@ impl RpcNode for ServiceRootNode {
                 self.multi_device = enabled;
                 log::info!("Multi-device mode: {enabled}");
                 Ok(RpcResponse::new(json!({"enabled": enabled})))
-            }
-            "update_children" => {
-                let children = self.manager.update_devices();
-                self.cached_children = children
-                    .iter()
-                    .map(|(name, info)| (name.clone(), info.clone()))
-                    .collect();
-                Ok(RpcResponse::new(json!({
-                    "children": self.cached_children,
-                })))
             }
             _ => Err(RpcError::no_such_action(action)),
         }

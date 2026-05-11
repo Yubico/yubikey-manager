@@ -124,7 +124,6 @@ fn list_via_service(serials: bool) -> Result<bool, CliError> {
         Err(_) => return Ok(false),
     };
 
-    let _ = client.call("update_children", &[] as &[&str], json!({}), None, false);
     let root = match client.get(&[] as &[&str]) {
         Ok(r) => r,
         Err(_) => return Ok(false),

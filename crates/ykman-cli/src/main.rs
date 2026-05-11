@@ -1643,7 +1643,6 @@ fn require_device(serial: Option<u32>) -> Result<LocalYubiKeyDevice, CliError> {
 fn try_service_device(serial: Option<u32>) -> Result<Box<dyn YubiKeyDevice>, CliError> {
     let mut client = rpc::client::RpcClient::connect_pipe()?;
     log::debug!("Connected to ykman-svc service");
-    let _ = client.call("update_children", &[] as &[&str], json!({}), None, false);
     let root = client
         .get(&[] as &[&str])
         .map_err(|e| CliError(format!("{e}")))?;
