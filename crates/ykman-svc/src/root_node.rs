@@ -1,7 +1,4 @@
 //! Root RPC node for the ykman-svc service.
-//!
-//! Provides:
-//! - `multi_device` action: toggle multi-device mode for the session
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -19,8 +16,6 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Root node of the service RPC tree.
 pub struct ServiceRootNode {
     manager: Arc<DeviceManager>,
-    /// Per-session multi_device flag.
-    multi_device: bool,
     /// Cached list of device names for list_children.
     cached_children: BTreeMap<String, Value>,
     /// Device names locked by this session (released on drop).
@@ -31,7 +26,6 @@ impl ServiceRootNode {
     pub fn new(manager: Arc<DeviceManager>) -> Self {
         Self {
             manager,
-            multi_device: false,
             cached_children: BTreeMap::new(),
             opened_devices: Vec::new(),
         }
@@ -56,7 +50,6 @@ impl RpcNode for ServiceRootNode {
     fn get_data(&self) -> Value {
         json!({
             "version": VERSION,
-            "multi_device": self.multi_device,
         })
     }
 
@@ -69,7 +62,7 @@ impl RpcNode for ServiceRootNode {
     }
 
     fn list_actions(&self) -> Vec<&'static str> {
-        vec!["multi_device"]
+        vec![]
     }
 
     fn list_children(&mut self) -> BTreeMap<String, Value> {
@@ -82,29 +75,17 @@ impl RpcNode for ServiceRootNode {
     }
 
     fn retains_children(&self) -> bool {
-        // In multi_device mode, keep all children alive
-        self.multi_device
+        true
     }
 
     fn call_action(
         &mut self,
         action: &str,
-        params: Value,
+        _params: Value,
         _signal: SignalFn,
         _cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError> {
-        match action {
-            "multi_device" => {
-                let enabled = params
-                    .get("enabled")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(!self.multi_device);
-                self.multi_device = enabled;
-                log::info!("Multi-device mode: {enabled}");
-                Ok(RpcResponse::new(json!({"enabled": enabled})))
-            }
-            _ => Err(RpcError::no_such_action(action)),
-        }
+        Err(RpcError::no_such_action(action))
     }
 
     fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {

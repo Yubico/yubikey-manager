@@ -1,7 +1,7 @@
 //! Per-client session management.
 //!
-//! Each connected client gets a `ClientSession` with its own NodeHost tree
-//! and multi_device setting. Device locks are released on disconnect.
+//! Each connected client gets a `ClientSession` with its own NodeHost tree.
+//! Device locks are released on disconnect.
 //!
 //! Named Pipe I/O on Windows is synchronous and serializes operations per
 //! pipe endpoint within a process. Using `run_rpc_loop` (which spawns a

@@ -274,6 +274,7 @@ pub struct RpcDevice {
     transport: Transport,
     name: String,
     pid: Option<u16>,
+    reader_name: Option<String>,
     usb_ifaces: UsbInterface,
     has_ccid: bool,
     has_ctap: bool,
@@ -351,6 +352,11 @@ impl RpcDevice {
 
         let pid = data.get("pid").and_then(|v| v.as_u64()).map(|p| p as u16);
 
+        let reader_name = data
+            .get("reader_name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         let has_ccid = children.get("ccid").is_some();
         let has_ctap = children.get("ctap").is_some();
         let has_otp = children.get("otp").is_some();
@@ -373,6 +379,7 @@ impl RpcDevice {
             transport,
             name,
             pid,
+            reader_name,
             usb_ifaces,
             has_ccid,
             has_ctap,
@@ -513,6 +520,10 @@ impl YubiKeyDevice for RpcDevice {
 
     fn pid(&self) -> Option<u16> {
         self.pid
+    }
+
+    fn reader_name(&self) -> Option<&str> {
+        self.reader_name.as_deref()
     }
 
     fn usb_interfaces(&self) -> UsbInterface {

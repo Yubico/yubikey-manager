@@ -153,6 +153,10 @@ pub trait YubiKeyDevice {
     fn pid(&self) -> Option<u16> {
         None
     }
+    /// Returns the PC/SC reader name, if this device has a smartcard reader.
+    fn reader_name(&self) -> Option<&str> {
+        None
+    }
     /// Returns the USB interfaces available on this device.
     fn usb_interfaces(&self) -> UsbInterface;
     /// Open a SmartCard (CCID) connection, returning a trait object.
@@ -183,6 +187,9 @@ impl YubiKeyDevice for Box<dyn YubiKeyDevice> {
     }
     fn pid(&self) -> Option<u16> {
         (**self).pid()
+    }
+    fn reader_name(&self) -> Option<&str> {
+        (**self).reader_name()
     }
     fn usb_interfaces(&self) -> UsbInterface {
         (**self).usb_interfaces()
@@ -545,6 +552,10 @@ impl YubiKeyDevice for LocalYubiKeyDevice {
 
     fn pid(&self) -> Option<u16> {
         self.pid
+    }
+
+    fn reader_name(&self) -> Option<&str> {
+        self.reader_name.as_deref()
     }
 
     fn usb_interfaces(&self) -> UsbInterface {

@@ -90,6 +90,7 @@ impl DeviceManager {
                     "serial": info.serial,
                     "version": [version.0, version.1, version.2],
                     "name": dev.name(),
+                    "reader_name": dev.reader_name(),
                     "usb_interfaces": dev.usb_interfaces().0,
                     "form_factor": info.form_factor as u8,
                     "transport": transport_str,

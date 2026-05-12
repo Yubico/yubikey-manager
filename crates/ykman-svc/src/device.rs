@@ -69,6 +69,7 @@ impl RpcNode for DeviceNode {
             "version": [version.0, version.1, version.2],
             "serial": info.serial,
             "name": self.device.name(),
+            "reader_name": self.device.reader_name(),
             "transport": match transport {
                 Transport::Usb => "usb",
                 Transport::Nfc => "nfc",
