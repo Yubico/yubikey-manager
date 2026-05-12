@@ -149,6 +149,10 @@ pub trait YubiKeyDevice {
     fn transport(&self) -> Transport;
     /// Returns the product name derived from device info.
     fn name(&self) -> String;
+    /// Returns the USB Product ID, if known.
+    fn pid(&self) -> Option<u16> {
+        None
+    }
     /// Returns the USB interfaces available on this device.
     fn usb_interfaces(&self) -> UsbInterface;
     /// Open a SmartCard (CCID) connection, returning a trait object.
@@ -176,6 +180,9 @@ impl YubiKeyDevice for Box<dyn YubiKeyDevice> {
     }
     fn name(&self) -> String {
         (**self).name()
+    }
+    fn pid(&self) -> Option<u16> {
+        (**self).pid()
     }
     fn usb_interfaces(&self) -> UsbInterface {
         (**self).usb_interfaces()
@@ -225,16 +232,6 @@ impl LocalYubiKeyDevice {
         &self.info
     }
 
-    /// Returns the serial number, if available.
-    pub fn serial(&self) -> Option<u32> {
-        self.info.serial
-    }
-
-    /// Returns the firmware version.
-    pub fn version(&self) -> Version {
-        self.info.version
-    }
-
     /// Returns the USB Product ID, if available.
     pub fn pid(&self) -> Option<u16> {
         self.pid
@@ -248,11 +245,6 @@ impl LocalYubiKeyDevice {
     /// Returns the product name derived from device info.
     pub fn name(&self) -> String {
         get_name(&self.info)
-    }
-
-    /// Returns the PC/SC reader name, if this device was found over CCID.
-    pub fn reader_name(&self) -> Option<&str> {
-        self.reader_name.as_deref()
     }
 
     /// Open a device from a PC/SC reader name.
@@ -270,16 +262,6 @@ impl LocalYubiKeyDevice {
             transport,
             info,
         })
-    }
-
-    /// Returns the HID device path, if this device was found over HID.
-    pub fn hid_path(&self) -> Option<&str> {
-        self.hid_path.as_deref()
-    }
-
-    /// Returns the FIDO HID device path, if this device was found over FIDO.
-    pub fn fido_path(&self) -> Option<&str> {
-        self.fido_path.as_deref()
     }
 
     /// Open a SmartCard (PC/SC) connection to this device.
@@ -561,6 +543,10 @@ impl YubiKeyDevice for LocalYubiKeyDevice {
         self.name()
     }
 
+    fn pid(&self) -> Option<u16> {
+        self.pid
+    }
+
     fn usb_interfaces(&self) -> UsbInterface {
         self.pid.map(usb_interfaces_from_pid).unwrap_or_else(|| {
             // Derive from enabled USB capabilities in the device info
@@ -614,7 +600,7 @@ impl YubiKeyDevice for LocalYubiKeyDevice {
 impl fmt::Display for LocalYubiKeyDevice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name())?;
-        if let Some(serial) = self.serial() {
+        if let Some(serial) = self.info.serial {
             write!(f, " (serial: {serial})")?;
         }
         Ok(())
@@ -1717,9 +1703,9 @@ mod tests {
         merge_devices(&mut result, fido);
         assert_eq!(result.len(), 1, "Should merge into a single device");
         let dev = &result[0];
-        assert_eq!(dev.reader_name(), Some("Yubico YubiKey OTP+FIDO+CCID 00"));
-        assert_eq!(dev.hid_path(), Some("/dev/hidraw0"));
-        assert_eq!(dev.fido_path(), Some("/dev/hidraw1"));
+        assert!(dev.reader_name.is_some());
+        assert!(dev.hid_path.is_some());
+        assert!(dev.fido_path.is_some());
         assert_eq!(dev.pid(), Some(0x0407));
     }
 
@@ -1767,12 +1753,18 @@ mod tests {
         let mut result = ccid;
         merge_devices(&mut result, otp);
         assert_eq!(result.len(), 2, "Should remain as two devices");
-        let d1 = result.iter().find(|d| d.serial() == Some(111)).unwrap();
-        assert!(d1.reader_name().is_some());
-        assert!(d1.hid_path().is_some());
-        let d2 = result.iter().find(|d| d.serial() == Some(222)).unwrap();
-        assert!(d2.reader_name().is_some());
-        assert!(d2.hid_path().is_some());
+        let d1 = result
+            .iter()
+            .find(|d| d.info().serial == Some(111))
+            .unwrap();
+        assert!(d1.reader_name.is_some());
+        assert!(d1.hid_path.is_some());
+        let d2 = result
+            .iter()
+            .find(|d| d.info().serial == Some(222))
+            .unwrap();
+        assert!(d2.reader_name.is_some());
+        assert!(d2.hid_path.is_some());
     }
 
     #[test]

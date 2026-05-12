@@ -511,6 +511,10 @@ impl YubiKeyDevice for RpcDevice {
         self.name.clone()
     }
 
+    fn pid(&self) -> Option<u16> {
+        self.pid
+    }
+
     fn usb_interfaces(&self) -> UsbInterface {
         self.usb_ifaces
     }

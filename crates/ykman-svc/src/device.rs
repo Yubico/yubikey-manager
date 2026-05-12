@@ -99,23 +99,15 @@ impl RpcNode for DeviceNode {
         use yubikit::management::UsbInterface;
 
         let mut children = BTreeMap::new();
-        let info = self.device.info();
         let transport = self.device.transport();
         let usb_ifaces = self.device.usb_interfaces();
 
-        let supported = info
-            .supported_capabilities
-            .get(&transport)
-            .copied()
-            .unwrap_or(Capability::NONE);
-
         if transport == Transport::Nfc || usb_ifaces.contains(UsbInterface::CCID) {
-            let has_fido2 = supported.contains(Capability::FIDO2);
-            children.insert("ccid".to_string(), json!({"fido2": has_fido2}));
+            children.insert("ccid".to_string(), json!({}));
         }
 
         if transport == Transport::Usb && usb_ifaces.contains(UsbInterface::FIDO) {
-            children.insert("ctap".to_string(), json!({"fido2": true}));
+            children.insert("ctap".to_string(), json!({}));
         }
 
         if transport == Transport::Usb && usb_ifaces.contains(UsbInterface::OTP) {

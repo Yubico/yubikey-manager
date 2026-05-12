@@ -21,8 +21,8 @@ fn main() {
     println!(
         "Found: {} (serial: {:?}, version: {}, transport: {transport:?})",
         dev.name(),
-        dev.serial(),
-        dev.version(),
+        dev.info().serial,
+        dev.info().version,
     );
     println!();
 
@@ -51,6 +51,6 @@ fn main() {
     println!(
         "YubiKey reconnected: {} (serial: {:?})",
         dev.name(),
-        dev.serial(),
+        dev.info().serial,
     );
 }

@@ -166,12 +166,6 @@ impl NativeYubiKeyDevice {
         device_info_to_dict(py, self.inner.info())
     }
 
-    /// Get the serial number.
-    #[getter]
-    fn serial(&self) -> Option<u32> {
-        self.inner.serial()
-    }
-
     /// Get the USB PID.
     #[getter]
     fn pid(&self) -> Option<u16> {
@@ -191,24 +185,6 @@ impl NativeYubiKeyDevice {
     #[getter]
     fn name(&self) -> String {
         self.inner.name()
-    }
-
-    /// Get the PC/SC reader name.
-    #[getter]
-    fn reader_name(&self) -> Option<String> {
-        self.inner.reader_name().map(|s| s.to_string())
-    }
-
-    /// Get the HID OTP device path.
-    #[getter]
-    fn hid_path(&self) -> Option<String> {
-        self.inner.hid_path().map(|s| s.to_string())
-    }
-
-    /// Get the FIDO HID device path.
-    #[getter]
-    fn fido_path(&self) -> Option<String> {
-        self.inner.fido_path().map(|s| s.to_string())
     }
 
     /// Get the USB interfaces bitmask.

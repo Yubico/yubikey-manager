@@ -12,8 +12,8 @@ fn main() {
                 println!(
                     "  {} (serial: {:?}, version: {})",
                     dev.name(),
-                    dev.serial(),
-                    dev.version()
+                    dev.info().serial,
+                    dev.info().version
                 );
             }
         }

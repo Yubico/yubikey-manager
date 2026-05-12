@@ -19,7 +19,7 @@ use rstest::{fixture, rstest};
 use std::sync::{Mutex, OnceLock};
 use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
-use yubikit::device::{LocalYubiKeyDevice, list_devices};
+use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices};
 use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType, UsbInterface};
 use yubikit::securitydomain::SecurityDomainSession;
 use yubikit::transport::pcsc::{PcscSmartCardConnection, list_readers};
@@ -87,12 +87,12 @@ fn get_device_and_info() -> &'static (LocalYubiKeyDevice, DeviceInfo) {
         let dev = match serial {
             Some(s) => devices
                 .into_iter()
-                .find(|d| d.serial() == Some(s))
+                .find(|d| d.info().serial == Some(s))
                 .unwrap_or_else(|| panic!("No YubiKey found with serial {s}")),
             None => {
                 let mut devs: Vec<_> = devices
                     .into_iter()
-                    .filter(|d| d.serial().is_none())
+                    .filter(|d| d.info().serial.is_none())
                     .collect();
                 match devs.len() {
                     0 => panic!("No YubiKey without serial found"),
@@ -231,14 +231,14 @@ fn should_skip(tc: &TestConnection) -> Option<String> {
 
     match tc {
         TestConnection::UsbSmartCard => {
-            if dev.reader_name().is_none() {
+            if !dev.usb_interfaces().contains(UsbInterface::CCID) {
                 Some("CCID not available".into())
             } else {
                 None
             }
         }
         TestConnection::UsbSmartCardScp11b => {
-            if dev.reader_name().is_none() {
+            if !dev.usb_interfaces().contains(UsbInterface::CCID) {
                 Some("CCID not available".into())
             } else if get_scp11b_params().is_none() {
                 Some("SCP11b not available on USB device".into())
@@ -247,7 +247,7 @@ fn should_skip(tc: &TestConnection) -> Option<String> {
             }
         }
         TestConnection::UsbOtp => {
-            if dev.hid_path().is_none() {
+            if !dev.usb_interfaces().contains(UsbInterface::OTP) {
                 Some("OTP HID not available".into())
             } else {
                 None
@@ -352,11 +352,11 @@ fn test_list_devices_finds_key() {
         .expect("list_devices");
     match serial {
         Some(s) => assert!(
-            devices.iter().any(|d| d.serial() == Some(s)),
+            devices.iter().any(|d| d.info().serial == Some(s)),
             "Expected YubiKey with serial {s} in device list"
         ),
         None => assert!(
-            devices.iter().any(|d| d.serial().is_none()),
+            devices.iter().any(|d| d.info().serial.is_none()),
             "Expected YubiKey without serial in device list"
         ),
     }
