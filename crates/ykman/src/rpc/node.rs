@@ -102,6 +102,18 @@ impl NodeHost {
         }
     }
 
+    fn close_named_child(&mut self, name: &str) {
+        if self.node.retains_children() {
+            if let Some(mut child) = self.retained_children.remove(name) {
+                log::debug!("Closing retained child: {name}");
+                child.close();
+                self.node.on_child_closed(name);
+            }
+        } else if self.child_name.as_deref() == Some(name) {
+            self.close_child();
+        }
+    }
+
     fn close(&mut self) {
         self.close_child();
         let retained: Vec<String> = self.retained_children.keys().cloned().collect();
@@ -199,6 +211,9 @@ impl NodeHost {
             if !actions.contains(&"get") {
                 actions.insert(0, "get");
             }
+            if !actions.contains(&"close") {
+                actions.push("close");
+            }
             actions.sort();
             let children = self.node.list_children();
             Ok(RpcResponse::new(json!({
@@ -206,6 +221,16 @@ impl NodeHost {
                 "actions": actions,
                 "children": children,
             })))
+        } else if action == "close" {
+            // Built-in close action: close a named child
+            let child_name = params
+                .get("child")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    RpcError::new("invalid-params", "close requires a 'child' parameter")
+                })?;
+            self.close_named_child(child_name);
+            Ok(RpcResponse::new(json!({})))
         } else if self.node.list_actions().contains(&action) {
             // Check if action should close child
             if self.node.action_closes_child(action) {
