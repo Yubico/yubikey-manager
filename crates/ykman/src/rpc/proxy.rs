@@ -585,6 +585,10 @@ impl YubiKeyDevice for RpcDevice {
 
         Ok(())
     }
+
+    fn clone_box(&self) -> Box<dyn YubiKeyDevice> {
+        Box::new(self.clone())
+    }
 }
 
 impl Drop for RpcDevice {

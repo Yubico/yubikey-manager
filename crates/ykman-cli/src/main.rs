@@ -3,7 +3,7 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 use yubikit::core::{Transport, Version, set_override_version};
-use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices, scan_usb_devices};
+use yubikit::device::{YubiKeyDevice, scan_usb_devices};
 use yubikit::management::{Capability, ReleaseType, UsbInterface};
 
 mod apdu;
@@ -27,8 +27,6 @@ use ykman::appdata;
 use ykman::cancel;
 use ykman::keyboard;
 use ykman::logging;
-#[cfg(target_os = "windows")]
-use ykman::rpc;
 
 use cli_enums::*;
 
@@ -1592,9 +1590,9 @@ enum SecurityDomainKeysAction {
 /// Which transports to scan when resolving a device.
 /// Select a single YubiKey from a device list, optionally filtered by serial.
 fn select_device(
-    devices: Vec<LocalYubiKeyDevice>,
+    devices: Vec<Box<dyn YubiKeyDevice>>,
     serial: Option<u32>,
-) -> Result<LocalYubiKeyDevice, CliError> {
+) -> Result<Box<dyn YubiKeyDevice>, CliError> {
     match (serial, devices.len()) {
         (None, 0) => {
             // Check for FIDO-blocked devices that scan can see but list cannot open
@@ -1613,94 +1611,29 @@ fn select_device(
         (None, n) => {
             let mut msg = format!("Multiple YubiKeys detected ({n}):");
             for dev in &devices {
-                msg.push_str(&format!("\n- {}", crate::list::describe_device(dev)));
+                msg.push_str(&format!(
+                    "\n- {}",
+                    crate::list::describe_device(dev.as_ref())
+                ));
             }
             msg.push_str("\nUse --device SERIAL to specify which one to use.");
             Err(CliError(msg))
         }
         (Some(s), _) => devices
             .into_iter()
-            .find(|d| d.serial() == Some(s))
+            .find(|d| d.info().serial == Some(s))
             .ok_or_else(|| CliError(format!("YubiKey with serial {s} not found."))),
     }
 }
 
-/// Enumerate devices and select one, optionally by serial number.
-fn require_device(serial: Option<u32>) -> Result<LocalYubiKeyDevice, CliError> {
-    let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
-    let devices =
-        list_devices(all).map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
-    select_device(devices, serial)
-}
-
-/// Try to get a device through the ykman-svc service.
-/// If `serial` is None and exactly one device is connected, returns it.
-/// If `serial` is None and multiple devices are connected, returns an error listing them.
-/// If `serial` is Some, returns the matching device or an error.
-#[cfg(target_os = "windows")]
-fn try_service_device(serial: Option<u32>) -> Result<Box<dyn YubiKeyDevice>, CliError> {
-    let mut client = rpc::client::RpcClient::connect_pipe()?;
-    log::debug!("Connected to ykman-svc service");
-    let root = client
-        .get(&[] as &[&str])
-        .map_err(|e| CliError(format!("{e}")))?;
-    let children = root
-        .body
-        .get("children")
-        .and_then(|v| v.as_object())
-        .cloned()
-        .unwrap_or_default();
-
-    if children.is_empty() {
-        return Err(CliError("No YubiKeys found via service".into()));
-    }
-
-    let device_name = if let Some(serial) = serial {
-        let key = serial.to_string();
-        if children.contains_key(&key) {
-            key
-        } else {
-            return Err(CliError(format!("Device '{serial}' not found via service")));
-        }
-    } else {
-        match children.len() {
-            0 => unreachable!("empty check above"),
-            1 => children.keys().next().unwrap().clone(),
-            n => {
-                let mut msg = format!("Multiple YubiKeys detected ({n}):");
-                for (name, info) in &children {
-                    msg.push_str(&format!(
-                        "\n- {}",
-                        crate::list::describe_svc_device(name, info)
-                    ));
-                }
-                msg.push_str("\nUse --device SERIAL to specify which one to use.");
-                return Err(CliError(msg));
-            }
-        }
-    };
-
-    log::debug!("Using service device: {device_name}");
-    let _dev_get = client
-        .get(&[&device_name])
-        .map_err(|e| CliError(format!("{e}")))?;
-
-    let dev = rpc::proxy::RpcDevice::from_client_at(client, &device_name)?;
-    apply_version_override(&dev);
-    Ok(Box::new(dev))
-}
-
-/// Get a YubiKey device. On Windows, always tries the ykman-svc service first,
-/// then falls back to direct access.
+/// Get a YubiKey device. Uses the ykman-svc service when available,
+/// falling back to direct local access.
 fn get_device(serial: Option<u32>) -> Result<Box<dyn YubiKeyDevice>, CliError> {
-    #[cfg(target_os = "windows")]
-    match try_service_device(serial) {
-        Ok(dev) => return Ok(dev),
-        Err(e) => log::debug!("ykman-svc not available ({}), using direct access", e.0),
-    }
-
-    let dev = require_device(serial)?;
-    Ok(Box::new(dev))
+    let mut source = ykman::device::get_device_source();
+    let devices = source
+        .list_devices()
+        .map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
+    select_device(devices, serial)
 }
 
 /// Check that a capability is available and enabled on the device.
@@ -3171,15 +3104,15 @@ fn run() -> Result<(), CliError> {
             short,
             send_apdu,
         } => {
-            let dev = require_device(cli.device)?;
-            if dev.reader_name().is_none() {
+            let dev = get_device(cli.device)?;
+            if !dev.usb_interfaces().contains(UsbInterface::CCID) {
                 return Err(CliError(
                     "The apdu command requires a CCID (smart card) connection.".into(),
                 ));
             }
-            check_scp_version(&dev, &scp_params)?;
+            check_scp_version(&*dev, &scp_params)?;
             apdu::run_apdu(
-                &dev,
+                &*dev,
                 &scp_params,
                 &apdus,
                 no_pretty,

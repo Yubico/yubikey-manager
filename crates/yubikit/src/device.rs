@@ -163,6 +163,8 @@ pub trait YubiKeyDevice {
         status_cb: &dyn Fn(ReinsertStatus),
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DeviceError>;
+    /// Clone this device into a boxed trait object.
+    fn clone_box(&self) -> Box<dyn YubiKeyDevice>;
 }
 
 impl YubiKeyDevice for Box<dyn YubiKeyDevice> {
@@ -193,6 +195,9 @@ impl YubiKeyDevice for Box<dyn YubiKeyDevice> {
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DeviceError> {
         (**self).reinsert(status_cb, cancelled)
+    }
+    fn clone_box(&self) -> Box<dyn YubiKeyDevice> {
+        (**self).clone_box()
     }
 }
 
@@ -599,6 +604,10 @@ impl YubiKeyDevice for LocalYubiKeyDevice {
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DeviceError> {
         self.reinsert(status_cb, cancelled)
+    }
+
+    fn clone_box(&self) -> Box<dyn YubiKeyDevice> {
+        Box::new(self.clone())
     }
 }
 
