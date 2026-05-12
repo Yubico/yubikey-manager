@@ -7,7 +7,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use yubikit::device::{DeviceError, YubiKeyDevice, list_devices};
+use serde_json::json;
+
+use yubikit::device::{DeviceError, YubiKeyDevice, list_devices, select_fido};
 use yubikit::management::UsbInterface;
 
 use crate::rpc::client::{RpcCallError, RpcClient};
@@ -26,6 +28,15 @@ pub trait DeviceSource {
     /// as needed.
     fn list_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError>;
 
+    /// Select a YubiKey by touch via CTAP2 authenticator selection.
+    ///
+    /// Waits for the user to touch a connected YubiKey and returns it.
+    /// Polls for newly inserted devices until one is selected or cancelled.
+    fn select_fido(
+        &mut self,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Box<dyn YubiKeyDevice>, DeviceError>;
+
     /// Whether this source is backed by the ykman-svc service.
     fn is_service(&self) -> bool {
         false
@@ -40,6 +51,14 @@ impl DeviceSource for LocalDeviceSource {
         let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
         let devices = list_devices(all)?;
         Ok(devices.into_iter().map(|d| Box::new(d) as _).collect())
+    }
+
+    fn select_fido(
+        &mut self,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Box<dyn YubiKeyDevice>, DeviceError> {
+        let dev = select_fido(cancel)?;
+        Ok(Box::new(dev))
     }
 }
 
@@ -89,6 +108,27 @@ impl DeviceSource for RpcDeviceSource {
         }
 
         Ok(devices)
+    }
+
+    fn select_fido(
+        &mut self,
+        _cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Box<dyn YubiKeyDevice>, DeviceError> {
+        let result = self
+            .client
+            .borrow_mut()
+            .call("select_fido", &[] as &[&str], json!({}), None, true)
+            .map_err(rpc_to_device_error)?;
+
+        let name = result
+            .body
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or(DeviceError::NoDeviceFound)?;
+
+        let dev =
+            RpcDevice::from_shared_at(self.client.clone(), name).map_err(rpc_to_device_error)?;
+        Ok(Box::new(dev))
     }
 
     fn is_service(&self) -> bool {

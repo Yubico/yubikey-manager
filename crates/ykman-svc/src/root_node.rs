@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Value, json};
 
@@ -62,7 +62,7 @@ impl RpcNode for ServiceRootNode {
     }
 
     fn list_actions(&self) -> Vec<&'static str> {
-        vec![]
+        vec!["select_fido"]
     }
 
     fn list_children(&mut self) -> BTreeMap<String, Value> {
@@ -83,9 +83,44 @@ impl RpcNode for ServiceRootNode {
         action: &str,
         _params: Value,
         _signal: SignalFn,
-        _cancel: &AtomicBool,
+        cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError> {
-        Err(RpcError::no_such_action(action))
+        match action {
+            "select_fido" => {
+                log::debug!("FIDO selection requested");
+                let cancel_fn = || cancel.load(Ordering::Relaxed);
+                let device = yubikit::device::select_fido(Some(&cancel_fn))
+                    .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
+
+                // Find the device name in our inventory
+                let devices = self.manager.update_devices();
+                let info = device.info();
+                let name = devices
+                    .iter()
+                    .find(|(_name, data)| {
+                        data.get("serial")
+                            .and_then(|v| v.as_u64())
+                            .map(|s| s as u32)
+                            == info.serial
+                            && data
+                                .get("version")
+                                .and_then(|v| v.as_array())
+                                .is_some_and(|arr| {
+                                    arr.len() == 3
+                                        && arr[0].as_u64() == Some(info.version.0 as u64)
+                                        && arr[1].as_u64() == Some(info.version.1 as u64)
+                                        && arr[2].as_u64() == Some(info.version.2 as u64)
+                                })
+                    })
+                    .map(|(name, _)| name.clone())
+                    .ok_or_else(|| {
+                        RpcError::new("device-error", "Selected device not found in inventory")
+                    })?;
+
+                Ok(RpcResponse::new(json!({"name": name})))
+            }
+            _ => Err(RpcError::no_such_action(action)),
+        }
     }
 
     fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
