@@ -128,7 +128,7 @@ fn run_service_inner() -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Service started");
 
-    let manager = Arc::new(crate::device_manager::DeviceManager::new());
+    let manager = crate::device_manager::DeviceManager::new();
     crate::pipe_server::run_server(manager, &stop);
 
     // Report stopped

@@ -28,6 +28,7 @@ pub struct ClientSession {
 
 impl ClientSession {
     pub fn new(manager: Arc<DeviceManager>) -> Self {
+        manager.client_connected();
         Self { manager }
     }
 
@@ -140,6 +141,12 @@ impl ClientSession {
         }
 
         log::info!("Client disconnected");
+    }
+}
+
+impl Drop for ClientSession {
+    fn drop(&mut self) {
+        self.manager.client_disconnected();
     }
 }
 

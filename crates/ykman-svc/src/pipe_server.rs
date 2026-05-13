@@ -25,7 +25,7 @@ pub fn run_standalone() {
     })
     .expect("Failed to set Ctrl+C handler");
 
-    let manager = Arc::new(DeviceManager::new());
+    let manager = DeviceManager::new();
     run_server(manager, &stop);
 }
 

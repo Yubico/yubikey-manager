@@ -1,10 +1,19 @@
 //! Device inventory management.
 //!
-//! Tracks connected YubiKeys, detects changes using scan_usb_devices/list_readers
-//! fingerprinting, and provides exclusive device locking across clients.
+//! Tracks connected YubiKeys, detects changes via background polling of
+//! `scan_usb_devices`, and provides exclusive device locking across clients.
+//!
+//! While at least one client is connected, a background thread polls
+//! `scan_usb_devices` every 500ms. If the fingerprint changes, the state is
+//! marked dirty. On `update_devices()` (triggered by a "get" call), a full
+//! `list_devices` is only performed when dirty; otherwise a quick fingerprint
+//! check is done.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -20,6 +29,12 @@ use crate::device::DeviceNode;
 /// Manages device inventory and exclusive access.
 pub struct DeviceManager {
     state: Mutex<ManagerState>,
+    /// Number of connected clients.
+    client_count: AtomicUsize,
+    /// Whether the device inventory needs a full refresh.
+    dirty: AtomicBool,
+    /// Used to wake the scanner thread when clients connect.
+    wake: Arc<(Mutex<bool>, Condvar)>,
 }
 
 struct ManagerState {
@@ -34,31 +49,105 @@ struct ManagerState {
 }
 
 impl DeviceManager {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Arc<Self> {
+        let wake = Arc::new((Mutex::new(false), Condvar::new()));
+        let manager = Arc::new(Self {
             state: Mutex::new(ManagerState {
                 last_fingerprint: 0,
                 devices: BTreeMap::new(),
                 device_objects: BTreeMap::new(),
                 locked_devices: HashSet::new(),
             }),
+            client_count: AtomicUsize::new(0),
+            dirty: AtomicBool::new(true),
+            wake: wake.clone(),
+        });
+
+        // Spawn background scanner thread
+        let mgr = Arc::downgrade(&manager);
+        thread::spawn(move || {
+            let (lock, cvar) = &*wake;
+            loop {
+                // Wait until there are clients
+                {
+                    let mut started = lock.lock().unwrap();
+                    while !*started {
+                        started = cvar.wait(started).unwrap();
+                    }
+                }
+
+                // Poll while clients are connected
+                loop {
+                    let Some(mgr) = mgr.upgrade() else {
+                        return; // DeviceManager dropped
+                    };
+                    if mgr.client_count.load(Ordering::Relaxed) == 0 {
+                        // No clients, go back to waiting
+                        let mut started = lock.lock().unwrap();
+                        *started = false;
+                        break;
+                    }
+
+                    let (_, fingerprint) = scan_usb_devices();
+                    {
+                        let mut state = mgr.state.lock().unwrap();
+                        if fingerprint != state.last_fingerprint {
+                            state.last_fingerprint = fingerprint;
+                            drop(state);
+                            log::debug!("Background scan: device change detected");
+                            mgr.dirty.store(true, Ordering::Relaxed);
+                        }
+                    }
+                    drop(mgr);
+                    thread::sleep(Duration::from_millis(500));
+                }
+            }
+        });
+
+        manager
+    }
+
+    /// Notify that a client has connected. Sets dirty immediately.
+    pub fn client_connected(&self) {
+        let prev = self.client_count.fetch_add(1, Ordering::Relaxed);
+        self.dirty.store(true, Ordering::Relaxed);
+        log::debug!("Client connected (count: {})", prev + 1);
+
+        if prev == 0 {
+            // Wake the scanner thread
+            let (lock, cvar) = &*self.wake;
+            let mut started = lock.lock().unwrap();
+            *started = true;
+            cvar.notify_one();
         }
     }
 
+    /// Notify that a client has disconnected.
+    pub fn client_disconnected(&self) {
+        let prev = self.client_count.fetch_sub(1, Ordering::Relaxed);
+        log::debug!("Client disconnected (count: {})", prev - 1);
+    }
+
     /// Scan for device changes and update the inventory.
-    /// Only calls the expensive `list_devices` if the fingerprint changed.
+    /// Performs a full `list_devices` only if dirty; otherwise does a quick
+    /// fingerprint check to see if a rescan is needed.
     /// Returns the current device map.
     pub fn update_devices(&self) -> BTreeMap<String, Value> {
         let mut state = self.state.lock().unwrap();
 
-        let (_pid_counts, fingerprint) = scan_usb_devices();
-
-        if fingerprint == state.last_fingerprint && !state.devices.is_empty() {
-            log::debug!("No device changes detected");
-            return state.devices.clone();
+        if !self.dirty.load(Ordering::Relaxed) {
+            // Quick check: has anything changed since last full scan?
+            let (_, fingerprint) = scan_usb_devices();
+            if fingerprint == state.last_fingerprint && !state.devices.is_empty() {
+                log::debug!("No device changes detected");
+                return state.devices.clone();
+            }
         }
 
+        self.dirty.store(false, Ordering::Relaxed);
         log::info!("Device state changed, rescanning");
+
+        let (_, fingerprint) = scan_usb_devices();
         state.last_fingerprint = fingerprint;
 
         // Full enumeration
@@ -189,7 +278,6 @@ impl DeviceManager {
     }
 
     /// Release a device lock when a client disconnects or closes the device.
-    #[allow(dead_code)]
     pub fn release_device(&self, name: &str) {
         let mut state = self.state.lock().unwrap();
         state.locked_devices.remove(name);
