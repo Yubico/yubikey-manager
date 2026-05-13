@@ -181,6 +181,22 @@ impl NativeYubiKeyDevice {
         }
     }
 
+    /// Get the PC/SC reader name.
+    #[getter]
+    fn reader_name(&self) -> Option<String> {
+        self.inner.reader_name.clone()
+    }
+
+    #[getter]
+    fn fido_path(&self) -> Option<String> {
+        self.inner.fido_path.clone()
+    }
+
+    #[getter]
+    fn hid_path(&self) -> Option<String> {
+        self.inner.hid_path.clone()
+    }
+
     /// Get the product name.
     #[getter]
     fn name(&self) -> String {

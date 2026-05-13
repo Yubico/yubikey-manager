@@ -26,9 +26,17 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import logging
+from typing import cast
+
+from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
 
 from _yubikit_native.device import get_name as _get_name_native
 from _yubikit_native.device import read_info as _read_info_native
+from yubikit.core import ApplicationNotAvailableError
+from yubikit.core.smartcard import ApduError, SmartCardConnection
+from yubikit.core.smartcard.scp import KeyRef, Scp11KeyParams
+from yubikit.securitydomain import SecurityDomainSession
 
 from .core import (
     PID,
@@ -86,3 +94,67 @@ def get_name(info: DeviceInfo, key_type: YUBIKEY | None) -> str:
         ),
         has_nfc=info.has_transport(TRANSPORT.NFC),
     )
+
+
+def find_scp11_params(
+    connection: SmartCardConnection,
+    kid: int,
+    kvn: int,
+    root_ca: x509.Certificate | None = None,
+) -> Scp11KeyParams:
+    if root_ca:
+        try:
+            ski = root_ca.extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
+        except x509.ExtensionNotFound:
+            ski = None
+    else:
+        ski = None
+
+    try:
+        with SecurityDomainSession(connection) as scp:
+            if not kvn:
+                if ski:
+                    # Find by CA
+                    ca_ski = ski.value.digest
+                    for ref, ca_check in scp.get_supported_ca_identifiers(
+                        klcc=True
+                    ).items():
+                        if ca_check == ca_ski:
+                            if not kid or ref.kid == kid:
+                                kid, kvn = ref
+                                break
+                    else:
+                        raise ValueError(
+                            f"No CA identifier found matching SKI: {ca_ski.hex()}"
+                        )
+                # Find any matching KID
+                for ref in scp.get_key_information().keys():
+                    if ref.kid == kid:
+                        kvn = ref.kvn
+                        break
+                else:
+                    raise ValueError(f"No SCP key found matching KID=0x{kid:x}")
+
+            ref = KeyRef(kid, kvn)
+            try:
+                chain = scp.get_certificate_bundle(ref)
+                if not chain:
+                    raise ValueError(f"No certificate chain stored for {ref}")
+                if root_ca:
+                    logger.debug("Validating KLCC CA using supplied file")
+                    parent = root_ca
+                    for cert in chain:
+                        # Requires cryptography >= 40
+                        cert.verify_directly_issued_by(parent)
+                        parent = cert
+                    logger.info("KLCC CA validated")
+                else:
+                    logger.info("No CA supplied, skipping KLCC CA validation")
+
+                pub_key = cast(EllipticCurvePublicKey, chain[-1].public_key())
+                return Scp11KeyParams(ref, pub_key)
+            except ApduError:
+                raise ValueError(f"Unable to get SCP key paramaters ({ref})")
+
+    except ApplicationNotAvailableError:
+        raise ValueError("Security Domain application not available")

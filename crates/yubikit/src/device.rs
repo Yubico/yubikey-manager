@@ -235,9 +235,12 @@ impl YubiKeyDevice for Box<dyn YubiKeyDevice> {
 /// Use [`list_devices`] to discover connected devices.
 #[derive(Debug, Clone)]
 pub struct LocalYubiKeyDevice {
-    reader_name: Option<String>,
-    hid_path: Option<String>,
-    fido_path: Option<String>,
+    /// The PC/SC reader name, if available.
+    pub reader_name: Option<String>,
+    /// The HID path, if available.
+    pub hid_path: Option<String>,
+    /// The FIDO path, if available.
+    pub fido_path: Option<String>,
     pid: Option<u16>,
     transport: Transport,
     info: DeviceInfo,

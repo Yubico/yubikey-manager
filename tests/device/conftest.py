@@ -3,13 +3,14 @@ import time
 from functools import partial
 
 import pytest
-
-from yubikit.device import list_all_devices
 from yubikit.core import TRANSPORT, _override_version
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
+from yubikit.core.smartcard.scp import ScpKid
+from yubikit.device import list_all_devices
 from yubikit.management import RELEASE_TYPE
+from yubikit.support import find_scp11_params
 
 from . import condition
 
@@ -98,5 +99,7 @@ def ccid_connection(device, info):
 
 @pytest.fixture(scope=connection_scope)
 def scp_params(ccid_connection):
-    # SCP11 parameter discovery not yet available in the new stack
-    return None
+    try:
+        return find_scp11_params(ccid_connection, ScpKid.SCP11b, 0)
+    except ValueError:
+        return None

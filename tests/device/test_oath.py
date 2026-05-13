@@ -1,5 +1,4 @@
 import pytest
-
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SW, ApduError
 from yubikit.management import CAPABILITY
@@ -18,14 +17,13 @@ KEY = bytes.fromhex("01020304050607080102030405060708")
 @pytest.fixture
 @condition.capability(CAPABILITY.OATH)
 def session(ccid_connection, info, scp_params):
-    fips = CAPABILITY.OATH in info.fips_capable
-    if ccid_connection.transport == TRANSPORT.NFC and fips:
-        oath = OathSession(ccid_connection, scp_params)
-    else:
-        oath = OathSession(ccid_connection)
+    oath = OathSession(ccid_connection)
     oath.reset()
 
-    if fips:
+    if CAPABILITY.OATH in info.fips_capable:
+        if ccid_connection.transport == TRANSPORT.NFC:
+            oath.close()
+            oath = OathSession(ccid_connection, scp_params)
         oath.set_key(KEY)
 
     yield oath
