@@ -13,7 +13,7 @@ See also: link:Library_Usage.adoc[Library Usage].
 
 
 === Invoking the script
-To run a script, use the Python interpreter directly (with `yubikey-manager`
+To run a script, use the Python interpreter directly (with `yubikit` and `ykman`
 installed):
 
   python myscript.py

@@ -1,13 +1,13 @@
-== Using ykman as a Python library
+== Using yubikit as a Python library
 In addition to using ykman as a standalone command line application, you can
 also use this project as a Python library for scripting purposes.
 
 === Setup
-You will need to have Python >= 3.10, and have `yubikey-manager` installed and
-added to your PYTHON_PATH. You can verify that this is set up correctly by
-running the following command from a Terminal:
+You will need to have Python >= 3.10, and have `yubikit` installed and added
+to your PYTHON_PATH. You can verify that this is set up correctly by running
+the following command from a Terminal:
 
-    $ python -c "import ykman"
+    $ python -c "import yubikit"
 
 If the above runs without error (no output at all), then you should be all set.
 
@@ -16,11 +16,11 @@ If the above runs without error (no output at all), then you should be all set.
 The first step you'll likely want to do is to list currently connected
 YubiKeys, and get some information about them. This is what the
 `list_all_devices` function is for. It detects and connects to each attached
-YubiKey, reading some information about it. It returns a list of tuples
-consisting of a YubiKeyDevice and a corresponding DeviceInfo. The DeviceInfo
-can tell you what kind of YubiKey it is, what capabilities it has, its serial
-number, etc. The YubiKeyDevice will let you open a Connection to it, which will
-let you interact with one of the available Applications.
+YubiKey, reading some information about it. It returns a list of YubiKeyDevice
+objects. Each device has an `info` property which tells you what kind of
+YubiKey it is, what capabilities it has, its serial number, etc. The device
+also lets you open a Connection to it, which lets you interact with one of the
+available Applications.
 
 [NOTE]
 ====
@@ -33,11 +33,11 @@ connections.
 ==== Example
 [source,py]
 ----
-from ykman.device import list_all_devices
+from yubikit.device import list_all_devices
 
-for device, info in list_all_devices():
-    if info.version >= (5, 0, 0):  # The info object provides details about the YubiKey
-        print(f"Found YubiKey with serial number: {info.serial}")
+for device in list_all_devices():
+    if device.info.version >= (5, 0, 0):
+        print(f"Found YubiKey with serial number: {device.info.serial}")
 ----
 
 
@@ -55,12 +55,12 @@ using a Connection, you should close it. This can be done explicitly by calling
 ==== Example
 [source,py]
 ----
-from ykman.device import list_all_devices
+from yubikit.device import list_all_devices
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.piv import PivSession
 
 # Select a connected YubiKeyDevice
-dev, info = list_all_devices()[0]
+dev = list_all_devices()[0]
 
 # Connect to a YubiKey over a SmartCardConnection, which is needed for PIV.
 with dev.open_connection(SmartCardConnection) as connection:
@@ -83,7 +83,7 @@ connected YubiKeys changes.
 ==== Example
 [source,py]
 ----
-from ykman.device import list_all_devices, scan_devices
+from yubikit.device import list_all_devices, scan_devices
 from time import sleep
 
 handled_serials = set()  # Keep track of YubiKeys we've already handled.
@@ -93,11 +93,11 @@ while True:  # Run this until we stop the script with Ctrl+C
     pids, new_state = scan_devices()
     if new_state != state:
         state = new_state  # State has changed
-        for device, info in list_all_devices():
-            if info.serial not in handled_serials:  # Unhandled YubiKey
-                print(f"Programming YubiKey with serial: {info.serial}")
+        for device in list_all_devices():
+            if device.info.serial not in handled_serials:  # Unhandled YubiKey
+                print(f"Programming YubiKey with serial: {device.info.serial}")
                 ...  # Do something with the device here.
-                handled_serials.add(info.serial)
+                handled_serials.add(device.info.serial)
     else:
         sleep(1.0)  # No change, sleep for 1 second.
 ----

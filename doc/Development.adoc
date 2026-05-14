@@ -5,22 +5,23 @@
 This project uses https://docs.astral.sh/uv/[uv] for development.
 Follow the uv Getting Started guide to install and configure it.
 
-==== Windows
-
-Make sure the http://www.swig.org/[swig] executable is in your PATH.
-
-==== macOS
-
-    $ brew install swig
+You will also need a Rust toolchain (stable). Install via https://rustup.rs/[rustup].
 
 ==== Linux (Debian-based distributions)
 
-    $ sudo apt install swig libu2f-udev pcscd libpcsclite-dev
+    $ sudo apt install pcscd libpcsclite-dev libudev-dev
 
 ==== Linux (RPM-based distributions)
 
-    # Tested on Fedora 34
-    $ sudo dnf install pcsc-lite-devel python3-devel swig
+    $ sudo dnf install pcsc-lite-devel systemd-devel
+
+==== macOS
+
+No additional system packages required (PC/SC is provided by the OS).
+
+==== Windows
+
+No additional system packages required.
 
 === Install yubikey-manager from source
 
@@ -49,10 +50,10 @@ Run ykman in DEBUG mode:
 
 === Code Style & Security
 
-This project uses https://docs.astral.sh/ruff/[ruff] for code style, and security
-linting.
-https://mypy-lang.org[mypy] and https://github.com/microsoft/pyright[pyright] are
-used for static type checking.
+This project uses https://docs.astral.sh/ruff/[ruff] for Python code style and
+security linting. https://mypy-lang.org[mypy] and
+https://github.com/microsoft/pyright[pyright] are used for static type checking.
+Rust code uses `cargo fmt` and `cargo clippy`.
 These are invoked with a http://pre-commit.com/[pre-commit] hook.
 
 To use these:

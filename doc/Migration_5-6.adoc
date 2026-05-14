@@ -1,0 +1,227 @@
+= Migrating from yubikey-manager 5.x to 6.x
+
+Version 6 is a complete rewrite of yubikey-manager in Rust, with Python bindings
+provided via PyO3. The Python API surface has been preserved where possible, but
+there are breaking changes. This documents migration steps required when using
+this project as a Python library.
+
+== Architecture
+
+In 5.x the entire stack was pure Python: transport layers (PC/SC, HID) were
+thin wrappers around `pyscard`, `fido2`, and platform HID libraries. In 6.x
+the core logic (transport, session management, device enumeration) is
+implemented in Rust and exposed to Python through a native extension module
+and a Python wrapper that adapt the native API to familiar Python idioms.
+
+In 5.x there were two top-level packages, yubikit and ykman. In 6.x only yubikit
+is used, with additional functionality provided to replace that of ykman. The
+ykman CLI tool is now fully written in Rust.
+
+Note: The `yubikey-manager` Python package still exists, but is only a thin wrapper
+around the ykman CLI tool. It does not include any Python library code.
+
+=== Package layout
+
+[cols="1,1"]
+|===
+| 5.x | 6.x
+
+| `pip install yubikey-manager`
+| `pip install yubikit`
+
+| Single package providing both `yubikit` and `ykman`
+| Single package providing `yubikit` only
+
+| Pure Python
+| Rust core + Python wrapper
+|===
+
+== Device enumeration
+
+=== `list_all_devices()`
+
+[cols="1,1"]
+|===
+| 5.x | 6.x
+
+| Returns `list[tuple[YkmanDevice, DeviceInfo]]`
+| Returns `list[YubiKeyDevice]`
+|===
+
+In 5.x, `DeviceInfo` was returned alongside the device. In 6.x, `DeviceInfo`
+is accessed via the `info` property on `YubiKeyDevice` directly.
+
+.5.x
+[source,python]
+----
+from ykman.device import list_all_devices
+
+for device, info in list_all_devices():
+    print(info.serial)
+----
+
+.6.x
+[source,python]
+----
+from yubikit.device import list_all_devices
+
+for device in list_all_devices():
+    print(device.info.serial)
+----
+
+=== `scan_devices()`
+
+Moved from `ykman.device` to `yubikit.device`. Signature unchanged.
+
+.6.x
+[source,python]
+----
+from yubikit.device import scan_devices
+
+pids, state = scan_devices()
+----
+
+=== Import paths
+
+[cols="1,1"]
+|===
+| 5.x | 6.x
+
+| `from ykman.device import list_all_devices, scan_devices`
+| `from yubikit.device import list_all_devices, scan_devices`
+|===
+
+== YubiKeyDevice
+
+In 5.x, the concrete device class was `YkmanDevice` (from `ykman.base`).
+In 6.x, there is a single abstract `YubiKeyDevice` class in
+`yubikit.core.device`.
+
+=== New properties
+
+* `device.info` — `DeviceInfo` (was returned separately from `list_all_devices`)
+* `device.name` — product name string (e.g. "YubiKey 5 NFC")
+* `device.reader_name` — PC/SC reader name, or `None` for USB-only
+
+=== Changed properties
+
+* `device.pid` — returns `PID | None` (was always set in 5.x `YkmanDevice`)
+* `device.fingerprint` — string (was `Hashable` in 5.x, now a stable string
+  derived from the reader name, HID path, or FIDO path)
+
+=== Removed
+
+* `YkmanDevice` class — use `YubiKeyDevice` directly
+* The `(device, info)` tuple pattern — use `device.info`
+* `ykman.base` module — removed entirely
+
+
+== Connections
+
+Connection types and their abstract base classes are unchanged:
+
+* `yubikit.core.smartcard.SmartCardConnection`
+* `yubikit.core.otp.OtpConnection`
+* `yubikit.core.fido.FidoConnection`
+
+Opening connections still uses `device.open_connection(ConnectionType)`:
+
+[source,python]
+----
+with device.open_connection(SmartCardConnection) as conn:
+    session = PivSession(conn)
+----
+
+=== Transport implementations
+
+In 5.x, platform-specific Python modules in `ykman/hid/` and `ykman/pcsc/`
+implemented the transports. In 6.x, all transports are implemented in Rust.
+The `ykman.hid` and `ykman.pcsc` Python modules no longer exist.
+
+If you were using low-level transport functions directly (e.g.
+`list_otp_devices()`, `list_ctap_devices()`, `open_device()`), use
+`list_all_devices()` instead and filter by `device.supports_connection()`.
+
+
+== Sessions
+
+Session classes (e.g. `OathSession`, `PivSession`, `ManagementSession`) retain
+the same constructor pattern: pass a connection.
+
+[source,python]
+----
+from yubikit.piv import PivSession
+from yubikit.core.smartcard import SmartCardConnection
+
+with device.open_connection(SmartCardConnection) as conn:
+    piv = PivSession(conn)
+----
+
+NOTE: Session classes are now backed by Rust implementations via PyO3.
+The Python-visible API is the same, but internal implementation details
+(private attributes, monkey-patching) will no longer work.
+
+
+== Core types
+
+Types in `yubikit.core` are largely unchanged:
+
+* `Version`, `TRANSPORT`, `USB_INTERFACE`, `PID`, `CAPABILITY` — same API
+* `Tlv` — encoding/decoding is now backed by Rust (`_yubikit_native.core`)
+* `int2bytes()`, `bytes2int()` — backed by Rust
+
+=== Removed
+
+* `require_version()` — removed; version checks are now internal to sessions
+* `CommandError`, `BadResponseError` — replaced by native exceptions
+
+
+== Dependencies
+
+=== Removed Python dependencies
+
+The following Python packages are no longer required:
+
+* `pyscard` / `smartcard` — replaced by Rust PC/SC
+* `fido2` — replaced by Rust CTAP implementation
+* `cryptography` — still required for some Python-side crypto (SCP, etc.)
+* `keyring` — removed
+* `platformdirs` — replaced by Rust app data handling
+
+=== New build dependency
+
+Building from source requires Rust (stable) and `maturin`. The latter is handled by uv:
+
+    $ uv sync
+
+
+== Removed modules and APIs
+
+[cols="1,1"]
+|===
+| Removed | Replacement
+
+| `ykman.base`
+| `yubikit.core.device`
+
+| `ykman.device.list_all_devices()`
+| `yubikit.device.list_all_devices()`
+
+| `ykman.device.scan_devices()`
+| `yubikit.device.scan_devices()`
+
+| `ykman.hid` (all platform backends)
+| Native Rust HID (transparent)
+
+| `ykman.pcsc`
+| Native Rust PC/SC (transparent)
+
+| `ykman.util`
+| Functionality moved to Rust core
+
+| `yubikit.support.read_info()`
+| Use `device.info` instead
+
+| `yubikit.support.get_name()`
+| Use `device.name` instead
+|===
