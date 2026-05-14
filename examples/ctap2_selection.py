@@ -91,8 +91,8 @@ def main() -> None:
         print("No YubiKeys found.")
         return
 
-    for dev, info in devices:
-        print(f"Found YubiKey: {info.serial or 'Unknown serial'}")
+    for dev in devices:
+        print(f"Found YubiKey: {dev.info.serial or 'Unknown serial'}")
 
         conn: FidoConnection | SmartCardConnection
         transport: str

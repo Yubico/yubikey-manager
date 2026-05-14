@@ -80,8 +80,8 @@ def main() -> None:
         print("No YubiKeys found.")
         return
 
-    dev, info = devices[0]
-    print(f"Using: {info.serial or 'Unknown serial'}")
+    dev = devices[0]
+    print(f"Using: {dev.info.serial or 'Unknown serial'}")
 
     pin = getpass.getpass("  Enter PIN: ")
 

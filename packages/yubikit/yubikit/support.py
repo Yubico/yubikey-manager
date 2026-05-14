@@ -31,69 +31,12 @@ from typing import cast
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
 
-from _yubikit_native.device import get_name as _get_name_native
-from _yubikit_native.device import read_info as _read_info_native
 from yubikit.core import ApplicationNotAvailableError
 from yubikit.core.smartcard import ApduError, SmartCardConnection
 from yubikit.core.smartcard.scp import KeyRef, Scp11KeyParams
 from yubikit.securitydomain import SecurityDomainSession
 
-from .core import (
-    PID,
-    TRANSPORT,
-    YUBIKEY,
-    Connection,
-)
-from .management import (
-    CAPABILITY,
-    DeviceInfo,
-    _device_info_from_native,
-)
-
 logger = logging.getLogger(__name__)
-
-
-_BASE_NEO_APPS = CAPABILITY.OTP | CAPABILITY.OATH | CAPABILITY.PIV | CAPABILITY.OPENPGP
-
-
-def read_info(conn: Connection, pid: PID | None = None) -> DeviceInfo:
-    """Reads out DeviceInfo from a YubiKey, or attempts to synthesize the data.
-
-    Reading DeviceInfo from a ManagementSession is only supported for newer YubiKeys.
-    This function attempts to read that information, but will fall back to gathering the
-    data using other mechanisms if needed. It will also make adjustments to the data if
-    required, for example to "fix" known bad values.
-
-    The *pid* parameter must be provided whenever the YubiKey is connected via USB.
-
-    :param conn: A connection to a YubiKey.
-    :param pid: The USB Product ID.
-    """
-
-    logger.debug(f"Attempting to read device info, using {type(conn).__name__}")
-
-    d = _read_info_native(conn)
-    return _device_info_from_native(d)
-
-
-def get_name(info: DeviceInfo, key_type: YUBIKEY | None) -> str:
-    """Determine the product name of a YubiKey
-
-    :param info: The device info.
-    :param key_type: The YubiKey hardware platform.
-    """
-    return _get_name_native(
-        version=(info.version[0], info.version[1], info.version[2]),
-        form_factor=int(info.form_factor),
-        is_sky=info.is_sky,
-        is_fips=info.is_fips,
-        pin_complexity=info.pin_complexity,
-        serial=info.serial,
-        usb_supported=int(
-            info.supported_capabilities.get(TRANSPORT.USB, CAPABILITY(0))
-        ),
-        has_nfc=info.has_transport(TRANSPORT.NFC),
-    )
 
 
 def find_scp11_params(

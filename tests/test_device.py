@@ -1,6 +1,7 @@
 from dataclasses import replace
 from typing import cast
 
+from _yubikit_native.device import get_name as _get_name_native
 from yubikit.core import TRANSPORT, YUBIKEY
 from yubikit.management import (
     CAPABILITY,
@@ -9,7 +10,27 @@ from yubikit.management import (
     DeviceInfo,
     Version,
 )
-from yubikit.support import get_name
+
+
+def get_name(info: DeviceInfo, key_type: YUBIKEY | None) -> str:
+    """Determine the product name of a YubiKey
+
+    :param info: The device info.
+    :param key_type: The YubiKey hardware platform.
+    """
+    return _get_name_native(
+        version=(info.version[0], info.version[1], info.version[2]),
+        form_factor=int(info.form_factor),
+        is_sky=info.is_sky,
+        is_fips=info.is_fips,
+        pin_complexity=info.pin_complexity,
+        serial=info.serial,
+        usb_supported=int(
+            info.supported_capabilities.get(TRANSPORT.USB, CAPABILITY(0))
+        ),
+        has_nfc=info.has_transport(TRANSPORT.NFC),
+    )
+
 
 DEFAULT_INFO = DeviceInfo(
     config=cast(DeviceConfig, None),

@@ -16,7 +16,7 @@ from . import condition
 
 
 @pytest.fixture(scope="session")
-def _device(pytestconfig):
+def device(pytestconfig):
     serial = pytestconfig.getoption("device")
     no_serial = pytestconfig.getoption("no_serial")
     if not serial:
@@ -27,25 +27,20 @@ def _device(pytestconfig):
 
     devices = list_all_devices()
     if serial is not None:
-        devices = [(d, i) for d, i in devices if i.serial == serial]
+        devices = [d for d in devices if d.info.serial == serial]
     if len(devices) != 1:
-        pytest.exit(f"Expected a single device (serial={serial}), found {len(devices)}")
-    dev, info = devices[0]
+        pytest.exit(f"Expected a single device (serial={serial})")
+    dev = devices[0]
 
-    if info.version_qualifier.type != RELEASE_TYPE.FINAL:
-        _override_version(info.version)
+    if dev.info.version_qualifier.type != RELEASE_TYPE.FINAL:
+        _override_version(dev.info.version)
 
-    return dev, info
-
-
-@pytest.fixture(scope="session")
-def device(_device):
-    return _device[0]
+    return dev
 
 
 @pytest.fixture(scope="session")
-def info(_device):
-    return _device[1]
+def info(device):
+    return device.info
 
 
 @pytest.fixture(scope="session")

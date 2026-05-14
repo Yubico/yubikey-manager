@@ -35,27 +35,25 @@ import logging
 from threading import Event
 from typing import Callable, Iterable, Iterator, Mapping, TypeAlias
 
-from _yubikit_native.device import NativeYubiKeyDevice as _NativeYubiKeyDeviceInfo
+from _yubikit_native.device import NativeYubiKeyDevice as _NativeYubiKeyDevice
 from _yubikit_native.device import list_devices as _native_list_devices
 from _yubikit_native.device import scan_devices as _native_scan_devices
 from _yubikit_native.hid import FidoConnection as _NativeFidoHidConnection
 from _yubikit_native.hid import OtpConnection as _NativeOtpConnectionImpl
-from _yubikit_native.pcsc import PcscConnection
+from _yubikit_native.pcsc import PcscConnection as _NativePcscConnection
 from _yubikit_native.pcsc import list_readers as _native_list_readers
 from yubikit.core import (
     PID,
-    REINSERT_STATUS,
     TRANSPORT,
     CancelledException,
     Connection,
-    YubiKeyDevice,
 )
+from yubikit.core.device import REINSERT_STATUS, YubiKeyDevice
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.logging import LOG_LEVEL
-from yubikit.management import DeviceInfo
-from yubikit.support import read_info  # noqa: F401 - re-exported
+from yubikit.management import DeviceInfo, _device_info_from_native
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +61,7 @@ logger = logging.getLogger(__name__)
 # --- Connection implementations ---
 
 
-class _NativeFidoConnection(FidoConnection):
+class _WrappedFidoConnection(FidoConnection):
     """FIDO connection backed by the native Rust CTAP HID transport."""
 
     def __init__(self, path: str, pid: int):
@@ -93,14 +91,14 @@ class _NativeFidoConnection(FidoConnection):
         self._native.close()
 
     @classmethod
-    def list_devices(cls) -> Iterator[_NativeFidoConnection]:
+    def list_devices(cls) -> Iterator[_WrappedFidoConnection]:
         from _yubikit_native.hid import list_fido_devices as _native_list_fido_devices
 
         for dev in _native_list_fido_devices():
             yield cls(dev.path, dev.pid)
 
 
-class _NativeOtpConnection(OtpConnection):
+class _WrappedOtpConnection(OtpConnection):
     """OTP connection backed by the Rust HID implementation."""
 
     def __init__(self, path: str):
@@ -123,12 +121,10 @@ class _NativeOtpConnection(OtpConnection):
 YK_READER_NAME = "yubico yubikey"
 
 
-class _NativeSmartCardConnection(SmartCardConnection):
+class _WrappedSmartCardConnection(SmartCardConnection):
     def __init__(self, reader_name):
-        self._native = PcscConnection.open(reader_name)
-        self._transport = (
-            TRANSPORT.USB if self._native.transport == "usb" else TRANSPORT.NFC
-        )
+        self._native = _NativePcscConnection.open(reader_name)
+        self._transport = TRANSPORT(self._native.transport)
 
     @property
     def transport(self):
@@ -190,19 +186,17 @@ def scan_devices() -> tuple[Mapping[PID, int], int]:
     return merged, state
 
 
-class _NativeYubiKeyDevice(YubiKeyDevice):
+class _WrappedYubiKeyDevice(YubiKeyDevice):
     """YubiKey device backed by native Rust enumeration."""
 
-    def __init__(self, native_dev: _NativeYubiKeyDeviceInfo, info: DeviceInfo):
+    def __init__(self, native_dev: _NativeYubiKeyDevice):
         self._pid = PID(native_dev.pid) if native_dev.pid else None
         self._fingerprint = (
             native_dev.reader_name or native_dev.hid_path or native_dev.fido_path or ""
         )
-        self._transport = (
-            TRANSPORT.NFC if native_dev.transport == "nfc" else TRANSPORT.USB
-        )
+        self._transport = TRANSPORT(native_dev.transport)
+        self._info = _device_info_from_native(native_dev.info())
         self._native = native_dev
-        self._info = info
 
     @property
     def transport(self) -> TRANSPORT:
@@ -211,6 +205,14 @@ class _NativeYubiKeyDevice(YubiKeyDevice):
     @property
     def pid(self) -> PID | None:
         return self._pid
+
+    @property
+    def name(self) -> str:
+        return self._native.name
+
+    @property
+    def info(self) -> DeviceInfo:
+        return self._info
 
     @property
     def fingerprint(self) -> str:
@@ -234,15 +236,15 @@ class _NativeYubiKeyDevice(YubiKeyDevice):
         if issubclass(connection_type, SmartCardConnection):
             reader = self._native.reader_name
             if reader is not None:
-                return _NativeSmartCardConnection(reader)
+                return _WrappedSmartCardConnection(reader)
         if issubclass(connection_type, FidoConnection):
             fido_path = self._native.fido_path
             if fido_path is not None and self.pid is not None:
-                return _NativeFidoConnection(fido_path, self.pid)
+                return _WrappedFidoConnection(fido_path, self.pid)
         if issubclass(connection_type, OtpConnection):
             hid_path = self._native.hid_path
             if hid_path is not None:
-                return _NativeOtpConnection(hid_path)
+                return _WrappedOtpConnection(hid_path)
         raise ValueError(f"Unsupported connection type: {connection_type}")
 
     def reinsert(
@@ -270,16 +272,9 @@ class _NativeYubiKeyDevice(YubiKeyDevice):
             raise
 
 
-def _device_info_from_native_dev(native_dev: _NativeYubiKeyDeviceInfo) -> DeviceInfo:
-    """Convert a native device's info dict to a DeviceInfo."""
-    from yubikit.management import _device_info_from_native
-
-    return _device_info_from_native(native_dev.info())
-
-
 def list_all_devices(
     connection_types: Iterable[_T_CONNECTION] = _DEFAULT_CONNECTION_TYPES,
-) -> list[tuple[YubiKeyDevice, DeviceInfo]]:
+) -> list[YubiKeyDevice]:
     """Connect to all attached YubiKeys and read device info from them.
 
     :param connection_types: An iterable of YubiKey connection types.
@@ -293,8 +288,7 @@ def list_all_devices(
     if not transports:
         return []
 
-    results: list[tuple[YubiKeyDevice, DeviceInfo]] = []
+    results: list[YubiKeyDevice] = []
     for native_dev in _native_list_devices(transports):
-        info = _device_info_from_native_dev(native_dev)
-        results.append((_NativeYubiKeyDevice(native_dev, info), info))
+        results.append(_WrappedYubiKeyDevice(native_dev))
     return results

@@ -85,8 +85,8 @@ def open_client() -> WebAuthnClient:
         print("No YubiKeys found.", file=sys.stderr)
         sys.exit(1)
 
-    dev, info = devices[0]
-    print(f"Using: {info.serial or 'Unknown serial'}")
+    dev = devices[0]
+    print(f"Using: {dev.info.serial or 'Unknown serial'}")
 
     conn: FidoConnection | SmartCardConnection
     if dev.supports_connection(FidoConnection):  # type: ignore[arg-type]

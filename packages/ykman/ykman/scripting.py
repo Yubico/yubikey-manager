@@ -29,13 +29,13 @@
 from time import sleep
 from typing import Generator
 
-from yubikit.core import TRANSPORT, YubiKeyDevice
+from yubikit.core import TRANSPORT
+from yubikit.core.device import YubiKeyDevice
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.device import list_all_devices, scan_devices
 from yubikit.management import DeviceInfo
-from yubikit.support import get_name, read_info
 
 """
 Various helpers intended to simplify scripting.
@@ -64,25 +64,23 @@ class ScriptingDevice:
     This wrapper adds some helpful utility methods useful for scripting.
     """
 
-    def __init__(self, wrapped, info):
+    def __init__(self, wrapped):
         self._wrapped = wrapped
-        self._info = info
-        self._name = get_name(info, self.pid.yubikey_type if self.pid else None)
 
     def __getattr__(self, attr):
         return getattr(self._wrapped, attr)
 
     def __str__(self):
-        serial = self._info.serial
-        return f"{self._name} ({serial})" if serial else self._name
+        serial = self.info.serial
+        return f"{self.name} ({serial})" if serial else self.name
 
     @property
     def info(self) -> DeviceInfo:
-        return self._info
+        return self._wrapped.info
 
     @property
     def name(self) -> str:
-        return self._name
+        return self._wrapped.name
 
     def reinsert(self, reinsert_cb=None, event=None):
         self._wrapped.reinsert(reinsert_cb=reinsert_cb, event=event)
@@ -119,7 +117,7 @@ def single(*, prompt=True) -> ScriptingDevice:
         n_devs = sum(pids.values())
     devs = list_all_devices()
     if len(devs) == 1:
-        return ScriptingDevice(*devs[0])
+        return ScriptingDevice(devs[0])
     raise ValueError("Failed to get single YubiKey")
 
 
@@ -152,11 +150,11 @@ def multi(
             serials = set()
             if len(pids) == 0 and None in handled_serials:
                 handled_serials.remove(None)  # Allow one key without serial at a time
-            for device, info in list_all_devices():
-                serials.add(info.serial)
-                if info.serial not in handled_serials:
-                    handled_serials.add(info.serial)
-                    yield ScriptingDevice(device, info)
+            for device in list_all_devices():
+                serials.add(device.info.serial)
+                if device.info.serial not in handled_serials:
+                    handled_serials.add(device.info.serial)
+                    yield ScriptingDevice(device)
             if not ignore_duplicates:  # Reset handled serials to currently connected
                 handled_serials = serials
         else:
@@ -169,7 +167,7 @@ def multi(
 def _get_reader(reader) -> YubiKeyDevice:
     readers = [
         d
-        for d, _info in list_all_devices([SmartCardConnection])
+        for d in list_all_devices([SmartCardConnection])
         if d.transport == TRANSPORT.NFC
     ]
     if reader:
@@ -192,9 +190,7 @@ def single_nfc(reader="", *, prompt=True) -> ScriptingDevice:
     device = _get_reader(reader)
     while True:
         try:
-            with device.open_connection(SmartCardConnection) as connection:
-                info = read_info(connection)
-            return ScriptingDevice(device, info)
+            return ScriptingDevice(device)
         except OSError:
             if prompt:
                 print("Place YubiKey on NFC reader...")
@@ -218,9 +214,8 @@ def multi_nfc(
     prompted = False
 
     try:
-        with device.open_connection(SmartCardConnection) as connection:
-            if not allow_initial:
-                raise ValueError("YubiKey must not be present initially.")
+        if not allow_initial:
+            raise ValueError("YubiKey must not be present initially.")
     except OSError:
         if prompt:
             print("Place YubiKey on NFC reader...")
@@ -231,8 +226,7 @@ def multi_nfc(
     current: int | None = -1
     while True:  # Run this until we stop the script with Ctrl+C
         try:
-            with device.open_connection(SmartCardConnection) as connection:
-                info = read_info(connection)
+            info = device.info
             if info.serial in handled_serials or current == info.serial:
                 if prompt and not prompted:
                     print("Remove YubiKey from NFC reader.")
@@ -241,7 +235,7 @@ def multi_nfc(
                 current = info.serial
                 if ignore_duplicates:
                     handled_serials.add(current)
-                yield ScriptingDevice(device, info)
+                yield ScriptingDevice(device)
                 prompted = False
         except OSError:
             if None in handled_serials:
