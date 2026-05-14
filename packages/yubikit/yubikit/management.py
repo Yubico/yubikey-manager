@@ -376,6 +376,8 @@ class ManagementSession(Session):
         connection: OtpConnection | SmartCardConnection | FidoConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
+        super().__init__(connection)
+
         self._native: (
             _NativeManagementSessionOtp
             | _NativeManagementSessionCcid

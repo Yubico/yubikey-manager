@@ -132,6 +132,7 @@ class HsmAuthSession(Session):
         connection: SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ) -> None:
+        super().__init__(connection)
         native = _NativeHsmAuthSession(connection, scp_key_params)
         self._native = native
         self._version = Version(*native.version)

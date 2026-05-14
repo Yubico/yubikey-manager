@@ -140,6 +140,7 @@ class OathSession(Session):
         connection: SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
+        super().__init__(connection)
         native = _NativeOathSession(connection, scp_key_params)
         self._native = native
         self._version = Version(*native.version)

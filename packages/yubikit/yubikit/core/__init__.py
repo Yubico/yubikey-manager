@@ -123,7 +123,15 @@ class Connection(abc.ABC):
     usb_interface: ClassVar[USB_INTERFACE] = USB_INTERFACE(0)
 
     def close(self) -> None:
-        """Close the device, releasing any held resources."""
+        """Close the device, releasing any held resources.
+
+        If a session is currently using this connection, the session is closed
+        first (which restores the connection to the caller).
+        """
+        session = getattr(self, "_session", None)
+        if session is not None:
+            self._session = None
+            session.close()
 
     def __enter__(self):
         return self
@@ -159,10 +167,25 @@ class Session(Closable):
 
     Provides a default ``close()`` that delegates to the underlying native
     session object stored in ``self._native``.
+
+    Subclasses must call ``super().__init__(connection)`` before
+    creating the native session.
     """
+
+    def __init__(self, connection: Connection):
+        existing = getattr(connection, "_session", None)
+        if existing is not None:
+            existing.close()
+
+        setattr(connection, "_session", self)
+        self._connection: Connection | None = connection
 
     def close(self) -> None:
         """Close the session, restoring the underlying connection."""
+        if self._connection and getattr(self._connection, "_session", None) is self:
+            setattr(self._connection, "_session", None)
+            self._connection = None
+
         self._native.close()  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
 
 

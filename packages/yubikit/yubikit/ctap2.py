@@ -92,6 +92,7 @@ class Ctap2Session(Session):
         connection: SmartCardConnection | FidoConnection,
         scp_key_params: ScpKeyParams | None = None,
     ) -> None:
+        super().__init__(connection)
         if isinstance(connection, SmartCardConnection):
             self._native: _Ctap2SessionCcid | _Ctap2SessionFido = _Ctap2SessionCcid(
                 connection, scp_key_params

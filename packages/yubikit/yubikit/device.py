@@ -88,7 +88,11 @@ class _WrappedFidoConnection(FidoConnection):
         return bytes(self._native.call(cmd, data))
 
     def close(self) -> None:
-        self._native.close()
+        super().close()
+        try:
+            self._native.close()
+        except OSError:
+            pass
 
     @classmethod
     def list_devices(cls) -> Iterator[_WrappedFidoConnection]:
@@ -106,7 +110,11 @@ class _WrappedOtpConnection(OtpConnection):
         self._native = _NativeOtpConnectionImpl(path)
 
     def close(self) -> None:
-        self._native.close()
+        super().close()
+        try:
+            self._native.close()
+        except OSError:
+            pass
 
     def receive(self) -> bytes:
         data = bytes(self._native.get_feature_report())
@@ -131,7 +139,11 @@ class _WrappedSmartCardConnection(SmartCardConnection):
         return self._transport
 
     def close(self):
-        self._native.disconnect()
+        super().close()
+        try:
+            self._native.disconnect()
+        except OSError:
+            pass
 
     def send_and_receive(self, apdu):
         """Sends a command APDU and returns the response data and sw"""

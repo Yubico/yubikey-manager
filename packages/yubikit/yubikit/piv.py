@@ -650,6 +650,7 @@ class PivSession(Session):
         connection: SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
+        super().__init__(connection)
         native = _NativePivSession(connection, scp_key_params)
         self._native = native
         self.connection = connection

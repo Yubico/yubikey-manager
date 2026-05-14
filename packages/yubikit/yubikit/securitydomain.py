@@ -66,6 +66,7 @@ class SecurityDomainSession(Session):
     """
 
     def __init__(self, connection: SmartCardConnection):
+        super().__init__(connection)
         native = _NativeSecurityDomainSession(connection)
         self._native = native
         self._version = Version(*native.version)

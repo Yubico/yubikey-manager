@@ -642,6 +642,7 @@ class YubiOtpSession(Session):
         connection: OtpConnection | SmartCardConnection,
         scp_key_params: ScpKeyParams | None = None,
     ):
+        super().__init__(connection)
         if isinstance(connection, OtpConnection):
             if scp_key_params:
                 raise ValueError("SCP can only be used with SmartCardConnection")
