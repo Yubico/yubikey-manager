@@ -27,6 +27,7 @@
 
 import abc
 import logging
+from datetime import datetime
 from threading import Event
 from typing import Callable
 
@@ -109,3 +110,34 @@ class OtpProtocol(Closable):
         :return: Status bytes (first 3 bytes are the firmware version).
         """
         return bytes(self._native.read_status())
+
+
+def format_csv(
+    serial: int,
+    public_id: bytes,
+    private_id: bytes,
+    key: bytes,
+    access_code: bytes | None = None,
+    timestamp: datetime | None = None,
+) -> str:
+    """Produce a CSV line in the "Yubico" format for YubiCloud validation servers.
+
+    :param serial: The serial number.
+    :param public_id: The public ID.
+    :param private_id: The private ID.
+    :param key: The secret key.
+    :param access_code: The access code, or ``None``.
+    :param timestamp: The timestamp; defaults to the current local time.
+    """
+    ts = timestamp or datetime.now()
+    return ",".join(
+        [
+            str(serial),
+            modhex_encode(public_id),
+            private_id.hex(),
+            key.hex(),
+            access_code.hex() if access_code else "",
+            ts.isoformat(timespec="seconds"),
+            "",  # trailing comma
+        ]
+    )

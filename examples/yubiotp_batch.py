@@ -14,7 +14,7 @@ import struct
 import sys
 
 from ykman import scripting as s
-from ykman.otp import format_csv
+from yubikit.core.otp import format_csv
 from yubikit.yubiotp import SLOT, YubiOtpSession, YubiOtpSlotConfiguration
 
 # csv file out output to, given as an argument
