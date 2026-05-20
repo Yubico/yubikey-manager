@@ -882,7 +882,9 @@ fn read_device_info_from_config<E: fmt::Debug + fmt::Display>(
 ) -> Result<DeviceInfo, ManagementError<E>> {
     let mut tlvs: HashMap<u32, Vec<u8>> = HashMap::new();
     let mut page: u8 = 0;
-    loop {
+    let mut more_data: u8 = 1;
+    while more_data > 0 {
+        more_data -= 1;
         let encoded = read_config(page).map_err(ManagementError::Connection)?;
         if encoded.is_empty() {
             return Err(ManagementError::InvalidData("Empty config response".into()));
@@ -891,17 +893,14 @@ fn read_device_info_from_config<E: fmt::Debug + fmt::Display>(
         if encoded.len() - 1 != expected_len {
             return Err(ManagementError::InvalidData("Invalid length".into()));
         }
-        let page_tlvs = parse_tlv_dict(&encoded[1..])
+        let mut page_tlvs = parse_tlv_dict(&encoded[1..])
             .map_err(|e| ManagementError::InvalidData(e.to_string()))?;
-        let more_data = page_tlvs.get(&TAG_MORE_DATA).is_some_and(|v| v == &[0x01]);
-        for (tag, value) in page_tlvs {
-            if tag != TAG_MORE_DATA {
-                tlvs.insert(tag, value);
-            }
+        if let Some(v) = page_tlvs.remove(&TAG_MORE_DATA)
+            && let Some(&count) = v.last()
+        {
+            more_data = count;
         }
-        if !more_data {
-            break;
-        }
+        tlvs.extend(page_tlvs);
         page += 1;
     }
     DeviceInfo::parse_tlvs(&tlvs, version).map_err(ManagementError::from_parse)
