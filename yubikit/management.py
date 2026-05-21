@@ -645,16 +645,18 @@ class ManagementSession:
         return self._do_read_device_info()
 
     def _do_read_device_info(self) -> DeviceInfo:
-        more_data = True
+        more_data = 1
         tlvs = {}
         page = 0
         while more_data:
+            more_data -= 1
             logger.debug(f"Reading DeviceInfo page: {page}")
             encoded = self.backend.read_config(page)
             if len(encoded) - 1 != encoded[0]:
                 raise BadResponseError("Invalid length")
             data = Tlv.parse_dict(encoded[1:])
-            more_data = data.pop(TAG_MORE_DATA, 0) == b"\1"
+            if TAG_MORE_DATA in data:
+                more_data = int.from_bytes(data.pop(TAG_MORE_DATA), byteorder="big")
             tlvs.update(data)
             page += 1
 
