@@ -54,6 +54,8 @@ windows = { version = "0.61", features = [
 ecdsa = { version = "0.16", features = ["verifying"] }
 elliptic-curve = { version = "0.13", features = ["pkcs8", "sec1"] }
 getrandom = "0.3"
+ml-dsa = "0.1"
+ml-kem = "0.3"
 p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
 rsa = "0.9"
 rstest = "0.25"

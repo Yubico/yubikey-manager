@@ -112,6 +112,10 @@ pub enum Algorithm {
     Ec,
     /// RSA public-key cryptography.
     Rsa,
+    /// ML-DSA post-quantum signature algorithm (requires firmware ≥ 6.0.0).
+    MlDsa,
+    /// ML-KEM post-quantum key-encapsulation algorithm (requires firmware ≥ 6.0.0).
+    MlKem,
 }
 
 impl fmt::Display for Algorithm {
@@ -119,6 +123,8 @@ impl fmt::Display for Algorithm {
         match self {
             Algorithm::Ec => write!(f, "ec"),
             Algorithm::Rsa => write!(f, "rsa"),
+            Algorithm::MlDsa => write!(f, "mldsa"),
+            Algorithm::MlKem => write!(f, "mlkem"),
         }
     }
 }
@@ -147,6 +153,18 @@ pub enum KeyType {
     Ed25519 = 0xE0,
     /// X25519 key-agreement key (requires firmware ≥ 5.7.0).
     X25519 = 0xE1,
+    /// ML-DSA-44 signing key (requires firmware ≥ 6.0.0).
+    MlDsa44 = 0xE2,
+    /// ML-DSA-65 signing key (requires firmware ≥ 6.0.0).
+    MlDsa65 = 0xE3,
+    /// ML-DSA-87 signing key (requires firmware ≥ 6.0.0).
+    MlDsa87 = 0xE4,
+    /// ML-KEM-512 key-encapsulation key (requires firmware ≥ 6.0.0).
+    MlKem512 = 0xE5,
+    /// ML-KEM-768 key-encapsulation key (requires firmware ≥ 6.0.0).
+    MlKem768 = 0xE6,
+    /// ML-KEM-1024 key-encapsulation key (requires firmware ≥ 6.0.0).
+    MlKem1024 = 0xE7,
 }
 
 impl KeyType {
@@ -161,6 +179,12 @@ impl KeyType {
             0x14 => Some(Self::EccP384),
             0xE0 => Some(Self::Ed25519),
             0xE1 => Some(Self::X25519),
+            0xE2 => Some(Self::MlDsa44),
+            0xE3 => Some(Self::MlDsa65),
+            0xE4 => Some(Self::MlDsa87),
+            0xE5 => Some(Self::MlKem512),
+            0xE6 => Some(Self::MlKem768),
+            0xE7 => Some(Self::MlKem1024),
             _ => None,
         }
     }
@@ -169,11 +193,13 @@ impl KeyType {
     pub fn algorithm(self) -> Algorithm {
         match self {
             Self::Rsa1024 | Self::Rsa2048 | Self::Rsa3072 | Self::Rsa4096 => Algorithm::Rsa,
+            Self::MlDsa44 | Self::MlDsa65 | Self::MlDsa87 => Algorithm::MlDsa,
+            Self::MlKem512 | Self::MlKem768 | Self::MlKem1024 => Algorithm::MlKem,
             _ => Algorithm::Ec,
         }
     }
 
-    /// Returns the key size in bits.
+    /// Returns the key size in bits (0 for ML-DSA/ML-KEM key types).
     pub fn bit_len(self) -> u32 {
         match self {
             Self::Rsa1024 => 1024,
@@ -183,6 +209,12 @@ impl KeyType {
             Self::EccP256 => 256,
             Self::EccP384 => 384,
             Self::Ed25519 | Self::X25519 => 256,
+            Self::MlDsa44
+            | Self::MlDsa65
+            | Self::MlDsa87
+            | Self::MlKem512
+            | Self::MlKem768
+            | Self::MlKem1024 => 0,
         }
     }
 
@@ -229,6 +261,12 @@ impl KeyType {
         const ED25519_OID: &[u8] = &[0x2b, 0x65, 0x70];
         // X25519 OID: 1.3.101.110
         const X25519_OID: &[u8] = &[0x2b, 0x65, 0x6e];
+        const ML_DSA_44_OID: &[u8] = OID_ML_DSA_44_BYTES;
+        const ML_DSA_65_OID: &[u8] = OID_ML_DSA_65_BYTES;
+        const ML_DSA_87_OID: &[u8] = OID_ML_DSA_87_BYTES;
+        const ML_KEM_512_OID: &[u8] = OID_ML_KEM_512_BYTES;
+        const ML_KEM_768_OID: &[u8] = OID_ML_KEM_768_BYTES;
+        const ML_KEM_1024_OID: &[u8] = OID_ML_KEM_1024_BYTES;
 
         if oid == RSA_OID {
             // For public keys: BIT STRING containing SEQUENCE { modulus, exponent }
@@ -298,6 +336,18 @@ impl KeyType {
             Ok(Self::Ed25519)
         } else if oid == X25519_OID {
             Ok(Self::X25519)
+        } else if oid == ML_DSA_44_OID {
+            Ok(Self::MlDsa44)
+        } else if oid == ML_DSA_65_OID {
+            Ok(Self::MlDsa65)
+        } else if oid == ML_DSA_87_OID {
+            Ok(Self::MlDsa87)
+        } else if oid == ML_KEM_512_OID {
+            Ok(Self::MlKem512)
+        } else if oid == ML_KEM_768_OID {
+            Ok(Self::MlKem768)
+        } else if oid == ML_KEM_1024_OID {
+            Ok(Self::MlKem1024)
         } else {
             Err(PivError::InvalidData("Unknown key algorithm OID".into()))
         }
@@ -307,7 +357,7 @@ impl KeyType {
     ///
     /// For RSA, returns the PKCS#1 RSAPrivateKey.
     /// For EC, returns the raw secret key scalar bytes.
-    /// For Ed25519/X25519, returns the 32-byte key.
+    /// For Ed25519/X25519/ML-DSA/ML-KEM, returns the raw private key bytes.
     pub fn extract_private_key_from_pkcs8(pkcs8_der: &[u8]) -> Result<Vec<u8>, PivError> {
         // Parse outer SEQUENCE
         let (_, seq_off, seq_len, _) =
@@ -353,7 +403,7 @@ impl KeyType {
                 .map_err(|_| PivError::InvalidData("Invalid EC private key".into()))?;
             Ok(inner[key_off..key_off + key_len].to_vec())
         } else {
-            // Ed25519/X25519: OCTET STRING contains another OCTET STRING wrapping the 32-byte key
+            // Ed25519/X25519/ML-DSA/ML-KEM: OCTET STRING contains another OCTET STRING with key
             let (_, key_off, key_len, _) = tlv_parse(private_key_data, 0)
                 .map_err(|_| PivError::InvalidData("Invalid key OCTET STRING".into()))?;
             Ok(private_key_data[key_off..key_off + key_len].to_vec())
@@ -372,6 +422,12 @@ impl fmt::Display for KeyType {
             Self::EccP384 => write!(f, "ECCP384"),
             Self::Ed25519 => write!(f, "ED25519"),
             Self::X25519 => write!(f, "X25519"),
+            Self::MlDsa44 => write!(f, "MLDSA44"),
+            Self::MlDsa65 => write!(f, "MLDSA65"),
+            Self::MlDsa87 => write!(f, "MLDSA87"),
+            Self::MlKem512 => write!(f, "MLKEM512"),
+            Self::MlKem768 => write!(f, "MLKEM768"),
+            Self::MlKem1024 => write!(f, "MLKEM1024"),
         }
     }
 }
@@ -803,6 +859,7 @@ const TAG_AUTH_WITNESS: u32 = 0x80;
 const TAG_AUTH_CHALLENGE: u32 = 0x81;
 const TAG_AUTH_RESPONSE: u32 = 0x82;
 const TAG_AUTH_EXPONENTIATION: u32 = 0x85;
+const TAG_AUTH_KEM: u32 = 0x86;
 const TAG_GEN_ALGORITHM: u32 = 0x80;
 const TAG_OBJ_DATA: u32 = 0x53;
 const TAG_OBJ_ID: u32 = 0x5C;
@@ -1057,6 +1114,17 @@ pub fn check_key_support(
         KeyType::Rsa3072 | KeyType::Rsa4096 | KeyType::Ed25519 | KeyType::X25519
     ) {
         require_version(version, Version(5, 7, 0), &format!("{key_type:?}"))?;
+    }
+    if matches!(
+        key_type,
+        KeyType::MlDsa44
+            | KeyType::MlDsa65
+            | KeyType::MlDsa87
+            | KeyType::MlKem512
+            | KeyType::MlKem768
+            | KeyType::MlKem1024
+    ) {
+        require_version(version, Version(6, 0, 0), &format!("{key_type:?}"))?;
     }
 
     Ok(())
@@ -1682,7 +1750,8 @@ impl<C: SmartCardConnection> PivSession<C> {
         message: &[u8],
     ) -> Result<Vec<u8>, PivError> {
         log::debug!("Signing with key in slot {:?}", slot);
-        self.use_private_key(slot, key_type, message, false)
+        let message_tlv = tlv_encode(TAG_AUTH_CHALLENGE, message);
+        self.use_private_key(slot, key_type, &message_tlv)
     }
 
     /// Decrypt ciphertext with an RSA private key in a slot.
@@ -1697,11 +1766,13 @@ impl<C: SmartCardConnection> PivSession<C> {
                 return Err(PivError::InvalidData("Invalid length of ciphertext".into()));
             }
         };
-        self.use_private_key(slot, key_type, cipher_text, false)
+        let message_tlv = tlv_encode(TAG_AUTH_CHALLENGE, cipher_text);
+        self.use_private_key(slot, key_type, &message_tlv)
     }
 
-    /// Calculate shared secret using ECDH.
-    /// `peer_public_key` should be the uncompressed EC point (X9.62) or raw X25519 bytes.
+    /// Calculate shared secret using ECDH (EC/X25519) or ML-KEM decapsulation.
+    /// For EC: `peer_public_key` should be the uncompressed EC point (X9.62) or raw X25519 bytes.
+    /// For ML-KEM: `peer_public_key` should be the ML-KEM ciphertext.
     pub fn calculate_secret(
         &mut self,
         slot: Slot,
@@ -1709,10 +1780,16 @@ impl<C: SmartCardConnection> PivSession<C> {
         peer_public_key: &[u8],
     ) -> Result<Vec<u8>, PivError> {
         log::debug!("Calculating shared secret with slot {:?}", slot);
-        if key_type.algorithm() != Algorithm::Ec {
-            return Err(PivError::InvalidData("Unsupported key type".into()));
-        }
-        self.use_private_key(slot, key_type, peer_public_key, true)
+        let message_tlv = match key_type.algorithm() {
+            Algorithm::Ec => tlv_encode(TAG_AUTH_EXPONENTIATION, peer_public_key),
+            Algorithm::MlKem => tlv_encode(TAG_AUTH_KEM, peer_public_key),
+            _ => {
+                return Err(PivError::InvalidData(
+                    "Unsupported key type for key agreement".into(),
+                ));
+            }
+        };
+        self.use_private_key(slot, key_type, &message_tlv)
     }
 
     // -----------------------------------------------------------------------
@@ -2036,17 +2113,10 @@ impl<C: SmartCardConnection> PivSession<C> {
         &mut self,
         slot: Slot,
         key_type: KeyType,
-        message: &[u8],
-        exponentiation: bool,
+        message_tlv: &[u8],
     ) -> Result<Vec<u8>, PivError> {
-        let tag = if exponentiation {
-            TAG_AUTH_EXPONENTIATION
-        } else {
-            TAG_AUTH_CHALLENGE
-        };
-
         let mut inner = tlv_encode(TAG_AUTH_RESPONSE, &[]);
-        inner.extend_from_slice(&tlv_encode(tag, message));
+        inner.extend_from_slice(message_tlv);
         let request = tlv_encode(TAG_DYN_AUTH, &inner);
 
         match self
@@ -2103,6 +2173,8 @@ fn build_put_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivE
             }
             Ok(tlv_encode(0x08, key_der))
         }
+        KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => Ok(tlv_encode(0x09, key_der)),
+        KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => Ok(tlv_encode(0x0A, key_der)),
     }
 }
 
@@ -2260,6 +2332,18 @@ const OID_CURVE_P384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0
 const OID_RSA_ENCRYPTION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1");
 const OID_ED25519_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
 const OID_X25519_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.110");
+const OID_ML_DSA_44: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.17");
+const OID_ML_DSA_65: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.18");
+const OID_ML_DSA_87: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.19");
+const OID_ML_KEM_512: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.4.1");
+const OID_ML_KEM_768: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.4.2");
+const OID_ML_KEM_1024: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.4.3");
+const OID_ML_DSA_44_BYTES: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x11];
+const OID_ML_DSA_65_BYTES: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12];
+const OID_ML_DSA_87_BYTES: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x13];
+const OID_ML_KEM_512_BYTES: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x01];
+const OID_ML_KEM_768_BYTES: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x02];
+const OID_ML_KEM_1024_BYTES: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x03];
 
 /// Parse a single TLV from PIV device-encoded public key data.
 fn parse_device_tlv(data: &[u8], offset: usize) -> Result<(u8, Vec<u8>, usize), PivError> {
@@ -2304,6 +2388,8 @@ fn parse_device_tlv(data: &[u8], offset: usize) -> Result<(u8, Vec<u8>, usize), 
 /// - EC keys: `86 <len> <uncompressed_point>`
 /// - RSA keys: `81 <len> <modulus> 82 <len> <exponent>`
 /// - Ed25519/X25519: `86 <len> <32_bytes>`
+/// - ML-DSA: `87 <len> <raw_public_key>`
+/// - ML-KEM: `88 <len> <raw_public_key>`
 fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u8>, PivError> {
     let spki = match key_type {
         KeyType::EccP256 | KeyType::EccP384 => {
@@ -2407,6 +2493,52 @@ fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u
                 algorithm: algo,
                 subject_public_key: BitString::from_bytes(&raw_key).map_err(|e| {
                     PivError::InvalidData(format!("Failed to encode X25519 key: {e}"))
+                })?,
+            }
+        }
+        KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => {
+            let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
+            if tag != 0x87 {
+                return Err(PivError::InvalidData(format!(
+                    "Expected tag 0x87 for ML-DSA key, got 0x{tag:02X}"
+                )));
+            }
+            let algo = AlgorithmIdentifierOwned {
+                oid: match key_type {
+                    KeyType::MlDsa44 => OID_ML_DSA_44,
+                    KeyType::MlDsa65 => OID_ML_DSA_65,
+                    KeyType::MlDsa87 => OID_ML_DSA_87,
+                    _ => unreachable!(),
+                },
+                parameters: None,
+            };
+            SubjectPublicKeyInfoOwned {
+                algorithm: algo,
+                subject_public_key: BitString::from_bytes(&raw_key).map_err(|e| {
+                    PivError::InvalidData(format!("Failed to encode ML-DSA key: {e}"))
+                })?,
+            }
+        }
+        KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
+            let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
+            if tag != 0x88 {
+                return Err(PivError::InvalidData(format!(
+                    "Expected tag 0x88 for ML-KEM key, got 0x{tag:02X}"
+                )));
+            }
+            let algo = AlgorithmIdentifierOwned {
+                oid: match key_type {
+                    KeyType::MlKem512 => OID_ML_KEM_512,
+                    KeyType::MlKem768 => OID_ML_KEM_768,
+                    KeyType::MlKem1024 => OID_ML_KEM_1024,
+                    _ => unreachable!(),
+                },
+                parameters: None,
+            };
+            SubjectPublicKeyInfoOwned {
+                algorithm: algo,
+                subject_public_key: BitString::from_bytes(&raw_key).map_err(|e| {
+                    PivError::InvalidData(format!("Failed to encode ML-KEM key: {e}"))
                 })?,
             }
         }
@@ -2542,7 +2674,12 @@ impl<C: SmartCardConnection> DynSignatureAlgorithmIdentifier for PivSigner<'_, C
                 (oid, Some(der::Any::from(der::asn1::Null)))
             }
             KeyType::Ed25519 => (OID_ED25519_SIG, None),
-            KeyType::X25519 => return Err(spki::Error::KeyMalformed),
+            KeyType::MlDsa44 => (OID_ML_DSA_44, None),
+            KeyType::MlDsa65 => (OID_ML_DSA_65, None),
+            KeyType::MlDsa87 => (OID_ML_DSA_87, None),
+            KeyType::X25519 | KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
+                return Err(spki::Error::KeyMalformed);
+            }
         };
         Ok(AlgorithmIdentifierOwned {
             oid,
@@ -2561,7 +2698,10 @@ impl<C: SmartCardConnection> signature::Signer<PivSignature> for PivSigner<'_, C
                 pkcs1v15_pad(self.hash_alg, &hash, key_byte_len)
             }
             KeyType::Ed25519 => msg.to_vec(),
-            KeyType::X25519 => return Err(signature::Error::new()),
+            KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => msg.to_vec(),
+            KeyType::X25519 | KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
+                return Err(signature::Error::new());
+            }
         };
 
         let mut session = self.session.borrow_mut();
@@ -2850,6 +2990,95 @@ mod tests {
                 false
             )
             .is_err()
+        );
+    }
+    #[test]
+    fn test_ml_key_types_round_trip_and_support() {
+        assert_eq!(KeyType::from_u8(0xE2), Some(KeyType::MlDsa44));
+        assert_eq!(KeyType::from_u8(0xE7), Some(KeyType::MlKem1024));
+        assert_eq!(KeyType::MlDsa44.algorithm(), Algorithm::MlDsa);
+        assert_eq!(KeyType::MlKem768.algorithm(), Algorithm::MlKem);
+        assert_eq!(KeyType::MlDsa65.bit_len(), 0);
+        assert_eq!(KeyType::MlKem512.bit_len(), 0);
+        assert_eq!(format!("{}", KeyType::MlKem1024), "MLKEM1024");
+        assert!(
+            check_key_support(
+                Version(5, 9, 9),
+                KeyType::MlDsa44,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_err()
+        );
+        assert!(
+            check_key_support(
+                Version(6, 0, 0),
+                KeyType::MlKem768,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_ml_public_key_der_detection_and_spki() {
+        let ml_dsa_spki = device_pubkey_to_spki(KeyType::MlDsa44, &tlv_encode(0x87, &[0xAA; 16]))
+            .expect("encode ML-DSA SPKI");
+        assert_eq!(
+            KeyType::from_public_key_der(&ml_dsa_spki).expect("detect ML-DSA public key"),
+            KeyType::MlDsa44
+        );
+
+        let ml_kem_spki = device_pubkey_to_spki(KeyType::MlKem768, &tlv_encode(0x88, &[0xBB; 24]))
+            .expect("encode ML-KEM SPKI");
+        assert_eq!(
+            KeyType::from_public_key_der(&ml_kem_spki).expect("detect ML-KEM public key"),
+            KeyType::MlKem768
+        );
+    }
+
+    #[test]
+    fn test_ml_private_key_der_detection_and_extraction() {
+        fn pkcs8_der(oid: &[u8], raw_key: &[u8]) -> Vec<u8> {
+            let mut algorithm_identifier = Vec::new();
+            algorithm_identifier.extend_from_slice(&tlv_encode(0x06, oid));
+            let algorithm_identifier = tlv_encode(0x30, &algorithm_identifier);
+
+            let inner_key = tlv_encode(0x04, raw_key);
+            let private_key = tlv_encode(0x04, &inner_key);
+
+            let mut pkcs8 = Vec::new();
+            pkcs8.extend_from_slice(&tlv_encode(0x02, &[0x00]));
+            pkcs8.extend_from_slice(&algorithm_identifier);
+            pkcs8.extend_from_slice(&private_key);
+            tlv_encode(0x30, &pkcs8)
+        }
+
+        let ml_dsa_key = vec![0x11; 32];
+        let ml_dsa_pkcs8 = pkcs8_der(OID_ML_DSA_65_BYTES, &ml_dsa_key);
+        assert_eq!(
+            KeyType::from_private_key_der(&ml_dsa_pkcs8).expect("detect ML-DSA private key"),
+            KeyType::MlDsa65
+        );
+        assert_eq!(
+            KeyType::extract_private_key_from_pkcs8(&ml_dsa_pkcs8).expect("extract ML-DSA key"),
+            ml_dsa_key
+        );
+
+        let ml_kem_key = vec![0x22; 48];
+        let ml_kem_pkcs8 = pkcs8_der(OID_ML_KEM_1024_BYTES, &ml_kem_key);
+        assert_eq!(
+            KeyType::from_private_key_der(&ml_kem_pkcs8).expect("detect ML-KEM private key"),
+            KeyType::MlKem1024
+        );
+        assert_eq!(
+            KeyType::extract_private_key_from_pkcs8(&ml_kem_pkcs8).expect("extract ML-KEM key"),
+            ml_kem_key
         );
     }
 }

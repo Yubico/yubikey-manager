@@ -1458,6 +1458,10 @@ fn check_key_match<C: yubikit::smartcard::SmartCardConnection>(
         KeyType::X25519 => {
             return Err(CliError("X25519 keys cannot be used for signing.".into()));
         }
+        KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => test_message.to_vec(),
+        KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
+            return Err(CliError("ML-KEM keys cannot be used for signing.".into()));
+        }
     };
 
     let signature = verify_pin_if_needed(session, pin, |s| s.sign(slot, key_type, &to_sign))?;

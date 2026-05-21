@@ -1009,6 +1009,172 @@ mod piv {
         );
         eprintln!("  PASS {tc:?}");
     }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_piv_generate_mldsa44(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_version!(Version(6, 0, 0));
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .expect("authenticate");
+
+        let spki_der = session
+            .generate_key(
+                Slot::Authentication,
+                KeyType::MlDsa44,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+            )
+            .expect("generate_key MlDsa44");
+        assert!(!spki_der.is_empty());
+        assert_eq!(
+            KeyType::from_public_key_der(&spki_der).expect("detect ML-DSA key type"),
+            KeyType::MlDsa44
+        );
+
+        session.verify_pin("123456").expect("verify PIN");
+        let sig = session
+            .sign(Slot::Authentication, KeyType::MlDsa44, b"test message")
+            .expect("sign MlDsa44");
+        assert!(!sig.is_empty());
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_piv_generate_mlkem768(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_version!(Version(6, 0, 0));
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .expect("authenticate");
+
+        let spki_der = session
+            .generate_key(
+                Slot::KeyManagement,
+                KeyType::MlKem768,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+            )
+            .expect("generate_key MlKem768");
+        assert!(!spki_der.is_empty());
+        assert_eq!(
+            KeyType::from_public_key_der(&spki_der).expect("detect ML-KEM key type"),
+            KeyType::MlKem768
+        );
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_piv_mldsa44_verify(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_version!(Version(6, 0, 0));
+        require_capability!(Capability::PIV);
+
+        use ml_dsa::{MlDsa44, Signature, VerifyingKey, common::KeyInit, signature::Verifier};
+        use x509_cert::der::Decode;
+        use x509_cert::spki::SubjectPublicKeyInfoRef;
+
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .expect("authenticate");
+
+        let spki_der = session
+            .generate_key(
+                Slot::Authentication,
+                KeyType::MlDsa44,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+            )
+            .expect("generate_key MlDsa44");
+
+        let msg = b"test message for ml-dsa44 verification";
+        session.verify_pin("123456").expect("verify PIN");
+        let sig_bytes = session
+            .sign(Slot::Authentication, KeyType::MlDsa44, msg)
+            .expect("sign");
+
+        // Extract raw public key bytes from SPKI
+        let spki = SubjectPublicKeyInfoRef::from_der(&spki_der).expect("parse SPKI");
+        let raw_key = spki.subject_public_key.raw_bytes();
+
+        // Parse with ml-dsa and verify
+        let vk_bytes: &[u8; 1312] = raw_key
+            .try_into()
+            .expect("ML-DSA-44 public key must be 1312 bytes");
+        let vk = VerifyingKey::<MlDsa44>::new(vk_bytes.into());
+        let sig = Signature::<MlDsa44>::try_from(sig_bytes.as_slice()).expect("parse signature");
+        vk.verify(msg, &sig).expect("signature verification failed");
+
+        eprintln!("  PASS {tc:?}");
+    }
+
+    #[rstest]
+    #[case(TestConnection::UsbSmartCard)]
+    fn test_piv_mlkem768_decapsulate(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_version!(Version(6, 0, 0));
+        require_capability!(Capability::PIV);
+
+        use ml_kem::EncapsulationKey768;
+        use x509_cert::der::Decode;
+        use x509_cert::spki::SubjectPublicKeyInfoRef;
+
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .expect("authenticate");
+
+        let spki_der = session
+            .generate_key(
+                Slot::KeyManagement,
+                KeyType::MlKem768,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+            )
+            .expect("generate_key MlKem768");
+
+        // Extract raw encapsulation key bytes from SPKI
+        let spki = SubjectPublicKeyInfoRef::from_der(&spki_der).expect("parse SPKI");
+        let raw_key = spki.subject_public_key.raw_bytes();
+
+        // Parse encapsulation key and encapsulate with random seed
+        let ek_bytes: &[u8; 1184] = raw_key
+            .try_into()
+            .expect("ML-KEM-768 public key must be 1184 bytes");
+        let ek = EncapsulationKey768::new(ek_bytes.into()).expect("parse encapsulation key");
+        let mut m = [0u8; 32];
+        getrandom::fill(&mut m).expect("getrandom");
+        let (ciphertext, host_shared_secret) = ek.encapsulate_deterministic(&m.into());
+
+        // Device decapsulates and returns shared secret
+        session.verify_pin("123456").expect("verify PIN");
+        let device_shared_secret = session
+            .calculate_secret(
+                Slot::KeyManagement,
+                KeyType::MlKem768,
+                ciphertext.as_slice(),
+            )
+            .expect("calculate_secret");
+
+        assert_eq!(
+            device_shared_secret.as_slice(),
+            host_shared_secret.as_slice(),
+            "Shared secrets must match"
+        );
+        eprintln!("  PASS {tc:?}");
+    }
 }
 
 // ───────────────────────── OpenPGP ─────────────────────────
