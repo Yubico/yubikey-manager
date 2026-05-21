@@ -656,7 +656,7 @@ class ManagementSession:
                 raise BadResponseError("Invalid length")
             data = Tlv.parse_dict(encoded[1:])
             if TAG_MORE_DATA in data:
-                more_data = int.from_bytes(data.pop(TAG_MORE_DATA))
+                more_data = int.from_bytes(data.pop(TAG_MORE_DATA), byteorder="big")
             tlvs.update(data)
             page += 1
 
