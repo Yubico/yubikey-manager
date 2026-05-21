@@ -251,24 +251,11 @@ impl KeyType {
         // Parse OID
         let (_, oid_off, oid_len, _) =
             tlv_parse(algo_data, 0).map_err(|_| PivError::InvalidData("Invalid OID".into()))?;
-        let oid = &algo_data[oid_off..oid_off + oid_len];
+        let oid_bytes = &algo_data[oid_off..oid_off + oid_len];
+        let oid = ObjectIdentifier::from_bytes(oid_bytes)
+            .map_err(|_| PivError::InvalidData("Invalid OID encoding".into()))?;
 
-        // RSA OID: 1.2.840.113549.1.1.1
-        const RSA_OID: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
-        // EC OID: 1.2.840.10045.2.1
-        const EC_OID: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
-        // Ed25519 OID: 1.3.101.112
-        const ED25519_OID: &[u8] = &[0x2b, 0x65, 0x70];
-        // X25519 OID: 1.3.101.110
-        const X25519_OID: &[u8] = &[0x2b, 0x65, 0x6e];
-        const ML_DSA_44_OID: &[u8] = OID_ML_DSA_44_BYTES;
-        const ML_DSA_65_OID: &[u8] = OID_ML_DSA_65_BYTES;
-        const ML_DSA_87_OID: &[u8] = OID_ML_DSA_87_BYTES;
-        const ML_KEM_512_OID: &[u8] = OID_ML_KEM_512_BYTES;
-        const ML_KEM_768_OID: &[u8] = OID_ML_KEM_768_BYTES;
-        const ML_KEM_1024_OID: &[u8] = OID_ML_KEM_1024_BYTES;
-
-        if oid == RSA_OID {
+        if oid == OID_RSA_ENCRYPTION {
             // For public keys: BIT STRING containing SEQUENCE { modulus, exponent }
             // For private keys: OCTET STRING containing SEQUENCE { version, modulus, ... }
             let (tag, data_off, data_len, _) = tlv_parse(seq_data, algo_end)
@@ -316,37 +303,35 @@ impl KeyType {
                     "Unsupported RSA key size: {bit_len}"
                 ))),
             }
-        } else if oid == EC_OID {
+        } else if oid == OID_EC_PUBLIC_KEY {
             // Parse curve OID parameter
             let (_, curve_off, curve_len, _) = tlv_parse(algo_data, oid_off + oid_len)
                 .map_err(|_| PivError::InvalidData("Invalid EC curve OID".into()))?;
-            let curve_oid = &algo_data[curve_off..curve_off + curve_len];
-            // P-256: 1.2.840.10045.3.1.7
-            const P256_OID: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07];
-            // P-384: 1.3.132.0.34
-            const P384_OID: &[u8] = &[0x2b, 0x81, 0x04, 0x00, 0x22];
-            if curve_oid == P256_OID {
+            let curve_oid =
+                ObjectIdentifier::from_bytes(&algo_data[curve_off..curve_off + curve_len])
+                    .map_err(|_| PivError::InvalidData("Invalid EC curve OID encoding".into()))?;
+            if curve_oid == OID_CURVE_P256 {
                 Ok(Self::EccP256)
-            } else if curve_oid == P384_OID {
+            } else if curve_oid == OID_CURVE_P384 {
                 Ok(Self::EccP384)
             } else {
                 Err(PivError::InvalidData("Unsupported EC curve".into()))
             }
-        } else if oid == ED25519_OID {
+        } else if oid == OID_ED25519_KEY {
             Ok(Self::Ed25519)
-        } else if oid == X25519_OID {
+        } else if oid == OID_X25519_KEY {
             Ok(Self::X25519)
-        } else if oid == ML_DSA_44_OID {
+        } else if oid == OID_ML_DSA_44 {
             Ok(Self::MlDsa44)
-        } else if oid == ML_DSA_65_OID {
+        } else if oid == OID_ML_DSA_65 {
             Ok(Self::MlDsa65)
-        } else if oid == ML_DSA_87_OID {
+        } else if oid == OID_ML_DSA_87 {
             Ok(Self::MlDsa87)
-        } else if oid == ML_KEM_512_OID {
+        } else if oid == OID_ML_KEM_512 {
             Ok(Self::MlKem512)
-        } else if oid == ML_KEM_768_OID {
+        } else if oid == OID_ML_KEM_768 {
             Ok(Self::MlKem768)
-        } else if oid == ML_KEM_1024_OID {
+        } else if oid == OID_ML_KEM_1024 {
             Ok(Self::MlKem1024)
         } else {
             Err(PivError::InvalidData("Unknown key algorithm OID".into()))
@@ -2338,12 +2323,6 @@ const OID_ML_DSA_87: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1
 const OID_ML_KEM_512: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.4.1");
 const OID_ML_KEM_768: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.4.2");
 const OID_ML_KEM_1024: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.4.3");
-const OID_ML_DSA_44_BYTES: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x11];
-const OID_ML_DSA_65_BYTES: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12];
-const OID_ML_DSA_87_BYTES: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x13];
-const OID_ML_KEM_512_BYTES: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x01];
-const OID_ML_KEM_768_BYTES: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x02];
-const OID_ML_KEM_1024_BYTES: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x03];
 
 /// Parse a single TLV from PIV device-encoded public key data.
 fn parse_device_tlv(data: &[u8], offset: usize) -> Result<(u8, Vec<u8>, usize), PivError> {
@@ -3060,7 +3039,7 @@ mod tests {
         }
 
         let ml_dsa_key = vec![0x11; 32];
-        let ml_dsa_pkcs8 = pkcs8_der(OID_ML_DSA_65_BYTES, &ml_dsa_key);
+        let ml_dsa_pkcs8 = pkcs8_der(OID_ML_DSA_65.as_bytes(), &ml_dsa_key);
         assert_eq!(
             KeyType::from_private_key_der(&ml_dsa_pkcs8).expect("detect ML-DSA private key"),
             KeyType::MlDsa65
@@ -3071,7 +3050,7 @@ mod tests {
         );
 
         let ml_kem_key = vec![0x22; 48];
-        let ml_kem_pkcs8 = pkcs8_der(OID_ML_KEM_1024_BYTES, &ml_kem_key);
+        let ml_kem_pkcs8 = pkcs8_der(OID_ML_KEM_1024.as_bytes(), &ml_kem_key);
         assert_eq!(
             KeyType::from_private_key_der(&ml_kem_pkcs8).expect("detect ML-KEM private key"),
             KeyType::MlKem1024
