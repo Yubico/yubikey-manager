@@ -548,6 +548,7 @@ enum MaxApduSize {
     Neo = 1390,
     Yk4 = 2038,
     Yk4_3 = 3062,
+    Yk6 = 4928,
 }
 
 // ---------------------------------------------------------------------------
@@ -634,7 +635,9 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         if self.connection.transport() == Transport::Usb && !force_short {
             self.apdu_format = ApduFormat::Extended;
         }
-        self.max_apdu_size = if version >= Version(4, 3, 0) {
+        self.max_apdu_size = if version >= Version(6, 0, 0) {
+            MaxApduSize::Yk6 as usize
+        } else if version >= Version(4, 3, 0) {
             MaxApduSize::Yk4_3 as usize
         } else {
             MaxApduSize::Yk4 as usize
