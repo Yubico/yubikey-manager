@@ -18,6 +18,18 @@ pub enum CliKeyType {
     Eccp384,
     Ed25519,
     X25519,
+    #[value(alias = "ml-dsa-44")]
+    MlDsa44,
+    #[value(alias = "ml-dsa-65")]
+    MlDsa65,
+    #[value(alias = "ml-dsa-87")]
+    MlDsa87,
+    #[value(alias = "ml-kem-512")]
+    MlKem512,
+    #[value(alias = "ml-kem-768")]
+    MlKem768,
+    #[value(alias = "ml-kem-1024")]
+    MlKem1024,
 }
 
 impl From<CliKeyType> for yubikit::piv::KeyType {
@@ -31,6 +43,12 @@ impl From<CliKeyType> for yubikit::piv::KeyType {
             CliKeyType::Eccp384 => Self::EccP384,
             CliKeyType::Ed25519 => Self::Ed25519,
             CliKeyType::X25519 => Self::X25519,
+            CliKeyType::MlDsa44 => Self::MlDsa44,
+            CliKeyType::MlDsa65 => Self::MlDsa65,
+            CliKeyType::MlDsa87 => Self::MlDsa87,
+            CliKeyType::MlKem512 => Self::MlKem512,
+            CliKeyType::MlKem768 => Self::MlKem768,
+            CliKeyType::MlKem1024 => Self::MlKem1024,
         }
     }
 }
