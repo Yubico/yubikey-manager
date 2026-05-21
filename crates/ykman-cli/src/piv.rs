@@ -1175,6 +1175,16 @@ pub fn run_certificates_generate(
 
     let (key_type, spki_der) = resolve_public_key(&mut session, slot, public_key_file)?;
 
+    match key_type {
+        KeyType::X25519 | KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
+            return Err(CliError(format!(
+                "{key_type} keys cannot sign certificates. \
+                 Use a signing key type (e.g. ECC, RSA, Ed25519, or ML-DSA) instead."
+            )));
+        }
+        _ => {}
+    }
+
     let spki = SubjectPublicKeyInfoOwned::from_der(&spki_der)
         .map_err(|e| CliError(format!("Failed to parse SPKI: {e}")))?;
     let subject_name =
