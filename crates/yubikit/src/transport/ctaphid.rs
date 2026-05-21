@@ -451,7 +451,7 @@ impl HidFidoConnection {
                     return Err(FidoError::InvalidResponse);
                 }
                 let r_seq = payload[0] & 0x7F;
-                if r_seq != seq {
+                if r_seq != seq & 0x7F {
                     return Err(FidoError::WrongSequence);
                 }
                 seq += 1;
