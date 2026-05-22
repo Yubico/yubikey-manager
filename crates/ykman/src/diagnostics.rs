@@ -12,16 +12,16 @@ use yubikit::core::Transport;
 use yubikit::device::get_name;
 use yubikit::management::{Capability, DeviceInfo, ReleaseType};
 
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 use yubikit::platform::device::{read_info_ccid, read_info_fido, read_info_otp};
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 use yubikit::platform::hidapi::{
     HidFidoConnection, HidOtpConnection, list_fido_devices, list_otp_devices,
 };
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 use yubikit::platform::pcsc::{PcscSmartCardConnection, is_reader_usb, list_readers};
 
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 use yubikit::yubiotp::YubiOtpSession;
 
 use yubikit::ctap::CtapSession;
@@ -680,23 +680,23 @@ fn probe_ctap2_pin<C: Connection + 'static>(
 // Main entry point
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 fn device_key_pcsc(reader: &str) -> String {
     let transport = if is_reader_usb(reader) { "USB" } else { "NFC" };
     format!("CCID ({reader}, [{transport}])")
 }
 
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 fn device_key_otp(pid: u16, path: &str) -> String {
     format!("OTP (pid={pid:04x}, path={path})")
 }
 
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 fn device_key_fido(pid: u16, path: &str) -> String {
     format!("FIDO (pid={pid:04x}, path={path})")
 }
 
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 fn probe_pcsc() -> ResultOrError<PcscDiag> {
     match list_readers() {
         Ok(readers) => {
@@ -801,7 +801,7 @@ fn probe_pcsc() -> ResultOrError<PcscDiag> {
     }
 }
 
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 fn probe_otp() -> ResultOrError<BTreeMap<String, OtpDeviceDiag>> {
     match list_otp_devices() {
         Ok(hid_devices) => {
@@ -877,7 +877,7 @@ fn probe_otp() -> ResultOrError<BTreeMap<String, OtpDeviceDiag>> {
     }
 }
 
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
     match list_fido_devices() {
         Ok(fido_devices) => {
@@ -971,8 +971,8 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
 /// Run full diagnostics across all transports and return a serializable report.
 pub fn run_diagnostics() -> DiagnosticsReport {
     let mut features = Vec::new();
-    if cfg!(feature = "direct") {
-        features.push("direct".to_string());
+    if cfg!(feature = "hardware") {
+        features.push("hardware".to_string());
     }
 
     DiagnosticsReport {
@@ -980,17 +980,17 @@ pub fn run_diagnostics() -> DiagnosticsReport {
         features,
         platform: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
-        #[cfg(feature = "direct")]
+        #[cfg(feature = "hardware")]
         pcsc: Some(probe_pcsc()),
-        #[cfg(not(feature = "direct"))]
+        #[cfg(not(feature = "hardware"))]
         pcsc: None,
-        #[cfg(feature = "direct")]
+        #[cfg(feature = "hardware")]
         otp: Some(probe_otp()),
-        #[cfg(not(feature = "direct"))]
+        #[cfg(not(feature = "hardware"))]
         otp: None,
-        #[cfg(feature = "direct")]
+        #[cfg(feature = "hardware")]
         fido: Some(probe_fido()),
-        #[cfg(not(feature = "direct"))]
+        #[cfg(not(feature = "hardware"))]
         fido: None,
         svc: Some(probe_svc()),
     }

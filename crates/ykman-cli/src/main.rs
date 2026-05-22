@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use yubikit::core::{Transport, Version, set_override_version};
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::{Capability, ReleaseType, UsbInterface};
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 use yubikit::platform::device::scan_usb_devices;
 
 mod apdu;
@@ -1603,7 +1603,7 @@ fn select_device(
     match (serial, devices.len()) {
         (None, 0) => {
             // Check for FIDO-blocked devices that scan can see but list cannot open
-            #[cfg(feature = "direct")]
+            #[cfg(feature = "hardware")]
             {
                 let (scan_pids, _) = scan_usb_devices();
                 if !scan_pids.is_empty() {

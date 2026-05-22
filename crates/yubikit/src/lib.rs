@@ -119,7 +119,7 @@ pub mod piv;
 /// Platform-specific transport implementations (HID, PC/SC).
 ///
 /// This module is only available when the `direct` feature is enabled (default).
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 pub mod platform;
 /// Security Domain operations for managing SCP keys and certificates.
 pub mod securitydomain;

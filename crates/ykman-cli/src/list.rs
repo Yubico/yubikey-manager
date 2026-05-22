@@ -1,8 +1,8 @@
 use yubikit::device::{YubiKeyDevice, get_name};
 use yubikit::management::UsbInterface;
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 use yubikit::platform::device::{name_from_pid, scan_usb_devices, usb_interfaces_from_pid};
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 use yubikit::platform::pcsc::list_readers;
 
 use crate::util::CliError;
@@ -41,7 +41,7 @@ fn format_interfaces(ifaces: UsbInterface) -> String {
 
 pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
     if readers {
-        #[cfg(feature = "direct")]
+        #[cfg(feature = "hardware")]
         {
             let reader_list =
                 list_readers().map_err(|e| CliError(format!("Failed to list readers: {e}")))?;
@@ -50,10 +50,10 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
             }
             return Ok(());
         }
-        #[cfg(not(feature = "direct"))]
+        #[cfg(not(feature = "hardware"))]
         {
             return Err(CliError(
-                "Listing readers requires direct device access (built without 'direct' feature)."
+                "Listing readers requires hardware access (built without 'hardware' feature)."
                     .into(),
             ));
         }
@@ -66,7 +66,7 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
 
     if devices.is_empty() && !serials && !source.is_service() {
         // Check for devices that are visible but not accessible
-        #[cfg(feature = "direct")]
+        #[cfg(feature = "hardware")]
         {
             let (scan_pids, _) = scan_usb_devices();
             if scan_pids.is_empty() {
@@ -77,7 +77,7 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
                 }
             }
         }
-        #[cfg(not(feature = "direct"))]
+        #[cfg(not(feature = "hardware"))]
         {
             println!("No YubiKeys detected.");
         }
@@ -102,7 +102,7 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
     Ok(())
 }
 
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 fn print_blocked_device(pid: u16) {
     let name = name_from_pid(pid);
     let ifaces = usb_interfaces_from_pid(pid);

@@ -14,8 +14,8 @@ name = "fido_selection"
 path = "examples/fido_selection.rs"
 
 [features]
-default = ["direct"]
-direct = ["ykman/direct", "yubikit/direct"]
+default = ["hardware"]
+hardware = ["ykman/hardware", "yubikit/hardware"]
 
 [dependencies]
 ykman = { path = "../ykman", default-features = false }

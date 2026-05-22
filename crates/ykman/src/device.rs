@@ -10,7 +10,7 @@ use std::rc::Rc;
 use serde_json::json;
 
 use yubikit::device::{DeviceError, DeviceSource, YubiKeyDevice};
-#[cfg(feature = "direct")]
+#[cfg(feature = "hardware")]
 use yubikit::platform::device::LocalDeviceSource;
 
 use crate::rpc::client::{RpcCallError, RpcClient};
@@ -148,11 +148,11 @@ pub fn get_device_source() -> Box<dyn DeviceSource> {
         }
     }
 
-    #[cfg(feature = "direct")]
+    #[cfg(feature = "hardware")]
     {
         Box::new(LocalDeviceSource)
     }
-    #[cfg(not(feature = "direct"))]
+    #[cfg(not(feature = "hardware"))]
     {
         Box::new(NoDeviceSource)
     }

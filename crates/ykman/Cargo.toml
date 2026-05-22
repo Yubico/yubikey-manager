@@ -10,8 +10,8 @@ name = "ykman"
 path = "src/lib.rs"
 
 [features]
-default = ["direct"]
-direct = ["yubikit/direct"]
+default = ["hardware"]
+hardware = ["yubikit/hardware"]
 
 [dependencies]
 yubikit = { path = "../yubikit", default-features = false }
