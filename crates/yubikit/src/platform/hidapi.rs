@@ -12,19 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! CTAP HID transport for FIDO devices.
+//! HID transport implementations for YubiKey devices.
 //!
-//! Implements the CTAP HID protocol framing used to communicate with FIDO2
-//! authenticators over USB HID. This is distinct from the OTP HID protocol
-//! which uses feature reports.
+//! This module provides two HID-based transports:
+//!
+//! - **CTAP HID** ([`HidFidoConnection`]) — FIDO2/U2F protocol using CTAP HID framing
+//!   (64-byte packets with channel multiplexing, keepalive, etc.)
+//! - **OTP HID** ([`HidOtpConnection`]) — YubiKey OTP protocol using USB HID feature reports
+//!   (8-byte frames for slot configuration and challenge-response)
 
 use hidapi::HidApi;
 
 use crate::core::Version;
 use crate::fido::{CtapHidCapability, CtapHidError, FidoError};
 use crate::log_traffic;
+use crate::otp::{OtpConnection, OtpError};
+
+// ---------------------------------------------------------------------------
+// Shared constants and helpers
+// ---------------------------------------------------------------------------
 
 const YUBICO_VID: u16 = 0x1050;
+
+/// Parse a USB bcdDevice value into a firmware [`Version`].
+///
+/// bcdDevice uses BCD encoding: `0xMMmp` where MM = major, m = minor, p = patch.
+fn version_from_bcd(bcd: u16) -> Version {
+    let major = ((bcd >> 12) & 0xF) * 10 + ((bcd >> 8) & 0xF);
+    let minor = ((bcd >> 4) & 0xF) as u8;
+    let patch = (bcd & 0xF) as u8;
+    Version(major as u8, minor, patch)
+}
+
+// ===========================================================================
+// CTAP HID (FIDO)
+// ===========================================================================
+
 const USAGE_PAGE_FIDO: u16 = 0xF1D0;
 const USAGE_FIDO: u16 = 0x0001;
 
@@ -94,14 +117,6 @@ pub struct FidoDeviceInfo {
     pub report_size_out: usize,
 }
 
-/// Parse a USB bcdDevice value into a firmware [`Version`].
-fn version_from_bcd(bcd: u16) -> Version {
-    let major = ((bcd >> 12) & 0xF) * 10 + ((bcd >> 8) & 0xF);
-    let minor = ((bcd >> 4) & 0xF) as u8;
-    let patch = (bcd & 0xF) as u8;
-    Version(major as u8, minor, patch)
-}
-
 /// List Yubico FIDO HID devices.
 pub fn list_fido_devices() -> Result<Vec<FidoDeviceInfo>, FidoError> {
     let api = HidApi::new()?;
@@ -115,9 +130,7 @@ pub fn list_fido_devices() -> Result<Vec<FidoDeviceInfo>, FidoError> {
                 path: dev.path().to_string_lossy().into_owned(),
                 pid: dev.product_id(),
                 version: version_from_bcd(dev.release_number()),
-                // hidapi doesn't directly expose report sizes from the descriptor.
-                // FIDO HID spec uses 64-byte packets; this is the standard for all
-                // USB FIDO devices including YubiKeys.
+                // FIDO HID spec uses 64-byte packets; standard for all USB FIDO devices.
                 report_size_in: 64,
                 report_size_out: 64,
             });
@@ -280,7 +293,6 @@ impl HidFidoConnection {
                     if message.contains("Interrupted") =>
                 {
                     // EINTR from signal handler (e.g. Ctrl+C) — retry read.
-                    // Cancel will be handled via the keepalive check below.
                     continue;
                 }
                 Err(e) => return Err(e.into()),
@@ -297,14 +309,12 @@ impl HidFidoConnection {
 
             let r_channel = u32::from_be_bytes([recv[0], recv[1], recv[2], recv[3]]);
             if r_channel != self.channel_id {
-                // Ignore packets from wrong channel (could be from broadcast)
                 continue;
             }
 
             let payload = &recv[4..];
 
             if first {
-                // Initialization packet
                 if payload.len() < 3 {
                     return Err(FidoError::InvalidResponse);
                 }
@@ -323,8 +333,6 @@ impl HidFidoConnection {
                     }
                     if cancel.is_some_and(|f| f()) {
                         let _ = self.send_request(CtapHidCommand::Cancel as u8, &[]);
-                        // Continue reading — the authenticator will respond to the
-                        // pending command with a CBOR error (KeepaliveCancel).
                     }
                     continue;
                 } else if r_cmd == TYPE_INIT | CtapHidCommand::Error as u8 {
@@ -338,7 +346,6 @@ impl HidFidoConnection {
                 response.extend_from_slice(data);
                 first = false;
             } else {
-                // Continuation packet
                 if payload.is_empty() {
                     return Err(FidoError::InvalidResponse);
                 }
@@ -397,9 +404,152 @@ impl Drop for HidFidoConnection {
     }
 }
 
+// ===========================================================================
+// OTP HID
+// ===========================================================================
+
+const USAGE_PAGE_OTP: u16 = 0x0001;
+const USAGE_OTP: u16 = 0x0006;
+
+/// Errors that can occur during OTP HID communication.
+#[derive(Debug, thiserror::Error)]
+pub enum HidError {
+    /// Low-level transport error (e.g. HID I/O failure).
+    #[error("Transport error: {0}")]
+    Transport(Box<dyn std::error::Error + Send + Sync>),
+    /// The device path is not a valid C string.
+    #[error("Invalid device path")]
+    InvalidPath,
+    /// The connection has already been closed.
+    #[error("Connection is closed")]
+    ConnectionClosed,
+}
+
+impl From<hidapi::HidError> for HidError {
+    fn from(e: hidapi::HidError) -> Self {
+        HidError::Transport(Box::new(e))
+    }
+}
+
+/// Information about an enumerated OTP HID device.
+#[derive(Clone, Debug)]
+pub struct HidDeviceInfo {
+    /// OS-specific HID device path.
+    pub path: String,
+    /// USB Product ID.
+    pub pid: u16,
+    /// Firmware version from USB bcdDevice descriptor.
+    pub version: Version,
+}
+
+/// List Yubico OTP HID devices.
+pub fn list_otp_devices() -> Result<Vec<HidDeviceInfo>, HidError> {
+    let api = HidApi::new()?;
+    let mut devices = Vec::new();
+    for dev in api.device_list() {
+        if dev.vendor_id() == YUBICO_VID
+            && dev.usage_page() == USAGE_PAGE_OTP
+            && dev.usage() == USAGE_OTP
+        {
+            devices.push(HidDeviceInfo {
+                path: dev.path().to_string_lossy().into_owned(),
+                pid: dev.product_id(),
+                version: version_from_bcd(dev.release_number()),
+            });
+        }
+    }
+    Ok(devices)
+}
+
+/// An open connection to an OTP HID device for feature report I/O.
+pub struct HidOtpConnection {
+    device: Option<hidapi::HidDevice>,
+}
+
+impl std::fmt::Debug for HidOtpConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HidOtpConnection").finish_non_exhaustive()
+    }
+}
+
+impl HidOtpConnection {
+    /// Open a connection to the OTP HID device at the given path.
+    pub fn new(path: &str) -> Result<Self, HidError> {
+        log_traffic!("Opening OTP HID connection to '{}'", path);
+        let api = HidApi::new()?;
+        let cpath = std::ffi::CString::new(path).map_err(|_| HidError::InvalidPath)?;
+        let device = api.open_path(&cpath)?;
+        log_traffic!("OTP HID connection opened to '{}'", path);
+        Ok(Self {
+            device: Some(device),
+        })
+    }
+
+    /// Read an 8-byte feature report from the device.
+    pub fn get_feature_report(&self) -> Result<Vec<u8>, HidError> {
+        let dev = self.device.as_ref().ok_or(HidError::ConnectionClosed)?;
+        let mut buf = [0u8; 9];
+        buf[0] = 0; // report ID
+        let n = dev.get_feature_report(&mut buf)?;
+        let start = if n > 0 && buf[0] == 0 { 1 } else { 0 };
+        let end = n.min(buf.len());
+        let data = buf[start..end].to_vec();
+        log_traffic!("RECV: {}", crate::logging::hex_encode(&data));
+        Ok(data)
+    }
+
+    /// Write an 8-byte feature report to the device.
+    pub fn set_feature_report(&self, data: &[u8]) -> Result<(), HidError> {
+        log_traffic!("SEND: {}", crate::logging::hex_encode(data));
+        let dev = self.device.as_ref().ok_or(HidError::ConnectionClosed)?;
+        let mut buf = vec![0u8; data.len() + 1];
+        buf[0] = 0; // report ID
+        buf[1..].copy_from_slice(data);
+        dev.send_feature_report(&buf)?;
+        Ok(())
+    }
+
+    /// Close the connection to the device.
+    pub fn close(&mut self) {
+        if self.device.is_some() {
+            log_traffic!("Closing OTP HID connection");
+        }
+        self.device.take();
+    }
+}
+
+impl crate::core::Connection for HidOtpConnection {
+    type Error = OtpError;
+
+    fn close(&mut self) {
+        HidOtpConnection::close(self);
+    }
+}
+
+impl OtpConnection for HidOtpConnection {
+    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
+        self.get_feature_report()
+            .map_err(|e| OtpError::Transport(Box::new(e)))
+    }
+    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
+        self.set_feature_report(data)
+            .map_err(|e| OtpError::Transport(Box::new(e)))
+    }
+}
+
+// ===========================================================================
+// Tests
+// ===========================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_version_from_bcd() {
+        assert_eq!(version_from_bcd(0x5430), Version(54, 3, 0));
+        assert_eq!(version_from_bcd(0x0501), Version(5, 0, 1));
+    }
 
     #[test]
     fn test_capability_flags() {

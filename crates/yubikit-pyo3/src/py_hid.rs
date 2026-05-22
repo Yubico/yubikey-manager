@@ -2,10 +2,9 @@ use pyo3::exceptions::PyOSError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use yubikit::fido::FidoConnection as _;
-use yubikit::platform::ctaphid;
-use yubikit::platform::otphid as hid;
+use yubikit::platform::hidapi;
 
-fn hid_err(e: hid::HidError) -> PyErr {
+fn hid_err(e: hidapi::HidError) -> PyErr {
     PyOSError::new_err(e.to_string())
 }
 
@@ -20,7 +19,7 @@ struct HidDeviceInfo {
 
 #[pyfunction]
 fn list_otp_devices() -> PyResult<Vec<HidDeviceInfo>> {
-    hid::list_otp_devices()
+    hidapi::list_otp_devices()
         .map(|devs| {
             devs.into_iter()
                 .map(|d| HidDeviceInfo {
@@ -34,24 +33,24 @@ fn list_otp_devices() -> PyResult<Vec<HidDeviceInfo>> {
 
 #[pyclass(unsendable)]
 pub struct OtpConnection {
-    inner: Option<hid::HidOtpConnection>,
+    inner: Option<hidapi::HidOtpConnection>,
 }
 
 impl OtpConnection {
     /// Take the inner native connection, leaving None behind.
-    pub fn take_inner(&mut self) -> PyResult<hid::HidOtpConnection> {
+    pub fn take_inner(&mut self) -> PyResult<hidapi::HidOtpConnection> {
         self.inner
             .take()
             .ok_or_else(|| PyOSError::new_err("OTP connection already consumed or closed"))
     }
 
     /// Restore a previously taken inner connection.
-    pub fn restore_inner(&mut self, conn: hid::HidOtpConnection) {
+    pub fn restore_inner(&mut self, conn: hidapi::HidOtpConnection) {
         self.inner = Some(conn);
     }
 
     /// Create from an already-open native connection.
-    pub fn from_native(conn: hid::HidOtpConnection) -> Self {
+    pub fn from_native(conn: hidapi::HidOtpConnection) -> Self {
         Self { inner: Some(conn) }
     }
 }
@@ -61,7 +60,7 @@ impl OtpConnection {
     #[new]
     fn new(path: &str) -> PyResult<Self> {
         Ok(Self {
-            inner: Some(hid::HidOtpConnection::new(path).map_err(hid_err)?),
+            inner: Some(hidapi::HidOtpConnection::new(path).map_err(hid_err)?),
         })
     }
 
@@ -122,7 +121,7 @@ pub struct FidoDeviceInfo {
 
 #[pyfunction]
 fn list_fido_devices() -> PyResult<Vec<FidoDeviceInfo>> {
-    ctaphid::list_fido_devices()
+    hidapi::list_fido_devices()
         .map(|devs| {
             devs.into_iter()
                 .map(|d| FidoDeviceInfo {
@@ -137,7 +136,7 @@ fn list_fido_devices() -> PyResult<Vec<FidoDeviceInfo>> {
 /// Native FIDO HID connection wrapping the Rust CTAP HID transport.
 #[pyclass(unsendable)]
 pub struct FidoConnection {
-    inner: Option<ctaphid::HidFidoConnection>,
+    inner: Option<hidapi::HidFidoConnection>,
     path: String,
     device_version: (u8, u8, u8),
     capabilities: u8,
@@ -145,19 +144,19 @@ pub struct FidoConnection {
 
 impl FidoConnection {
     /// Take the inner native connection, leaving None behind.
-    pub fn take_inner(&mut self) -> PyResult<ctaphid::HidFidoConnection> {
+    pub fn take_inner(&mut self) -> PyResult<hidapi::HidFidoConnection> {
         self.inner
             .take()
             .ok_or_else(|| PyOSError::new_err("FIDO connection already consumed or closed"))
     }
 
     /// Restore a previously taken inner connection.
-    pub fn restore_inner(&mut self, conn: ctaphid::HidFidoConnection) {
+    pub fn restore_inner(&mut self, conn: hidapi::HidFidoConnection) {
         self.inner = Some(conn);
     }
 
     /// Create from an already-open native connection.
-    pub fn from_native(conn: ctaphid::HidFidoConnection) -> Self {
+    pub fn from_native(conn: hidapi::HidFidoConnection) -> Self {
         let device_version = conn.device_version();
         let capabilities = conn.capabilities().raw();
         Self {
@@ -173,14 +172,14 @@ impl FidoConnection {
 impl FidoConnection {
     #[new]
     fn new(path: &str, pid: u16) -> PyResult<Self> {
-        let info = ctaphid::FidoDeviceInfo {
+        let info = hidapi::FidoDeviceInfo {
             path: path.to_string(),
             pid,
             version: yubikit::core::Version(0, 0, 0),
             report_size_in: 64,
             report_size_out: 64,
         };
-        let conn = ctaphid::HidFidoConnection::open(&info).map_err(ctap_err)?;
+        let conn = hidapi::HidFidoConnection::open(&info).map_err(ctap_err)?;
         let device_version = conn.device_version();
         let capabilities = conn.capabilities().raw();
         Ok(Self {

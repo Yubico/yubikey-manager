@@ -27,7 +27,7 @@
 //! ```no_run
 //! use yubikit::ctap::CtapSession;
 //! use yubikit::ctap2::Ctap2Session;
-//! use yubikit::platform::ctaphid::{HidFidoConnection, list_fido_devices};
+//! use yubikit::platform::hidapi::{HidFidoConnection, list_fido_devices};
 //!
 //! let devices = list_fido_devices()?;
 //! let dev = devices.first().expect("no FIDO device found");

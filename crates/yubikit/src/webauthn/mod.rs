@@ -23,7 +23,7 @@
 //! ```no_run
 //! use yubikit::ctap::CtapSession;
 //! use yubikit::ctap2::{Ctap2Session, Permissions};
-//! use yubikit::platform::ctaphid::{HidFidoConnection, list_fido_devices};
+//! use yubikit::platform::hidapi::{HidFidoConnection, list_fido_devices};
 //! use yubikit::webauthn::{
 //!     WebAuthnClient, ClientDataCollector, CollectedClientData, UserInteraction,
 //!     types::{

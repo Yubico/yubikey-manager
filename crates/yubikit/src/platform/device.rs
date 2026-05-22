@@ -18,8 +18,10 @@ use crate::management::{
 use crate::otp::OtpConnection;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardProtocol};
 
-use super::ctaphid::{FidoDeviceInfo, HidFidoConnection, list_fido_devices};
-use super::otphid::{HidDeviceInfo, HidError, HidOtpConnection, list_otp_devices};
+use super::hidapi::{
+    FidoDeviceInfo, HidDeviceInfo, HidError, HidFidoConnection, HidOtpConnection,
+    list_fido_devices, list_otp_devices,
+};
 use super::pcsc::{
     PcscError, PcscSmartCardConnection, is_reader_usb, list_readers, list_readers_with_state,
 };

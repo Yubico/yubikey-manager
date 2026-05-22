@@ -118,8 +118,8 @@ pub mod otp;
 pub mod piv;
 /// Platform-specific transport implementations (HID, PC/SC).
 ///
-/// This module is only available when the `usb` feature is enabled (default).
-#[cfg(feature = "usb")]
+/// This module is only available when the `direct` feature is enabled (default).
+#[cfg(feature = "direct")]
 pub mod platform;
 /// Security Domain operations for managing SCP keys and certificates.
 pub mod securitydomain;

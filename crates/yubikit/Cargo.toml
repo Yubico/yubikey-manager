@@ -7,8 +7,8 @@ license = "Apache-2.0"
 autoexamples = false
 
 [features]
-default = ["usb"]
-usb = ["dep:hidapi", "dep:pcsc"]
+default = ["direct"]
+direct = ["dep:hidapi", "dep:pcsc"]
 
 [dependencies]
 aes = "0.8"

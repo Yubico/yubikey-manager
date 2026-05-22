@@ -7,9 +7,8 @@ use serde_json::{Value, json};
 use yubikit::core::Connection;
 use yubikit::fido::FidoConnection;
 use yubikit::otp::OtpConnection;
-use yubikit::platform::ctaphid::HidFidoConnection;
 use yubikit::platform::device::LocalYubiKeyDevice;
-use yubikit::platform::otphid::HidOtpConnection;
+use yubikit::platform::hidapi::{HidFidoConnection, HidOtpConnection};
 use yubikit::platform::pcsc::PcscSmartCardConnection;
 use yubikit::smartcard::SmartCardConnection;
 

@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use yubikit::ctap::CtapSession;
 use yubikit::ctap2::{Ctap2Error, Ctap2Session, CtapStatus};
-use yubikit::platform::ctaphid::{HidFidoConnection, list_fido_devices};
+use yubikit::platform::hidapi::{HidFidoConnection, list_fido_devices};
 use yubikit::platform::pcsc::{PcscSmartCardConnection, list_readers};
 
 const CANCEL_TIMEOUT: Duration = Duration::from_secs(5);

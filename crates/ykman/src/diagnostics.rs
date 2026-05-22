@@ -10,11 +10,11 @@ use serde::Serialize;
 use yubikit::core::Connection;
 use yubikit::core::Transport;
 use yubikit::management::{Capability, DeviceInfo, ReleaseType};
-use yubikit::platform::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::platform::device::{get_name, read_info_ccid, read_info_fido, read_info_otp};
-use yubikit::platform::otphid::{HidOtpConnection, list_otp_devices};
-use yubikit::platform::pcsc::list_readers;
-use yubikit::platform::pcsc::{PcscSmartCardConnection, is_reader_usb};
+use yubikit::platform::hidapi::{
+    HidFidoConnection, HidOtpConnection, list_fido_devices, list_otp_devices,
+};
+use yubikit::platform::pcsc::{PcscSmartCardConnection, is_reader_usb, list_readers};
 
 use yubikit::yubiotp::YubiOtpSession;
 

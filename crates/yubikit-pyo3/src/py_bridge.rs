@@ -31,7 +31,7 @@ use pyo3::types::PyBytes;
 use yubikit::core::Transport;
 use yubikit::fido::FidoConnection as FidoConnectionTrait;
 use yubikit::fido::{CtapHidCapability, FidoError};
-use yubikit::platform::ctaphid::HidFidoConnection;
+use yubikit::platform::hidapi::HidFidoConnection;
 use yubikit::platform::pcsc::PcscSmartCardConnection;
 use yubikit::smartcard::{SmartCardConnection, SmartCardError, SmartCardProtocol};
 
@@ -376,7 +376,7 @@ pub fn restore_fido_connection(
 // ---------------------------------------------------------------------------
 
 use yubikit::otp::{OtpConnection as OtpConnectionTrait, OtpError};
-use yubikit::platform::otphid::HidOtpConnection;
+use yubikit::platform::hidapi::HidOtpConnection;
 
 /// Enum over the two concrete OTP connection types used in the PyO3 layer.
 pub enum PyOtpConn {

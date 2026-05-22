@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 use yubikit::management::{DeviceInfo, ManagementSession};
-use yubikit::platform::ctaphid::list_fido_devices;
+use yubikit::platform::hidapi::list_fido_devices;
 
 use crate::py_bridge::{
     BoxedFidoConnection, BoxedOtpConnection, BoxedSmartCardConnection, extract_fido_connection,
