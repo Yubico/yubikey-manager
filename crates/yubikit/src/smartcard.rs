@@ -49,8 +49,28 @@ impl Aid {
     pub const OPENPGP: &[u8] = &[0xd2, 0x76, 0x00, 0x01, 0x24, 0x01];
     /// AID for the OATH applet.
     pub const OATH: &[u8] = &[0xa0, 0x00, 0x00, 0x05, 0x27, 0x21, 0x01];
-    /// AID for the PIV applet.
-    pub const PIV: &[u8] = &[0xa0, 0x00, 0x00, 0x03, 0x08];
+    /// AID for the PIV applet — RID + PIX per NIST SP 800-73-4 §2.2
+    /// (`A0 00 00 03 08 00 00 10 00`, 9 bytes).
+    ///
+    /// The 5-byte RID prefix (`A0 00 00 03 08`) is the Yubico RID
+    /// shared by every Yubico applet — YubiKeys are prefix-tolerant
+    /// on SELECT and activate the PIV applet on it, but
+    /// standards-conformant PIV cards (NIST SP 800-73 Test Card 3,
+    /// US government-issued PIVs, CAC v6+ PIV applets) treat the
+    /// 5-byte form as targeting a sibling or management applet:
+    /// SELECT returns SW=9000 but the actual PIV applet is never
+    /// activated, so every subsequent GET DATA / VERIFY fails with
+    /// SW=0x6982 ("security status not satisfied").
+    ///
+    /// SP 800-73-4 nominally specifies an 11-byte AID with the
+    /// version suffix `01 00` appended, but in field testing that
+    /// form is also rejected by Test Card 3 (SW=9000 to SELECT,
+    /// then SW=0x6982 on every subsequent op) — the chip apparently
+    /// doesn't bind its applet against the version suffix. The
+    /// 9-byte RID + PIX form is the empirically-confirmed sweet
+    /// spot: works on YubiKeys (prefix-tolerant) and on
+    /// standards-conformant non-YubiKey PIV cards.
+    pub const PIV: &[u8] = &[0xa0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x10, 0x00];
     /// AID for the FIDO applet.
     pub const FIDO: &[u8] = &[0xa0, 0x00, 0x00, 0x06, 0x47, 0x2f, 0x00, 0x01];
     /// AID for the YubiHSM Auth applet.
