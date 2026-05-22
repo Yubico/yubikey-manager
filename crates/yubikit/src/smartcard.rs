@@ -538,7 +538,7 @@ fn format_extended_apdu(
     le: u16,
     max_apdu_size: usize,
 ) -> Result<Vec<u8>, ApduError> {
-    let mut buf = Vec::with_capacity(7 + data.len() + 2);
+    let mut buf = Vec::with_capacity(7 + data.len() + 3);
     buf.extend_from_slice(&[cla, ins, p1, p2]);
     if !data.is_empty() {
         buf.push(0); // Extended length marker
@@ -546,13 +546,22 @@ fn format_extended_apdu(
         buf.push(data.len() as u8);
         buf.extend_from_slice(data);
     }
-    if le > 0 {
-        if data.is_empty() {
-            buf.push(0); // 3-byte Le
-        }
-        buf.push((le >> 8) as u8);
-        buf.push(le as u8);
+    // Always append extended Le. Same rationale as the short-APDU
+    // variant: without Le, a data-bearing command becomes a case-3
+    // extended APDU (data sent, no response expected) and the chip
+    // returns only the status word with no body — breaking every
+    // PIV GET DATA. `Le = 0x0000` means "respond with up to 65536
+    // bytes": case-4 for data-bearing commands, case-2 for header-
+    // only commands, harmless for commands that return only SW.
+    // When data is empty the 2-byte Le must be preceded by the
+    // extended-length marker `0x00` so the chip distinguishes
+    // case-2 extended from a short Le. Caller-specified Le wins.
+    if data.is_empty() {
+        buf.push(0);
     }
+    let le_actual = if le > 0 { le } else { 0 };
+    buf.push((le_actual >> 8) as u8);
+    buf.push(le_actual as u8);
     if max_apdu_size > 0 && buf.len() > max_apdu_size {
         return Err(ApduError::ExtendedApduTooLong);
     }
