@@ -511,11 +511,20 @@ fn format_short_apdu(
         buf.push(data.len() as u8);
         buf.extend_from_slice(data);
     }
-    if le > 0 {
-        buf.push(le);
-    } else if data.is_empty() {
-        buf.push(0);
-    }
+    // Always append Le. Without it, a data-bearing command becomes a
+    // case-3 APDU (data sent, no response expected) which standards-
+    // conformant PIV cards (NIST SP 800-73 Test Card 3) reject with
+    // SW=0x6982 on GET DATA — the chip has data to return (CCC,
+    // CHUID, facial image) but the APDU shape forbids it. YubiKeys
+    // are lenient and treat case-3 GET DATA as case-4 with Le=0;
+    // non-YubiKey PIV cards strict-mode the case distinction.
+    //
+    // Le=0x00 means "respond with up to 256 bytes" — case-4 for
+    // data-bearing commands, case-2 for header-only commands, and
+    // harmless for commands that return only a status word (the
+    // chip just truncates the response to zero bytes). Caller-
+    // specified Le still wins.
+    buf.push(if le > 0 { le } else { 0 });
     Ok(buf)
 }
 
