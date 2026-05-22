@@ -13,6 +13,10 @@ path = "src/main.rs"
 name = "fido_selection"
 path = "examples/fido_selection.rs"
 
+[features]
+default = ["direct"]
+direct = ["ykman/direct", "yubikit/direct"]
+
 [dependencies]
 ykman = { path = "../ykman" }
 yubikit = { path = "../yubikit" }

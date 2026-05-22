@@ -9,6 +9,10 @@ license = "Apache-2.0"
 name = "ykman"
 path = "src/lib.rs"
 
+[features]
+default = ["direct"]
+direct = ["yubikit/direct"]
+
 [dependencies]
 yubikit = { path = "../yubikit" }
 chrono = "0.4"

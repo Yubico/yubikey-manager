@@ -10,10 +10,30 @@ use std::rc::Rc;
 use serde_json::json;
 
 use yubikit::device::{DeviceError, DeviceSource, YubiKeyDevice};
+#[cfg(feature = "direct")]
 use yubikit::platform::device::LocalDeviceSource;
 
 use crate::rpc::client::{RpcCallError, RpcClient};
 use crate::rpc::proxy::RpcDevice;
+
+/// A device source that always returns "no device found".
+///
+/// Used as the fallback when the `direct` feature is disabled and no RPC
+/// service is available.
+pub struct NoDeviceSource;
+
+impl DeviceSource for NoDeviceSource {
+    fn list_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError> {
+        Err(DeviceError::NoDeviceFound)
+    }
+
+    fn select_fido(
+        &mut self,
+        _cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Box<dyn YubiKeyDevice>, DeviceError> {
+        Err(DeviceError::NoDeviceFound)
+    }
+}
 
 /// Device source using the ykman-svc service (Named Pipe on Windows, Unix
 /// socket in debug builds).
@@ -99,7 +119,8 @@ fn rpc_to_device_error(e: RpcCallError) -> DeviceError {
 /// On Windows, attempts to connect to the ykman-svc Named Pipe service.
 /// On other platforms in debug builds, attempts a Unix socket connection.
 /// Falls back to direct local device access on failure or when the service
-/// is unavailable.
+/// is unavailable. When the `direct` feature is disabled, returns
+/// [`NoDeviceSource`] if no RPC service is available.
 pub fn get_device_source() -> Box<dyn DeviceSource> {
     #[cfg(target_os = "windows")]
     {
@@ -127,5 +148,12 @@ pub fn get_device_source() -> Box<dyn DeviceSource> {
         }
     }
 
-    Box::new(LocalDeviceSource)
+    #[cfg(feature = "direct")]
+    {
+        Box::new(LocalDeviceSource)
+    }
+    #[cfg(not(feature = "direct"))]
+    {
+        Box::new(NoDeviceSource)
+    }
 }
