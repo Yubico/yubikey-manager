@@ -5,15 +5,18 @@ use clap::{Parser, Subcommand};
 use yubikit::core::{Transport, Version, set_override_version};
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::{Capability, ReleaseType, UsbInterface};
+#[cfg(feature = "direct")]
 use yubikit::platform::device::scan_usb_devices;
 
 mod apdu;
 mod cli_enums;
 mod config;
+#[cfg(feature = "direct")]
 mod diagnose;
 mod fido;
 mod hsmauth;
 mod info;
+#[cfg(feature = "direct")]
 mod list;
 mod oath;
 mod openpgp;
@@ -1588,6 +1591,21 @@ enum SecurityDomainKeysAction {
     },
 }
 
+/// Brief device description for error messages.
+fn describe_device_brief(dev: &dyn YubiKeyDevice) -> String {
+    #[cfg(feature = "direct")]
+    {
+        list::describe_device(dev)
+    }
+    #[cfg(not(feature = "direct"))]
+    {
+        match dev.info().serial {
+            Some(s) => format!("{} (serial: {})", dev.name(), s),
+            None => dev.name().to_string(),
+        }
+    }
+}
+
 /// Which transports to scan when resolving a device.
 /// Select a single YubiKey from a device list, optionally filtered by serial.
 fn select_device(
@@ -1597,25 +1615,24 @@ fn select_device(
     match (serial, devices.len()) {
         (None, 0) => {
             // Check for FIDO-blocked devices that scan can see but list cannot open
-            let (scan_pids, _) = scan_usb_devices();
-            if !scan_pids.is_empty() {
-                Err(CliError(
-                    "A YubiKey was detected, but FIDO access on Windows requires \
-                     running as Administrator."
-                        .into(),
-                ))
-            } else {
-                Err(CliError("No YubiKey detected!".into()))
+            #[cfg(feature = "direct")]
+            {
+                let (scan_pids, _) = scan_usb_devices();
+                if !scan_pids.is_empty() {
+                    return Err(CliError(
+                        "A YubiKey was detected, but FIDO access on Windows requires \
+                         running as Administrator."
+                            .into(),
+                    ));
+                }
             }
+            Err(CliError("No YubiKey detected!".into()))
         }
         (None, 1) => Ok(devices.into_iter().next().unwrap()),
         (None, n) => {
             let mut msg = format!("Multiple YubiKeys detected ({n}):");
             for dev in &devices {
-                msg.push_str(&format!(
-                    "\n- {}",
-                    crate::list::describe_device(dev.as_ref())
-                ));
+                msg.push_str(&format!("\n- {}", describe_device_brief(dev.as_ref())));
             }
             msg.push_str("\nUse --device SERIAL to specify which one to use.");
             Err(CliError(msg))
@@ -1918,7 +1935,17 @@ fn run() -> Result<(), CliError> {
 
     // Handle --diagnose
     if cli.diagnose {
-        return diagnose::run_diagnose();
+        #[cfg(feature = "direct")]
+        {
+            return diagnose::run_diagnose();
+        }
+        #[cfg(not(feature = "direct"))]
+        {
+            return Err(CliError(
+                "Diagnostics requires direct device access (built without 'direct' feature)."
+                    .into(),
+            ));
+        }
     }
 
     // Handle --licenses
@@ -1954,7 +1981,18 @@ fn run() -> Result<(), CliError> {
             if cli.device.is_some() {
                 return Err(CliError("--device can't be used with 'list'.".into()));
             }
-            list::run(serials, readers)
+            #[cfg(feature = "direct")]
+            {
+                list::run(serials, readers)
+            }
+            #[cfg(not(feature = "direct"))]
+            {
+                let _ = (serials, readers);
+                Err(CliError(
+                    "Listing requires direct device access (built without 'direct' feature)."
+                        .into(),
+                ))
+            }
         }
         Commands::Info { check_fips } => {
             let dev = get_device(cli.device)?;

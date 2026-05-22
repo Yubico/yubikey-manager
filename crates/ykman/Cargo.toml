@@ -14,7 +14,7 @@ default = ["direct"]
 direct = ["yubikit/direct"]
 
 [dependencies]
-yubikit = { path = "../yubikit" }
+yubikit = { path = "../yubikit", default-features = false }
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3.5.2"

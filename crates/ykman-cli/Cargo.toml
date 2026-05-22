@@ -18,8 +18,8 @@ default = ["direct"]
 direct = ["ykman/direct", "yubikit/direct"]
 
 [dependencies]
-ykman = { path = "../ykman" }
-yubikit = { path = "../yubikit" }
+ykman = { path = "../ykman", default-features = false }
+yubikit = { path = "../yubikit", default-features = false }
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 getrandom = "0.3"
