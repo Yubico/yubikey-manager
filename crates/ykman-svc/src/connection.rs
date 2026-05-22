@@ -8,10 +8,10 @@ use yubikit::core::Connection;
 use yubikit::device::LocalYubiKeyDevice;
 use yubikit::fido::FidoConnection;
 use yubikit::otp::OtpConnection;
+use yubikit::platform::ctaphid::HidFidoConnection;
+use yubikit::platform::otphid::HidOtpConnection;
+use yubikit::platform::pcsc::PcscSmartCardConnection;
 use yubikit::smartcard::SmartCardConnection;
-use yubikit::transport::ctaphid::HidFidoConnection;
-use yubikit::transport::otphid::HidOtpConnection;
-use yubikit::transport::pcsc::PcscSmartCardConnection;
 
 use ykman::rpc::error::{RpcError, RpcResponse};
 use ykman::rpc::node::{RpcNode, SignalFn};

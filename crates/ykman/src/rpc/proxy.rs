@@ -12,10 +12,10 @@ use serde_json::{Value, json};
 use yubikit::core::{Connection, Transport};
 use yubikit::device::{DeviceError, ReinsertStatus, YubiKeyDevice};
 use yubikit::fido::FidoConnection;
+use yubikit::fido::{CtapHidCapability, FidoError};
 use yubikit::management::{Capability, DeviceInfo, UsbInterface};
 use yubikit::otp::{OtpConnection, OtpError};
 use yubikit::smartcard::{SmartCardConnection, SmartCardError};
-use yubikit::transport::ctaphid::{CtapHidCapability, FidoError};
 
 use super::client::{RpcCallError, RpcClient};
 

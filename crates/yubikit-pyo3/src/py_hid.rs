@@ -2,8 +2,8 @@ use pyo3::exceptions::PyOSError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use yubikit::fido::FidoConnection as _;
-use yubikit::transport::ctaphid;
-use yubikit::transport::otphid as hid;
+use yubikit::platform::ctaphid;
+use yubikit::platform::otphid as hid;
 
 fn hid_err(e: hid::HidError) -> PyErr {
     PyOSError::new_err(e.to_string())
@@ -107,7 +107,7 @@ impl OtpConnection {
 // FIDO HID (CTAP)
 // ---------------------------------------------------------------------------
 
-fn ctap_err(e: ctaphid::FidoError) -> PyErr {
+fn ctap_err(e: yubikit::fido::FidoError) -> PyErr {
     PyOSError::new_err(e.to_string())
 }
 

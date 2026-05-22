@@ -11,9 +11,9 @@ use yubikit::core::Connection;
 use yubikit::core::Transport;
 use yubikit::device::{get_name, list_readers, read_info_ccid, read_info_fido, read_info_otp};
 use yubikit::management::{Capability, DeviceInfo, ReleaseType};
-use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
-use yubikit::transport::otphid::{HidOtpConnection, list_otp_devices};
-use yubikit::transport::pcsc::{PcscSmartCardConnection, is_reader_usb};
+use yubikit::platform::ctaphid::{HidFidoConnection, list_fido_devices};
+use yubikit::platform::otphid::{HidOtpConnection, list_otp_devices};
+use yubikit::platform::pcsc::{PcscSmartCardConnection, is_reader_usb};
 
 use yubikit::yubiotp::YubiOtpSession;
 

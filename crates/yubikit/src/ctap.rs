@@ -23,8 +23,8 @@ use std::time::Duration;
 
 use crate::core::{Connection, Version, patch_version};
 use crate::fido::FidoConnection;
+use crate::fido::FidoError;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
-use crate::transport::ctaphid::FidoError;
 
 // ---------------------------------------------------------------------------
 // CTAP2 constants

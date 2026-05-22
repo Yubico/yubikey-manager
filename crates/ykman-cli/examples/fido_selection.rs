@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use yubikit::ctap::CtapSession;
 use yubikit::ctap2::{Ctap2Session, CtapStatus};
-use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
-use yubikit::transport::pcsc::{PcscSmartCardConnection, list_readers};
+use yubikit::platform::ctaphid::{HidFidoConnection, list_fido_devices};
+use yubikit::platform::pcsc::{PcscSmartCardConnection, list_readers};
 
 // --- Main ---
 

@@ -7,7 +7,7 @@ use std::io::{self, Write};
 
 use yubikit::ctap::CtapSession;
 use yubikit::ctap2::{Ctap2Session, Info, Permissions};
-use yubikit::transport::ctaphid::{HidFidoConnection, list_fido_devices};
+use yubikit::platform::ctaphid::{HidFidoConnection, list_fido_devices};
 use yubikit::webauthn::{
     ClientDataCollector, CollectedClientData, PublicKeyCredentialCreationOptions,
     PublicKeyCredentialRequestOptions, UserInteraction, WebAuthnClient,

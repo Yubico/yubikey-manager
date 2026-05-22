@@ -83,7 +83,7 @@
 //! - [`webauthn`] — High-level WebAuthn client with extension support (PRF, credProtect, largeBlob, etc.)
 //!
 //! ## Transport and protocol infrastructure
-//! - [`transport`] — USB HID (FIDO and OTP) and PC/SC transport implementations
+//! - [`platform`] — USB HID (FIDO and OTP) and PC/SC transport implementations (requires `usb` feature)
 //! - [`smartcard`] — ISO 7816 SmartCard / CCID connection, APDU handling, and SCP03 secure channel
 //! - [`otp`] — OTP HID framing protocol
 //! - [`core`] — Shared types: [`core::Version`], [`core::Connection`] trait
@@ -116,14 +116,17 @@ pub mod openpgp;
 pub mod otp;
 /// PIV (Personal Identity Verification) smart card application.
 pub mod piv;
+/// Platform-specific transport implementations (HID, PC/SC).
+///
+/// This module is only available when the `usb` feature is enabled (default).
+#[cfg(feature = "usb")]
+pub mod platform;
 /// Security Domain operations for managing SCP keys and certificates.
 pub mod securitydomain;
 /// Smart card communication primitives — APDUs, status words, ISO 7816-4, and SCP.
 pub mod smartcard;
 /// TLV (Tag-Length-Value) encoding and decoding.
 pub mod tlv;
-/// Transport layer — HID, PC/SC, and NFC backends.
-pub mod transport;
 /// WebAuthn client — high-level API for credentials and assertions.
 pub mod webauthn;
 /// YubiOTP application — configuring OTP slots and challenge-response.

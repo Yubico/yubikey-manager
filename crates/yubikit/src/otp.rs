@@ -20,7 +20,9 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::core::Version;
-use crate::transport::otphid::HidOtpConnection;
+
+#[cfg(feature = "usb")]
+use crate::platform::otphid::HidOtpConnection;
 
 // --- OTP Codec ---
 
@@ -135,9 +137,9 @@ pub enum OtpError {
     /// The operation timed out.
     #[error("Timeout: {0}")]
     Timeout(String),
-    /// An underlying HID transport error.
-    #[error("HID error: {0}")]
-    Hid(#[from] crate::transport::otphid::HidError),
+    /// An underlying transport error (e.g. HID I/O failure).
+    #[error("Transport error: {0}")]
+    Transport(Box<dyn std::error::Error + Send + Sync>),
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +186,7 @@ impl OtpConnection for Box<dyn OtpConnection + Send + Sync> {
     }
 }
 
+#[cfg(feature = "usb")]
 impl crate::core::Connection for HidOtpConnection {
     type Error = OtpError;
 
@@ -192,12 +195,15 @@ impl crate::core::Connection for HidOtpConnection {
     }
 }
 
+#[cfg(feature = "usb")]
 impl OtpConnection for HidOtpConnection {
     fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
-        self.get_feature_report().map_err(OtpError::from)
+        self.get_feature_report()
+            .map_err(|e| OtpError::Transport(Box::new(e)))
     }
     fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
-        self.set_feature_report(data).map_err(OtpError::from)
+        self.set_feature_report(data)
+            .map_err(|e| OtpError::Transport(Box::new(e)))
     }
 }
 

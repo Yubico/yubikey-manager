@@ -21,8 +21,8 @@ use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
 use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices};
 use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType, UsbInterface};
+use yubikit::platform::pcsc::{PcscSmartCardConnection, list_readers};
 use yubikit::securitydomain::SecurityDomainSession;
-use yubikit::transport::pcsc::{PcscSmartCardConnection, list_readers};
 
 // ───────────────────────── Connection Parameterization ─────────────────────────
 

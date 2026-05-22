@@ -6,6 +6,10 @@ description = "YubiKey management library"
 license = "Apache-2.0"
 autoexamples = false
 
+[features]
+default = ["usb"]
+usb = ["dep:hidapi", "dep:pcsc"]
+
 [dependencies]
 aes = "0.8"
 aes-gcm = "0.10"
@@ -19,7 +23,7 @@ hkdf = "0.12"
 hmac = "0.12"
 log = { version = "0.4", features = ["max_level_trace", "release_max_level_trace"] }
 pbkdf2 = { version = "0.12", features = ["hmac"] }
-pcsc = "2"
+pcsc = { version = "2", optional = true }
 sha1 = "0.10"
 sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
@@ -39,10 +43,10 @@ x509-cert = { version = "0.2.5", features = ["builder", "pem"] }
 signature = { version = "2.2.0", features = ["std"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-hidapi = { version = "2", default-features = false, features = ["linux-static-hidraw"] }
+hidapi = { version = "2", default-features = false, features = ["linux-static-hidraw"], optional = true }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-hidapi = { version = "2" }
+hidapi = { version = "2", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [

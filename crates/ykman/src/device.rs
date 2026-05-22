@@ -1,66 +1,21 @@
 //! Device source abstraction for YubiKey enumeration.
 //!
-//! Provides a [`DeviceSource`] trait that abstracts over local USB/NFC
-//! enumeration and remote access via the ykman-svc service. Use
-//! [`get_device_source`] to get the best available source for the platform.
+//! Provides device source implementations: local (via yubikit) and remote
+//! (via the ykman-svc service). Use [`get_device_source`] to get the best
+//! available source for the platform.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use serde_json::json;
 
-use yubikit::device::{DeviceError, YubiKeyDevice, list_devices, select_fido};
-use yubikit::management::UsbInterface;
+use yubikit::device::{DeviceError, DeviceSource, YubiKeyDevice};
 
 use crate::rpc::client::{RpcCallError, RpcClient};
 use crate::rpc::proxy::RpcDevice;
 
-/// A source of YubiKey devices.
-///
-/// Abstracts over local enumeration (USB/NFC) and remote access via the
-/// ykman-svc service, allowing callers to enumerate devices without caring
-/// about the underlying transport.
-pub trait DeviceSource {
-    /// List all currently connected YubiKey devices.
-    ///
-    /// Returns devices across all transports (USB and NFC) and connection
-    /// types (CCID, FIDO, OTP). Callers should filter the returned list
-    /// as needed.
-    fn list_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError>;
-
-    /// Select a YubiKey by touch via CTAP2 authenticator selection.
-    ///
-    /// Waits for the user to touch a connected YubiKey and returns it.
-    /// Polls for newly inserted devices until one is selected or cancelled.
-    fn select_fido(
-        &mut self,
-        cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Box<dyn YubiKeyDevice>, DeviceError>;
-
-    /// Whether this source is backed by the ykman-svc service.
-    fn is_service(&self) -> bool {
-        false
-    }
-}
-
-/// Device source using direct local access (USB HID, PC/SC).
-pub struct LocalDeviceSource;
-
-impl DeviceSource for LocalDeviceSource {
-    fn list_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError> {
-        let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
-        let devices = list_devices(all)?;
-        Ok(devices.into_iter().map(|d| Box::new(d) as _).collect())
-    }
-
-    fn select_fido(
-        &mut self,
-        cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Box<dyn YubiKeyDevice>, DeviceError> {
-        let dev = select_fido(cancel)?;
-        Ok(Box::new(dev))
-    }
-}
+// Re-export from yubikit for backward compatibility
+pub use yubikit::device::LocalDeviceSource;
 
 /// Device source using the ykman-svc service (Named Pipe on Windows, Unix
 /// socket in debug builds).

@@ -29,15 +29,21 @@ const USAGE_OTP: u16 = 0x0006;
 /// Errors that can occur during OTP HID communication.
 #[derive(Debug, thiserror::Error)]
 pub enum HidError {
-    /// Low-level HID transport error.
-    #[error("HID error: {0}")]
-    Hid(#[from] hidapi::HidError),
+    /// Low-level transport error (e.g. HID I/O failure).
+    #[error("Transport error: {0}")]
+    Transport(Box<dyn std::error::Error + Send + Sync>),
     /// The device path is not a valid C string.
     #[error("Invalid device path")]
     InvalidPath,
     /// The connection has already been closed.
     #[error("Connection is closed")]
     ConnectionClosed,
+}
+
+impl From<hidapi::HidError> for HidError {
+    fn from(e: hidapi::HidError) -> Self {
+        HidError::Transport(Box::new(e))
+    }
 }
 
 /// Information about an enumerated HID device.
