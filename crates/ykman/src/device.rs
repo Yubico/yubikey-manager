@@ -24,7 +24,7 @@ pub struct NoDeviceSource;
 
 impl DeviceSource for NoDeviceSource {
     fn list_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError> {
-        Err(DeviceError::NoDeviceFound)
+        Ok(Vec::new())
     }
 
     fn select_fido(

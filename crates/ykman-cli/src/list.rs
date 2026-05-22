@@ -1,8 +1,8 @@
-use yubikit::device::YubiKeyDevice;
+use yubikit::device::{YubiKeyDevice, get_name};
 use yubikit::management::UsbInterface;
-use yubikit::platform::device::{
-    get_name, name_from_pid, scan_usb_devices, usb_interfaces_from_pid,
-};
+#[cfg(feature = "direct")]
+use yubikit::platform::device::{name_from_pid, scan_usb_devices, usb_interfaces_from_pid};
+#[cfg(feature = "direct")]
 use yubikit::platform::pcsc::list_readers;
 
 use crate::util::CliError;
@@ -41,12 +41,22 @@ fn format_interfaces(ifaces: UsbInterface) -> String {
 
 pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
     if readers {
-        let reader_list =
-            list_readers().map_err(|e| CliError(format!("Failed to list readers: {e}")))?;
-        for r in &reader_list {
-            println!("{r}");
+        #[cfg(feature = "direct")]
+        {
+            let reader_list =
+                list_readers().map_err(|e| CliError(format!("Failed to list readers: {e}")))?;
+            for r in &reader_list {
+                println!("{r}");
+            }
+            return Ok(());
         }
-        return Ok(());
+        #[cfg(not(feature = "direct"))]
+        {
+            return Err(CliError(
+                "Listing readers requires direct device access (built without 'direct' feature)."
+                    .into(),
+            ));
+        }
     }
 
     let mut source = ykman::device::get_device_source();
@@ -56,13 +66,20 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
 
     if devices.is_empty() && !serials && !source.is_service() {
         // Check for devices that are visible but not accessible
-        let (scan_pids, _) = scan_usb_devices();
-        if scan_pids.is_empty() {
-            println!("No YubiKeys detected.");
-        } else {
-            for pid in scan_pids.keys() {
-                print_blocked_device(*pid);
+        #[cfg(feature = "direct")]
+        {
+            let (scan_pids, _) = scan_usb_devices();
+            if scan_pids.is_empty() {
+                println!("No YubiKeys detected.");
+            } else {
+                for pid in scan_pids.keys() {
+                    print_blocked_device(*pid);
+                }
             }
+        }
+        #[cfg(not(feature = "direct"))]
+        {
+            println!("No YubiKeys detected.");
         }
         return Ok(());
     }
@@ -85,6 +102,7 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
     Ok(())
 }
 
+#[cfg(feature = "direct")]
 fn print_blocked_device(pid: u16) {
     let name = name_from_pid(pid);
     let ifaces = usb_interfaces_from_pid(pid);

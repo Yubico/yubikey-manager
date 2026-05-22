@@ -9,13 +9,19 @@ use serde::Serialize;
 
 use yubikit::core::Connection;
 use yubikit::core::Transport;
+use yubikit::device::get_name;
 use yubikit::management::{Capability, DeviceInfo, ReleaseType};
-use yubikit::platform::device::{get_name, read_info_ccid, read_info_fido, read_info_otp};
+
+#[cfg(feature = "direct")]
+use yubikit::platform::device::{read_info_ccid, read_info_fido, read_info_otp};
+#[cfg(feature = "direct")]
 use yubikit::platform::hidapi::{
     HidFidoConnection, HidOtpConnection, list_fido_devices, list_otp_devices,
 };
+#[cfg(feature = "direct")]
 use yubikit::platform::pcsc::{PcscSmartCardConnection, is_reader_usb, list_readers};
 
+#[cfg(feature = "direct")]
 use yubikit::yubiotp::YubiOtpSession;
 
 use yubikit::ctap::CtapSession;
@@ -45,12 +51,17 @@ impl<T: Serialize> From<Result<T, String>> for ResultOrError<T> {
 #[derive(Debug, Serialize)]
 pub struct DiagnosticsReport {
     pub version: String,
+    pub features: Vec<String>,
     pub platform: String,
     pub arch: String,
-    pub pcsc: ResultOrError<PcscDiag>,
-    pub otp: ResultOrError<BTreeMap<String, OtpDeviceDiag>>,
-    pub fido: ResultOrError<BTreeMap<String, FidoDeviceDiag>>,
-    pub svc: ResultOrError<SvcDiag>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pcsc: Option<ResultOrError<PcscDiag>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub otp: Option<ResultOrError<BTreeMap<String, OtpDeviceDiag>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fido: Option<ResultOrError<BTreeMap<String, FidoDeviceDiag>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub svc: Option<ResultOrError<SvcDiag>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -669,19 +680,23 @@ fn probe_ctap2_pin<C: Connection + 'static>(
 // Main entry point
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "direct")]
 fn device_key_pcsc(reader: &str) -> String {
     let transport = if is_reader_usb(reader) { "USB" } else { "NFC" };
     format!("CCID ({reader}, [{transport}])")
 }
 
+#[cfg(feature = "direct")]
 fn device_key_otp(pid: u16, path: &str) -> String {
     format!("OTP (pid={pid:04x}, path={path})")
 }
 
+#[cfg(feature = "direct")]
 fn device_key_fido(pid: u16, path: &str) -> String {
     format!("FIDO (pid={pid:04x}, path={path})")
 }
 
+#[cfg(feature = "direct")]
 fn probe_pcsc() -> ResultOrError<PcscDiag> {
     match list_readers() {
         Ok(readers) => {
@@ -786,6 +801,7 @@ fn probe_pcsc() -> ResultOrError<PcscDiag> {
     }
 }
 
+#[cfg(feature = "direct")]
 fn probe_otp() -> ResultOrError<BTreeMap<String, OtpDeviceDiag>> {
     match list_otp_devices() {
         Ok(hid_devices) => {
@@ -861,6 +877,7 @@ fn probe_otp() -> ResultOrError<BTreeMap<String, OtpDeviceDiag>> {
     }
 }
 
+#[cfg(feature = "direct")]
 fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
     match list_fido_devices() {
         Ok(fido_devices) => {
@@ -953,14 +970,68 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
 
 /// Run full diagnostics across all transports and return a serializable report.
 pub fn run_diagnostics() -> DiagnosticsReport {
+    let mut features = Vec::new();
+    if cfg!(feature = "direct") {
+        features.push("direct".to_string());
+    }
+
     DiagnosticsReport {
         version: env!("CARGO_PKG_VERSION").to_string(),
+        features,
         platform: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
-        pcsc: probe_pcsc(),
-        otp: probe_otp(),
-        fido: probe_fido(),
-        svc: probe_svc(),
+        #[cfg(feature = "direct")]
+        pcsc: Some(probe_pcsc()),
+        #[cfg(not(feature = "direct"))]
+        pcsc: None,
+        #[cfg(feature = "direct")]
+        otp: Some(probe_otp()),
+        #[cfg(not(feature = "direct"))]
+        otp: None,
+        #[cfg(feature = "direct")]
+        fido: Some(probe_fido()),
+        #[cfg(not(feature = "direct"))]
+        fido: None,
+        svc: Some(probe_svc()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Generic read_info helpers (no platform dependency)
+// ---------------------------------------------------------------------------
+
+use yubikit::fido::FidoConnection;
+use yubikit::management::ManagementSession;
+use yubikit::otp::OtpConnection;
+use yubikit::smartcard::SmartCardConnection;
+
+fn read_info_ccid_generic<C: SmartCardConnection + Send + 'static>(
+    conn: C,
+) -> Result<(DeviceInfo, C), String> {
+    let mut session =
+        ManagementSession::new(conn).map_err(|(e, _)| format!("Management session failed: {e}"))?;
+    match session.read_device_info() {
+        Ok(info) => Ok((info, session.into_connection())),
+        Err(e) => Err(format!("read_device_info failed: {e}")),
+    }
+}
+
+fn read_info_fido_generic<C: FidoConnection + 'static>(conn: C) -> Result<(DeviceInfo, C), String> {
+    let mut session = ManagementSession::new_fido(conn)
+        .map_err(|(e, _)| format!("Management session failed: {e}"))?;
+    match session.read_device_info() {
+        Ok(info) => Ok((info, session.into_connection())),
+        Err(e) => Err(format!("read_device_info failed: {e}")),
+    }
+}
+
+fn read_info_otp_generic<T: OtpConnection + 'static>(
+    conn: T,
+) -> Result<(DeviceInfo, T), Option<T>> {
+    let mut session = ManagementSession::new_otp(conn).map_err(|(_, conn)| Some(conn))?;
+    match session.read_device_info() {
+        Ok(info) => Ok((info, session.into_connection())),
+        Err(_) => Err(Some(session.into_connection())),
     }
 }
 
@@ -969,15 +1040,6 @@ pub fn run_diagnostics() -> DiagnosticsReport {
 // ---------------------------------------------------------------------------
 
 fn probe_svc() -> ResultOrError<SvcDiag> {
-    #[cfg(not(target_os = "windows"))]
-    return ResultOrError::Err("ykman-svc is only available on Windows".to_string());
-
-    #[cfg(target_os = "windows")]
-    probe_svc_windows()
-}
-
-#[cfg(target_os = "windows")]
-fn probe_svc_windows() -> ResultOrError<SvcDiag> {
     let mut client = match crate::rpc::client::RpcClient::connect_pipe() {
         Ok(c) => c,
         Err(e) => return ResultOrError::Err(format!("Service not available: {e}")),
@@ -1004,7 +1066,6 @@ fn probe_svc_windows() -> ResultOrError<SvcDiag> {
     ResultOrError::Ok(SvcDiag { devices })
 }
 
-#[cfg(target_os = "windows")]
 fn probe_svc_device(name: &str, info: &serde_json::Value) -> SvcDeviceDiag {
     use crate::rpc::proxy::RpcDevice;
 
@@ -1051,28 +1112,23 @@ fn probe_svc_device(name: &str, info: &serde_json::Value) -> SvcDeviceDiag {
     }
 }
 
-#[cfg(target_os = "windows")]
 fn parse_svc_management(info: &serde_json::Value) -> ResultOrError<ManagementDiag> {
     let dev_info = crate::rpc::proxy::RpcDevice::parse_device_info(info);
     ResultOrError::Ok(management_diag(&dev_info))
 }
 
-#[cfg(target_os = "windows")]
 fn probe_svc_ccid(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcCcidDiag> {
     use yubikit::device::YubiKeyDevice;
-    use yubikit::platform::device::read_info_ccid;
 
     let conn = match dev.open_smartcard() {
         Ok(c) => c,
         Err(e) => return ResultOrError::Err(format!("Failed to open CCID: {e}")),
     };
 
-    // read_info_ccid returns DeviceError on failure (no connection returned).
-    // Re-open the connection for subsequent probes if info read fails.
-    let (mgmt, conn) = match read_info_ccid(conn) {
+    let (mgmt, conn) = match read_info_ccid_generic(conn) {
         Ok((info, c)) => (ResultOrError::Ok(management_diag(&info)), c),
         Err(e) => {
-            let mgmt = ResultOrError::Err(format!("{e}"));
+            let mgmt = ResultOrError::Err(e);
             match dev.open_smartcard() {
                 Ok(c) => (mgmt, c),
                 Err(e2) => {
@@ -1102,11 +1158,9 @@ fn probe_svc_ccid(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcCcidDi
     })
 }
 
-#[cfg(target_os = "windows")]
 fn probe_svc_ctap(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcFidoDiag> {
     use yubikit::device::YubiKeyDevice;
     use yubikit::fido::FidoConnection;
-    use yubikit::platform::device::read_info_fido;
 
     let conn: Box<dyn yubikit::fido::FidoConnection + Send> = match dev.open_fido() {
         Ok(c) => c,
@@ -1128,9 +1182,9 @@ fn probe_svc_ctap(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcFidoDi
                         pin,
                     });
                     let conn = ctap2.into_session().into_connection();
-                    let mgmt = match read_info_fido(conn) {
+                    let mgmt = match read_info_fido_generic(conn) {
                         Ok((info, _)) => ResultOrError::Ok(management_diag(&info)),
-                        Err((e, _)) => ResultOrError::Err(format!("{e}")),
+                        Err(_) => ResultOrError::Err("Failed to read management info".to_string()),
                     };
                     (ctap2_diag, mgmt)
                 }
@@ -1152,9 +1206,9 @@ fn probe_svc_ctap(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcFidoDi
             management: mgmt,
         })
     } else {
-        let mgmt = match read_info_fido(conn) {
+        let mgmt = match read_info_fido_generic(conn) {
             Ok((info, _)) => ResultOrError::Ok(management_diag(&info)),
-            Err((e, _)) => ResultOrError::Err(format!("{e}")),
+            Err(_) => ResultOrError::Err("Failed to read management info".to_string()),
         };
         ResultOrError::Ok(SvcFidoDiag {
             ctap_version: format!("{v1}.{v2}.{v3}"),
@@ -1165,20 +1219,18 @@ fn probe_svc_ctap(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcFidoDi
     }
 }
 
-#[cfg(target_os = "windows")]
 fn probe_svc_otp(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<OtpDeviceDiag> {
     use yubikit::device::YubiKeyDevice;
-    use yubikit::platform::device::read_info_otp;
 
     let conn = match dev.open_otp() {
         Ok(c) => c,
         Err(e) => return ResultOrError::Err(format!("Failed to open OTP: {e}")),
     };
 
-    let (mgmt, conn) = match read_info_otp(conn) {
+    let (mgmt, conn) = match read_info_otp_generic(conn) {
         Ok((info, c)) => (ResultOrError::Ok(management_diag(&info)), c),
-        Err((e, c)) => (
-            ResultOrError::Err(format!("{e}")),
+        Err(c) => (
+            ResultOrError::Err("Failed to read management info".to_string()),
             c.unwrap_or_else(|| dev.open_otp().expect("reopen failed")),
         ),
     };

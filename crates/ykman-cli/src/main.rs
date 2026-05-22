@@ -11,12 +11,10 @@ use yubikit::platform::device::scan_usb_devices;
 mod apdu;
 mod cli_enums;
 mod config;
-#[cfg(feature = "direct")]
 mod diagnose;
 mod fido;
 mod hsmauth;
 mod info;
-#[cfg(feature = "direct")]
 mod list;
 mod oath;
 mod openpgp;
@@ -1593,17 +1591,7 @@ enum SecurityDomainKeysAction {
 
 /// Brief device description for error messages.
 fn describe_device_brief(dev: &dyn YubiKeyDevice) -> String {
-    #[cfg(feature = "direct")]
-    {
-        list::describe_device(dev)
-    }
-    #[cfg(not(feature = "direct"))]
-    {
-        match dev.info().serial {
-            Some(s) => format!("{} (serial: {})", dev.name(), s),
-            None => dev.name().to_string(),
-        }
-    }
+    list::describe_device(dev)
 }
 
 /// Which transports to scan when resolving a device.
@@ -1935,17 +1923,7 @@ fn run() -> Result<(), CliError> {
 
     // Handle --diagnose
     if cli.diagnose {
-        #[cfg(feature = "direct")]
-        {
-            return diagnose::run_diagnose();
-        }
-        #[cfg(not(feature = "direct"))]
-        {
-            return Err(CliError(
-                "Diagnostics requires direct device access (built without 'direct' feature)."
-                    .into(),
-            ));
-        }
+        return diagnose::run_diagnose();
     }
 
     // Handle --licenses
@@ -1981,18 +1959,7 @@ fn run() -> Result<(), CliError> {
             if cli.device.is_some() {
                 return Err(CliError("--device can't be used with 'list'.".into()));
             }
-            #[cfg(feature = "direct")]
-            {
-                list::run(serials, readers)
-            }
-            #[cfg(not(feature = "direct"))]
-            {
-                let _ = (serials, readers);
-                Err(CliError(
-                    "Listing requires direct device access (built without 'direct' feature)."
-                        .into(),
-                ))
-            }
+            list::run(serials, readers)
         }
         Commands::Info { check_fips } => {
             let dev = get_device(cli.device)?;

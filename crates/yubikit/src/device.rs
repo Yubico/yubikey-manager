@@ -25,7 +25,7 @@
 //!
 //! let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO).unwrap();
 //! for dev in &devices {
-//!     println!("{} (serial: {:?})", dev.name(), dev.serial());
+//!     println!("{} (serial: {:?})", dev.name(), dev.info().serial);
 //! }
 //! ```
 
@@ -33,7 +33,7 @@ use std::fmt;
 
 use crate::core::Transport;
 use crate::fido::FidoConnection;
-use crate::management::{BoxedManagementError, DeviceInfo, UsbInterface};
+use crate::management::{BoxedManagementError, Capability, DeviceInfo, FormFactor, UsbInterface};
 use crate::otp::OtpConnection;
 use crate::smartcard::{SmartCardConnection, SmartCardError};
 
@@ -213,4 +213,152 @@ pub trait DeviceSource {
     fn is_service(&self) -> bool {
         false
     }
+}
+
+// ---------------------------------------------------------------------------
+// Device naming
+// ---------------------------------------------------------------------------
+
+use crate::core::Version;
+
+/// Preview firmware version ranges.
+const PREVIEW_RANGES: &[(Version, Version)] = &[
+    (Version(5, 0, 0), Version(5, 1, 0)),
+    (Version(5, 2, 0), Version(5, 2, 3)),
+    (Version(5, 5, 0), Version(5, 5, 2)),
+];
+
+pub(crate) fn is_preview(version: Version) -> bool {
+    PREVIEW_RANGES
+        .iter()
+        .any(|(start, end)| version >= *start && version < *end)
+}
+
+pub(crate) fn fido_only(cap: Capability) -> bool {
+    let non_fido = Capability::OTP.0
+        | Capability::OATH.0
+        | Capability::PIV.0
+        | Capability::OPENPGP.0
+        | Capability::HSMAUTH.0;
+    let fido = Capability::U2F.0 | Capability::FIDO2.0;
+    (cap.0 & non_fido == 0) && (cap.0 & fido != 0)
+}
+
+/// Determine the product name of a YubiKey from its [`DeviceInfo`].
+pub fn get_name(info: &DeviceInfo) -> String {
+    let usb_supported = info
+        .supported_capabilities
+        .get(&Transport::Usb)
+        .copied()
+        .unwrap_or(Capability::NONE);
+
+    let major = info.version.0;
+
+    // SKY devices are handled separately — they never get "YubiKey Preview"
+    // even on preview firmware, matching the Python behavior where key_type
+    // is determined from PID before the preview check.
+    if info.is_sky {
+        if info.version >= Version(5, 1, 0) {
+            return build_yk5_name(info, usb_supported);
+        }
+        if !usb_supported.contains(Capability::FIDO2) {
+            return "FIDO U2F Security Key".to_string();
+        }
+        return "Security Key by Yubico".to_string();
+    }
+
+    // Pre-YK4 devices
+    if major < 4 {
+        return if major == 0 {
+            format!("YubiKey ({})", info.version)
+        } else if major == 3 {
+            "YubiKey NEO".to_string()
+        } else {
+            "YubiKey".to_string()
+        };
+    }
+
+    // YK4 era
+    if major == 4 {
+        if info.is_fips {
+            return "YubiKey FIPS (4 Series)".to_string();
+        }
+        if usb_supported == Capability(Capability::OTP.0 | Capability::U2F.0) {
+            return "YubiKey Edge".to_string();
+        }
+        return "YubiKey 4".to_string();
+    }
+
+    // Preview firmware (non-SKY only)
+    if is_preview(info.version) {
+        return "YubiKey Preview".to_string();
+    }
+
+    // YK5+ dynamic naming (5.1.0+)
+    if info.version >= Version(5, 1, 0) {
+        return build_yk5_name(info, usb_supported);
+    }
+
+    // Fallback for 5.0.x
+    "YubiKey 5".to_string()
+}
+
+fn build_yk5_name(info: &DeviceInfo, usb_supported: Capability) -> String {
+    let is_nano = matches!(
+        info.form_factor,
+        FormFactor::UsbANano | FormFactor::UsbCNano
+    );
+    let is_bio = info.form_factor.is_bio();
+    let is_c = matches!(
+        info.form_factor,
+        FormFactor::UsbCKeychain | FormFactor::UsbCNano | FormFactor::UsbCBio
+    );
+    let has_nfc = info.supported_capabilities.contains_key(&Transport::Nfc);
+
+    let mut parts: Vec<&str> = Vec::new();
+
+    // Base name
+    if info.is_sky {
+        parts.push("Security Key");
+    } else {
+        parts.push("YubiKey");
+        if !is_bio {
+            parts.push("5");
+        }
+    }
+
+    // Connector type
+    if is_c {
+        parts.push("C");
+    } else if info.form_factor == FormFactor::UsbCLightning {
+        parts.push("Ci");
+    }
+
+    // Form factor / transport suffix
+    if is_nano {
+        parts.push("Nano");
+    } else if has_nfc {
+        parts.push("NFC");
+    } else if info.form_factor == FormFactor::UsbAKeychain {
+        parts.push("A");
+    } else if is_bio {
+        parts.push("Bio");
+    }
+
+    // Edition suffix
+    if info.is_fips {
+        parts.push("FIPS");
+    } else if is_bio {
+        if fido_only(usb_supported) {
+            parts.push("- FIDO Edition");
+        } else if usb_supported.contains(Capability::PIV) {
+            parts.push("- Multi-protocol Edition");
+        }
+    } else if info.is_sky && info.serial.is_some() {
+        parts.push("- Enterprise Edition");
+    } else if info.pin_complexity && !info.is_sky {
+        parts.push("- Enhanced PIN");
+    }
+
+    parts.join(" ").replace("5 C", "5C").replace("5 A", "5A")
 }
