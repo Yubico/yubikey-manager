@@ -1,8 +1,8 @@
 //! Read detailed device information from the first connected YubiKey.
 
 use yubikit::core::Transport;
-use yubikit::device::list_devices;
 use yubikit::management::UsbInterface;
+use yubikit::platform::device::list_devices;
 
 fn main() {
     let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;

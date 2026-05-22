@@ -1,8 +1,8 @@
 //! List OATH accounts on the first connected YubiKey.
 
-use yubikit::device::list_devices;
 use yubikit::management::UsbInterface;
 use yubikit::oath::OathSession;
+use yubikit::platform::device::list_devices;
 
 fn main() {
     let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;

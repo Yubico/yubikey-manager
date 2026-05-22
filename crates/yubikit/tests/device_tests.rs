@@ -19,8 +19,9 @@ use rstest::{fixture, rstest};
 use std::sync::{Mutex, OnceLock};
 use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
-use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices};
+use yubikit::device::YubiKeyDevice;
 use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType, UsbInterface};
+use yubikit::platform::device::{LocalYubiKeyDevice, list_devices};
 use yubikit::platform::pcsc::{PcscSmartCardConnection, list_readers};
 use yubikit::securitydomain::SecurityDomainSession;
 

@@ -4,8 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::{Value, json};
 
 use yubikit::core::Transport;
-use yubikit::device::{LocalYubiKeyDevice, ReinsertStatus, YubiKeyDevice};
+use yubikit::device::{ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
+use yubikit::platform::device::LocalYubiKeyDevice;
 
 use ykman::rpc::error::{RpcError, RpcResponse};
 use ykman::rpc::node::{RpcNode, SignalFn};

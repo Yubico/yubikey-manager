@@ -19,12 +19,27 @@ use crate::otp::OtpConnection;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardProtocol};
 
 use super::ctaphid::{FidoDeviceInfo, HidFidoConnection, list_fido_devices};
-use super::otphid::{HidDeviceInfo, HidOtpConnection, list_otp_devices};
-use super::pcsc::{PcscSmartCardConnection, is_reader_usb, list_readers, list_readers_with_state};
+use super::otphid::{HidDeviceInfo, HidError, HidOtpConnection, list_otp_devices};
+use super::pcsc::{
+    PcscError, PcscSmartCardConnection, is_reader_usb, list_readers, list_readers_with_state,
+};
 #[cfg(windows)]
 use super::setupdi::list_setupdi_devices;
 
 use crate::yubiotp::YubiOtpSession;
+
+// From conversions for platform-specific errors into DeviceError
+impl From<PcscError> for DeviceError {
+    fn from(e: PcscError) -> Self {
+        Self::Transport(Box::new(e))
+    }
+}
+
+impl From<HidError> for DeviceError {
+    fn from(e: HidError) -> Self {
+        Self::Transport(Box::new(e))
+    }
+}
 
 /// A discovered YubiKey that can open connections.
 ///

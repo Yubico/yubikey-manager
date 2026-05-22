@@ -20,7 +20,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use yubikit::device::list_devices;
+//! use yubikit::platform::device::list_devices;
 //! use yubikit::management::UsbInterface;
 //!
 //! let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO).unwrap();
@@ -97,20 +97,6 @@ impl std::error::Error for DeviceError {
 impl From<SmartCardError> for DeviceError {
     fn from(e: SmartCardError) -> Self {
         Self::SmartCard(e)
-    }
-}
-
-#[cfg(feature = "usb")]
-impl From<crate::platform::pcsc::PcscError> for DeviceError {
-    fn from(e: crate::platform::pcsc::PcscError) -> Self {
-        Self::Transport(Box::new(e))
-    }
-}
-
-#[cfg(feature = "usb")]
-impl From<crate::platform::otphid::HidError> for DeviceError {
-    fn from(e: crate::platform::otphid::HidError) -> Self {
-        Self::Transport(Box::new(e))
     }
 }
 
@@ -228,20 +214,3 @@ pub trait DeviceSource {
         false
     }
 }
-
-// ===========================================================================
-// Platform-specific re-exports (requires "usb" feature)
-// ===========================================================================
-
-#[cfg(feature = "usb")]
-pub use crate::platform::device::{
-    LocalDeviceSource, LocalYubiKeyDevice, get_name, list_devices, name_from_pid, read_info_ccid,
-    read_info_fido, read_info_otp, scan_usb_devices, select_fido, usb_interfaces_from_pid,
-};
-
-/// Re-export of [`list_readers`] for enumerating PC/SC smart card readers.
-#[cfg(feature = "usb")]
-pub use crate::platform::pcsc::list_readers;
-/// Re-export of [`list_readers_with_state`] for fingerprint-aware scanning.
-#[cfg(feature = "usb")]
-pub use crate::platform::pcsc::list_readers_with_state;

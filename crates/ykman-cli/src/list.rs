@@ -1,7 +1,9 @@
-use yubikit::device::{
-    YubiKeyDevice, get_name, list_readers, name_from_pid, scan_usb_devices, usb_interfaces_from_pid,
-};
+use yubikit::device::YubiKeyDevice;
 use yubikit::management::UsbInterface;
+use yubikit::platform::device::{
+    get_name, name_from_pid, scan_usb_devices, usb_interfaces_from_pid,
+};
+use yubikit::platform::pcsc::list_readers;
 
 use crate::util::CliError;
 

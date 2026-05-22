@@ -21,6 +21,7 @@ use hidapi::HidApi;
 
 use crate::core::Version;
 use crate::log_traffic;
+use crate::otp::{OtpConnection, OtpError};
 
 const YUBICO_VID: u16 = 0x1050;
 const USAGE_PAGE_OTP: u16 = 0x0001;
@@ -157,5 +158,24 @@ impl HidOtpConnection {
             log_traffic!("Closing HID connection");
         }
         self.device.take();
+    }
+}
+
+impl crate::core::Connection for HidOtpConnection {
+    type Error = OtpError;
+
+    fn close(&mut self) {
+        HidOtpConnection::close(self);
+    }
+}
+
+impl OtpConnection for HidOtpConnection {
+    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
+        self.get_feature_report()
+            .map_err(|e| OtpError::Transport(Box::new(e)))
+    }
+    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
+        self.set_feature_report(data)
+            .map_err(|e| OtpError::Transport(Box::new(e)))
     }
 }

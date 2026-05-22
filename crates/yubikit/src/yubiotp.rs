@@ -23,7 +23,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use yubikit::device::list_devices;
+//! use yubikit::platform::device::list_devices;
 //! use yubikit::management::UsbInterface;
 //! use yubikit::yubiotp::{YubiOtpSession, Slot};
 //!

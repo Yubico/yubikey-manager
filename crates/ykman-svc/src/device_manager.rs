@@ -18,8 +18,9 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use yubikit::core::Transport;
-use yubikit::device::{LocalYubiKeyDevice, YubiKeyDevice, list_devices, scan_usb_devices};
+use yubikit::device::YubiKeyDevice;
 use yubikit::management::UsbInterface;
+use yubikit::platform::device::{LocalYubiKeyDevice, list_devices, scan_usb_devices};
 
 use ykman::rpc::error::RpcError;
 use ykman::rpc::node::RpcNode;

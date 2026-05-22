@@ -4,8 +4,9 @@
 //! remove and reinsert it.
 
 use yubikit::core::Transport;
-use yubikit::device::{ReinsertStatus, list_devices};
+use yubikit::device::ReinsertStatus;
 use yubikit::management::UsbInterface;
+use yubikit::platform::device::list_devices;
 
 fn main() {
     let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;

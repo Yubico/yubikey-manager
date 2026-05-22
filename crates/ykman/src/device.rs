@@ -10,12 +10,10 @@ use std::rc::Rc;
 use serde_json::json;
 
 use yubikit::device::{DeviceError, DeviceSource, YubiKeyDevice};
+use yubikit::platform::device::LocalDeviceSource;
 
 use crate::rpc::client::{RpcCallError, RpcClient};
 use crate::rpc::proxy::RpcDevice;
-
-// Re-export from yubikit for backward compatibility
-pub use yubikit::device::LocalDeviceSource;
 
 /// Device source using the ykman-svc service (Named Pipe on Windows, Unix
 /// socket in debug builds).

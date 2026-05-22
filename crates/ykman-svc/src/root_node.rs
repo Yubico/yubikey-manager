@@ -89,7 +89,7 @@ impl RpcNode for ServiceRootNode {
             "select_fido" => {
                 log::debug!("FIDO selection requested");
                 let cancel_fn = || cancel.load(Ordering::Relaxed);
-                let device = yubikit::device::select_fido(Some(&cancel_fn))
+                let device = yubikit::platform::device::select_fido(Some(&cancel_fn))
                     .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
 
                 // Find the device name in our inventory

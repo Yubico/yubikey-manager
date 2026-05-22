@@ -5,10 +5,10 @@ use hex::{self, FromHex, ToHex};
 use serde_json::{Value, json};
 
 use yubikit::core::Connection;
-use yubikit::device::LocalYubiKeyDevice;
 use yubikit::fido::FidoConnection;
 use yubikit::otp::OtpConnection;
 use yubikit::platform::ctaphid::HidFidoConnection;
+use yubikit::platform::device::LocalYubiKeyDevice;
 use yubikit::platform::otphid::HidOtpConnection;
 use yubikit::platform::pcsc::PcscSmartCardConnection;
 use yubikit::smartcard::SmartCardConnection;

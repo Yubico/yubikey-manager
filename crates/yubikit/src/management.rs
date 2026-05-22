@@ -25,7 +25,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use yubikit::device::list_devices;
+//! use yubikit::platform::device::list_devices;
 //! use yubikit::management::{ManagementSession, UsbInterface};
 //!
 //! let devices = list_devices(UsbInterface::CCID)?;

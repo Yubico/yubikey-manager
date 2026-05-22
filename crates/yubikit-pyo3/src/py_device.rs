@@ -23,6 +23,7 @@ use pyo3::types::PyDict;
 use yubikit::device;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management;
+use yubikit::platform::device as platform_device;
 
 fn device_err(e: device::DeviceError) -> PyErr {
     PyRuntimeError::new_err(format!("{e}"))
@@ -36,7 +37,7 @@ fn device_err(e: device::DeviceError) -> PyErr {
 pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<PyObject> {
     // Try OTP connection
     if let Ok(native) = extract_otp_connection(connection) {
-        match device::read_info_otp(native) {
+        match platform_device::read_info_otp(native) {
             Ok((info, conn)) => {
                 restore_otp_connection(connection, conn)?;
                 return device_info_to_dict(py, &info);
@@ -52,7 +53,7 @@ pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<PyOb
 
     // Try FIDO connection
     if let Ok(native) = extract_fido_connection(connection) {
-        match device::read_info_fido(native) {
+        match platform_device::read_info_fido(native) {
             Ok((info, conn)) => {
                 restore_fido_connection(connection, conn)?;
                 return device_info_to_dict(py, &info);
@@ -72,7 +73,7 @@ pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<PyOb
             "Expected a SmartCardConnection, OtpConnection, or FidoConnection",
         )
     })?;
-    match device::read_info_ccid(conn) {
+    match platform_device::read_info_ccid(conn) {
         Ok((info, conn)) => {
             restore_smartcard_connection(connection, conn)?;
             device_info_to_dict(py, &info)
@@ -136,7 +137,7 @@ pub fn get_name(
     };
 
     let _ = py;
-    Ok(device::get_name(&info))
+    Ok(platform_device::get_name(&info))
 }
 
 /// Scan USB for attached YubiKeys without opening connections.
@@ -145,7 +146,7 @@ pub fn get_name(
 /// and state is a hash that changes when attached devices change.
 #[pyfunction]
 pub fn scan_devices(py: Python<'_>) -> PyResult<PyObject> {
-    let (counts, state) = device::scan_usb_devices();
+    let (counts, state) = platform_device::scan_usb_devices();
     let dict = PyDict::new(py);
     for (pid, count) in counts {
         dict.set_item(pid, count)?;
@@ -156,7 +157,7 @@ pub fn scan_devices(py: Python<'_>) -> PyResult<PyObject> {
 /// A YubiKey device discovered via native enumeration.
 #[pyclass(unsendable)]
 pub struct NativeYubiKeyDevice {
-    inner: device::LocalYubiKeyDevice,
+    inner: platform_device::LocalYubiKeyDevice,
 }
 
 #[pymethods]
@@ -265,7 +266,7 @@ pub fn list_devices(transports: Vec<String>) -> PyResult<Vec<NativeYubiKeyDevice
             }
         }
     }
-    let devices = device::list_devices(interfaces).map_err(device_err)?;
+    let devices = platform_device::list_devices(interfaces).map_err(device_err)?;
     Ok(devices
         .into_iter()
         .map(|d| NativeYubiKeyDevice { inner: d })

@@ -3,8 +3,9 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 use yubikit::core::{Transport, Version, set_override_version};
-use yubikit::device::{YubiKeyDevice, scan_usb_devices};
+use yubikit::device::YubiKeyDevice;
 use yubikit::management::{Capability, ReleaseType, UsbInterface};
+use yubikit::platform::device::scan_usb_devices;
 
 mod apdu;
 mod cli_enums;

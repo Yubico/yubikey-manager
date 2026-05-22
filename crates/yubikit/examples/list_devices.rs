@@ -1,7 +1,7 @@
 //! List all connected YubiKeys and display their information.
 
-use yubikit::device::list_devices;
 use yubikit::management::UsbInterface;
+use yubikit::platform::device::list_devices;
 
 fn main() {
     let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;

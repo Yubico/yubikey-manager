@@ -9,10 +9,11 @@ use serde::Serialize;
 
 use yubikit::core::Connection;
 use yubikit::core::Transport;
-use yubikit::device::{get_name, list_readers, read_info_ccid, read_info_fido, read_info_otp};
 use yubikit::management::{Capability, DeviceInfo, ReleaseType};
 use yubikit::platform::ctaphid::{HidFidoConnection, list_fido_devices};
+use yubikit::platform::device::{get_name, read_info_ccid, read_info_fido, read_info_otp};
 use yubikit::platform::otphid::{HidOtpConnection, list_otp_devices};
+use yubikit::platform::pcsc::list_readers;
 use yubikit::platform::pcsc::{PcscSmartCardConnection, is_reader_usb};
 
 use yubikit::yubiotp::YubiOtpSession;
@@ -1058,7 +1059,8 @@ fn parse_svc_management(info: &serde_json::Value) -> ResultOrError<ManagementDia
 
 #[cfg(target_os = "windows")]
 fn probe_svc_ccid(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcCcidDiag> {
-    use yubikit::device::{YubiKeyDevice, read_info_ccid};
+    use yubikit::device::YubiKeyDevice;
+    use yubikit::platform::device::read_info_ccid;
 
     let conn = match dev.open_smartcard() {
         Ok(c) => c,
@@ -1102,8 +1104,9 @@ fn probe_svc_ccid(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcCcidDi
 
 #[cfg(target_os = "windows")]
 fn probe_svc_ctap(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcFidoDiag> {
-    use yubikit::device::{YubiKeyDevice, read_info_fido};
+    use yubikit::device::YubiKeyDevice;
     use yubikit::fido::FidoConnection;
+    use yubikit::platform::device::read_info_fido;
 
     let conn: Box<dyn yubikit::fido::FidoConnection + Send> = match dev.open_fido() {
         Ok(c) => c,
@@ -1164,7 +1167,8 @@ fn probe_svc_ctap(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcFidoDi
 
 #[cfg(target_os = "windows")]
 fn probe_svc_otp(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<OtpDeviceDiag> {
-    use yubikit::device::{YubiKeyDevice, read_info_otp};
+    use yubikit::device::YubiKeyDevice;
+    use yubikit::platform::device::read_info_otp;
 
     let conn = match dev.open_otp() {
         Ok(c) => c,

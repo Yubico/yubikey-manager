@@ -21,9 +21,6 @@ use thiserror::Error;
 
 use crate::core::Version;
 
-#[cfg(feature = "usb")]
-use crate::platform::otphid::HidOtpConnection;
-
 // --- OTP Codec ---
 
 const MODHEX_ALPHABET: &[u8; 16] = b"cbdefghijklnrtuv";
@@ -183,27 +180,6 @@ impl OtpConnection for Box<dyn OtpConnection + Send + Sync> {
     }
     fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
         (**self).otp_send(data)
-    }
-}
-
-#[cfg(feature = "usb")]
-impl crate::core::Connection for HidOtpConnection {
-    type Error = OtpError;
-
-    fn close(&mut self) {
-        HidOtpConnection::close(self);
-    }
-}
-
-#[cfg(feature = "usb")]
-impl OtpConnection for HidOtpConnection {
-    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
-        self.get_feature_report()
-            .map_err(|e| OtpError::Transport(Box::new(e)))
-    }
-    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
-        self.set_feature_report(data)
-            .map_err(|e| OtpError::Transport(Box::new(e)))
     }
 }
 
