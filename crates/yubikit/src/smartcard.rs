@@ -889,22 +889,9 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         };
 
         // Build APDU for MAC calculation (always use extended format for long data)
-        let mac_apdu = if enc_data.len() + 8 > SHORT_APDU_MAX_CHUNK {
-            format_extended_apdu(
-                cla,
-                ins,
-                p1,
-                p2,
-                &[&enc_data[..], &[0u8; 8]].concat(),
-                0,
-                MaxApduSize::Yk4_3 as usize,
-            )?
-        } else {
-            match self.apdu_format {
-                ApduFormat::Short => {
-                    format_short_apdu(cla, ins, p1, p2, &[&enc_data[..], &[0u8; 8]].concat(), 0)?
-                }
-                ApduFormat::Extended => format_extended_apdu(
+        let (mac_apdu, le_size) = if enc_data.len() + 8 > SHORT_APDU_MAX_CHUNK {
+            (
+                format_extended_apdu(
                     cla,
                     ins,
                     p1,
@@ -913,11 +900,32 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
                     0,
                     MaxApduSize::Yk4_3 as usize,
                 )?,
+                2usize,
+            )
+        } else {
+            match self.apdu_format {
+                ApduFormat::Short => (
+                    format_short_apdu(cla, ins, p1, p2, &[&enc_data[..], &[0u8; 8]].concat(), 0)?,
+                    1usize,
+                ),
+                ApduFormat::Extended => (
+                    format_extended_apdu(
+                        cla,
+                        ins,
+                        p1,
+                        p2,
+                        &[&enc_data[..], &[0u8; 8]].concat(),
+                        0,
+                        MaxApduSize::Yk4_3 as usize,
+                    )?,
+                    2usize,
+                ),
             }
         };
 
-        // Calculate MAC over the APDU (minus the 8 zero bytes placeholder)
-        let mac = scp.mac(&mac_apdu[..mac_apdu.len() - 8])?;
+        // Calculate MAC over the APDU (minus the 8-byte MAC placeholder and
+        // the trailing Le which is not part of the SCP03 MAC input)
+        let mac = scp.mac(&mac_apdu[..mac_apdu.len() - 8 - le_size])?;
 
         // Append MAC to encrypted data
         let full_data = [&enc_data[..], &mac[..]].concat();
