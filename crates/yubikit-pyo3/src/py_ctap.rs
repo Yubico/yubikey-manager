@@ -227,15 +227,25 @@ impl PyCtap2SessionCcid {
         let conn = extract_smartcard_connection(connection)?;
         let ctap = if let Some(params) = scp_key_params {
             let scp_params = crate::py_bridge::scp_key_params_from_py(params)?;
-            CtapSession::new_with_scp(conn, &scp_params).map_err(|(e, _)| ctap_err(e))?
+            CtapSession::new_with_scp(conn, &scp_params).map_err(|(e, conn)| {
+                let _ = restore_smartcard_connection(connection, conn);
+                ctap_err(e)
+            })?
         } else {
-            CtapSession::new(conn).map_err(|(e, _)| ctap_err(e))?
+            CtapSession::new(conn).map_err(|(e, conn)| {
+                let _ = restore_smartcard_connection(connection, conn);
+                ctap_err(e)
+            })?
         };
         if !ctap.has_ctap2() {
             return Err(PyRuntimeError::new_err("Device does not support CTAP2"));
         }
         Ok(Self {
-            session: Some(Ctap2Session::new(ctap).map_err(|(e, _)| ctap2_err(e))?),
+            session: Some(Ctap2Session::new(ctap).map_err(|(e, ctap)| {
+                let conn = ctap.into_connection();
+                let _ = restore_smartcard_connection(connection, conn);
+                ctap2_err(e)
+            })?),
             py_connection,
         })
     }
@@ -367,12 +377,19 @@ impl PyCtap2SessionFido {
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();
         let conn = extract_fido_connection(connection)?;
-        let ctap = CtapSession::new_fido(conn).map_err(|(e, _)| ctap_err(e))?;
+        let ctap = CtapSession::new_fido(conn).map_err(|(e, conn)| {
+            let _ = restore_fido_connection(connection, conn);
+            ctap_err(e)
+        })?;
         if !ctap.has_ctap2() {
             return Err(PyRuntimeError::new_err("Device does not support CTAP2"));
         }
         Ok(Self {
-            session: Some(Ctap2Session::new(ctap).map_err(|(e, _)| ctap2_err(e))?),
+            session: Some(Ctap2Session::new(ctap).map_err(|(e, ctap)| {
+                let conn = ctap.into_connection();
+                let _ = restore_fido_connection(connection, conn);
+                ctap2_err(e)
+            })?),
             py_connection,
         })
     }

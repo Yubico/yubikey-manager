@@ -65,7 +65,10 @@ impl SecurityDomainSession {
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
-        let inner = RustSecurityDomainSession::new(conn).map_err(|(e, _)| smartcard_err(e))?;
+        let inner = RustSecurityDomainSession::new(conn).map_err(|(e, conn)| {
+            let _ = restore_smartcard_connection(connection, conn);
+            smartcard_err(e)
+        })?;
         Ok(Self {
             inner: Some(inner),
             py_connection,

@@ -136,14 +136,20 @@ impl ManagementSessionCcid {
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
-            let inner = ManagementSession::new_with_scp(conn, &scp_params)
-                .map_err(|(e, _)| management_ccid_err(e))?;
+            let inner =
+                ManagementSession::new_with_scp(conn, &scp_params).map_err(|(e, conn)| {
+                    let _ = restore_smartcard_connection(connection, conn);
+                    management_ccid_err(e)
+                })?;
             Ok(Self {
                 inner: Some(inner),
                 py_connection,
             })
         } else {
-            let inner = ManagementSession::new(conn).map_err(|(e, _)| management_ccid_err(e))?;
+            let inner = ManagementSession::new(conn).map_err(|(e, conn)| {
+                let _ = restore_smartcard_connection(connection, conn);
+                management_ccid_err(e)
+            })?;
             Ok(Self {
                 inner: Some(inner),
                 py_connection,
@@ -267,7 +273,10 @@ impl ManagementSessionOtp {
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();
         let hid_conn = extract_otp_connection(connection)?;
-        let inner = ManagementSession::new_otp(hid_conn).map_err(|(e, _)| management_err(e))?;
+        let inner = ManagementSession::new_otp(hid_conn).map_err(|(e, conn)| {
+            let _ = restore_otp_connection(connection, conn);
+            management_err(e)
+        })?;
         Ok(Self {
             inner: Some(inner),
             py_connection,
@@ -380,7 +389,10 @@ impl ManagementSessionFido {
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_connection: PyObject = connection.clone().unbind();
         let conn = extract_fido_connection(connection)?;
-        let inner = ManagementSession::new_fido(conn).map_err(|(e, _)| management_err(e))?;
+        let inner = ManagementSession::new_fido(conn).map_err(|(e, conn)| {
+            let _ = restore_fido_connection(connection, conn);
+            management_err(e)
+        })?;
         Ok(Self {
             inner: Some(inner),
             py_connection,

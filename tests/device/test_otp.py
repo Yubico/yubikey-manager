@@ -52,7 +52,7 @@ def read_config(session, conn_type, info, transport, await_reboot, device):
     if need_reboot:
         pytest.skip("Can't read config")
 
-    return session.get_config_state()
+    return session.get_config_state
 
 
 class TestProgrammingState:

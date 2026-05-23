@@ -219,13 +219,16 @@ def verify_cert_signature(cert, public_key=None):
     public_key.verify(*args)
 
 
-def skip_unsupported_key_type(key_type, info, pin_policy=PIN_POLICY.DEFAULT):
+def skip_unsupported_key_type(
+    key_type, info, pin_policy=PIN_POLICY.DEFAULT, generate=True
+):
     try:
         _do_check_key_support(
             info.version,
             key_type,
             pin_policy,
             TOUCH_POLICY.DEFAULT,
+            generate=generate,
             fips_restrictions=CAPABILITY.PIV in info.fips_capable,
         )
     except NotSupportedError as e:
@@ -240,7 +243,7 @@ class TestCertificateSignatures:
     def test_generate_self_signed_certificate(
         self, info, session, key_type, hash_algorithm, keys, scp
     ):
-        skip_unsupported_key_type(key_type, info)
+        skip_unsupported_key_type(key_type, info, generate=False)
 
         slot = SLOT.SIGNATURE
         public_key = import_key(session, scp, keys, slot, key_type)
@@ -297,7 +300,7 @@ class TestKeyAgreement:
 
     @pytest.mark.parametrize("key_type", ECDH_KEY_TYPES)
     def test_import_ecdh(self, session, info, key_type, keys, scp):
-        skip_unsupported_key_type(key_type, info)
+        skip_unsupported_key_type(key_type, info, generate=False)
 
         e_priv = generate_sw_key(key_type)
         public_key = import_key(
@@ -336,6 +339,7 @@ class TestKeyManagement:
             == "alice"
         )
 
+    @condition.min_version(4)
     def test_generate_self_signed_certificate_requires_pin(self, session, keys, scp):
         session.verify_pin(keys.pin)
         public_key = generate_key(session, scp, keys, SLOT.AUTHENTICATION)

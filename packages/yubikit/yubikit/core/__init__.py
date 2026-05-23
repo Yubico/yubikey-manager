@@ -186,7 +186,9 @@ class Session(Closable):
             setattr(self._connection, "_session", None)
             self._connection = None
 
-        self._native.close()  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+        native = getattr(self, "_native", None)
+        if native is not None:
+            native.close()
 
 
 @unique

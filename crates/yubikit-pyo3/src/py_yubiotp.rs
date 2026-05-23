@@ -92,14 +92,20 @@ impl PyYubiOtpSessionCcid {
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
-            let session = YubiOtpSession::new_with_scp(conn, &scp_params)
-                .map_err(|(e, _)| yubiotp_ccid_err(e))?;
+            let session =
+                YubiOtpSession::new_with_scp(conn, &scp_params).map_err(|(e, conn)| {
+                    let _ = restore_smartcard_connection(connection, conn);
+                    yubiotp_ccid_err(e)
+                })?;
             Ok(Self {
                 session: Some(session),
                 py_connection,
             })
         } else {
-            let session = YubiOtpSession::new(conn).map_err(|(e, _)| yubiotp_ccid_err(e))?;
+            let session = YubiOtpSession::new(conn).map_err(|(e, conn)| {
+                let _ = restore_smartcard_connection(connection, conn);
+                yubiotp_ccid_err(e)
+            })?;
             Ok(Self {
                 session: Some(session),
                 py_connection,
