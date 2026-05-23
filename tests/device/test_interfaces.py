@@ -3,11 +3,24 @@ from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.management import ManagementSession
+from yubikit.yubiotp import YubiOtpSession
 
 from . import condition
 
 
 def try_connection(device, conn_type):
+    if device.info.version < (4, 0, 0):
+        if issubclass(conn_type, FidoConnection):
+            with device.open_connection(conn_type):
+                pass
+            return True
+        else:
+            with device.open_connection(conn_type) as conn:
+                with YubiOtpSession(conn) as s:
+                    serial = s.get_serial()
+            assert serial == device.info.serial
+            return True
+
     with device.open_connection(conn_type) as conn:
         with ManagementSession(conn) as m:
             info = m.read_device_info()
