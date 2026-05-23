@@ -889,6 +889,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         };
 
         // Build APDU for MAC calculation (always use extended format for long data)
+        let max_size = std::cmp::max(MaxApduSize::Yk4_3 as usize, self.max_apdu_size);
         let (mac_apdu, le_size) = if enc_data.len() + 8 > SHORT_APDU_MAX_CHUNK {
             (
                 format_extended_apdu(
@@ -898,7 +899,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
                     p2,
                     &[&enc_data[..], &[0u8; 8]].concat(),
                     0,
-                    MaxApduSize::Yk4_3 as usize,
+                    max_size,
                 )?,
                 2usize,
             )
@@ -916,7 +917,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
                         p2,
                         &[&enc_data[..], &[0u8; 8]].concat(),
                         0,
-                        MaxApduSize::Yk4_3 as usize,
+                        max_size,
                     )?,
                     2usize,
                 ),
