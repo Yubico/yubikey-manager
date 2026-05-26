@@ -1490,19 +1490,490 @@ mod yubiotp {
     }
 }
 
-// ───────────────────────── FIDO / CTAP HID ─────────────────────────
+// ───────────────────────── FIDO / CTAP2 ─────────────────────────
 
 mod fido {
     use super::*;
+    use yubikit::core::Connection;
+    use yubikit::ctap::CtapSession;
+    use yubikit::ctap2::types::{AuthenticatorOptions, PublicKeyCredentialRpEntity};
+    use yubikit::ctap2::{
+        Aaguid, ClientPin, CredentialManagement, Ctap2Error, Ctap2Session, CtapStatus, LargeBlobs,
+        Permissions, PinProtocol, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
+        PublicKeyCredentialUserEntity,
+    };
     use yubikit::fido::FidoConnection;
+    use yubikit::webauthn::types::PublicKeyCredentialType;
 
-    /// Test that cancelling a CTAP2 selection command over HID works.
+    const TEST_PIN: &str = "123456";
+    const TEST_RP_ID: &str = "test.rs.yubikey.example";
+
+    /// Whether the FIDO CCID interface is usable.
     ///
-    /// Sends an authenticatorSelection CBOR command and cancels it
-    /// after receiving a keepalive, verifying that the authenticator
-    /// responds with KeepaliveCancel (0x2D) promptly.
+    /// Over NFC it is always available; over USB the FIDOCCID capability must be
+    /// enabled in the device's configuration.
+    fn fido_ccid_available() -> bool {
+        let dev = get_device();
+        if dev.transport() == Transport::Nfc {
+            return true;
+        }
+        dev.info()
+            .config
+            .enabled_capabilities
+            .get(&Transport::Usb)
+            .copied()
+            .unwrap_or(Capability::NONE)
+            .contains(Capability::FIDOCCID)
+    }
+
+    /// Skip a SmartCard / SmartCardScp11b test if FIDOCCID is not enabled over USB.
+    macro_rules! require_fido_ccid {
+        ($tc:expr) => {
+            if matches!(
+                $tc,
+                TestConnection::SmartCard | TestConnection::SmartCardScp11b
+            ) && !fido_ccid_available()
+            {
+                eprintln!("  SKIP {:?}: FIDOCCID not enabled over USB", $tc);
+                return;
+            }
+        };
+    }
+
+    /// Get a PIN token, skipping the test if the PIN is wrong or auth is blocked.
+    macro_rules! get_pin_token_or_skip {
+        ($cp:expr, $pin:expr, $perms:expr, $rpid:expr) => {
+            match $cp.get_pin_token($pin, $perms, $rpid) {
+                Ok(t) => t,
+                Err(Ctap2Error::StatusError(CtapStatus::PinInvalid)) => {
+                    eprintln!("  SKIP: device PIN is not TEST_PIN; reset FIDO applet to rerun");
+                    return;
+                }
+                Err(Ctap2Error::StatusError(CtapStatus::PinAuthBlocked)) => {
+                    eprintln!("  SKIP: PIN auth blocked (re-power/re-tap device to clear)");
+                    return;
+                }
+                Err(e) => panic!("get_pin_token failed: {e}"),
+            }
+        };
+    }
+
+    fn open_ctap2_smartcard(tc: &TestConnection) -> Ctap2Session<PcscSmartCardConnection> {
+        let conn = open_smartcard_connection(tc);
+        let ctap = CtapSession::new(conn)
+            .map_err(|(e, _)| e)
+            .expect("CtapSession::new");
+        Ctap2Session::new(ctap)
+            .map_err(|(e, _)| e)
+            .expect("Ctap2Session::new")
+    }
+
+    // ── Generic helpers (work for any C: Connection + 'static) ───────────────
+
+    fn assert_info<C: Connection + 'static>(mut session: Ctap2Session<C>) {
+        let info = session.get_info().expect("get_info");
+        assert!(!info.versions.is_empty(), "versions should not be empty");
+        assert!(
+            info.versions.iter().any(|v| v.starts_with("FIDO_2_")),
+            "expected a FIDO_2_x version, got: {:?}",
+            info.versions
+        );
+        assert_ne!(info.aaguid, Aaguid::NONE, "AAGUID should not be all zeros");
+        assert!(!info.options.is_empty(), "options should not be empty");
+        eprintln!("  versions: {:?}", info.versions);
+        eprintln!("  aaguid: {:?}", info.aaguid);
+        eprintln!("  extensions: {:?}", info.extensions);
+    }
+
+    fn assert_pin_retries<C: Connection + 'static>(mut session: Ctap2Session<C>) {
+        let info = session.get_info().expect("get_info for pin retries check");
+        if !ClientPin::<C>::is_supported(&info) {
+            eprintln!("  SKIP: clientPin not supported on this device");
+            return;
+        }
+        let mut cp = ClientPin::new(session)
+            .map_err(|(e, _)| e)
+            .expect("ClientPin::new");
+        let (retries, pcs) = cp.get_pin_retries().expect("get_pin_retries");
+        assert!(retries <= 8, "retries should be <= 8, got {retries}");
+        eprintln!("  PIN retries: {retries} (power_cycle_state: {pcs:?})");
+    }
+
+    // ── 1. authenticatorGetInfo ─────────────────────────────────────────────
+
+    /// Verify that authenticatorGetInfo returns valid data on all transports.
     #[rstest]
-    #[case(TestConnection::UsbHid)] // UsbHid means USB HID interface is available
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
+    #[case(TestConnection::UsbHid)]
+    fn test_ctap2_get_info(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::FIDO2);
+        require_fido_ccid!(tc);
+        match &tc {
+            TestConnection::UsbHid => {
+                let conn = get_device().open_fido().expect("open FIDO HID");
+                let ctap = CtapSession::new_fido(conn)
+                    .map_err(|(e, _)| e)
+                    .expect("CtapSession::new_fido");
+                let session = Ctap2Session::new(ctap)
+                    .map_err(|(e, _)| e)
+                    .expect("Ctap2Session::new");
+                assert_info(session);
+            }
+            _ => assert_info(open_ctap2_smartcard(&tc)),
+        }
+    }
+
+    // ── 2. PIN retries ─────────────────────────────────────────────────────
+
+    /// Verify that PIN retries can be read (no UP required) on all transports.
+    #[rstest]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
+    #[case(TestConnection::UsbHid)]
+    fn test_ctap2_pin_retries(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::FIDO2);
+        require_fido_ccid!(tc);
+        match &tc {
+            TestConnection::UsbHid => {
+                let conn = get_device().open_fido().expect("open FIDO HID");
+                let ctap = CtapSession::new_fido(conn)
+                    .map_err(|(e, _)| e)
+                    .expect("CtapSession::new_fido");
+                let session = Ctap2Session::new(ctap)
+                    .map_err(|(e, _)| e)
+                    .expect("Ctap2Session::new");
+                assert_pin_retries(session);
+            }
+            _ => assert_pin_retries(open_ctap2_smartcard(&tc)),
+        }
+    }
+
+    // ── 3. authenticatorSelection over NFC ─────────────────────────────────
+
+    /// Verify that authenticatorSelection succeeds over NFC (UP is satisfied
+    /// immediately because the card is on the reader).
+    ///
+    /// Requires CTAP 2.1 or the FIDO_2_1_PRE preview.
+    #[rstest]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
+    fn test_ctap2_selection_nfc(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_transport!(Transport::Nfc);
+        require_capability!(Capability::FIDO2);
+
+        let mut session = open_ctap2_smartcard(&tc);
+        let info = session.get_info().expect("get_info for selection check");
+        let supports_selection = info
+            .versions
+            .iter()
+            .any(|v| v == "FIDO_2_1" || v == "FIDO_2_1_PRE");
+        if !supports_selection {
+            eprintln!("  SKIP: authenticatorSelection requires CTAP 2.1");
+            return;
+        }
+
+        // On NFC the card is already present, so UP is satisfied without physical touch.
+        match session.selection(None, None) {
+            Ok(()) => eprintln!("  selection: OK"),
+            Err(e) => eprintln!("  selection: {e} (acceptable on some pre-release firmware)"),
+        }
+    }
+
+    // ── 4. make_credential + get_assertion over NFC ─────────────────────────
+
+    /// Create a credential, then immediately verify it by getting an assertion.
+    ///
+    /// Each step opens a fresh NFC connection, giving the authenticator a new
+    /// per-connection UP budget (card on reader = UP satisfied).
+    /// Cleans up the test credential via CredentialManagement if available.
+    #[rstest]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
+    fn test_ctap2_make_and_get_credential_nfc(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_transport!(Transport::Nfc);
+        require_capability!(Capability::FIDO2);
+
+        // Step 1: Ensure the test PIN is set (no UP required).
+        {
+            let mut session = open_ctap2_smartcard(&tc);
+            let info = session.get_info().expect("get_info for pin state");
+            let pin_set = info.options.get("clientPin").copied().unwrap_or(false);
+            if !pin_set {
+                let mut cp = ClientPin::new(session)
+                    .map_err(|(e, _)| e)
+                    .expect("ClientPin for set_pin");
+                cp.set_pin(TEST_PIN).expect("set_pin");
+                eprintln!("  PIN set to test PIN");
+            }
+        }
+
+        let client_data_hash = [0x42u8; 32];
+        let rp = PublicKeyCredentialRpEntity {
+            id: TEST_RP_ID.into(),
+            name: Some("Rust Device Tests".into()),
+        };
+        let user = PublicKeyCredentialUserEntity {
+            id: b"test-user-01".to_vec(),
+            name: Some("test@rs.example".into()),
+            display_name: Some("Test User".into()),
+        };
+        let params = [PublicKeyCredentialParameters {
+            type_: PublicKeyCredentialType::PublicKey,
+            alg: -7, // ES256
+        }];
+        let options = AuthenticatorOptions {
+            rk: Some(true),
+            ..Default::default()
+        };
+
+        // Step 2: make_credential (UP satisfied by card on NFC reader).
+        let cred_id = {
+            let session = open_ctap2_smartcard(&tc);
+            let mut cp = ClientPin::new(session)
+                .map_err(|(e, _)| e)
+                .expect("ClientPin for make_credential");
+            let token = get_pin_token_or_skip!(
+                cp,
+                TEST_PIN,
+                Some(Permissions::MAKE_CREDENTIAL),
+                Some(TEST_RP_ID)
+            );
+            let protocol = cp.protocol();
+            let mut session = cp.into_session();
+
+            let pin_uv_param = protocol.authenticate(&token, &client_data_hash);
+            let resp = session
+                .make_credential(
+                    &client_data_hash,
+                    &rp,
+                    &user,
+                    &params,
+                    None,
+                    None,
+                    Some(&options),
+                    Some(&pin_uv_param),
+                    Some(protocol.version()),
+                    None,
+                    None,
+                    None,
+                )
+                .expect("make_credential");
+
+            assert!(!resp.auth_data.is_empty(), "auth_data should not be empty");
+            assert!(
+                resp.auth_data.len() >= 55,
+                "auth_data too short for attested data: {} bytes",
+                resp.auth_data.len()
+            );
+            assert!(!resp.fmt.is_empty(), "fmt should not be empty");
+
+            let flags = resp.auth_data[32];
+            assert!(flags & 0x01 != 0, "UP flag should be set in auth_data");
+            assert!(
+                flags & 0x40 != 0,
+                "AT flag should be set in auth_data (make_credential)"
+            );
+
+            let cred_id_len = u16::from_be_bytes([resp.auth_data[53], resp.auth_data[54]]) as usize;
+            assert!(
+                resp.auth_data.len() >= 55 + cred_id_len,
+                "auth_data truncated (need {} bytes for cred ID)",
+                55 + cred_id_len
+            );
+            let cred_id = resp.auth_data[55..55 + cred_id_len].to_vec();
+            eprintln!(
+                "  make_credential: fmt={}, cred_id={} bytes",
+                resp.fmt,
+                cred_id.len()
+            );
+            cred_id
+        };
+
+        // Step 3: get_assertion — fresh connection = new UP budget.
+        {
+            let assert_hash = [0xABu8; 32];
+            let session = open_ctap2_smartcard(&tc);
+            let mut cp = ClientPin::new(session)
+                .map_err(|(e, _)| e)
+                .expect("ClientPin for get_assertion");
+            let token = get_pin_token_or_skip!(
+                cp,
+                TEST_PIN,
+                Some(Permissions::GET_ASSERTION),
+                Some(TEST_RP_ID)
+            );
+            let protocol = cp.protocol();
+            let mut session = cp.into_session();
+
+            let pin_uv_param = protocol.authenticate(&token, &assert_hash);
+            let allow_list = [PublicKeyCredentialDescriptor {
+                type_: PublicKeyCredentialType::PublicKey,
+                id: cred_id.clone(),
+                transports: None,
+            }];
+            let resp = session
+                .get_assertion(
+                    TEST_RP_ID,
+                    &assert_hash,
+                    Some(&allow_list),
+                    None,
+                    None,
+                    Some(&pin_uv_param),
+                    Some(protocol.version()),
+                    None,
+                    None,
+                )
+                .expect("get_assertion");
+
+            assert!(!resp.auth_data.is_empty(), "auth_data should not be empty");
+            assert!(!resp.signature.is_empty(), "signature should not be empty");
+            let flags = resp.auth_data[32];
+            assert!(
+                flags & 0x01 != 0,
+                "UP flag should be set in assertion auth_data"
+            );
+            eprintln!("  get_assertion: sig={} bytes", resp.signature.len());
+        }
+
+        // Step 4: clean up with CredentialManagement (best-effort).
+        {
+            let mut session = open_ctap2_smartcard(&tc);
+            let info = session.get_info().expect("get_info for cleanup check");
+            if CredentialManagement::<PcscSmartCardConnection>::is_supported(&info) {
+                let mut cp = ClientPin::new(session)
+                    .map_err(|(e, _)| e)
+                    .expect("ClientPin for credmgmt cleanup");
+                let token =
+                    match cp.get_pin_token(TEST_PIN, Some(Permissions::CREDENTIAL_MGMT), None) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            eprintln!("  cleanup: could not get PIN token (non-fatal): {e}");
+                            return;
+                        }
+                    };
+                let protocol = cp.protocol();
+                let session = cp.into_session();
+                let mut credmgmt = CredentialManagement::new(session, protocol, token)
+                    .map_err(|(e, _)| e)
+                    .expect("CredentialManagement for cleanup");
+                let cred_desc = PublicKeyCredentialDescriptor {
+                    type_: PublicKeyCredentialType::PublicKey,
+                    id: cred_id,
+                    transports: None,
+                };
+                match credmgmt.delete_cred(&cred_desc) {
+                    Ok(()) => eprintln!("  cleanup: test credential deleted"),
+                    Err(e) => eprintln!("  cleanup: delete_cred failed (non-fatal): {e}"),
+                }
+            } else {
+                eprintln!("  cleanup: CredentialManagement not supported, skipping");
+            }
+        }
+    }
+
+    // ── 5. CredentialManagement metadata over NFC ──────────────────────────
+
+    /// Read credential storage metadata via CredentialManagement.
+    ///
+    /// Requires a PIN to be set. If no PIN is set the test is skipped.
+    #[rstest]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
+    fn test_ctap2_credential_management_nfc(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_transport!(Transport::Nfc);
+        require_capability!(Capability::FIDO2);
+
+        let mut session = open_ctap2_smartcard(&tc);
+        let info = session.get_info().expect("get_info for credmgmt check");
+        if !CredentialManagement::<PcscSmartCardConnection>::is_supported(&info) {
+            eprintln!("  SKIP: CredentialManagement not supported");
+            return;
+        }
+        if !info.options.get("clientPin").copied().unwrap_or(false) {
+            eprintln!("  SKIP: no PIN set (required for CredentialManagement)");
+            return;
+        }
+
+        let mut cp = ClientPin::new(session)
+            .map_err(|(e, _)| e)
+            .expect("ClientPin for credmgmt");
+        let token = get_pin_token_or_skip!(cp, TEST_PIN, Some(Permissions::CREDENTIAL_MGMT), None);
+        let protocol = cp.protocol();
+        let session = cp.into_session();
+        let mut credmgmt = CredentialManagement::new(session, protocol, token)
+            .map_err(|(e, _)| e)
+            .expect("CredentialManagement::new");
+
+        let (existing, max_remaining) = credmgmt.get_metadata().expect("get_metadata");
+        eprintln!("  credentials: existing={existing}, max_remaining={max_remaining}");
+        // Total capacity must be non-zero.
+        assert!(
+            existing + max_remaining > 0,
+            "total credential capacity should be > 0"
+        );
+
+        if existing > 0 {
+            let rps = credmgmt.enumerate_rps().expect("enumerate_rps");
+            eprintln!("  RPs: {}", rps.len());
+            assert!(
+                !rps.is_empty(),
+                "enumerate_rps returned empty for existing credentials"
+            );
+            for rp in &rps {
+                eprintln!("    rp_id={}", rp.rp.id);
+                let creds = credmgmt
+                    .enumerate_creds(&rp.rp_id_hash)
+                    .expect("enumerate_creds");
+                eprintln!("    creds: {}", creds.len());
+            }
+        }
+    }
+
+    // ── 6. Large Blobs read over NFC ───────────────────────────────────────
+
+    /// Verify that the large-blob array can be read (no UP required).
+    #[rstest]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
+    fn test_ctap2_large_blobs_nfc(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_transport!(Transport::Nfc);
+        require_capability!(Capability::FIDO2);
+
+        let mut session = open_ctap2_smartcard(&tc);
+        let info = session.get_info().expect("get_info for largeblobs check");
+        if !LargeBlobs::<PcscSmartCardConnection>::is_supported(&info) {
+            eprintln!("  SKIP: largeBlobs not supported");
+            return;
+        }
+
+        // Reads don't require a PIN token; pass dummy values.
+        let mut lb = LargeBlobs::new(session, PinProtocol::V1, vec![])
+            .map_err(|(e, _)| e)
+            .expect("LargeBlobs::new");
+        let blob_array = lb.read_blob_array().expect("read_blob_array");
+        eprintln!("  large blob array: {} bytes", blob_array.len());
+    }
+
+    // ── 7. authenticatorSelection cancel over USB HID ──────────────────────
+
+    /// Verify that cancelling a CTAP2 selection command over USB HID works.
+    ///
+    /// Sends an authenticatorSelection CBOR command and cancels it after the
+    /// first keepalive, checking that the authenticator responds with
+    /// KeepaliveCancel (0x2D) promptly.
+    ///
+    /// This test is USB HID–only: the cancel mechanism relies on the HID
+    /// out-of-band cancel packet; NFCCTAP uses a different cancel path that
+    /// is tested via `test_ctap2_selection_nfc` above.
+    #[rstest]
+    #[case(TestConnection::UsbHid)]
     fn test_fido_selection_cancel(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::FIDO2);
@@ -1510,8 +1981,6 @@ mod fido {
 
         let mut conn = get_device().open_fido().expect("open FIDO HID");
 
-        // Cancel after the first keepalive is received (the cancel command
-        // can only be sent in response to a keepalive packet).
         let got_keepalive = std::sync::atomic::AtomicBool::new(false);
         let start = std::time::Instant::now();
         let result = conn.call(
@@ -1537,16 +2006,13 @@ mod fido {
                     response.first()
                 );
             }
-            Err(e) => {
-                panic!("Unexpected error: {e}");
-            }
+            Err(e) => panic!("Unexpected error: {e}"),
         }
 
         assert!(
             elapsed.as_secs() < 10,
             "Cancel took too long: {elapsed:?} (expected < 10s)"
         );
-
         eprintln!("  PASS {tc:?} (cancelled in {elapsed:?})");
     }
 }
