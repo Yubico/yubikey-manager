@@ -1,11 +1,42 @@
 == Working with the code
 
+=== Repository structure
+
+This repository is a mixed Rust/Python workspace:
+
+[cols="1,2"]
+|===
+| Path | Description
+
+| `crates/yubikit`
+| Core Rust library — protocol implementations for all YubiKey applications
+
+| `crates/yubikit-pyo3`
+| PyO3 bindings that expose the Rust library to Python
+
+| `crates/ykman`
+| Rust library implementing higher-level ykman operations
+
+| `crates/ykman-cli`
+| The `ykman` command-line executable
+
+| `crates/ykman-svc`
+| Background service for elevated YubiKey access (Windows)
+
+| `packages/yubikit`
+| Python package wrapping the native Rust extension
+
+| `packages/ykman`
+| Python wrapper for the `ykman` command-line executable
+
+|===
+
 === Install dependencies
 
-This project uses https://docs.astral.sh/uv/[uv] for development.
-Follow the uv Getting Started guide to install and configure it.
-
-You will also need a Rust toolchain (stable). Install via https://rustup.rs/[rustup].
+This project uses https://rustup.rs/[rustup] for the Rust toolchain. The
+Python parts use https://docs.astral.sh/uv/[uv], which can be skipped when
+only developing the Rust parts. Note that changes in the `yubikit` crate often
+require modifications to the Python wrapper as well.
 
 ==== Linux (Debian-based distributions)
 
@@ -17,79 +48,154 @@ You will also need a Rust toolchain (stable). Install via https://rustup.rs/[rus
 
 ==== macOS
 
-No additional system packages required (PC/SC is provided by the OS).
+No additional system packages required.
 
 ==== Windows
 
 No additional system packages required.
 
-=== Install yubikey-manager from source
+=== Setting up the development environment
 
-Clone the repository:
+Clone the repository and set up the Python environment:
 
     $ git clone https://github.com/Yubico/yubikey-manager.git
     $ cd yubikey-manager
+    $ uv sync
 
-=== Running from source
+Build the native Rust extension and install it into the virtual environment:
 
-To run ykman from source, use the `uv run` command:
+    $ cd crates/yubikit-pyo3
+    $ maturin develop
+    $ cd ../..
 
-    $ uv run ykman
+After making changes to the Rust code, re-run `maturin develop` to rebuild
+and reinstall the native extension before testing.
 
-Show available commands:
+NOTE: Use `.venv/bin/python3 -m pytest` (or activate the venv) rather than
+`uv run pytest` when testing after `maturin develop`.  The `uv run` command
+synchronises the environment before running, which can overwrite the
+maturin-installed native extension with a cached wheel.
 
-    $ uv run ykman --help
 
-Show information about inserted YubiKey:
+=== Building the Rust crates and executables
 
-    $ uv run ykman info
+To build the project use cargo build:
 
-Run ykman in DEBUG mode:
+    $ cargo build
 
-    $ uv run ykman --log-level DEBUG info
+For a release build:
 
-=== Code Style & Security
+    $ cargo build --release
 
-This project uses https://docs.astral.sh/ruff/[ruff] for Python code style and
-security linting. https://mypy-lang.org[mypy] and
-https://github.com/microsoft/pyright[pyright] are used for static type checking.
+=== Building the ykman executable
+
+To build a debug binary:
+
+    $ cargo build -p ykman-cli
+
+The binary is written to `target/debug/ykman`.
+
+For a release build:
+
+    $ cargo build --release -p ykman-cli
+
+The binary is written to `target/release/ykman`.
+
+The `hardware` feature (enabled by default) links against libpcsclite and
+hidapi to communicate directly with connected devices. Build without it to
+produce a binary that can only communicate via the `ykman-svc` service:
+
+    $ cargo build -p ykman-cli --no-default-features
+
+=== Building the Python wrapper
+
+To build the Python wrapper, use `uv`:
+
+    $ uv sync
+
+Because uv caches wheels, any changes to the native layers may require you to
+force a rebuild of the yubikit package:
+
+    $ uv clean && uv pip uninstall yubikit
+    $ uv sync
+
+=== Code style & security
+
+https://docs.astral.sh/ruff/[ruff] handles Python style and security linting.
+https://mypy-lang.org[mypy], https://github.com/microsoft/pyright[pyright], and
+https://github.com/astral-sh/ty[ty] are used for static type checking.
 Rust code uses `cargo fmt` and `cargo clippy`.
-These are invoked with a http://pre-commit.com/[pre-commit] hook.
-
-To use these:
+All checks are wired up via a http://pre-commit.com/[pre-commit] hook:
 
     $ uv tool install pre-commit
     $ pre-commit install
 
+To run all checks manually:
+
+    $ pre-commit run --all
+
 === Unit tests
 
-To run unit tests:
+These tests do not require a YubiKey to be connected.
+
+Rust unit tests:
+
+    $ cargo test --lib
+
+Python unit tests:
 
     $ uv run pytest
 
-
-=== Integration tests
+=== Rust device tests
 
 WARNING: ONLY run these on dedicated developer keys, as it will permanently
-delete data on the device(s)!
+delete data on the device!
 
-To run integration tests, indicate the serial number (given by `ykman list`) of
-the YubiKey to test with.  Make sure no other YubiKey is connected when running
-the test!
+Set `YUBIKEY_SERIAL` to the serial number of the target device, then run:
 
-   $ uv run pytest --device 123456
+    $ YUBIKEY_SERIAL=123456 cargo test -p yubikit --test device_tests -- --test-threads=1
 
-To run the tests over NFC, place the YubiKey to test on an NFC reader, and
-indicate both the reader and the serial number of the YubiKey:
+For devices without a serial number, use `YUBIKEY_NO_SERIAL=1` instead:
 
-   $ uv run pytest --reader HID --device 123456
+    $ YUBIKEY_NO_SERIAL=1 cargo test -p yubikit --test device_tests -- --test-threads=1
 
-The integration test suite will automatically identify which test cases can be
-run with the attached YubiKey.
+To additionally run tests over NFC, set `YUBIKEY_NFC_SERIAL` to the serial
+number of the device on the reader. Optionally set `YUBIKEY_READER` to a
+partial PC/SC reader name (case-insensitive) to select a specific reader:
 
+    $ YUBIKEY_SERIAL=123456 YUBIKEY_NFC_SERIAL=123456 \
+        cargo test -p yubikit --test device_tests -- --test-threads=1
 
-=== Packaging
+=== Python device tests
 
-For third-party packaging, use the source releases and signatures available
-https://developers.yubico.com/yubikey-manager/Releases/[here].
-These artifacts are also published on Github on the Releases page.
+WARNING: ONLY run these on dedicated developer keys, as it will permanently
+delete data on the device!
+
+Specify the serial number of the YubiKey to test with (shown by `ykman list`):
+
+    $ uv run pytest --device 123456
+
+This works for both USB and NFC-connected devices. The test suite automatically
+skips tests that are not applicable to the attached device.
+
+=== Generating documentation
+
+==== Rust (cargo doc)
+
+Generate and open API documentation for the `yubikit` crate:
+
+    $ cargo doc -p yubikit --open
+
+To include documentation for all workspace crates:
+
+    $ cargo doc --workspace --open
+
+The generated HTML is written to `target/doc/`.
+
+==== Python (Sphinx)
+
+Generate HTML API documentation for the Python packages:
+
+    $ uv run sphinx-build docs docs/_build/html
+
+Open `docs/_build/html/index.html` in a browser to view the result.
