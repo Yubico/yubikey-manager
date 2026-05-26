@@ -20,7 +20,7 @@ use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
 use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType, UsbInterface};
 use yubikit::platform::device::{LocalYubiKeyDevice, list_devices};
-use yubikit::platform::pcsc::{PcscSmartCardConnection, list_readers};
+use yubikit::platform::pcsc::PcscSmartCardConnection;
 use yubikit::securitydomain::SecurityDomainSession;
 
 // ───────────────────────── Connection Parameterization ─────────────────────────
@@ -44,22 +44,10 @@ macro_rules! skip_if_needed {
     };
 }
 
-// ───────────────────────── Device State ─────────────────────────
+// ───────────────────────── Device ─────────────────────────
 
-/// Source of the device under test.
-enum DeviceSource {
-    Usb(Box<LocalYubiKeyDevice>),
-    Nfc { reader: String },
-}
-
-struct DeviceState {
-    source: DeviceSource,
-    info: DeviceInfo,
-    transport: Transport,
-}
-
-/// Cached device state — resolved once and reused across all tests.
-static DEVICE_STATE: OnceLock<DeviceState> = OnceLock::new();
+/// Cached device — resolved once and reused across all tests.
+static DEVICE: OnceLock<LocalYubiKeyDevice> = OnceLock::new();
 
 /// Whether the device supports SCP11b (version >= 5.7.2).
 static SCP11B_SUPPORTED: OnceLock<bool> = OnceLock::new();
@@ -79,84 +67,37 @@ fn required_serial() -> Option<u32> {
     Some(s.parse().expect("YUBIKEY_SERIAL must be a valid integer"))
 }
 
-fn get_device_state() -> &'static DeviceState {
-    DEVICE_STATE.get_or_init(|| {
+fn get_device() -> &'static LocalYubiKeyDevice {
+    DEVICE.get_or_init(|| {
         let serial = required_serial();
+        let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
+            .expect("Failed to enumerate YubiKeys");
 
-        // Try USB first. list_devices() also returns NFC devices; filter them out.
-        let usb_devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
-            .expect("Failed to enumerate USB YubiKeys");
-
-        let usb_match = match serial {
-            Some(s) => usb_devices
+        let dev = match serial {
+            Some(s) => devices
                 .into_iter()
-                .filter(|d| d.transport() == Transport::Usb)
-                .find(|d| d.info().serial == Some(s)),
+                .find(|d| d.info().serial == Some(s))
+                .unwrap_or_else(|| panic!("No YubiKey found with serial {s}")),
             None => {
-                let mut devs: Vec<_> = usb_devices
+                let mut devs: Vec<_> = devices
                     .into_iter()
-                    .filter(|d| d.transport() == Transport::Usb && d.info().serial.is_none())
+                    .filter(|d| d.info().serial.is_none())
                     .collect();
                 match devs.len() {
-                    0 => None,
-                    1 => Some(devs.remove(0)),
-                    n => panic!(
-                        "Multiple USB YubiKeys without serial found ({n}), cannot disambiguate"
-                    ),
+                    0 => panic!("No YubiKey without serial found"),
+                    1 => devs.remove(0),
+                    n => {
+                        panic!("Multiple YubiKeys without serial found ({n}), cannot disambiguate")
+                    }
                 }
             }
         };
 
-        if let Some(dev) = usb_match {
-            let info = dev.info().clone();
-            if info.version_qualifier.release_type != ReleaseType::Final {
-                set_override_version(info.version);
-            }
-            return DeviceState {
-                source: DeviceSource::Usb(Box::new(dev)),
-                info,
-                transport: Transport::Usb,
-            };
+        if dev.info().version_qualifier.release_type != ReleaseType::Final {
+            set_override_version(dev.info().version);
         }
-
-        // Try NFC readers.
-        let readers = list_readers().unwrap_or_default();
-        for reader in readers {
-            if let Ok(conn) = PcscSmartCardConnection::new(&reader, false)
-                && let Ok(mut session) = ManagementSession::new(conn)
-                && let Ok(info) = session.read_device_info()
-            {
-                let matches = match serial {
-                    Some(s) => info.serial == Some(s),
-                    None => info.serial.is_none(),
-                };
-                if matches {
-                    if info.version_qualifier.release_type != ReleaseType::Final {
-                        set_override_version(info.version);
-                    }
-                    return DeviceState {
-                        source: DeviceSource::Nfc { reader },
-                        info,
-                        transport: Transport::Nfc,
-                    };
-                }
-            }
-        }
-
-        match serial {
-            Some(s) => panic!("No YubiKey found with serial {s} (checked USB and NFC readers)"),
-            None => panic!("No YubiKey without serial found (checked USB and NFC readers)"),
-        }
+        dev
     })
-}
-
-fn open_smartcard() -> PcscSmartCardConnection {
-    match &get_device_state().source {
-        DeviceSource::Usb(dev) => dev.open_smartcard().expect("Failed to open USB smartcard"),
-        DeviceSource::Nfc { reader } => {
-            PcscSmartCardConnection::new(reader, false).expect("Failed to open NFC smartcard")
-        }
-    }
 }
 
 /// Extract an uncompressed P-256 public key (65 bytes) from a DER-encoded certificate.
@@ -185,10 +126,7 @@ fn detect_scp11b_params(conn: PcscSmartCardConnection) -> Option<(u8, u8, Vec<u8
 }
 
 fn scp11b_supported() -> bool {
-    *SCP11B_SUPPORTED.get_or_init(|| {
-        let state = get_device_state();
-        state.info.version >= Version(5, 7, 2)
-    })
+    *SCP11B_SUPPORTED.get_or_init(|| get_device().info().version >= Version(5, 7, 2))
 }
 
 fn get_scp11b_params() -> Option<(u8, u8, Vec<u8>)> {
@@ -200,7 +138,9 @@ fn get_scp11b_params() -> Option<(u8, u8, Vec<u8>)> {
         *cached = Some(None);
         return None;
     }
-    let conn = open_smartcard();
+    let conn = get_device()
+        .open_smartcard()
+        .expect("open smartcard for SCP11b detection");
     let result = detect_scp11b_params(conn);
     *cached = Some(result.clone());
     result
@@ -215,7 +155,7 @@ fn open_smartcard_connection(tc: &TestConnection) -> PcscSmartCardConnection {
         !matches!(tc, TestConnection::UsbHid),
         "UsbHid is not a smartcard connection"
     );
-    open_smartcard()
+    get_device().open_smartcard().expect("open smartcard")
 }
 
 fn scp_params(tc: &TestConnection) -> Option<(u8, u8, Vec<u8>)> {
@@ -230,19 +170,18 @@ fn should_skip(tc: &TestConnection) -> Option<String> {
         return Some("YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set".into());
     }
 
-    let state = get_device_state();
+    let dev = get_device();
 
     match tc {
         TestConnection::SmartCard => {
-            if let DeviceSource::Usb(_) = &state.source {
-                let enabled_usb = state
-                    .info
+            if dev.transport() == Transport::Usb {
+                let enabled_usb = dev
+                    .info()
                     .config
                     .enabled_capabilities
                     .get(&Transport::Usb)
                     .copied()
                     .unwrap_or(Capability::NONE);
-                // CCID is available if any CCID-based application is enabled
                 let ccid_apps =
                     Capability::PIV | Capability::OATH | Capability::OPENPGP | Capability::HSMAUTH;
                 if (enabled_usb & ccid_apps).is_empty() {
@@ -252,9 +191,9 @@ fn should_skip(tc: &TestConnection) -> Option<String> {
             None
         }
         TestConnection::SmartCardScp11b => {
-            if let DeviceSource::Usb(_) = &state.source {
-                let enabled_usb = state
-                    .info
+            if dev.transport() == Transport::Usb {
+                let enabled_usb = dev
+                    .info()
                     .config
                     .enabled_capabilities
                     .get(&Transport::Usb)
@@ -271,36 +210,35 @@ fn should_skip(tc: &TestConnection) -> Option<String> {
             }
             None
         }
-        TestConnection::UsbHid => match &state.source {
-            DeviceSource::Nfc { .. } => Some("UsbHid requires USB transport".into()),
-            DeviceSource::Usb(_) => {
-                // Check enabled USB capabilities from device info
-                let enabled_usb = state
-                    .info
-                    .config
-                    .enabled_capabilities
-                    .get(&Transport::Usb)
-                    .copied()
-                    .unwrap_or(Capability::NONE);
-                if !enabled_usb.contains(Capability::OTP) {
-                    Some("OTP not enabled over USB".into())
-                } else {
-                    None
-                }
+        TestConnection::UsbHid => {
+            if dev.transport() != Transport::Usb {
+                return Some("UsbHid requires USB transport".into());
             }
-        },
+            let enabled_usb = dev
+                .info()
+                .config
+                .enabled_capabilities
+                .get(&Transport::Usb)
+                .copied()
+                .unwrap_or(Capability::NONE);
+            if !enabled_usb.contains(Capability::OTP) {
+                Some("OTP not enabled over USB".into())
+            } else {
+                None
+            }
+        }
     }
 }
 
 /// Returns the transport of the device under test.
 fn device_transport() -> Transport {
-    get_device_state().transport
+    get_device().transport()
 }
 
 /// Fixture providing the device info (cached via OnceLock).
 #[fixture]
 fn device_info() -> &'static DeviceInfo {
-    &get_device_state().info
+    get_device().info()
 }
 
 /// Fixture providing device capabilities for the active transport.
@@ -314,17 +252,16 @@ fn capabilities(device_info: &DeviceInfo) -> Capability {
 }
 
 fn device_capabilities() -> Capability {
-    let state = get_device_state();
-    state
-        .info
+    let dev = get_device();
+    dev.info()
         .supported_capabilities
-        .get(&state.transport)
+        .get(&dev.transport())
         .copied()
         .unwrap_or(Capability::NONE)
 }
 
 fn device_version() -> Version {
-    get_device_state().info.version
+    get_device().info().version
 }
 
 macro_rules! require_capability {
@@ -370,15 +307,6 @@ fn make_scp_key_params(kid: u8, kvn: u8, pk: &[u8]) -> yubikit::smartcard::ScpKe
     }
 }
 
-/// Returns the USB device; panics if the device is on NFC.
-/// Only call this from tests guarded by `require_transport!(Transport::Usb)`.
-fn usb_device() -> &'static LocalYubiKeyDevice {
-    match &get_device_state().source {
-        DeviceSource::Usb(dev) => dev,
-        DeviceSource::Nfc { .. } => panic!("usb_device() called for NFC device"),
-    }
-}
-
 // ───────────────────────── Device / Management ─────────────────────────
 
 #[test]
@@ -413,7 +341,7 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
     match tc {
         TestConnection::UsbHid => {
             require_transport!(Transport::Usb);
-            let conn = usb_device().open_otp().expect("open OTP");
+            let conn = get_device().open_otp().expect("open OTP");
             let mut session = ManagementSession::new_otp(conn).expect("ManagementSession::new_otp");
             let info = session.read_device_info().expect("read_device_info");
             assert_eq!(info.serial, required_serial());
@@ -1480,7 +1408,7 @@ mod yubiotp {
         match tc {
             TestConnection::UsbHid => {
                 require_transport!(Transport::Usb);
-                let conn = usb_device().open_otp().expect("open OTP");
+                let conn = get_device().open_otp().expect("open OTP");
                 let session = YubiOtpSession::new_otp(conn).expect("YubiOtpSession::new_otp");
                 let _v = session.version();
             }
@@ -1510,7 +1438,7 @@ mod yubiotp {
         require_capability!(Capability::OTP);
         require_transport!(Transport::Usb);
 
-        let dev = usb_device();
+        let dev = get_device();
 
         // Program slot 2 with HMAC-SHA1 requiring touch (use CCID)
         {
@@ -1580,7 +1508,7 @@ mod fido {
         require_capability!(Capability::FIDO2);
         require_transport!(Transport::Usb);
 
-        let mut conn = usb_device().open_fido().expect("open FIDO HID");
+        let mut conn = get_device().open_fido().expect("open FIDO HID");
 
         // Cancel after the first keepalive is received (the cancel command
         // can only be sent in response to a keepalive packet).
