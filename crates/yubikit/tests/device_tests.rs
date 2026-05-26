@@ -4,8 +4,7 @@
 //! environment variable to be set to the device's serial number.
 //! For devices without a serial, set `YUBIKEY_NO_SERIAL=1` instead.
 //!
-//! Optional: Set `YUBIKEY_READER` to a partial PC/SC reader name (case-insensitive)
-//! and `YUBIKEY_NFC_SERIAL` to the NFC device's serial to also run tests over NFC.
+//! The device is found automatically whether it is connected over USB or NFC.
 //!
 //! ```sh
 //! YUBIKEY_SERIAL=12345678 cargo test -p yubikit --test device_tests -- --test-threads=1
@@ -19,7 +18,6 @@ use rstest::{fixture, rstest};
 use std::sync::{Mutex, OnceLock};
 use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
-use yubikit::device::YubiKeyDevice;
 use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType, UsbInterface};
 use yubikit::platform::device::{LocalYubiKeyDevice, list_devices};
 use yubikit::platform::pcsc::{PcscSmartCardConnection, list_readers};
@@ -29,11 +27,12 @@ use yubikit::securitydomain::SecurityDomainSession;
 
 #[derive(Debug, Clone)]
 enum TestConnection {
-    UsbSmartCard,
-    UsbSmartCardScp11b,
-    UsbOtp,
-    NfcSmartCard,
-    NfcSmartCardScp11b,
+    /// SmartCard (CCID/NFC) — runs over whichever transport the device uses.
+    SmartCard,
+    /// SmartCard with SCP11b — skipped if SCP11b is not available on the device.
+    SmartCardScp11b,
+    /// USB HID — requires the device to be on USB with the OTP/FIDO HID interface.
+    UsbHid,
 }
 
 macro_rules! skip_if_needed {
@@ -45,21 +44,29 @@ macro_rules! skip_if_needed {
     };
 }
 
-/// Cached device info so we only enumerate once.
-static DEVICE_INFO: OnceLock<(LocalYubiKeyDevice, DeviceInfo)> = OnceLock::new();
+// ───────────────────────── Device State ─────────────────────────
 
-/// Whether the USB device supports SCP11b (version >= 5.7.2).
+/// Source of the device under test.
+enum DeviceSource {
+    Usb(Box<LocalYubiKeyDevice>),
+    Nfc { reader: String },
+}
+
+struct DeviceState {
+    source: DeviceSource,
+    info: DeviceInfo,
+    transport: Transport,
+}
+
+/// Cached device state — resolved once and reused across all tests.
+static DEVICE_STATE: OnceLock<DeviceState> = OnceLock::new();
+
+/// Whether the device supports SCP11b (version >= 5.7.2).
 static SCP11B_SUPPORTED: OnceLock<bool> = OnceLock::new();
 
-/// Cached SCP11b parameters for USB: (kid, kvn, pk_sd_ecka).
-/// Uses Mutex instead of OnceLock so it can be invalidated after SD reset tests.
+/// Cached SCP11b parameters: (kid, kvn, pk_sd_ecka).
+/// Uses Mutex so it can be invalidated after SD reset tests.
 static SCP11B_PARAMS: Mutex<Option<Option<(u8, u8, Vec<u8>)>>> = Mutex::new(None);
-
-/// Cached SCP11b parameters for NFC: (kid, kvn, pk_sd_ecka).
-static NFC_SCP11B_PARAMS: OnceLock<Option<(u8, u8, Vec<u8>)>> = OnceLock::new();
-
-/// Cached NFC device version.
-static NFC_DEVICE_VERSION: OnceLock<Option<Version>> = OnceLock::new();
 
 fn required_serial() -> Option<u32> {
     if std::env::var("YUBIKEY_NO_SERIAL").is_ok() {
@@ -72,66 +79,84 @@ fn required_serial() -> Option<u32> {
     Some(s.parse().expect("YUBIKEY_SERIAL must be a valid integer"))
 }
 
-fn required_nfc_serial() -> Option<u32> {
-    std::env::var("YUBIKEY_NFC_SERIAL").ok().map(|s| {
-        s.parse()
-            .expect("YUBIKEY_NFC_SERIAL must be a valid integer")
-    })
-}
-
-fn get_device_and_info() -> &'static (LocalYubiKeyDevice, DeviceInfo) {
-    DEVICE_INFO.get_or_init(|| {
+fn get_device_state() -> &'static DeviceState {
+    DEVICE_STATE.get_or_init(|| {
         let serial = required_serial();
-        let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
-            .expect("Failed to enumerate YubiKeys");
 
-        let dev = match serial {
-            Some(s) => devices
+        // Try USB first. list_devices() also returns NFC devices; filter them out.
+        let usb_devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
+            .expect("Failed to enumerate USB YubiKeys");
+
+        let usb_match = match serial {
+            Some(s) => usb_devices
                 .into_iter()
-                .find(|d| d.info().serial == Some(s))
-                .unwrap_or_else(|| panic!("No YubiKey found with serial {s}")),
+                .filter(|d| d.transport() == Transport::Usb)
+                .find(|d| d.info().serial == Some(s)),
             None => {
-                let mut devs: Vec<_> = devices
+                let mut devs: Vec<_> = usb_devices
                     .into_iter()
-                    .filter(|d| d.info().serial.is_none())
+                    .filter(|d| d.transport() == Transport::Usb && d.info().serial.is_none())
                     .collect();
                 match devs.len() {
-                    0 => panic!("No YubiKey without serial found"),
-                    1 => devs.remove(0),
-                    n => {
-                        panic!("Multiple YubiKeys without serial found ({n}), cannot disambiguate")
-                    }
+                    0 => None,
+                    1 => Some(devs.remove(0)),
+                    n => panic!(
+                        "Multiple USB YubiKeys without serial found ({n}), cannot disambiguate"
+                    ),
                 }
             }
         };
 
-        let info = dev.info().clone();
-
-        if info.version_qualifier.release_type != ReleaseType::Final {
-            set_override_version(info.version);
+        if let Some(dev) = usb_match {
+            let info = dev.info().clone();
+            if info.version_qualifier.release_type != ReleaseType::Final {
+                set_override_version(info.version);
+            }
+            return DeviceState {
+                source: DeviceSource::Usb(Box::new(dev)),
+                info,
+                transport: Transport::Usb,
+            };
         }
 
-        (dev, info)
+        // Try NFC readers.
+        let readers = list_readers().unwrap_or_default();
+        for reader in readers {
+            if let Ok(conn) = PcscSmartCardConnection::new(&reader, false)
+                && let Ok(mut session) = ManagementSession::new(conn)
+                && let Ok(info) = session.read_device_info()
+            {
+                let matches = match serial {
+                    Some(s) => info.serial == Some(s),
+                    None => info.serial.is_none(),
+                };
+                if matches {
+                    if info.version_qualifier.release_type != ReleaseType::Final {
+                        set_override_version(info.version);
+                    }
+                    return DeviceState {
+                        source: DeviceSource::Nfc { reader },
+                        info,
+                        transport: Transport::Nfc,
+                    };
+                }
+            }
+        }
+
+        match serial {
+            Some(s) => panic!("No YubiKey found with serial {s} (checked USB and NFC readers)"),
+            None => panic!("No YubiKey without serial found (checked USB and NFC readers)"),
+        }
     })
 }
 
-fn open_usb_smartcard() -> PcscSmartCardConnection {
-    let (dev, _) = get_device_and_info();
-    dev.open_smartcard().expect("Failed to open USB smartcard")
-}
-
-fn nfc_reader() -> Option<String> {
-    let filter = std::env::var("YUBIKEY_READER").ok()?;
-    let readers = list_readers().ok()?;
-    readers.into_iter().find(|r| {
-        r.to_ascii_lowercase()
-            .contains(&filter.to_ascii_lowercase())
-    })
-}
-
-fn open_nfc_smartcard() -> Option<PcscSmartCardConnection> {
-    let reader = nfc_reader()?;
-    PcscSmartCardConnection::new(&reader, false).ok()
+fn open_smartcard() -> PcscSmartCardConnection {
+    match &get_device_state().source {
+        DeviceSource::Usb(dev) => dev.open_smartcard().expect("Failed to open USB smartcard"),
+        DeviceSource::Nfc { reader } => {
+            PcscSmartCardConnection::new(reader, false).expect("Failed to open NFC smartcard")
+        }
+    }
 }
 
 /// Extract an uncompressed P-256 public key (65 bytes) from a DER-encoded certificate.
@@ -161,8 +186,8 @@ fn detect_scp11b_params(conn: PcscSmartCardConnection) -> Option<(u8, u8, Vec<u8
 
 fn scp11b_supported() -> bool {
     *SCP11B_SUPPORTED.get_or_init(|| {
-        let (_, info) = get_device_and_info();
-        info.version >= Version(5, 7, 2)
+        let state = get_device_state();
+        state.info.version >= Version(5, 7, 2)
     })
 }
 
@@ -175,7 +200,7 @@ fn get_scp11b_params() -> Option<(u8, u8, Vec<u8>)> {
         *cached = Some(None);
         return None;
     }
-    let conn = open_usb_smartcard();
+    let conn = open_smartcard();
     let result = detect_scp11b_params(conn);
     *cached = Some(result.clone());
     result
@@ -185,40 +210,17 @@ fn invalidate_scp11b_params() {
     *SCP11B_PARAMS.lock().unwrap() = None;
 }
 
-fn get_nfc_device_version() -> &'static Option<Version> {
-    NFC_DEVICE_VERSION.get_or_init(|| {
-        let conn = open_nfc_smartcard()?;
-        let mut session = ManagementSession::new(conn).ok()?;
-        let info = session.read_device_info().ok()?;
-        Some(info.version)
-    })
-}
-
-fn get_nfc_scp11b_params() -> &'static Option<(u8, u8, Vec<u8>)> {
-    NFC_SCP11B_PARAMS.get_or_init(|| {
-        let version = (*get_nfc_device_version())?;
-        if version < Version(5, 7, 2) {
-            return None;
-        }
-        let conn = open_nfc_smartcard()?;
-        detect_scp11b_params(conn)
-    })
-}
-
 fn open_smartcard_connection(tc: &TestConnection) -> PcscSmartCardConnection {
-    match tc {
-        TestConnection::UsbSmartCard | TestConnection::UsbSmartCardScp11b => open_usb_smartcard(),
-        TestConnection::NfcSmartCard | TestConnection::NfcSmartCardScp11b => {
-            open_nfc_smartcard().expect("NFC reader not available")
-        }
-        TestConnection::UsbOtp => panic!("UsbOtp is not a smartcard connection"),
-    }
+    assert!(
+        !matches!(tc, TestConnection::UsbHid),
+        "UsbHid is not a smartcard connection"
+    );
+    open_smartcard()
 }
 
 fn scp_params(tc: &TestConnection) -> Option<(u8, u8, Vec<u8>)> {
     match tc {
-        TestConnection::UsbSmartCardScp11b => get_scp11b_params(),
-        TestConnection::NfcSmartCardScp11b => get_nfc_scp11b_params().clone(),
+        TestConnection::SmartCardScp11b => get_scp11b_params(),
         _ => None,
     }
 }
@@ -228,87 +230,106 @@ fn should_skip(tc: &TestConnection) -> Option<String> {
         return Some("YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set".into());
     }
 
-    let (dev, _) = get_device_and_info();
+    let state = get_device_state();
 
     match tc {
-        TestConnection::UsbSmartCard => {
-            if !dev.usb_interfaces().contains(UsbInterface::CCID) {
-                Some("CCID not available".into())
-            } else {
-                None
+        TestConnection::SmartCard => {
+            if let DeviceSource::Usb(_) = &state.source {
+                let enabled_usb = state
+                    .info
+                    .config
+                    .enabled_capabilities
+                    .get(&Transport::Usb)
+                    .copied()
+                    .unwrap_or(Capability::NONE);
+                // CCID is available if any CCID-based application is enabled
+                let ccid_apps =
+                    Capability::PIV | Capability::OATH | Capability::OPENPGP | Capability::HSMAUTH;
+                if (enabled_usb & ccid_apps).is_empty() {
+                    return Some("CCID not enabled over USB".into());
+                }
             }
+            None
         }
-        TestConnection::UsbSmartCardScp11b => {
-            if !dev.usb_interfaces().contains(UsbInterface::CCID) {
-                Some("CCID not available".into())
-            } else if get_scp11b_params().is_none() {
-                Some("SCP11b not available on USB device".into())
-            } else {
-                None
+        TestConnection::SmartCardScp11b => {
+            if let DeviceSource::Usb(_) = &state.source {
+                let enabled_usb = state
+                    .info
+                    .config
+                    .enabled_capabilities
+                    .get(&Transport::Usb)
+                    .copied()
+                    .unwrap_or(Capability::NONE);
+                let ccid_apps =
+                    Capability::PIV | Capability::OATH | Capability::OPENPGP | Capability::HSMAUTH;
+                if (enabled_usb & ccid_apps).is_empty() {
+                    return Some("CCID not enabled over USB".into());
+                }
             }
-        }
-        TestConnection::UsbOtp => {
-            if !dev.usb_interfaces().contains(UsbInterface::OTP) {
-                Some("OTP HID not available".into())
-            } else {
-                None
+            if get_scp11b_params().is_none() {
+                return Some("SCP11b not available on device".into());
             }
+            None
         }
-        TestConnection::NfcSmartCard => {
-            if nfc_reader().is_none() {
-                Some("YUBIKEY_READER not set or reader not found".into())
-            } else if required_nfc_serial().is_none() {
-                Some("YUBIKEY_NFC_SERIAL not set".into())
-            } else {
-                None
+        TestConnection::UsbHid => match &state.source {
+            DeviceSource::Nfc { .. } => Some("UsbHid requires USB transport".into()),
+            DeviceSource::Usb(_) => {
+                // Check enabled USB capabilities from device info
+                let enabled_usb = state
+                    .info
+                    .config
+                    .enabled_capabilities
+                    .get(&Transport::Usb)
+                    .copied()
+                    .unwrap_or(Capability::NONE);
+                if !enabled_usb.contains(Capability::OTP) {
+                    Some("OTP not enabled over USB".into())
+                } else {
+                    None
+                }
             }
-        }
-        TestConnection::NfcSmartCardScp11b => {
-            if nfc_reader().is_none() {
-                Some("YUBIKEY_READER not set or reader not found".into())
-            } else if required_nfc_serial().is_none() {
-                Some("YUBIKEY_NFC_SERIAL not set".into())
-            } else if get_nfc_scp11b_params().is_none() {
-                Some("SCP11b not available on NFC device".into())
-            } else {
-                None
-            }
-        }
+        },
     }
 }
 
-/// Fixture providing the USB device info (cached via OnceLock).
-#[fixture]
-fn device_info() -> &'static DeviceInfo {
-    &get_device_and_info().1
+/// Returns the transport of the device under test.
+fn device_transport() -> Transport {
+    get_device_state().transport
 }
 
-/// Fixture providing USB device capabilities.
+/// Fixture providing the device info (cached via OnceLock).
+#[fixture]
+fn device_info() -> &'static DeviceInfo {
+    &get_device_state().info
+}
+
+/// Fixture providing device capabilities for the active transport.
 #[fixture]
 fn capabilities(device_info: &DeviceInfo) -> Capability {
     device_info
         .supported_capabilities
-        .get(&Transport::Usb)
+        .get(&device_transport())
         .copied()
         .unwrap_or(Capability::NONE)
 }
 
-fn usb_capabilities() -> Capability {
-    let (_, info) = get_device_and_info();
-    info.supported_capabilities
-        .get(&Transport::Usb)
+fn device_capabilities() -> Capability {
+    let state = get_device_state();
+    state
+        .info
+        .supported_capabilities
+        .get(&state.transport)
         .copied()
         .unwrap_or(Capability::NONE)
 }
 
 fn device_version() -> Version {
-    let (_, info) = get_device_and_info();
-    info.version
+    get_device_state().info.version
 }
 
 macro_rules! require_capability {
     ($cap:expr) => {
-        if !usb_capabilities().contains($cap) {
+        if !device_capabilities().contains($cap) {
             eprintln!(
                 "SKIP: device does not support {:?}, skipping test",
                 stringify!($cap)
@@ -331,12 +352,30 @@ macro_rules! require_version {
     };
 }
 
+macro_rules! require_transport {
+    ($transport:expr) => {
+        if device_transport() != $transport {
+            eprintln!("SKIP: test requires {:?} transport", $transport);
+            return;
+        }
+    };
+}
+
 /// Build SCP11b key params for test helper usage.
 fn make_scp_key_params(kid: u8, kvn: u8, pk: &[u8]) -> yubikit::smartcard::ScpKeyParams {
     yubikit::smartcard::ScpKeyParams::Scp11b {
         kid,
         kvn,
         pk_sd_ecka: pk.to_vec(),
+    }
+}
+
+/// Returns the USB device; panics if the device is on NFC.
+/// Only call this from tests guarded by `require_transport!(Transport::Usb)`.
+fn usb_device() -> &'static LocalYubiKeyDevice {
+    match &get_device_state().source {
+        DeviceSource::Usb(dev) => dev,
+        DeviceSource::Nfc { .. } => panic!("usb_device() called for NFC device"),
     }
 }
 
@@ -348,6 +387,7 @@ fn test_list_devices_finds_key() {
         eprintln!("  SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
         return;
     }
+    require_transport!(Transport::Usb);
     let serial = required_serial();
     let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
         .expect("list_devices");
@@ -364,18 +404,16 @@ fn test_list_devices_finds_key() {
 }
 
 #[rstest]
-#[case(TestConnection::UsbSmartCard)]
-#[case(TestConnection::UsbSmartCardScp11b)]
-#[case(TestConnection::UsbOtp)]
-#[case(TestConnection::NfcSmartCard)]
-#[case(TestConnection::NfcSmartCardScp11b)]
+#[case(TestConnection::SmartCard)]
+#[case(TestConnection::SmartCardScp11b)]
+#[case(TestConnection::UsbHid)]
 fn test_management_read_device_info(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(4, 1, 0));
     match tc {
-        TestConnection::UsbOtp => {
-            let (dev, _) = get_device_and_info();
-            let conn = dev.open_otp().expect("open OTP");
+        TestConnection::UsbHid => {
+            require_transport!(Transport::Usb);
+            let conn = usb_device().open_otp().expect("open OTP");
             let mut session = ManagementSession::new_otp(conn).expect("ManagementSession::new_otp");
             let info = session.read_device_info().expect("read_device_info");
             assert_eq!(info.serial, required_serial());
@@ -389,14 +427,7 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
                 ManagementSession::new(conn).expect("ManagementSession::new (CCID)")
             };
             let info = session.read_device_info().expect("read_device_info");
-            if matches!(
-                tc,
-                TestConnection::UsbSmartCard | TestConnection::UsbSmartCardScp11b
-            ) {
-                assert_eq!(info.serial, required_serial());
-            } else if let Some(nfc_serial) = required_nfc_serial() {
-                assert_eq!(info.serial, Some(nfc_serial));
-            }
+            assert_eq!(info.serial, required_serial());
         }
     }
     eprintln!("  PASS {tc:?}");
@@ -408,13 +439,12 @@ fn test_management_device_info_capabilities() {
         eprintln!("  SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
         return;
     }
-    let (_, info) = get_device_and_info();
-    let caps = info
-        .supported_capabilities
-        .get(&Transport::Usb)
-        .expect("USB capabilities should be present");
-    // Every YubiKey has at least one USB capability
-    assert!(!caps.is_empty(), "Expected at least one capability on USB");
+    let caps = device_capabilities();
+    // Every YubiKey has at least one capability on its active transport
+    assert!(
+        !caps.is_empty(),
+        "Expected at least one capability on active transport"
+    );
 }
 
 // ───────────────────────── OATH ─────────────────────────
@@ -434,10 +464,8 @@ mod oath {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
     fn test_oath_session_version(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OATH);
@@ -447,10 +475,8 @@ mod oath {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
     fn test_oath_reset_and_list(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OATH);
@@ -463,10 +489,8 @@ mod oath {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
     fn test_oath_put_list_delete(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OATH);
@@ -502,10 +526,8 @@ mod oath {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
     fn test_oath_calculate_all(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OATH);
@@ -559,10 +581,8 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
     fn test_piv_session_version(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::PIV);
@@ -572,10 +592,8 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
     fn test_piv_verify_default_pin(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::PIV);
@@ -587,10 +605,8 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
     fn test_piv_pin_attempts(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::PIV);
@@ -603,7 +619,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_piv_generate_key_ec_p256(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -628,7 +644,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_piv_generate_key_rsa2048(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -653,7 +669,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_piv_sign_ec_p256(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -698,7 +714,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_piv_self_signed_cert_ec(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -785,7 +801,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_piv_generate_csr(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -847,7 +863,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_piv_self_signed_cert_rsa(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -909,7 +925,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_piv_decrypt_rsa(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -954,7 +970,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_piv_ecdh_p256(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -1012,7 +1028,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_piv_generate_mldsa44(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(6, 0, 0));
@@ -1046,7 +1062,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_piv_generate_mlkem768(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(6, 0, 0));
@@ -1074,7 +1090,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_piv_mldsa44_verify(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(6, 0, 0));
@@ -1121,7 +1137,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_piv_mlkem768_decapsulate(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(6, 0, 0));
@@ -1195,10 +1211,8 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
     fn test_openpgp_session_version(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1208,10 +1222,8 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
     fn test_openpgp_get_application_data(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1228,10 +1240,8 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
     fn test_openpgp_get_challenge(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1249,7 +1259,7 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_openpgp_generate_ec_key_and_sign(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1303,7 +1313,7 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_openpgp_generate_rsa_key_and_sign(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1354,7 +1364,7 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_openpgp_rsa_decrypt(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1402,7 +1412,7 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_openpgp_ec_ecdh(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1461,18 +1471,16 @@ mod yubiotp {
     use yubikit::yubiotp::{Slot, SlotConfiguration, YubiOtpSession};
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::UsbOtp)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
+    #[case(TestConnection::UsbHid)]
     fn test_yubiotp_session_version(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OTP);
         match tc {
-            TestConnection::UsbOtp => {
-                let (dev, _) = get_device_and_info();
-                let conn = dev.open_otp().expect("open OTP");
+            TestConnection::UsbHid => {
+                require_transport!(Transport::Usb);
+                let conn = usb_device().open_otp().expect("open OTP");
                 let session = YubiOtpSession::new_otp(conn).expect("YubiOtpSession::new_otp");
                 let _v = session.version();
             }
@@ -1496,12 +1504,13 @@ mod yubiotp {
     /// calculate_hmac_sha1 and immediately cancels it, verifying
     /// that it returns a Timeout error promptly.
     #[rstest]
-    #[case(TestConnection::UsbOtp)]
+    #[case(TestConnection::UsbHid)]
     fn test_calculate_hmac_sha1_cancel(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OTP);
+        require_transport!(Transport::Usb);
 
-        let (dev, _) = get_device_and_info();
+        let dev = usb_device();
 
         // Program slot 2 with HMAC-SHA1 requiring touch (use CCID)
         {
@@ -1565,13 +1574,13 @@ mod fido {
     /// after receiving a keepalive, verifying that the authenticator
     /// responds with KeepaliveCancel (0x2D) promptly.
     #[rstest]
-    #[case(TestConnection::UsbOtp)] // UsbOtp just means USB HID is available
+    #[case(TestConnection::UsbHid)] // UsbHid means USB HID interface is available
     fn test_fido_selection_cancel(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::FIDO2);
+        require_transport!(Transport::Usb);
 
-        let (dev, _) = get_device_and_info();
-        let mut conn = dev.open_fido().expect("open FIDO HID");
+        let mut conn = usb_device().open_fido().expect("open FIDO HID");
 
         // Cancel after the first keepalive is received (the cancel command
         // can only be sent in response to a keepalive packet).
@@ -1631,10 +1640,8 @@ mod hsmauth {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
     fn test_hsmauth_session_version(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::HSMAUTH);
@@ -1644,10 +1651,8 @@ mod hsmauth {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::UsbSmartCardScp11b)]
-    #[case(TestConnection::NfcSmartCard)]
-    #[case(TestConnection::NfcSmartCardScp11b)]
+    #[case(TestConnection::SmartCard)]
+    #[case(TestConnection::SmartCardScp11b)]
     fn test_hsmauth_reset_and_list(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::HSMAUTH);
@@ -1882,8 +1887,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_securitydomain_version(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         let conn = open_smartcard_connection(&tc);
@@ -1899,8 +1903,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_securitydomain_get_key_information(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         let conn = open_smartcard_connection(&tc);
@@ -1917,8 +1920,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_card_recognition_data(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         let conn = open_smartcard_connection(&tc);
@@ -1946,8 +1948,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_scp03_authenticate(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -1977,8 +1978,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_scp03_wrong_key(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         let conn = open_smartcard_connection(&tc);
@@ -2005,8 +2005,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_scp03_change_key(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2074,8 +2073,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_scp11b_ok(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2122,8 +2120,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_scp11b_import(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2185,8 +2182,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_scp11a_ok(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2235,8 +2231,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_scp11a_allowlist(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2300,8 +2295,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_scp11a_allowlist_blocked(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2393,8 +2387,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::UsbSmartCard)]
-    #[case(TestConnection::NfcSmartCard)]
+    #[case(TestConnection::SmartCard)]
     fn test_scp11c_ok(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));

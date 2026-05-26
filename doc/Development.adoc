@@ -151,7 +151,9 @@ Python unit tests:
 WARNING: ONLY run these on dedicated developer keys, as it will permanently
 delete data on the device!
 
-Set `YUBIKEY_SERIAL` to the serial number of the target device, then run:
+The test suite automatically detects whether the device is connected over USB or NFC.
+Tests that require a physical USB connection (e.g., OTP/FIDO HID) are automatically
+skipped when the device is connected over NFC.
 
     $ YUBIKEY_SERIAL=123456 cargo test -p yubikit --test device_tests -- --test-threads=1
 
@@ -159,12 +161,8 @@ For devices without a serial number, use `YUBIKEY_NO_SERIAL=1` instead:
 
     $ YUBIKEY_NO_SERIAL=1 cargo test -p yubikit --test device_tests -- --test-threads=1
 
-To additionally run tests over NFC, set `YUBIKEY_NFC_SERIAL` to the serial
-number of the device on the reader. Optionally set `YUBIKEY_READER` to a
-partial PC/SC reader name (case-insensitive) to select a specific reader:
-
-    $ YUBIKEY_SERIAL=123456 YUBIKEY_NFC_SERIAL=123456 \
-        cargo test -p yubikit --test device_tests -- --test-threads=1
+The same command works whether the device is connected via USB or via an NFC reader.
+No additional environment variables are needed for NFC devices.
 
 === Python device tests
 
