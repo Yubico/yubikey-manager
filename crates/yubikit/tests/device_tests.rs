@@ -1792,9 +1792,16 @@ mod fido {
         let mut cp = ClientPin::new(session)
             .map_err(|(e, _)| e)
             .expect("ClientPin::new");
-        let (retries, pcs) = cp.get_pin_retries().expect("get_pin_retries");
-        assert!(retries <= 8, "retries should be <= 8, got {retries}");
-        eprintln!("  PIN retries: {retries} (power_cycle_state: {pcs:?})");
+        match cp.get_pin_retries() {
+            Ok((retries, pcs)) => {
+                assert!(retries <= 8, "retries should be <= 8, got {retries}");
+                eprintln!("  PIN retries: {retries} (power_cycle_state: {pcs:?})");
+            }
+            Err(Ctap2Error::StatusError(CtapStatus::PinNotSet)) => {
+                eprintln!("  PIN not set (no retries to report)");
+            }
+            Err(e) => panic!("get_pin_retries: {e}"),
+        }
     }
 
     // ── 1. authenticatorGetInfo ─────────────────────────────────────────────
