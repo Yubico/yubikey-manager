@@ -62,6 +62,10 @@ Clone the repository and set up the Python environment:
     $ cd yubikey-manager
     $ uv sync
 
+Install `cargo-nextest`, the recommended test runner:
+
+    $ cargo install cargo-nextest --locked
+
 Build the native Rust extension and install it into the virtual environment:
 
     $ cd crates/yubikit-pyo3
@@ -140,7 +144,7 @@ These tests do not require a YubiKey to be connected.
 
 Rust unit tests:
 
-    $ cargo test --lib
+    $ cargo nextest run --lib
 
 Python unit tests:
 
@@ -155,14 +159,21 @@ The test suite automatically detects whether the device is connected over USB or
 Tests that require a physical USB connection (e.g., OTP/FIDO HID) are automatically
 skipped when the device is connected over NFC.
 
-    $ YUBIKEY_SERIAL=123456 cargo test -p yubikit --test device_tests -- --test-threads=1
+The `device` nextest profile enables per-test output and single-threaded execution
+(required for PCSC/HID exclusivity) and is the recommended way to run device tests:
+
+    $ YUBIKEY_SERIAL=123456 cargo nextest run --profile device --test device_tests
 
 For devices without a serial number, use `YUBIKEY_NO_SERIAL=1` instead:
 
-    $ YUBIKEY_NO_SERIAL=1 cargo test -p yubikit --test device_tests -- --test-threads=1
+    $ YUBIKEY_NO_SERIAL=1 cargo nextest run --profile device --test device_tests
 
 The same command works whether the device is connected via USB or via an NFC reader.
 No additional environment variables are needed for NFC devices.
+
+The output shows the transport variant in each test name (e.g., `::smart_card`,
+`::scp11b`, `::usb_hid`) and prints the reason for any skipped test inline,
+making it easy to see which tests ran, which were skipped and why, and which failed.
 
 === Python device tests
 

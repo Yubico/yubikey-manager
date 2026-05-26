@@ -332,9 +332,9 @@ fn test_list_devices_finds_key() {
 }
 
 #[rstest]
-#[case(TestConnection::SmartCard)]
-#[case(TestConnection::SmartCardScp11b)]
-#[case(TestConnection::UsbHid)]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+#[case::usb_hid(TestConnection::UsbHid)]
 fn test_management_read_device_info(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(4, 1, 0));
@@ -392,8 +392,8 @@ mod oath {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_oath_session_version(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OATH);
@@ -403,8 +403,8 @@ mod oath {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_oath_reset_and_list(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OATH);
@@ -417,8 +417,8 @@ mod oath {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_oath_put_list_delete(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OATH);
@@ -454,8 +454,8 @@ mod oath {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_oath_calculate_all(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OATH);
@@ -509,8 +509,8 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_piv_session_version(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::PIV);
@@ -520,8 +520,8 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_piv_verify_default_pin(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::PIV);
@@ -533,8 +533,8 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_piv_pin_attempts(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::PIV);
@@ -547,7 +547,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_piv_generate_key_ec_p256(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -572,7 +572,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_piv_generate_key_rsa2048(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -597,7 +597,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_piv_sign_ec_p256(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -642,7 +642,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_piv_self_signed_cert_ec(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -729,7 +729,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_piv_generate_csr(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -791,7 +791,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_piv_self_signed_cert_rsa(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -853,7 +853,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_piv_decrypt_rsa(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -898,7 +898,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_piv_ecdh_p256(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(4, 0, 0));
@@ -956,7 +956,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_piv_generate_mldsa44(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(6, 0, 0));
@@ -990,7 +990,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_piv_generate_mlkem768(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(6, 0, 0));
@@ -1018,7 +1018,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_piv_mldsa44_verify(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(6, 0, 0));
@@ -1065,7 +1065,7 @@ mod piv {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_piv_mlkem768_decapsulate(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(6, 0, 0));
@@ -1139,8 +1139,8 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_openpgp_session_version(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1150,8 +1150,8 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_openpgp_get_application_data(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1168,8 +1168,8 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_openpgp_get_challenge(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1187,7 +1187,7 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_openpgp_generate_ec_key_and_sign(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1241,7 +1241,7 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_openpgp_generate_rsa_key_and_sign(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1292,7 +1292,7 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_openpgp_rsa_decrypt(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1340,7 +1340,7 @@ mod openpgp {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_openpgp_ec_ecdh(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
@@ -1399,9 +1399,9 @@ mod yubiotp {
     use yubikit::yubiotp::{Slot, SlotConfiguration, YubiOtpSession};
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
-    #[case(TestConnection::UsbHid)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_yubiotp_session_version(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OTP);
@@ -1432,7 +1432,7 @@ mod yubiotp {
     /// calculate_hmac_sha1 and immediately cancels it, verifying
     /// that it returns a Timeout error promptly.
     #[rstest]
-    #[case(TestConnection::UsbHid)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_calculate_hmac_sha1_cancel(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::OTP);
@@ -1833,9 +1833,9 @@ mod fido {
 
     /// Verify that authenticatorGetInfo returns valid data on all transports.
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
-    #[case(TestConnection::UsbHid)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_ctap2_get_info(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::FIDO2);
@@ -1859,9 +1859,9 @@ mod fido {
 
     /// Verify that PIN retries can be read (no UP required) on all transports.
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
-    #[case(TestConnection::UsbHid)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_ctap2_pin_retries(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::FIDO2);
@@ -1888,8 +1888,8 @@ mod fido {
     ///
     /// Requires CTAP 2.1 or the FIDO_2_1_PRE preview.
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_ctap2_selection_nfc(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_transport!(Transport::Nfc);
@@ -1923,8 +1923,8 @@ mod fido {
     /// connection resets that budget for the next UP-requiring command.
     /// Cleans up the test credential with CredentialManagement when supported.
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_ctap2_make_and_get_credential_nfc(#[case] tc: TestConnection) {
         use yubikit::webauthn::{
             AuthenticatorSelectionCriteria, DefaultClientDataCollector,
@@ -2060,8 +2060,8 @@ mod fido {
 
     /// Read credential storage metadata via CredentialManagement.
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_ctap2_credential_management_nfc(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_transport!(Transport::Nfc);
@@ -2114,8 +2114,8 @@ mod fido {
 
     /// Verify that the large-blob array can be read (no UP required).
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_ctap2_large_blobs_nfc(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_transport!(Transport::Nfc);
@@ -2148,7 +2148,7 @@ mod fido {
     /// out-of-band cancel packet; NFCCTAP uses a different cancel path that
     /// is tested via `test_ctap2_selection_nfc` above.
     #[rstest]
-    #[case(TestConnection::UsbHid)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_fido_selection_cancel(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::FIDO2);
@@ -2209,8 +2209,8 @@ mod hsmauth {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_hsmauth_session_version(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::HSMAUTH);
@@ -2220,8 +2220,8 @@ mod hsmauth {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
-    #[case(TestConnection::SmartCardScp11b)]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_hsmauth_reset_and_list(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_capability!(Capability::HSMAUTH);
@@ -2456,7 +2456,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_securitydomain_version(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         let conn = open_smartcard_connection(&tc);
@@ -2472,7 +2472,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_securitydomain_get_key_information(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         let conn = open_smartcard_connection(&tc);
@@ -2489,7 +2489,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_card_recognition_data(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         let conn = open_smartcard_connection(&tc);
@@ -2517,7 +2517,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_scp03_authenticate(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2547,7 +2547,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_scp03_wrong_key(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         let conn = open_smartcard_connection(&tc);
@@ -2574,7 +2574,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_scp03_change_key(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2642,7 +2642,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_scp11b_ok(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2689,7 +2689,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_scp11b_import(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2751,7 +2751,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_scp11a_ok(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2800,7 +2800,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_scp11a_allowlist(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2864,7 +2864,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_scp11a_allowlist_blocked(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));
@@ -2956,7 +2956,7 @@ mod securitydomain {
     }
 
     #[rstest]
-    #[case(TestConnection::SmartCard)]
+    #[case::smart_card(TestConnection::SmartCard)]
     fn test_scp11c_ok(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_version!(Version(5, 7, 2));

@@ -1,0 +1,14 @@
+[profile.default]
+# Show output only for failing tests during normal development.
+status-level = "fail"
+failure-output = "immediate"
+success-output = "never"
+
+# Device test profile — pass --profile device when running device_tests.
+# Shows all test output so skip reasons and per-test progress are visible.
+[profile.device]
+status-level = "pass"
+failure-output = "immediate"
+success-output = "immediate"
+# Device tests must run single-threaded (PCSC/HID exclusivity).
+test-threads = 1
