@@ -1496,7 +1496,6 @@ mod fido {
     use super::*;
     use yubikit::core::Connection;
     use yubikit::ctap::CtapSession;
-    use yubikit::ctap2::types::{AuthenticatorOptions, PublicKeyCredentialRpEntity};
     use yubikit::ctap2::{
         Aaguid, ClientPin, CredentialManagement, Ctap2Error, Ctap2Session, CtapStatus, LargeBlobs,
         Permissions, PinProtocol, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
@@ -1764,30 +1763,32 @@ mod fido {
 
     fn open_ctap2_smartcard(tc: &TestConnection) -> Ctap2Session<PcscSmartCardConnection> {
         let conn = open_smartcard_connection(tc);
-        let ctap = CtapSession::new(conn)
-            .map_err(|(e, _)| e)
-            .expect("CtapSession::new");
+        let ctap = if let Some((kid, kvn, ref pk)) = scp_params(tc) {
+            let params = make_scp_key_params(kid, kvn, pk);
+            CtapSession::new_with_scp(conn, &params)
+                .map_err(|(e, _)| e)
+                .expect("CtapSession::new_with_scp")
+        } else {
+            CtapSession::new(conn)
+                .map_err(|(e, _)| e)
+                .expect("CtapSession::new")
+        };
         Ctap2Session::new(ctap)
             .map_err(|(e, _)| e)
             .expect("Ctap2Session::new")
     }
 
-    /// Compute `pinUvAuthParam` for `authenticatorMakeCredential`.
-    ///
-    /// CTAP 2.2 §6.1.2 specifies protocol 2 prepends `0x01` to the
-    /// clientDataHash; protocol 1 uses the raw hash. Pre-release firmware may
-    /// not yet enforce the prefix — update when the production firmware does.
-    fn pin_auth_for_mc(protocol: &PinProtocol, token: &[u8], client_data_hash: &[u8]) -> Vec<u8> {
-        protocol.authenticate(token, client_data_hash)
-    }
+    /// Simple [`UserInteraction`] for tests: always returns `TEST_PIN`, never uses UV.
+    struct TestInteraction;
 
-    /// Compute `pinUvAuthParam` for `authenticatorGetAssertion`.
-    ///
-    /// CTAP 2.2 §6.2.2 specifies protocol 2 prepends `0x02` to the
-    /// clientDataHash; protocol 1 uses the raw hash. Pre-release firmware may
-    /// not yet enforce the prefix — update when the production firmware does.
-    fn pin_auth_for_ga(protocol: &PinProtocol, token: &[u8], client_data_hash: &[u8]) -> Vec<u8> {
-        protocol.authenticate(token, client_data_hash)
+    impl yubikit::webauthn::UserInteraction for TestInteraction {
+        fn prompt_up(&self) {}
+        fn request_pin(&self, _permissions: Permissions, _rp_id: Option<&str>) -> Option<String> {
+            Some(TEST_PIN.to_string())
+        }
+        fn request_uv(&self, _permissions: Permissions, _rp_id: Option<&str>) -> bool {
+            false
+        }
     }
 
     // ── Generic helpers (work for any C: Connection + 'static) ───────────────
@@ -1908,209 +1909,150 @@ mod fido {
         // On NFC the card is already present, so UP is satisfied without physical touch.
         match session.selection(None, None) {
             Ok(()) => eprintln!("  selection: OK"),
-            Err(e) => eprintln!("  selection: {e} (acceptable on some pre-release firmware)"),
+            Err(e) => panic!("  selection: {e}"),
         }
     }
 
     // ── 4. make_credential + get_assertion over NFC ─────────────────────────
 
-    /// Create a credential, then immediately verify it by getting an assertion.
+    /// Register a credential then verify it via assertion using [`WebAuthnClient`].
     ///
-    /// Each step opens a fresh NFC connection, giving the authenticator a new
-    /// per-connection UP budget (card on reader = UP satisfied).
-    /// Cleans up the test credential via CredentialManagement if available.
+    /// Two separate NFC connections are used: one for make_credential and one
+    /// for get_assertion. On NFC, each physical "tap" (logical connection) gives
+    /// one user-presence (UP) budget. Closing and reopening the smartcard
+    /// connection resets that budget for the next UP-requiring command.
+    /// Cleans up the test credential with CredentialManagement when supported.
     #[rstest]
     #[case(TestConnection::SmartCard)]
     #[case(TestConnection::SmartCardScp11b)]
     fn test_ctap2_make_and_get_credential_nfc(#[case] tc: TestConnection) {
+        use yubikit::webauthn::{
+            AuthenticatorSelectionCriteria, DefaultClientDataCollector,
+            PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
+            PublicKeyCredentialRpEntity, ResidentKeyRequirement, UserVerificationRequirement,
+            WebAuthnClient,
+        };
         skip_if_needed!(tc);
         require_transport!(Transport::Nfc);
         require_capability!(Capability::FIDO2);
         require_fido_pin!();
 
-        // Power-cycle the NFC card before each case to clear any PinAuthBlocked state
-        // left by a previous case in this test run.
-        if let Err(e) = power_cycle_nfc() {
-            eprintln!("  power_cycle_nfc skipped: {e}");
-        }
+        // ── Registration ─────────────────────────────────────────────────────
+        let session = open_ctap2_smartcard(&tc);
+        let collector = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
+        let mut mc_client = WebAuthnClient::new(session, TestInteraction, collector);
 
-        let client_data_hash = [0x42u8; 32];
-        let rp = PublicKeyCredentialRpEntity {
-            id: TEST_RP_ID.into(),
-            name: Some("Rust Device Tests".into()),
-        };
-        let user = PublicKeyCredentialUserEntity {
-            id: b"test-user-01".to_vec(),
-            name: Some("test@rs.example".into()),
-            display_name: Some("Test User".into()),
-        };
-        let params = [PublicKeyCredentialParameters {
-            type_: PublicKeyCredentialType::PublicKey,
-            alg: -7, // ES256
-        }];
-        let options = AuthenticatorOptions {
-            rk: Some(true),
-            ..Default::default()
-        };
-
-        // Step 2: make_credential (UP satisfied by card on NFC reader).
-        let cred_id = {
-            let session = open_ctap2_smartcard(&tc);
-            let mut cp = ClientPin::new(session)
-                .map_err(|(e, _)| e)
-                .expect("ClientPin for make_credential");
-            let token = get_pin_token_or_skip!(
-                cp,
-                TEST_PIN,
-                Some(Permissions::MAKE_CREDENTIAL),
-                Some(TEST_RP_ID)
-            );
-            let protocol = cp.protocol();
-            let mut session = cp.into_session();
-
-            let pin_uv_param = pin_auth_for_mc(&protocol, &token, &client_data_hash);
-            let resp = match session.make_credential(
-                &client_data_hash,
-                &rp,
-                &user,
-                &params,
-                None,
-                None,
-                Some(&options),
-                Some(&pin_uv_param),
-                Some(protocol.version()),
-                None,
-                None,
-                None,
-            ) {
-                Ok(r) => r,
-                Err(Ctap2Error::StatusError(CtapStatus::PinAuthBlocked)) => {
-                    eprintln!("  SKIP: PIN auth blocked (re-tap NFC device to clear)");
-                    return;
-                }
-                Err(e) => panic!("make_credential: {e}"),
-            };
-
-            assert!(!resp.auth_data.is_empty(), "auth_data should not be empty");
-            assert!(
-                resp.auth_data.len() >= 55,
-                "auth_data too short for attested data: {} bytes",
-                resp.auth_data.len()
-            );
-            assert!(!resp.fmt.is_empty(), "fmt should not be empty");
-
-            let flags = resp.auth_data[32];
-            assert!(flags & 0x01 != 0, "UP flag should be set in auth_data");
-            assert!(
-                flags & 0x40 != 0,
-                "AT flag should be set in auth_data (make_credential)"
-            );
-
-            let cred_id_len = u16::from_be_bytes([resp.auth_data[53], resp.auth_data[54]]) as usize;
-            assert!(
-                resp.auth_data.len() >= 55 + cred_id_len,
-                "auth_data truncated (need {} bytes for cred ID)",
-                55 + cred_id_len
-            );
-            let cred_id = resp.auth_data[55..55 + cred_id_len].to_vec();
-            eprintln!(
-                "  make_credential: fmt={}, cred_id={} bytes",
-                resp.fmt,
-                cred_id.len()
-            );
-            cred_id
-        };
-
-        // Step 3: get_assertion — fresh connection = new UP budget.
-        {
-            let assert_hash = [0xABu8; 32];
-            let session = open_ctap2_smartcard(&tc);
-            let mut cp = ClientPin::new(session)
-                .map_err(|(e, _)| e)
-                .expect("ClientPin for get_assertion");
-            let token = get_pin_token_or_skip!(
-                cp,
-                TEST_PIN,
-                Some(Permissions::GET_ASSERTION),
-                Some(TEST_RP_ID)
-            );
-            let protocol = cp.protocol();
-            let mut session = cp.into_session();
-
-            let pin_uv_param = pin_auth_for_ga(&protocol, &token, &assert_hash);
-            let allow_list = [PublicKeyCredentialDescriptor {
+        let create_options = PublicKeyCredentialCreationOptions {
+            rp: PublicKeyCredentialRpEntity {
+                name: "Rust Device Tests".to_string(),
+                id: Some(TEST_RP_ID.to_string()),
+            },
+            user: PublicKeyCredentialUserEntity {
+                id: b"test-user-01".to_vec(),
+                name: Some("test@rs.example".to_string()),
+                display_name: Some("Test User".to_string()),
+            },
+            challenge: vec![0x42; 32],
+            pub_key_cred_params: vec![PublicKeyCredentialParameters {
                 type_: PublicKeyCredentialType::PublicKey,
-                id: cred_id.clone(),
-                transports: None,
-            }];
-            let resp = match session.get_assertion(
-                TEST_RP_ID,
-                &assert_hash,
-                Some(&allow_list),
-                None,
-                None,
-                Some(&pin_uv_param),
-                Some(protocol.version()),
-                None,
-                None,
-            ) {
-                Ok(r) => r,
-                Err(Ctap2Error::StatusError(CtapStatus::PinAuthBlocked)) => {
-                    // Some pre-release firmware builds return PinAuthBlocked (0x34)
-                    // for get_assertion in certain internal states even when
-                    // power_cycle_state is false. Skip gracefully; re-tap the NFC
-                    // card to clear the state.
-                    eprintln!(
-                        "  SKIP: get_assertion returned PinAuthBlocked (pre-release firmware quirk)"
-                    );
-                    return;
-                }
-                Err(e) => panic!("get_assertion: {e}"),
-            };
+                alg: -7, // ES256
+            }],
+            timeout: None,
+            exclude_credentials: None,
+            authenticator_selection: Some(AuthenticatorSelectionCriteria {
+                resident_key: Some(ResidentKeyRequirement::Required),
+                user_verification: Some(UserVerificationRequirement::Preferred),
+                ..Default::default()
+            }),
+            hints: None,
+            attestation: None,
+            attestation_formats: None,
+            extensions: None,
+        };
 
-            assert!(!resp.auth_data.is_empty(), "auth_data should not be empty");
-            assert!(!resp.signature.is_empty(), "signature should not be empty");
-            let flags = resp.auth_data[32];
-            assert!(
-                flags & 0x01 != 0,
-                "UP flag should be set in assertion auth_data"
-            );
-            eprintln!("  get_assertion: sig={} bytes", resp.signature.len());
-        }
+        let reg = mc_client
+            .make_credential(&create_options, None)
+            .expect("make_credential");
+        let cred_id = reg.id.clone();
+        eprintln!("  make_credential: cred_id={} bytes", cred_id.len());
+        assert!(!cred_id.is_empty(), "credential ID should not be empty");
+        // Drop the session so the NFC card resets its UP budget for the next connection.
+        // Hardware-reset the NFC card so the UP budget is fresh for the next connection.
+        // (NFC CTAP2 allows one UP-requiring command per "tap"; PCSC power_cycle_nfc
+        // is equivalent to removing and re-tapping the card.)
+        drop(mc_client);
+        power_cycle_nfc().expect("power_cycle_nfc between MC and GA");
 
-        // Step 4: clean up with CredentialManagement (best-effort).
-        {
-            let mut session = open_ctap2_smartcard(&tc);
-            let info = session.get_info().expect("get_info for cleanup check");
-            if CredentialManagement::<PcscSmartCardConnection>::is_supported(&info) {
-                let mut cp = ClientPin::new(session)
-                    .map_err(|(e, _)| e)
-                    .expect("ClientPin for credmgmt cleanup");
-                let token =
-                    match cp.get_pin_token(TEST_PIN, Some(Permissions::CREDENTIAL_MGMT), None) {
-                        Ok(t) => t,
-                        Err(e) => {
-                            eprintln!("  cleanup: could not get PIN token (non-fatal): {e}");
-                            return;
-                        }
+        // ── Authentication ────────────────────────────────────────────────────
+        // Open a NEW connection so the NFC card's per-connection UP budget is
+        // fresh.  Omit allow_credentials so the authenticator discovers the
+        // resident credential directly (avoids a pre-flight silent assertion
+        // with up:false, which CTAP 2.2 §6.2.2 step 5(vi) forbids when the
+        // token has userPresenceRequired set).
+        let session2 = open_ctap2_smartcard(&tc);
+        let collector2 = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
+        let mut ga_client = WebAuthnClient::new(session2, TestInteraction, collector2);
+
+        let get_options = PublicKeyCredentialRequestOptions {
+            challenge: vec![0xAB; 32],
+            timeout: None,
+            rp_id: Some(TEST_RP_ID.to_string()),
+            allow_credentials: None,
+            user_verification: Some(UserVerificationRequirement::Preferred),
+            hints: None,
+            extensions: None,
+        };
+
+        let assertions = ga_client
+            .get_assertion(&get_options, None)
+            .expect("get_assertion");
+        assert!(!assertions.is_empty(), "expected at least one assertion");
+        let a = &assertions[0];
+        assert!(
+            !a.response.signature.is_empty(),
+            "signature should not be empty"
+        );
+        assert!(
+            !a.response.authenticator_data.is_empty(),
+            "auth_data should not be empty"
+        );
+        let flags = a.response.authenticator_data[32];
+        assert!(flags & 0x01 != 0, "UP flag should be set in assertion");
+        eprintln!("  get_assertion: sig={} bytes", a.response.signature.len());
+
+        // ── Cleanup ───────────────────────────────────────────────────────────
+        // Delete the test credential via CredentialManagement (best-effort).
+        // The GA session's UP budget is consumed; power-cycle and open a fresh
+        // connection for cleanup.
+        drop(ga_client);
+        power_cycle_nfc().expect("power_cycle_nfc before cleanup");
+        let mut session3 = open_ctap2_smartcard(&tc);
+        let info = session3.get_info().expect("get_info for cleanup check");
+        if CredentialManagement::<PcscSmartCardConnection>::is_supported(&info) {
+            let mut cp = ClientPin::new(session3)
+                .map_err(|(e, _)| e)
+                .expect("ClientPin for credmgmt cleanup");
+            match cp.get_pin_token(TEST_PIN, Some(Permissions::CREDENTIAL_MGMT), None) {
+                Ok(token) => {
+                    let protocol = cp.protocol();
+                    let session = cp.into_session();
+                    let mut credmgmt = CredentialManagement::new(session, protocol, token)
+                        .map_err(|(e, _)| e)
+                        .expect("CredentialManagement for cleanup");
+                    let cred_desc = PublicKeyCredentialDescriptor {
+                        type_: PublicKeyCredentialType::PublicKey,
+                        id: cred_id,
+                        transports: None,
                     };
-                let protocol = cp.protocol();
-                let session = cp.into_session();
-                let mut credmgmt = CredentialManagement::new(session, protocol, token)
-                    .map_err(|(e, _)| e)
-                    .expect("CredentialManagement for cleanup");
-                let cred_desc = PublicKeyCredentialDescriptor {
-                    type_: PublicKeyCredentialType::PublicKey,
-                    id: cred_id,
-                    transports: None,
-                };
-                match credmgmt.delete_cred(&cred_desc) {
-                    Ok(()) => eprintln!("  cleanup: test credential deleted"),
-                    Err(e) => eprintln!("  cleanup: delete_cred failed (non-fatal): {e}"),
+                    match credmgmt.delete_cred(&cred_desc) {
+                        Ok(()) => eprintln!("  cleanup: test credential deleted"),
+                        Err(e) => eprintln!("  cleanup: delete_cred failed (non-fatal): {e}"),
+                    }
                 }
-            } else {
-                eprintln!("  cleanup: CredentialManagement not supported, skipping");
+                Err(e) => eprintln!("  cleanup: could not get PIN token (non-fatal): {e}"),
             }
+        } else {
+            eprintln!("  cleanup: CredentialManagement not supported, skipping");
         }
     }
 
