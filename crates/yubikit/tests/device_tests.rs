@@ -1769,8 +1769,6 @@ mod fido {
         }
     }
 
-    // ── 1. authenticatorGetInfo ─────────────────────────────────────────────
-
     /// Verify that authenticatorGetInfo returns valid data on all transports.
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
@@ -1794,8 +1792,6 @@ mod fido {
             _ => assert_info(open_ctap2_smartcard(&tc)),
         }
     }
-
-    // ── 2. PIN retries ─────────────────────────────────────────────────────
 
     /// Verify that PIN retries can be read (no UP required) on all transports.
     #[rstest]
@@ -1821,16 +1817,14 @@ mod fido {
         }
     }
 
-    // ── 3. authenticatorSelection over NFC ─────────────────────────────────
-
-    /// Verify that authenticatorSelection succeeds over NFC (UP is satisfied
-    /// immediately because the card is on the reader).
+    /// Verify that authenticatorSelection succeeds (UP is satisfied
+    /// immediately because the card is on the reader for NFC).
     ///
     /// Requires CTAP 2.1 or the FIDO_2_1_PRE preview.
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
-    fn test_ctap2_selection_nfc(#[case] tc: TestConnection) {
+    fn test_ctap2_selection(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_transport!(Transport::Nfc);
         require_capability!(Capability::FIDO2);
@@ -1853,19 +1847,17 @@ mod fido {
         }
     }
 
-    // ── 4. make_credential + get_assertion over NFC ─────────────────────────
-
     /// Register a credential then verify it via assertion using [`WebAuthnClient`].
     ///
-    /// Two separate NFC connections are used: one for make_credential and one
-    /// for get_assertion. On NFC, each physical "tap" (logical connection) gives
+    /// Two separate connections are used: one for make_credential and one
+    /// for get_assertion. Each physical "tap" (logical connection) gives
     /// one user-presence (UP) budget. Closing and reopening the smartcard
     /// connection resets that budget for the next UP-requiring command.
     /// Cleans up the test credential with CredentialManagement when supported.
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
-    fn test_ctap2_make_and_get_credential_nfc(#[case] tc: TestConnection) {
+    fn test_ctap2_make_and_get_credential(#[case] tc: TestConnection) {
         use yubikit::webauthn::{
             AuthenticatorSelectionCriteria, DefaultClientDataCollector,
             PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
@@ -1962,15 +1954,12 @@ mod fido {
         assert!(flags & 0x01 != 0, "UP flag should be set in assertion");
     }
 
-    // ── 5. CredentialManagement metadata over NFC ──────────────────────────
-
     /// Read credential storage metadata via CredentialManagement.
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
-    fn test_ctap2_credential_management_nfc(#[case] tc: TestConnection) {
+    fn test_ctap2_credential_management(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
-        require_transport!(Transport::Nfc);
         require_capability!(Capability::FIDO2);
         require_fido_pin!();
 
@@ -2015,13 +2004,11 @@ mod fido {
         }
     }
 
-    // ── 6. Large Blobs read over NFC ───────────────────────────────────────
-
     /// Verify that the large-blob array can be read (no UP required).
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
-    fn test_ctap2_large_blobs_nfc(#[case] tc: TestConnection) {
+    fn test_ctap2_large_blobs(#[case] tc: TestConnection) {
         skip_if_needed!(tc);
         require_transport!(Transport::Nfc);
         require_capability!(Capability::FIDO2);
@@ -2039,8 +2026,6 @@ mod fido {
         let blob_array = lb.read_blob_array().expect("read_blob_array");
         eprintln!("large blob array: {} bytes", blob_array.len());
     }
-
-    // ── 7. authenticatorSelection cancel over USB HID ──────────────────────
 
     /// Verify that cancelling a CTAP2 selection command over USB HID works.
     ///

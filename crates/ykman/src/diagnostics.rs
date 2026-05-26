@@ -81,6 +81,8 @@ pub struct PcscDeviceDiag {
     pub oath: ResultOrError<OathDiag>,
     pub openpgp: ResultOrError<OpenPgpDiag>,
     pub hsmauth: ResultOrError<HsmAuthDiag>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fido: Option<ResultOrError<Ctap2Diag>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -315,14 +317,32 @@ pub struct Ctap2InfoDiag {
     pub max_cred_id_length: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub transports: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub algorithms: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_large_blob: Option<usize>,
     #[serde(skip_serializing_if = "is_four")]
     pub min_pin_length: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_pin_length: Option<usize>,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub firmware_version: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_cred_blob_length: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_rpids_for_min_pin: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub remaining_disc_creds: Option<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub attestation_formats: Vec<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub certifications: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub transports_for_reset: Vec<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub force_pin_change: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub long_touch_for_reset: bool,
 }
 
 fn is_zero_usize(v: &usize) -> bool {
@@ -418,6 +438,16 @@ fn management_diag(info: &DeviceInfo) -> ManagementDiag {
 }
 
 fn ctap2_info_diag(info: &yubikit::ctap2::Info) -> Ctap2InfoDiag {
+    let algorithms = info
+        .algorithms
+        .iter()
+        .map(|p| format!("{}({})", p.type_, p.alg))
+        .collect();
+    let certifications = info
+        .certifications
+        .iter()
+        .map(|(k, v)| (k.clone(), format!("{v:?}")))
+        .collect();
     Ctap2InfoDiag {
         versions: info.versions.clone(),
         extensions: info.extensions.clone(),
@@ -428,10 +458,19 @@ fn ctap2_info_diag(info: &yubikit::ctap2::Info) -> Ctap2InfoDiag {
         max_creds_in_list: info.max_creds_in_list.unwrap_or(0),
         max_cred_id_length: info.max_cred_id_length.unwrap_or(0),
         transports: info.transports.clone(),
+        algorithms,
+        max_large_blob: info.max_large_blob,
         min_pin_length: info.min_pin_length,
+        max_pin_length: info.max_pin_length,
         firmware_version: info.firmware_version.unwrap_or(0),
+        max_cred_blob_length: info.max_cred_blob_length,
+        max_rpids_for_min_pin: info.max_rpids_for_min_pin,
         remaining_disc_creds: info.remaining_disc_creds,
+        attestation_formats: info.attestation_formats.clone(),
+        certifications,
+        transports_for_reset: info.transports_for_reset.clone(),
         force_pin_change: info.force_pin_change,
+        long_touch_for_reset: info.long_touch_for_reset,
     }
 }
 
@@ -676,6 +715,25 @@ fn probe_ctap2_pin<C: Connection + 'static>(
     }
 }
 
+#[cfg(feature = "hardware")]
+fn probe_ctap2_ccid(conn: PcscSmartCardConnection) -> ResultOrError<Ctap2Diag> {
+    match CtapSession::new(conn) {
+        Ok(ctap) => match Ctap2Session::new(ctap) {
+            Ok(mut ctap2) => {
+                let info = ctap2.get_info().ok();
+                let info_diag = info.as_ref().map(ctap2_info_diag).unwrap_or_default();
+                let (pin, _ctap2) = probe_ctap2_pin(ctap2);
+                ResultOrError::Ok(Ctap2Diag {
+                    info: info_diag,
+                    pin,
+                })
+            }
+            Err((e, _)) => ResultOrError::Err(format!("{e}")),
+        },
+        Err((e, _)) => ResultOrError::Err(format!("{e}")),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -684,6 +742,28 @@ fn probe_ctap2_pin<C: Connection + 'static>(
 fn device_key_pcsc(reader: &str) -> String {
     let transport = if is_reader_usb(reader) { "USB" } else { "NFC" };
     format!("CCID ({reader}, [{transport}])")
+}
+
+#[cfg(feature = "hardware")]
+fn fido_ccid_enabled(reader: &str, info: Option<&DeviceInfo>) -> Option<()> {
+    if !is_reader_usb(reader) {
+        // NFC devices always support FIDO via CCID
+        return Some(());
+    }
+    // USB: only if FIDOCCID capability is enabled
+    let info = info?;
+    if info
+        .config
+        .enabled_capabilities
+        .get(&Transport::Usb)
+        .copied()
+        .unwrap_or(Capability(0))
+        .contains(Capability::FIDOCCID)
+    {
+        Some(())
+    } else {
+        None
+    }
 }
 
 #[cfg(feature = "hardware")]
@@ -743,6 +823,7 @@ fn probe_pcsc() -> ResultOrError<PcscDiag> {
                                 oath: ResultOrError::Err("skipped".to_string()),
                                 openpgp: ResultOrError::Err("skipped".to_string()),
                                 hsmauth: ResultOrError::Err("skipped".to_string()),
+                                fido: None,
                             },
                         );
                         continue;
@@ -767,6 +848,7 @@ fn probe_pcsc() -> ResultOrError<PcscDiag> {
                                             oath: ResultOrError::Err("skipped".to_string()),
                                             openpgp: ResultOrError::Err("skipped".to_string()),
                                             hsmauth: ResultOrError::Err("skipped".to_string()),
+                                            fido: None,
                                         },
                                     );
                                     continue;
@@ -781,6 +863,10 @@ fn probe_pcsc() -> ResultOrError<PcscDiag> {
                 let (openpgp, conn) = probe_openpgp(conn);
                 let (hsmauth, _conn) = probe_hsmauth(conn);
 
+                let fido = fido_ccid_enabled(reader, cached_info.as_ref())
+                    .and_then(|_| PcscSmartCardConnection::new(reader, false).ok())
+                    .map(probe_ctap2_ccid);
+
                 yubikeys.insert(
                     key,
                     PcscDeviceDiag {
@@ -789,6 +875,7 @@ fn probe_pcsc() -> ResultOrError<PcscDiag> {
                         oath,
                         openpgp,
                         hsmauth,
+                        fido,
                     },
                 );
             }
