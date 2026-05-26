@@ -61,6 +61,7 @@ getrandom = "0.3"
 ml-dsa = "0.1"
 ml-kem = "0.3"
 p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+pcsc = "2"
 rsa = "0.9"
 rstest = "0.25"
 sha2 = { version = "0.10", features = ["oid"] }

@@ -1505,8 +1505,206 @@ mod fido {
     use yubikit::fido::FidoConnection;
     use yubikit::webauthn::types::PublicKeyCredentialType;
 
-    const TEST_PIN: &str = "123456";
+    const TEST_PIN: &str = "12345679";
     const TEST_RP_ID: &str = "test.rs.yubikey.example";
+
+    /// One-time setup: ensure the FIDO PIN is in a known state.
+    ///
+    /// If a PIN is already set on the device and it matches TEST_PIN, nothing
+    /// extra is done.  If the PIN is set but doesn't match (or is blocked),
+    /// the FIDO applet is reset first (which on NFC requires a recent power-up),
+    /// then TEST_PIN is set.  Runs at most once per test-process invocation.
+    fn setup_fido_pin() -> bool {
+        eprintln!("  FIDO setup: initializing PIN state...");
+
+        let open_session = || -> Result<Ctap2Session<PcscSmartCardConnection>, String> {
+            let conn = open_smartcard_connection(&TestConnection::SmartCard);
+            let ctap = CtapSession::new(conn).map_err(|(e, _)| e.to_string())?;
+            Ctap2Session::new(ctap).map_err(|(e, _)| e.to_string())
+        };
+
+        // Check current PIN state.
+        let needs_reset = {
+            let mut session = match open_session() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("  FIDO setup: open session failed: {e}");
+                    return false;
+                }
+            };
+            let info = match session.get_info() {
+                Ok(i) => i,
+                Err(e) => {
+                    eprintln!("  FIDO setup: get_info failed: {e}");
+                    return false;
+                }
+            };
+
+            // If reset would be needed, verify this transport is allowed for it.
+            if !info.transports_for_reset.is_empty() {
+                let current = match get_device().transport() {
+                    Transport::Usb => "usb",
+                    Transport::Nfc => "nfc",
+                };
+                if !info
+                    .transports_for_reset
+                    .iter()
+                    .any(|t| t.eq_ignore_ascii_case(current))
+                {
+                    eprintln!(
+                        "  FIDO setup: reset not allowed over {current} \
+                         (transports_for_reset={:?}); skipping PIN tests",
+                        info.transports_for_reset
+                    );
+                    return false;
+                }
+            }
+
+            let pin_set = info.options.get("clientPin").copied().unwrap_or(false);
+            if !pin_set {
+                // No PIN set; proceed straight to set_pin below.
+                false
+            } else {
+                // PIN is set — try to verify it's already TEST_PIN.
+                let mut cp = match ClientPin::new(session).map_err(|(e, _)| e.to_string()) {
+                    Ok(cp) => cp,
+                    Err(e) => {
+                        eprintln!("  FIDO setup: ClientPin::new failed: {e}");
+                        return false;
+                    }
+                };
+                match cp.get_pin_token(TEST_PIN, None, None) {
+                    Ok(_) => {
+                        // PIN is already TEST_PIN — no reset required.
+                        eprintln!("  FIDO setup: PIN already set to TEST_PIN, no reset needed");
+                        return true;
+                    }
+                    Err(Ctap2Error::StatusError(CtapStatus::PinInvalid))
+                    | Err(Ctap2Error::StatusError(CtapStatus::PinAuthBlocked))
+                    | Err(Ctap2Error::StatusError(CtapStatus::PinBlocked)) => {
+                        // Wrong PIN or blocked — reset required.
+                        true
+                    }
+                    Err(e) => {
+                        eprintln!("  FIDO setup: unexpected error checking PIN: {e}");
+                        return false;
+                    }
+                }
+            }
+        };
+
+        if needs_reset {
+            eprintln!("  FIDO setup: PIN mismatch or blocked, resetting applet...");
+            // Power-cycle the NFC card so the "recently powered up" window is
+            // satisfied for the FIDO reset command (NFC only).
+            if get_device().transport() == Transport::Nfc
+                && let Err(e) = power_cycle_nfc()
+            {
+                eprintln!("  FIDO setup: NFC power cycle failed: {e}");
+                return false;
+            }
+            let mut session = match open_session() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("  FIDO setup: open session (post-power-cycle) failed: {e}");
+                    return false;
+                }
+            };
+            if let Err(e) = session.reset(None, None) {
+                eprintln!(
+                    "  FIDO setup: reset failed: {e}\n  \
+                     NOTE: For NFC, remove the card and re-tap it, then \
+                     run the tests within 10 seconds."
+                );
+                return false;
+            }
+            eprintln!("  FIDO setup: reset done");
+        }
+
+        // Set the PIN on a fresh connection (avoids stale cached state after reset).
+        let session = match open_session() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("  FIDO setup: re-open after reset failed: {e}");
+                return false;
+            }
+        };
+        let mut cp = match ClientPin::new(session).map_err(|(e, _)| e.to_string()) {
+            Ok(cp) => cp,
+            Err(e) => {
+                eprintln!("  FIDO setup: ClientPin::new failed: {e}");
+                return false;
+            }
+        };
+        if let Err(e) = cp.set_pin(TEST_PIN) {
+            eprintln!("  FIDO setup: set_pin failed: {e}");
+            return false;
+        }
+        eprintln!("  FIDO setup: PIN set to TEST_PIN");
+        true
+    }
+
+    /// Power-cycle the NFC card using PCSC so the "recently powered up"
+    /// window is reset for commands like FIDO reset.
+    ///
+    /// Tries `UnpowerCard` first; falls back to `ResetCard` (warm reset /
+    /// NFC deactivation + reactivation) if the card is unavailable after
+    /// unpowering.
+    fn power_cycle_nfc() -> Result<(), String> {
+        use ::pcsc::{Context, Disposition, Protocols, Scope, ShareMode};
+        use std::ffi::CString;
+
+        let reader_name = get_device()
+            .reader_name
+            .as_deref()
+            .ok_or("device has no PCSC reader name")?;
+        let c_reader = CString::new(reader_name).map_err(|e| e.to_string())?;
+        let ctx = Context::establish(Scope::User).map_err(|e| e.to_string())?;
+
+        eprintln!("  FIDO setup: power-cycling NFC card via PCSC...");
+
+        // Try UnpowerCard (cold reset / field off) first.
+        {
+            let card = ctx
+                .connect(&c_reader, ShareMode::Shared, Protocols::ANY)
+                .map_err(|e| e.to_string())?;
+            card.disconnect(Disposition::UnpowerCard)
+                .map_err(|(_, e)| e.to_string())?;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        // Reconnect to confirm the card came back; use ResetCard to also
+        // ensure the card goes through its ATR sequence (warm reset).
+        {
+            let mut card = ctx
+                .connect(&c_reader, ShareMode::Shared, Protocols::ANY)
+                .map_err(|e| e.to_string())?;
+            card.reconnect(ShareMode::Shared, Protocols::ANY, Disposition::ResetCard)
+                .map_err(|e| e.to_string())?;
+            card.disconnect(Disposition::LeaveCard)
+                .map_err(|(_, e)| e.to_string())?;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        eprintln!("  FIDO setup: NFC card power-cycled");
+        Ok(())
+    }
+
+    fn ensure_fido_pin() -> bool {
+        use std::sync::OnceLock;
+        static FIDO_PIN_READY: OnceLock<bool> = OnceLock::new();
+        *FIDO_PIN_READY.get_or_init(setup_fido_pin)
+    }
+
+    /// Skip the calling test if the global FIDO PIN setup failed.
+    macro_rules! require_fido_pin {
+        () => {
+            if !ensure_fido_pin() {
+                eprintln!("  SKIP: FIDO PIN setup failed (see setup output above)");
+                return;
+            }
+        };
+    }
 
     /// Whether the FIDO CCID interface is usable.
     ///
@@ -1697,20 +1895,7 @@ mod fido {
         skip_if_needed!(tc);
         require_transport!(Transport::Nfc);
         require_capability!(Capability::FIDO2);
-
-        // Step 1: Ensure the test PIN is set (no UP required).
-        {
-            let mut session = open_ctap2_smartcard(&tc);
-            let info = session.get_info().expect("get_info for pin state");
-            let pin_set = info.options.get("clientPin").copied().unwrap_or(false);
-            if !pin_set {
-                let mut cp = ClientPin::new(session)
-                    .map_err(|(e, _)| e)
-                    .expect("ClientPin for set_pin");
-                cp.set_pin(TEST_PIN).expect("set_pin");
-                eprintln!("  PIN set to test PIN");
-            }
-        }
+        require_fido_pin!();
 
         let client_data_hash = [0x42u8; 32];
         let rp = PublicKeyCredentialRpEntity {
@@ -1879,8 +2064,6 @@ mod fido {
     // ── 5. CredentialManagement metadata over NFC ──────────────────────────
 
     /// Read credential storage metadata via CredentialManagement.
-    ///
-    /// Requires a PIN to be set. If no PIN is set the test is skipped.
     #[rstest]
     #[case(TestConnection::SmartCard)]
     #[case(TestConnection::SmartCardScp11b)]
@@ -1888,15 +2071,12 @@ mod fido {
         skip_if_needed!(tc);
         require_transport!(Transport::Nfc);
         require_capability!(Capability::FIDO2);
+        require_fido_pin!();
 
         let mut session = open_ctap2_smartcard(&tc);
         let info = session.get_info().expect("get_info for credmgmt check");
         if !CredentialManagement::<PcscSmartCardConnection>::is_supported(&info) {
             eprintln!("  SKIP: CredentialManagement not supported");
-            return;
-        }
-        if !info.options.get("clientPin").copied().unwrap_or(false) {
-            eprintln!("  SKIP: no PIN set (required for CredentialManagement)");
             return;
         }
 
