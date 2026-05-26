@@ -38,10 +38,17 @@ enum TestConnection {
 macro_rules! skip_if_needed {
     ($tc:expr) => {
         if let Some(reason) = should_skip(&$tc) {
-            eprintln!("  SKIP {:?}: {}", $tc, reason);
-            return;
+            skip!("{:?}: {}", $tc, reason);
         }
     };
+}
+
+/// Skip the current test with a printed reason.
+macro_rules! skip {
+    ($($arg:tt)*) => {{
+        eprintln!("SKIP: {}", format_args!($($arg)*));
+        return;
+    }};
 }
 
 // ───────────────────────── Device ─────────────────────────
@@ -267,11 +274,7 @@ fn device_version() -> Version {
 macro_rules! require_capability {
     ($cap:expr) => {
         if !device_capabilities().contains($cap) {
-            eprintln!(
-                "SKIP: device does not support {:?}, skipping test",
-                stringify!($cap)
-            );
-            return;
+            skip!("device does not support {:?}", stringify!($cap));
         }
     };
 }
@@ -279,12 +282,7 @@ macro_rules! require_capability {
 macro_rules! require_version {
     ($min:expr) => {
         if device_version() < $min {
-            eprintln!(
-                "SKIP: device version {:?} < {:?}, skipping test",
-                device_version(),
-                $min
-            );
-            return;
+            skip!("device version {:?} < {:?}", device_version(), $min);
         }
     };
 }
@@ -292,8 +290,7 @@ macro_rules! require_version {
 macro_rules! require_transport {
     ($transport:expr) => {
         if device_transport() != $transport {
-            eprintln!("SKIP: test requires {:?} transport", $transport);
-            return;
+            skip!("test requires {:?}", $transport);
         }
     };
 }
@@ -312,8 +309,7 @@ fn make_scp_key_params(kid: u8, kvn: u8, pk: &[u8]) -> yubikit::smartcard::ScpKe
 #[test]
 fn test_list_devices_finds_key() {
     if std::env::var("YUBIKEY_SERIAL").is_err() && std::env::var("YUBIKEY_NO_SERIAL").is_err() {
-        eprintln!("  SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
-        return;
+        skip!("YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
     }
     require_transport!(Transport::Usb);
     let serial = required_serial();
@@ -358,14 +354,12 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
             assert_eq!(info.serial, required_serial());
         }
     }
-    eprintln!("  PASS {tc:?}");
 }
 
 #[test]
 fn test_management_device_info_capabilities() {
     if std::env::var("YUBIKEY_SERIAL").is_err() && std::env::var("YUBIKEY_NO_SERIAL").is_err() {
-        eprintln!("  SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
-        return;
+        skip!("YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
     }
     let caps = device_capabilities();
     // Every YubiKey has at least one capability on its active transport
@@ -399,7 +393,6 @@ mod oath {
         require_capability!(Capability::OATH);
         let session = open_oath_session(&tc);
         let _v = session.version();
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -413,7 +406,6 @@ mod oath {
 
         let creds = session.list_credentials().expect("list_credentials");
         assert!(creds.is_empty(), "Expected no credentials after reset");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -450,7 +442,6 @@ mod oath {
 
         let creds = session.list_credentials().expect("list_credentials");
         assert!(creds.is_empty());
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -484,7 +475,6 @@ mod oath {
         assert_eq!(results.len(), 1);
         let (_, code) = &results[0];
         assert!(code.is_some(), "Expected a TOTP code");
-        eprintln!("  PASS {tc:?}");
     }
 }
 
@@ -516,7 +506,6 @@ mod piv {
         require_capability!(Capability::PIV);
         let session = open_piv_session(&tc);
         let _v = session.version();
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -529,7 +518,6 @@ mod piv {
         session.reset().expect("reset");
 
         session.verify_pin("123456").expect("verify default PIN");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -543,7 +531,6 @@ mod piv {
 
         let attempts = session.get_pin_attempts().expect("get_pin_attempts");
         assert!(attempts > 0, "Expected positive PIN attempts");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -568,7 +555,6 @@ mod piv {
             .expect("generate_key");
         assert!(!spki_der.is_empty());
         assert!(spki_der.len() > 50, "SPKI should be substantial");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -593,7 +579,6 @@ mod piv {
             .expect("generate_key");
         assert!(!spki_der.is_empty());
         assert!(spki_der.len() > 256, "RSA SPKI should be large");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -638,7 +623,6 @@ mod piv {
         .expect("parse verifying key");
         let sig = Signature::from_der(&sig).expect("parse DER signature");
         vk.verify(message, &sig).expect("signature verification");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -725,7 +709,6 @@ mod piv {
             .get_certificate(Slot::Retired1)
             .expect("get_certificate");
         assert_eq!(cert_der, retrieved, "Certificate round-trip should match");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -787,7 +770,6 @@ mod piv {
             Signature::from_der(parsed_csr.signature.raw_bytes()).expect("parse CSR signature");
         vk.verify(&info_der, &csr_sig)
             .expect("CSR signature verification");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -849,7 +831,6 @@ mod piv {
         let sig = Signature::try_from(parsed.signature.raw_bytes()).expect("parse RSA signature");
         vk.verify(&tbs_der, &sig)
             .expect("RSA certificate signature verification");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -894,7 +875,6 @@ mod piv {
             plaintext,
             "Decrypted plaintext should match"
         );
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -952,7 +932,6 @@ mod piv {
             host_shared.raw_secret_bytes().as_slice(),
             "ECDH shared secrets should match"
         );
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -986,7 +965,6 @@ mod piv {
             .sign(Slot::Authentication, KeyType::MlDsa44, b"test message")
             .expect("sign MlDsa44");
         assert!(!sig.is_empty());
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -1014,7 +992,6 @@ mod piv {
             KeyType::from_public_key_der(&spki_der).expect("detect ML-KEM key type"),
             KeyType::MlKem768
         );
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -1060,8 +1037,6 @@ mod piv {
         let vk = VerifyingKey::<MlDsa44>::new(vk_bytes.into());
         let sig = Signature::<MlDsa44>::try_from(sig_bytes.as_slice()).expect("parse signature");
         vk.verify(msg, &sig).expect("signature verification failed");
-
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -1118,7 +1093,6 @@ mod piv {
             host_shared_secret.as_slice(),
             "Shared secrets must match"
         );
-        eprintln!("  PASS {tc:?}");
     }
 }
 
@@ -1146,7 +1120,6 @@ mod openpgp {
         require_capability!(Capability::OPENPGP);
         let session = open_openpgp_session(&tc);
         let _v = session.version();
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -1164,13 +1137,14 @@ mod openpgp {
             major >= 2,
             "Expected OpenPGP version >= 2.0, got {major}.{minor}"
         );
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_openpgp_get_challenge(#[case] tc: TestConnection) {
+        use yubikit::openpgp::OpenPgpError;
+
         skip_if_needed!(tc);
         require_capability!(Capability::OPENPGP);
         let mut session = open_openpgp_session(&tc);
@@ -1179,11 +1153,13 @@ mod openpgp {
                 assert_eq!(challenge.len(), 8);
                 assert!(challenge.iter().any(|&b| b != 0));
             }
-            Err(_) => {
-                eprintln!("  NOTE: get_challenge not supported on this device");
+            Err(OpenPgpError::NotSupported(_)) => {
+                eprintln!("SKIP: get_challenge not supported");
+            }
+            Err(e) => {
+                panic!("get_challenge failed: {e}");
             }
         }
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -1237,7 +1213,6 @@ mod openpgp {
         let sig = Signature::from_bytes((&signature[..]).into()).expect("parse signature");
         vk.verify_digest(digest, &sig)
             .expect("EC signature verification");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -1288,7 +1263,6 @@ mod openpgp {
         let sig = Signature::try_from(signature.as_slice()).expect("parse RSA signature");
         vk.verify(message, &sig)
             .expect("RSA signature verification");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -1336,7 +1310,6 @@ mod openpgp {
             plaintext,
             "Decrypted plaintext should match"
         );
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -1388,7 +1361,6 @@ mod openpgp {
             host_shared.raw_secret_bytes().as_slice(),
             "ECDH shared secrets should match"
         );
-        eprintln!("  PASS {tc:?}");
     }
 }
 
@@ -1423,7 +1395,6 @@ mod yubiotp {
                 let _v = session.version();
             }
         }
-        eprintln!("  PASS {tc:?}");
     }
 
     /// Test that cancelling an OTP HMAC challenge-response with touch works.
@@ -1485,8 +1456,6 @@ mod yubiotp {
             let mut session = YubiOtpSession::new(conn).expect("YubiOtpSession");
             session.delete_slot(Slot::Two, None).expect("delete slot");
         }
-
-        eprintln!("  PASS {tc:?} (cancelled in {elapsed:?})");
     }
 }
 
@@ -1502,7 +1471,6 @@ mod fido {
         PublicKeyCredentialUserEntity,
     };
     use yubikit::fido::FidoConnection;
-    use yubikit::webauthn::types::PublicKeyCredentialType;
 
     const TEST_PIN: &str = "12345679";
     const TEST_RP_ID: &str = "test.rs.yubikey.example";
@@ -1514,14 +1482,7 @@ mod fido {
     /// the FIDO applet is reset first (which on NFC requires a recent power-up),
     /// then TEST_PIN is set.  Runs at most once per test-process invocation.
     fn setup_fido_pin() -> bool {
-        eprintln!("  FIDO setup: initializing PIN state...");
-
-        // Always power-cycle the NFC card at the start of a test run so any
-        // accumulated PinAuthBlocked state from a previous run is cleared.
-        // For USB devices this is a no-op (power_cycle_nfc returns Err quickly).
-        if let Err(e) = power_cycle_nfc() {
-            eprintln!("  FIDO setup: power_cycle_nfc skipped: {e}");
-        }
+        eprintln!("FIDO setup: initializing PIN state...");
 
         let open_session = || -> Result<Ctap2Session<PcscSmartCardConnection>, String> {
             let conn = open_smartcard_connection(&TestConnection::SmartCard);
@@ -1534,15 +1495,13 @@ mod fido {
             let mut session = match open_session() {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("  FIDO setup: open session failed: {e}");
-                    return false;
+                    panic!("FIDO setup: open session failed: {e}");
                 }
             };
             let info = match session.get_info() {
                 Ok(i) => i,
                 Err(e) => {
-                    eprintln!("  FIDO setup: get_info failed: {e}");
-                    return false;
+                    panic!("FIDO setup: get_info failed: {e}");
                 }
             };
 
@@ -1555,14 +1514,13 @@ mod fido {
                 let mut cp = match ClientPin::new(session).map_err(|(e, _)| e.to_string()) {
                     Ok(cp) => cp,
                     Err(e) => {
-                        eprintln!("  FIDO setup: ClientPin::new failed: {e}");
-                        return false;
+                        panic!("FIDO setup: ClientPin::new failed: {e}");
                     }
                 };
                 match cp.get_pin_token(TEST_PIN, None, None) {
                     Ok(_) => {
                         // PIN is already TEST_PIN — no reset required.
-                        eprintln!("  FIDO setup: PIN already set to TEST_PIN, no reset needed");
+                        eprintln!("FIDO setup: PIN already set to TEST_PIN, no reset needed");
                         return true;
                     }
                     Err(Ctap2Error::StatusError(CtapStatus::PinInvalid))
@@ -1581,7 +1539,7 @@ mod fido {
                                 .any(|t| t.eq_ignore_ascii_case(current))
                             {
                                 eprintln!(
-                                    "  FIDO setup: reset not allowed over {current} \
+                                    "FIDO setup: reset not allowed over {current} \
                                      (transports_for_reset={:?}); skipping PIN tests",
                                     info.transports_for_reset
                                 );
@@ -1591,61 +1549,52 @@ mod fido {
                         true
                     }
                     Err(e) => {
-                        eprintln!("  FIDO setup: unexpected error checking PIN: {e}");
-                        return false;
+                        panic!("FIDO setup: unexpected error checking PIN: {e}");
                     }
                 }
             }
         };
 
         if needs_reset {
-            eprintln!("  FIDO setup: PIN mismatch or blocked, resetting applet...");
+            eprintln!("FIDO setup: PIN mismatch or blocked, resetting applet...");
             // Power-cycle the NFC card so the "recently powered up" window is
             // satisfied for the FIDO reset command (NFC only).
             if get_device().transport() == Transport::Nfc
                 && let Err(e) = power_cycle_nfc()
             {
-                eprintln!("  FIDO setup: NFC power cycle failed: {e}");
-                return false;
+                panic!("FIDO setup: NFC power cycle failed: {e}");
             }
             let mut session = match open_session() {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("  FIDO setup: open session (post-power-cycle) failed: {e}");
-                    return false;
+                    panic!("FIDO setup: open session (post-power-cycle) failed: {e}");
                 }
             };
             if let Err(e) = session.reset(None, None) {
-                eprintln!(
-                    "  FIDO setup: reset failed: {e}\n  \
-                     NOTE: For NFC, remove the card and re-tap it, then \
-                     run the tests within 10 seconds."
+                panic!(
+                    "FIDO setup: reset failed: {e}\n  NOTE: For NFC, remove the card and re-tap it, then run the tests within 10 seconds."
                 );
-                return false;
             }
-            eprintln!("  FIDO setup: reset done");
+            eprintln!("FIDO setup: reset done");
         }
 
         // Set the PIN on a fresh connection (avoids stale cached state after reset).
         let session = match open_session() {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("  FIDO setup: re-open after reset failed: {e}");
-                return false;
+                panic!("FIDO setup: re-open after reset failed: {e}");
             }
         };
         let mut cp = match ClientPin::new(session).map_err(|(e, _)| e.to_string()) {
             Ok(cp) => cp,
             Err(e) => {
-                eprintln!("  FIDO setup: ClientPin::new failed: {e}");
-                return false;
+                panic!("FIDO setup: ClientPin::new failed: {e}");
             }
         };
         if let Err(e) = cp.set_pin(TEST_PIN) {
-            eprintln!("  FIDO setup: set_pin failed: {e}");
-            return false;
+            panic!("FIDO setup: set_pin failed: {e}");
         }
-        eprintln!("  FIDO setup: PIN set to TEST_PIN");
+        eprintln!("FIDO setup: PIN set to TEST_PIN");
         true
     }
 
@@ -1666,7 +1615,7 @@ mod fido {
         let c_reader = CString::new(reader_name).map_err(|e| e.to_string())?;
         let ctx = Context::establish(Scope::User).map_err(|e| e.to_string())?;
 
-        eprintln!("  FIDO setup: power-cycling NFC card via PCSC...");
+        eprintln!("FIDO setup: power-cycling NFC card via PCSC...");
 
         // Try UnpowerCard (cold reset / field off) first.
         {
@@ -1691,7 +1640,7 @@ mod fido {
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
 
-        eprintln!("  FIDO setup: NFC card power-cycled");
+        eprintln!("FIDO setup: NFC card power-cycled");
         Ok(())
     }
 
@@ -1705,8 +1654,7 @@ mod fido {
     macro_rules! require_fido_pin {
         () => {
             if !ensure_fido_pin() {
-                eprintln!("  SKIP: FIDO PIN setup failed (see setup output above)");
-                return;
+                skip!("FIDO reset blocked for current transport (see setup output)");
             }
         };
     }
@@ -1737,8 +1685,7 @@ mod fido {
                 TestConnection::SmartCard | TestConnection::SmartCardScp11b
             ) && !fido_ccid_available()
             {
-                eprintln!("  SKIP {:?}: FIDOCCID not enabled over USB", $tc);
-                return;
+                skip!("{:?}: FIDOCCID not enabled over USB", $tc);
             }
         };
     }
@@ -1749,12 +1696,10 @@ mod fido {
             match $cp.get_pin_token($pin, $perms, $rpid) {
                 Ok(t) => t,
                 Err(Ctap2Error::StatusError(CtapStatus::PinInvalid)) => {
-                    eprintln!("  SKIP: device PIN is not TEST_PIN; reset FIDO applet to rerun");
-                    return;
+                    skip!("device PIN is not TEST_PIN; reset FIDO applet to rerun");
                 }
                 Err(Ctap2Error::StatusError(CtapStatus::PinAuthBlocked)) => {
-                    eprintln!("  SKIP: PIN auth blocked (re-power/re-tap device to clear)");
-                    return;
+                    skip!("PIN auth blocked (re-power/re-tap device to clear)");
                 }
                 Err(e) => panic!("get_pin_token failed: {e}"),
             }
@@ -1803,27 +1748,22 @@ mod fido {
         );
         assert_ne!(info.aaguid, Aaguid::NONE, "AAGUID should not be all zeros");
         assert!(!info.options.is_empty(), "options should not be empty");
-        eprintln!("  versions: {:?}", info.versions);
-        eprintln!("  aaguid: {:?}", info.aaguid);
-        eprintln!("  extensions: {:?}", info.extensions);
     }
 
     fn assert_pin_retries<C: Connection + 'static>(mut session: Ctap2Session<C>) {
         let info = session.get_info().expect("get_info for pin retries check");
         if !ClientPin::<C>::is_supported(&info) {
-            eprintln!("  SKIP: clientPin not supported on this device");
-            return;
+            skip!("clientPin not supported");
         }
         let mut cp = ClientPin::new(session)
             .map_err(|(e, _)| e)
             .expect("ClientPin::new");
         match cp.get_pin_retries() {
-            Ok((retries, pcs)) => {
+            Ok((retries, _)) => {
                 assert!(retries <= 8, "retries should be <= 8, got {retries}");
-                eprintln!("  PIN retries: {retries} (power_cycle_state: {pcs:?})");
             }
             Err(Ctap2Error::StatusError(CtapStatus::PinNotSet)) => {
-                eprintln!("  PIN not set (no retries to report)");
+                eprintln!("PIN not set (no retries to report)");
             }
             Err(e) => panic!("get_pin_retries: {e}"),
         }
@@ -1895,6 +1835,7 @@ mod fido {
         require_transport!(Transport::Nfc);
         require_capability!(Capability::FIDO2);
 
+        power_cycle_nfc().expect("power_cycle_nfc before selection");
         let mut session = open_ctap2_smartcard(&tc);
         let info = session.get_info().expect("get_info for selection check");
         let supports_selection = info
@@ -1902,13 +1843,12 @@ mod fido {
             .iter()
             .any(|v| v == "FIDO_2_1" || v == "FIDO_2_1_PRE");
         if !supports_selection {
-            eprintln!("  SKIP: authenticatorSelection requires CTAP 2.1");
-            return;
+            skip!("authenticatorSelection requires CTAP 2.1");
         }
 
         // On NFC the card is already present, so UP is satisfied without physical touch.
         match session.selection(None, None) {
-            Ok(()) => eprintln!("  selection: OK"),
+            Ok(()) => eprintln!("selection: OK"),
             Err(e) => panic!("  selection: {e}"),
         }
     }
@@ -1929,13 +1869,15 @@ mod fido {
         use yubikit::webauthn::{
             AuthenticatorSelectionCriteria, DefaultClientDataCollector,
             PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
-            PublicKeyCredentialRpEntity, ResidentKeyRequirement, UserVerificationRequirement,
-            WebAuthnClient,
+            PublicKeyCredentialRpEntity, PublicKeyCredentialType, ResidentKeyRequirement,
+            UserVerificationRequirement, WebAuthnClient,
         };
         skip_if_needed!(tc);
         require_transport!(Transport::Nfc);
         require_capability!(Capability::FIDO2);
         require_fido_pin!();
+
+        power_cycle_nfc().expect("power_cycle_nfc before MC");
 
         // ── Registration ─────────────────────────────────────────────────────
         let session = open_ctap2_smartcard(&tc);
@@ -1960,7 +1902,7 @@ mod fido {
             timeout: None,
             exclude_credentials: None,
             authenticator_selection: Some(AuthenticatorSelectionCriteria {
-                resident_key: Some(ResidentKeyRequirement::Required),
+                resident_key: Some(ResidentKeyRequirement::Discouraged),
                 user_verification: Some(UserVerificationRequirement::Preferred),
                 ..Default::default()
             }),
@@ -1974,12 +1916,8 @@ mod fido {
             .make_credential(&create_options, None)
             .expect("make_credential");
         let cred_id = reg.id.clone();
-        eprintln!("  make_credential: cred_id={} bytes", cred_id.len());
         assert!(!cred_id.is_empty(), "credential ID should not be empty");
-        // Drop the session so the NFC card resets its UP budget for the next connection.
-        // Hardware-reset the NFC card so the UP budget is fresh for the next connection.
-        // (NFC CTAP2 allows one UP-requiring command per "tap"; PCSC power_cycle_nfc
-        // is equivalent to removing and re-tapping the card.)
+
         drop(mc_client);
         power_cycle_nfc().expect("power_cycle_nfc between MC and GA");
 
@@ -1997,7 +1935,11 @@ mod fido {
             challenge: vec![0xAB; 32],
             timeout: None,
             rp_id: Some(TEST_RP_ID.to_string()),
-            allow_credentials: None,
+            allow_credentials: Some(vec![PublicKeyCredentialDescriptor {
+                type_: PublicKeyCredentialType::PublicKey,
+                id: cred_id.clone(),
+                transports: None,
+            }]),
             user_verification: Some(UserVerificationRequirement::Preferred),
             hints: None,
             extensions: None,
@@ -2018,42 +1960,6 @@ mod fido {
         );
         let flags = a.response.authenticator_data[32];
         assert!(flags & 0x01 != 0, "UP flag should be set in assertion");
-        eprintln!("  get_assertion: sig={} bytes", a.response.signature.len());
-
-        // ── Cleanup ───────────────────────────────────────────────────────────
-        // Delete the test credential via CredentialManagement (best-effort).
-        // The GA session's UP budget is consumed; power-cycle and open a fresh
-        // connection for cleanup.
-        drop(ga_client);
-        power_cycle_nfc().expect("power_cycle_nfc before cleanup");
-        let mut session3 = open_ctap2_smartcard(&tc);
-        let info = session3.get_info().expect("get_info for cleanup check");
-        if CredentialManagement::<PcscSmartCardConnection>::is_supported(&info) {
-            let mut cp = ClientPin::new(session3)
-                .map_err(|(e, _)| e)
-                .expect("ClientPin for credmgmt cleanup");
-            match cp.get_pin_token(TEST_PIN, Some(Permissions::CREDENTIAL_MGMT), None) {
-                Ok(token) => {
-                    let protocol = cp.protocol();
-                    let session = cp.into_session();
-                    let mut credmgmt = CredentialManagement::new(session, protocol, token)
-                        .map_err(|(e, _)| e)
-                        .expect("CredentialManagement for cleanup");
-                    let cred_desc = PublicKeyCredentialDescriptor {
-                        type_: PublicKeyCredentialType::PublicKey,
-                        id: cred_id,
-                        transports: None,
-                    };
-                    match credmgmt.delete_cred(&cred_desc) {
-                        Ok(()) => eprintln!("  cleanup: test credential deleted"),
-                        Err(e) => eprintln!("  cleanup: delete_cred failed (non-fatal): {e}"),
-                    }
-                }
-                Err(e) => eprintln!("  cleanup: could not get PIN token (non-fatal): {e}"),
-            }
-        } else {
-            eprintln!("  cleanup: CredentialManagement not supported, skipping");
-        }
     }
 
     // ── 5. CredentialManagement metadata over NFC ──────────────────────────
@@ -2071,8 +1977,7 @@ mod fido {
         let mut session = open_ctap2_smartcard(&tc);
         let info = session.get_info().expect("get_info for credmgmt check");
         if !CredentialManagement::<PcscSmartCardConnection>::is_supported(&info) {
-            eprintln!("  SKIP: CredentialManagement not supported");
-            return;
+            skip!("CredentialManagement not supported");
         }
 
         let mut cp = ClientPin::new(session)
@@ -2086,7 +1991,7 @@ mod fido {
             .expect("CredentialManagement::new");
 
         let (existing, max_remaining) = credmgmt.get_metadata().expect("get_metadata");
-        eprintln!("  credentials: existing={existing}, max_remaining={max_remaining}");
+        eprintln!("credentials: existing={existing}, max_remaining={max_remaining}");
         // Total capacity must be non-zero.
         assert!(
             existing + max_remaining > 0,
@@ -2095,17 +2000,17 @@ mod fido {
 
         if existing > 0 {
             let rps = credmgmt.enumerate_rps().expect("enumerate_rps");
-            eprintln!("  RPs: {}", rps.len());
+            eprintln!("RPs: {}", rps.len());
             assert!(
                 !rps.is_empty(),
                 "enumerate_rps returned empty for existing credentials"
             );
             for rp in &rps {
-                eprintln!("    rp_id={}", rp.rp.id);
+                eprintln!("  rp_id={}", rp.rp.id);
                 let creds = credmgmt
                     .enumerate_creds(&rp.rp_id_hash)
                     .expect("enumerate_creds");
-                eprintln!("    creds: {}", creds.len());
+                eprintln!("  creds: {}", creds.len());
             }
         }
     }
@@ -2124,8 +2029,7 @@ mod fido {
         let mut session = open_ctap2_smartcard(&tc);
         let info = session.get_info().expect("get_info for largeblobs check");
         if !LargeBlobs::<PcscSmartCardConnection>::is_supported(&info) {
-            eprintln!("  SKIP: largeBlobs not supported");
-            return;
+            skip!("largeBlobs not supported");
         }
 
         // Reads don't require a PIN token; pass dummy values.
@@ -2133,7 +2037,7 @@ mod fido {
             .map_err(|(e, _)| e)
             .expect("LargeBlobs::new");
         let blob_array = lb.read_blob_array().expect("read_blob_array");
-        eprintln!("  large blob array: {} bytes", blob_array.len());
+        eprintln!("large blob array: {} bytes", blob_array.len());
     }
 
     // ── 7. authenticatorSelection cancel over USB HID ──────────────────────
@@ -2171,8 +2075,7 @@ mod fido {
         match &result {
             Ok(response) if !response.is_empty() && response[0] == 0x01 => {
                 // CTAP1_ERR_INVALID_COMMAND: selection not supported (pre-CTAP 2.1)
-                eprintln!("  SKIP: authenticatorSelection not supported on this device");
-                return;
+                skip!("authenticatorSelection not supported");
             }
             Ok(response) => {
                 assert!(
@@ -2188,7 +2091,6 @@ mod fido {
             elapsed.as_secs() < 10,
             "Cancel took too long: {elapsed:?} (expected < 10s)"
         );
-        eprintln!("  PASS {tc:?} (cancelled in {elapsed:?})");
     }
 }
 
@@ -2216,7 +2118,6 @@ mod hsmauth {
         require_capability!(Capability::HSMAUTH);
         let session = open_hsmauth_session(&tc);
         let _v = session.version();
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -2230,7 +2131,6 @@ mod hsmauth {
 
         let creds = session.list_credentials().expect("list_credentials");
         assert!(creds.is_empty(), "Expected no credentials after reset");
-        eprintln!("  PASS {tc:?}");
     }
 }
 
@@ -2463,10 +2363,9 @@ mod securitydomain {
         match SecurityDomainSession::new(conn) {
             Ok(session) => {
                 let _v = session.version();
-                eprintln!("  PASS {tc:?}");
             }
             Err(_) => {
-                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
+                eprintln!("SKIP {tc:?}: SecurityDomain not available");
             }
         }
     }
@@ -2479,13 +2378,11 @@ mod securitydomain {
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                return;
+                skip!("{tc:?}: SecurityDomain not available");
             }
         };
         let key_info = session.get_key_information().expect("get_key_information");
         assert!(!key_info.is_empty(), "Expected at least one key entry");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -2496,8 +2393,7 @@ mod securitydomain {
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                return;
+                skip!("{tc:?}: SecurityDomain not available");
             }
         };
         ensure_default_keys(&mut session);
@@ -2513,7 +2409,6 @@ mod securitydomain {
             data[0], 0x06,
             "Expected OID tag (0x06) as first TLV element"
         );
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -2525,8 +2420,7 @@ mod securitydomain {
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                return;
+                skip!("{tc:?}: SecurityDomain not available");
             }
         };
         ensure_default_keys(&mut session);
@@ -2543,7 +2437,6 @@ mod securitydomain {
             .map_err(|(e, _)| e)
             .expect("SCP03 authentication with default keys");
         verify_auth(&mut session);
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -2554,8 +2447,7 @@ mod securitydomain {
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                return;
+                skip!("{tc:?}: SecurityDomain not available");
             }
         };
         ensure_default_keys(&mut session);
@@ -2570,7 +2462,6 @@ mod securitydomain {
         };
         let result = SecurityDomainSession::new_with_scp(conn, &params).map_err(|(e, _)| e);
         assert!(result.is_err(), "SCP03 with wrong keys should fail");
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -2582,8 +2473,7 @@ mod securitydomain {
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                return;
+                skip!("{tc:?}: SecurityDomain not available");
             }
         };
         ensure_default_keys(&mut session);
@@ -2638,7 +2528,6 @@ mod securitydomain {
         let mut session = SecurityDomainSession::new(conn).expect("open session for reset");
         session.reset().expect("reset");
         invalidate_scp11b_params();
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -2650,8 +2539,7 @@ mod securitydomain {
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                return;
+                skip!("{tc:?}: SecurityDomain not available");
             }
         };
         ensure_default_keys(&mut session);
@@ -2661,8 +2549,7 @@ mod securitydomain {
             .get_certificate_bundle(scp11b_ref)
             .expect("get_certificate_bundle");
         if chain.is_empty() {
-            eprintln!("  SKIP {tc:?}: No SCP11b certificate bundle on device");
-            return;
+            skip!("{tc:?}: No SCP11b certificate bundle on device");
         }
         let leaf_cert = chain.last().unwrap();
         let pk = extract_ec_p256_pubkey(leaf_cert).expect("extract public key from leaf cert");
@@ -2685,7 +2572,6 @@ mod securitydomain {
             result.is_err(),
             "SCP11b should not allow key generation (read-only)"
         );
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -2697,8 +2583,7 @@ mod securitydomain {
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                return;
+                skip!("{tc:?}: SecurityDomain not available");
             }
         };
         ensure_default_keys(&mut session);
@@ -2747,7 +2632,6 @@ mod securitydomain {
         let mut session = SecurityDomainSession::new(conn).expect("open session for reset");
         session.reset().expect("reset");
         invalidate_scp11b_params();
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -2759,8 +2643,7 @@ mod securitydomain {
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                return;
+                skip!("{tc:?}: SecurityDomain not available");
             }
         };
         ensure_default_keys(&mut session);
@@ -2796,7 +2679,6 @@ mod securitydomain {
         let mut session = SecurityDomainSession::new(conn).expect("open session for reset");
         session.reset().expect("reset");
         invalidate_scp11b_params();
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -2808,8 +2690,7 @@ mod securitydomain {
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                return;
+                skip!("{tc:?}: SecurityDomain not available");
             }
         };
         ensure_default_keys(&mut session);
@@ -2860,7 +2741,6 @@ mod securitydomain {
         let mut session = SecurityDomainSession::new(conn).expect("open session for reset");
         session.reset().expect("reset");
         invalidate_scp11b_params();
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -2872,8 +2752,7 @@ mod securitydomain {
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                return;
+                skip!("{tc:?}: SecurityDomain not available");
             }
         };
         ensure_default_keys(&mut session);
@@ -2952,7 +2831,6 @@ mod securitydomain {
         let mut session = SecurityDomainSession::new(conn).expect("open session for reset");
         session.reset().expect("reset");
         invalidate_scp11b_params();
-        eprintln!("  PASS {tc:?}");
     }
 
     #[rstest]
@@ -2964,8 +2842,7 @@ mod securitydomain {
         let mut session = match SecurityDomainSession::new(conn) {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("  SKIP {tc:?}: SecurityDomain not available on this device");
-                return;
+                skip!("{tc:?}: SecurityDomain not available");
             }
         };
         ensure_default_keys(&mut session);
@@ -3003,6 +2880,5 @@ mod securitydomain {
         let mut session = SecurityDomainSession::new(conn).expect("open session for reset");
         session.reset().expect("reset");
         invalidate_scp11b_params();
-        eprintln!("  PASS {tc:?}");
     }
 }
