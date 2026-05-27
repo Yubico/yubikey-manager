@@ -291,6 +291,9 @@ macro_rules! require_version {
 
 macro_rules! require_transport {
     ($transport:expr) => {
+        if std::env::var("YUBIKEY_SERIAL").is_err() && std::env::var("YUBIKEY_NO_SERIAL").is_err() {
+            skip!("YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
+        }
         if device_transport() != $transport {
             skip!("test requires {:?}", $transport);
         }
@@ -1653,6 +1656,11 @@ mod fido {
     /// Skip the calling test if the global FIDO PIN setup failed.
     macro_rules! require_fido_pin {
         () => {
+            if std::env::var("YUBIKEY_SERIAL").is_err()
+                && std::env::var("YUBIKEY_NO_SERIAL").is_err()
+            {
+                skip!("YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
+            }
             if !ensure_fido_pin() {
                 skip!("FIDO reset blocked for current transport (see setup output)");
             }
