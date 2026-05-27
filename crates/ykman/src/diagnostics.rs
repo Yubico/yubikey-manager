@@ -354,6 +354,7 @@ fn cap_diag(cap: Capability) -> CapabilityDiag {
         (Capability::PIV, "PIV"),
         (Capability::OPENPGP, "OPENPGP"),
         (Capability::HSMAUTH, "HSMAUTH"),
+        (Capability::FIDOCCID, "FIDOCCID"),
     ];
     let names: Vec<String> = all
         .iter()
@@ -827,15 +828,18 @@ fn probe_pcsc() -> ResultOrError<PcscDiag> {
                     }
                 };
 
-                let (mgmt, conn) = if let Some(info) = cached_info {
-                    (ResultOrError::Ok(management_diag(info)), conn)
+                let (mgmt, conn, usb_info) = if let Some(info) = cached_info {
+                    (ResultOrError::Ok(management_diag(info)), conn, None)
                 } else {
                     match read_info_ccid(conn) {
-                        Ok((info, c)) => (ResultOrError::Ok(management_diag(&info)), c),
+                        Ok((info, c)) => {
+                            let mgmt = ResultOrError::Ok(management_diag(&info));
+                            (mgmt, c, Some(info))
+                        }
                         Err(e) => {
                             let mgmt = ResultOrError::Err(format!("{e}"));
                             match PcscSmartCardConnection::new(reader, false) {
-                                Ok(c) => (mgmt, c),
+                                Ok(c) => (mgmt, c, None),
                                 Err(_) => {
                                     yubikeys.insert(
                                         key,
@@ -860,7 +864,8 @@ fn probe_pcsc() -> ResultOrError<PcscDiag> {
                 let (openpgp, conn) = probe_openpgp(conn);
                 let (hsmauth, _conn) = probe_hsmauth(conn);
 
-                let fido = fido_ccid_enabled(reader, cached_info.as_ref())
+                let effective_info = cached_info.as_ref().or(usb_info.as_ref());
+                let fido = fido_ccid_enabled(reader, effective_info)
                     .and_then(|_| PcscSmartCardConnection::new(reader, false).ok())
                     .map(probe_ctap2_ccid);
 
