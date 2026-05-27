@@ -1817,6 +1817,96 @@ mod fido {
         });
     }
 
+    /// Exercise ClientPin operations: get token, wrong pin, change pin.
+    ///
+    /// Tests both PIN protocol versions across all transports.
+    /// Changes the PIN during the test and restores it at the end.
+    #[rstest]
+    #[case::smart_card_v1(TestConnection::SmartCard, PinProtocol::V1)]
+    #[case::smart_card_v2(TestConnection::SmartCard, PinProtocol::V2)]
+    #[case::scp11b_v1(TestConnection::SmartCardScp11b, PinProtocol::V1)]
+    #[case::scp11b_v2(TestConnection::SmartCardScp11b, PinProtocol::V2)]
+    #[case::usb_hid_v1(TestConnection::UsbHid, PinProtocol::V1)]
+    #[case::usb_hid_v2(TestConnection::UsbHid, PinProtocol::V2)]
+    fn test_ctap2_client_pin(#[case] tc: TestConnection, #[case] protocol: PinProtocol) {
+        require_fido_pin!();
+        with_fido_session!(tc, |open, info| {
+            if info.options.get("clientPin") != Some(&true) {
+                skip!("clientPin not set");
+            }
+            let supported_protocols = &info.pin_uv_protocols;
+            if !supported_protocols.contains(&protocol.version()) {
+                skip!(
+                    "PIN protocol {} not supported (supported: {:?})",
+                    protocol.version(),
+                    supported_protocols
+                );
+            }
+
+            // ── Get PIN token with correct PIN ───────────────────────────────
+            let session = open();
+            let mut cp = ClientPin::new_with_protocol(session, protocol);
+            let token = get_pin_token_or_skip!(cp, TEST_PIN, None, None);
+            assert!(!token.is_empty(), "PIN token should not be empty");
+
+            // ── Get PIN token with permissions ───────────────────────────────
+            let token2 =
+                get_pin_token_or_skip!(cp, TEST_PIN, Some(Permissions::CREDENTIAL_MGMT), None);
+            assert!(!token2.is_empty());
+
+            // ── Wrong PIN should fail ────────────────────────────────────────
+            let wrong_result = cp.get_pin_token("wrong-pin-999", None, None);
+            match wrong_result {
+                Err(Ctap2Error::StatusError(CtapStatus::PinInvalid)) => {
+                    // Expected result: wrong PIN should be rejected.
+                }
+                Err(e) => panic!("unexpected error for wrong PIN: {e}"),
+                Ok(_) => panic!("wrong PIN should not succeed"),
+            }
+
+            // ── PIN retries should have decreased ────────────────────────────
+            let (retries, _) = cp.get_pin_retries().expect("get_pin_retries");
+            assert!(retries < 8, "retries should have decreased");
+
+            // ── Change PIN ───────────────────────────────────────────────────
+            const TEMP_PIN: &str = "99887766";
+            cp.change_pin(TEST_PIN, TEMP_PIN)
+                .expect("change_pin to TEMP_PIN");
+
+            // Verify new PIN works
+            let token3 = cp
+                .get_pin_token(TEMP_PIN, None, None)
+                .expect("get_pin_token with TEMP_PIN");
+            assert!(!token3.is_empty());
+
+            // Old PIN should fail now
+            match cp.get_pin_token(TEST_PIN, None, None) {
+                Err(Ctap2Error::StatusError(CtapStatus::PinInvalid)) => {
+                    // Expected result: old PIN should no longer work.
+                }
+                Err(e) => {
+                    // Restore PIN before panicking
+                    let _ = cp.change_pin(TEMP_PIN, TEST_PIN);
+                    panic!("unexpected error for old PIN: {e}");
+                }
+                Ok(_) => {
+                    let _ = cp.change_pin(TEMP_PIN, TEST_PIN);
+                    panic!("old PIN should not work after change");
+                }
+            }
+
+            // ── Restore original PIN ─────────────────────────────────────────
+            cp.change_pin(TEMP_PIN, TEST_PIN)
+                .expect("restore PIN to TEST_PIN");
+
+            // Confirm restored PIN works
+            let token4 = cp
+                .get_pin_token(TEST_PIN, None, None)
+                .expect("get_pin_token after restore");
+            assert!(!token4.is_empty());
+        });
+    }
+
     /// Verify that authenticatorSelection succeeds (UP is satisfied
     /// immediately because the card is on the reader for NFC).
     ///
