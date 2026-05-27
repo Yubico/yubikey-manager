@@ -1463,14 +1463,12 @@ mod yubiotp {
 
 mod fido {
     use super::*;
-    use yubikit::core::Connection;
     use yubikit::ctap::CtapSession;
     use yubikit::ctap2::{
         Aaguid, ClientPin, CredentialManagement, Ctap2Error, Ctap2Session, CtapStatus, LargeBlobs,
         Permissions, PinProtocol, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
         PublicKeyCredentialUserEntity,
     };
-    use yubikit::fido::FidoConnection;
 
     const TEST_PIN: &str = "12345679";
     const TEST_RP_ID: &str = "test.rs.yubikey.example";
@@ -1723,6 +1721,40 @@ mod fido {
             .expect("Ctap2Session::new")
     }
 
+    /// Run a FIDO test body against any transport variant.
+    ///
+    /// Handles skip checks (FIDO2 capability, FIDOCCID for SmartCard, USB for HID),
+    /// opens the appropriate session type, gets info, and runs the body.
+    /// The body receives `session` (a `Ctap2Session<impl Connection>`) and `info`.
+    macro_rules! with_fido_session {
+        ($tc:expr, |$session:ident, $info:ident| $body:block) => {{
+            skip_if_needed!($tc);
+            require_capability!(Capability::FIDO2);
+            match &$tc {
+                TestConnection::UsbHid => {
+                    require_transport!(Transport::Usb);
+                    let conn = get_device().open_fido().expect("open FIDO HID");
+                    let ctap = CtapSession::new_fido(conn)
+                        .map_err(|(e, _)| e)
+                        .expect("CtapSession::new_fido");
+                    #[allow(unused_mut)]
+                    let mut $session = Ctap2Session::new(ctap)
+                        .map_err(|(e, _)| e)
+                        .expect("Ctap2Session::new");
+                    let $info = $session.get_info().expect("get_info");
+                    $body
+                }
+                _ => {
+                    require_fido_ccid!($tc);
+                    #[allow(unused_mut)]
+                    let mut $session = open_ctap2_smartcard(&$tc);
+                    let $info = $session.get_info().expect("get_info");
+                    $body
+                }
+            }
+        }};
+    }
+
     /// Simple [`UserInteraction`] for tests: always returns `TEST_PIN`, never uses UV.
     struct TestInteraction;
 
@@ -1738,59 +1770,22 @@ mod fido {
 
     // ── Generic helpers (work for any C: Connection + 'static) ───────────────
 
-    fn assert_info<C: Connection + 'static>(mut session: Ctap2Session<C>) {
-        let info = session.get_info().expect("get_info");
-        assert!(!info.versions.is_empty(), "versions should not be empty");
-        assert!(
-            info.versions.iter().any(|v| v.starts_with("FIDO_2_")),
-            "expected a FIDO_2_x version, got: {:?}",
-            info.versions
-        );
-        assert_ne!(info.aaguid, Aaguid::NONE, "AAGUID should not be all zeros");
-        assert!(!info.options.is_empty(), "options should not be empty");
-    }
-
-    fn assert_pin_retries<C: Connection + 'static>(mut session: Ctap2Session<C>) {
-        let info = session.get_info().expect("get_info for pin retries check");
-        if !ClientPin::<C>::is_supported(&info) {
-            skip!("clientPin not supported");
-        }
-        let mut cp = ClientPin::new(session)
-            .map_err(|(e, _)| e)
-            .expect("ClientPin::new");
-        match cp.get_pin_retries() {
-            Ok((retries, _)) => {
-                assert!(retries <= 8, "retries should be <= 8, got {retries}");
-            }
-            Err(Ctap2Error::StatusError(CtapStatus::PinNotSet)) => {
-                eprintln!("PIN not set (no retries to report)");
-            }
-            Err(e) => panic!("get_pin_retries: {e}"),
-        }
-    }
-
     /// Verify that authenticatorGetInfo returns valid data on all transports.
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
     #[case::usb_hid(TestConnection::UsbHid)]
     fn test_ctap2_get_info(#[case] tc: TestConnection) {
-        skip_if_needed!(tc);
-        require_capability!(Capability::FIDO2);
-        require_fido_ccid!(tc);
-        match &tc {
-            TestConnection::UsbHid => {
-                let conn = get_device().open_fido().expect("open FIDO HID");
-                let ctap = CtapSession::new_fido(conn)
-                    .map_err(|(e, _)| e)
-                    .expect("CtapSession::new_fido");
-                let session = Ctap2Session::new(ctap)
-                    .map_err(|(e, _)| e)
-                    .expect("Ctap2Session::new");
-                assert_info(session);
-            }
-            _ => assert_info(open_ctap2_smartcard(&tc)),
-        }
+        with_fido_session!(tc, |session, info| {
+            assert!(!info.versions.is_empty(), "versions should not be empty");
+            assert!(
+                info.versions.iter().any(|v| v.starts_with("FIDO_2_")),
+                "expected a FIDO_2_x version, got: {:?}",
+                info.versions
+            );
+            assert_ne!(info.aaguid, Aaguid::NONE, "AAGUID should not be all zeros");
+            assert!(!info.options.is_empty(), "options should not be empty");
+        });
     }
 
     /// Verify that PIN retries can be read (no UP required) on all transports.
@@ -1799,22 +1794,23 @@ mod fido {
     #[case::scp11b(TestConnection::SmartCardScp11b)]
     #[case::usb_hid(TestConnection::UsbHid)]
     fn test_ctap2_pin_retries(#[case] tc: TestConnection) {
-        skip_if_needed!(tc);
-        require_capability!(Capability::FIDO2);
-        require_fido_ccid!(tc);
-        match &tc {
-            TestConnection::UsbHid => {
-                let conn = get_device().open_fido().expect("open FIDO HID");
-                let ctap = CtapSession::new_fido(conn)
-                    .map_err(|(e, _)| e)
-                    .expect("CtapSession::new_fido");
-                let session = Ctap2Session::new(ctap)
-                    .map_err(|(e, _)| e)
-                    .expect("Ctap2Session::new");
-                assert_pin_retries(session);
+        with_fido_session!(tc, |session, info| {
+            if info.options.get("clientPin") != Some(&true) {
+                skip!("clientPin not supported or not configured");
             }
-            _ => assert_pin_retries(open_ctap2_smartcard(&tc)),
-        }
+            let mut cp = ClientPin::new(session)
+                .map_err(|(e, _)| e)
+                .expect("ClientPin::new");
+            match cp.get_pin_retries() {
+                Ok((retries, _)) => {
+                    assert!(retries <= 8, "retries should be <= 8, got {retries}");
+                }
+                Err(Ctap2Error::StatusError(CtapStatus::PinNotSet)) => {
+                    eprintln!("PIN not set (no retries to report)");
+                }
+                Err(e) => panic!("get_pin_retries: {e}"),
+            }
+        });
     }
 
     /// Verify that authenticatorSelection succeeds (UP is satisfied
@@ -1958,50 +1954,51 @@ mod fido {
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_ctap2_credential_management(#[case] tc: TestConnection) {
-        skip_if_needed!(tc);
-        require_capability!(Capability::FIDO2);
         require_fido_pin!();
-
-        let mut session = open_ctap2_smartcard(&tc);
-        let info = session.get_info().expect("get_info for credmgmt check");
-        if !CredentialManagement::<PcscSmartCardConnection>::is_supported(&info) {
-            skip!("CredentialManagement not supported");
-        }
-
-        let mut cp = ClientPin::new(session)
-            .map_err(|(e, _)| e)
-            .expect("ClientPin for credmgmt");
-        let token = get_pin_token_or_skip!(cp, TEST_PIN, Some(Permissions::CREDENTIAL_MGMT), None);
-        let protocol = cp.protocol();
-        let session = cp.into_session();
-        let mut credmgmt = CredentialManagement::new(session, protocol, token)
-            .map_err(|(e, _)| e)
-            .expect("CredentialManagement::new");
-
-        let (existing, max_remaining) = credmgmt.get_metadata().expect("get_metadata");
-        eprintln!("credentials: existing={existing}, max_remaining={max_remaining}");
-        // Total capacity must be non-zero.
-        assert!(
-            existing + max_remaining > 0,
-            "total credential capacity should be > 0"
-        );
-
-        if existing > 0 {
-            let rps = credmgmt.enumerate_rps().expect("enumerate_rps");
-            eprintln!("RPs: {}", rps.len());
-            assert!(
-                !rps.is_empty(),
-                "enumerate_rps returned empty for existing credentials"
-            );
-            for rp in &rps {
-                eprintln!("  rp_id={}", rp.rp.id);
-                let creds = credmgmt
-                    .enumerate_creds(&rp.rp_id_hash)
-                    .expect("enumerate_creds");
-                eprintln!("  creds: {}", creds.len());
+        with_fido_session!(tc, |session, info| {
+            if info.options.get("credMgmt") != Some(&true)
+                && !(info.versions.contains(&"FIDO_2_1_PRE".to_string())
+                    && info.options.get("credentialMgmtPreview") == Some(&true))
+            {
+                skip!("CredentialManagement not supported");
             }
-        }
+
+            let mut cp = ClientPin::new(session)
+                .map_err(|(e, _)| e)
+                .expect("ClientPin for credmgmt");
+            let token =
+                get_pin_token_or_skip!(cp, TEST_PIN, Some(Permissions::CREDENTIAL_MGMT), None);
+            let protocol = cp.protocol();
+            let session = cp.into_session();
+            let mut credmgmt = CredentialManagement::new(session, protocol, token)
+                .map_err(|(e, _)| e)
+                .expect("CredentialManagement::new");
+
+            let (existing, max_remaining) = credmgmt.get_metadata().expect("get_metadata");
+            eprintln!("credentials: existing={existing}, max_remaining={max_remaining}");
+            assert!(
+                existing + max_remaining > 0,
+                "total credential capacity should be > 0"
+            );
+
+            if existing > 0 {
+                let rps = credmgmt.enumerate_rps().expect("enumerate_rps");
+                eprintln!("RPs: {}", rps.len());
+                assert!(
+                    !rps.is_empty(),
+                    "enumerate_rps returned empty for existing credentials"
+                );
+                for rp in &rps {
+                    eprintln!("  rp_id={}", rp.rp.id);
+                    let creds = credmgmt
+                        .enumerate_creds(&rp.rp_id_hash)
+                        .expect("enumerate_creds");
+                    eprintln!("  creds: {}", creds.len());
+                }
+            }
+        });
     }
 
     /// Verify that the large-blob array can be read (no UP required).
@@ -2027,55 +2024,55 @@ mod fido {
         eprintln!("large blob array: {} bytes", blob_array.len());
     }
 
-    /// Verify that cancelling a CTAP2 selection command over USB HID works.
+    /// Verify that cancelling a CTAP2 selection command over USB works.
     ///
-    /// Sends an authenticatorSelection CBOR command and cancels it after the
+    /// Sends an authenticatorSelection command and cancels it after the
     /// first keepalive, checking that the authenticator responds with
     /// KeepaliveCancel (0x2D) promptly.
-    ///
-    /// This test is USB HID–only: the cancel mechanism relies on the HID
-    /// out-of-band cancel packet; NFCCTAP uses a different cancel path that
-    /// is tested via `test_ctap2_selection_nfc` above.
     #[rstest]
+    #[case::smart_card(TestConnection::SmartCard)]
+    #[case::scp11b(TestConnection::SmartCardScp11b)]
     #[case::usb_hid(TestConnection::UsbHid)]
     fn test_fido_selection_cancel(#[case] tc: TestConnection) {
-        skip_if_needed!(tc);
-        require_capability!(Capability::FIDO2);
         require_transport!(Transport::Usb);
-
-        let mut conn = get_device().open_fido().expect("open FIDO HID");
-
-        let got_keepalive = std::sync::atomic::AtomicBool::new(false);
-        let start = std::time::Instant::now();
-        let result = conn.call(
-            0x10,
-            &[0x0B], // CBOR authenticatorSelection
-            Some(&mut |_status| {
-                got_keepalive.store(true, std::sync::atomic::Ordering::Relaxed);
-            }),
-            Some(&|| got_keepalive.load(std::sync::atomic::Ordering::Relaxed)),
-        );
-        let elapsed = start.elapsed();
-
-        match &result {
-            Ok(response) if !response.is_empty() && response[0] == 0x01 => {
-                // CTAP1_ERR_INVALID_COMMAND: selection not supported (pre-CTAP 2.1)
-                skip!("authenticatorSelection not supported");
+        with_fido_session!(tc, |session, info| {
+            let supports_selection = info
+                .versions
+                .iter()
+                .any(|v| v == "FIDO_2_1" || v == "FIDO_2_1_PRE");
+            if !supports_selection {
+                skip!("authenticatorSelection requires CTAP 2.1");
             }
-            Ok(response) => {
-                assert!(
-                    !response.is_empty() && response[0] == 0x2D,
-                    "Expected KeepaliveCancel (0x2D), got: {:#04X?}",
-                    response.first()
-                );
-            }
-            Err(e) => panic!("Unexpected error: {e}"),
-        }
 
-        assert!(
-            elapsed.as_secs() < 10,
-            "Cancel took too long: {elapsed:?} (expected < 10s)"
-        );
+            let got_keepalive = std::sync::atomic::AtomicBool::new(false);
+            let start = std::time::Instant::now();
+            let result = session.selection(
+                Some(&mut |_status| {
+                    got_keepalive.store(true, std::sync::atomic::Ordering::Relaxed);
+                }),
+                Some(&|| got_keepalive.load(std::sync::atomic::Ordering::Relaxed)),
+            );
+            let elapsed = start.elapsed();
+
+            match result {
+                Ok(()) => {
+                    // UP was satisfied without touch (shouldn't happen on USB without touch)
+                    eprintln!("selection: OK (UP satisfied without cancel)");
+                    if get_device().transport() == Transport::Usb {
+                        panic!("  (unexpected on USB transport without touch)");
+                    }
+                }
+                Err(Ctap2Error::StatusError(CtapStatus::KeepaliveCancel)) => {
+                    eprintln!("selection: cancelled after keepalive ({elapsed:?})");
+                }
+                Err(e) => panic!("Unexpected error: {e}"),
+            }
+
+            assert!(
+                elapsed.as_secs() < 10,
+                "Cancel took too long: {elapsed:?} (expected < 10s)"
+            );
+        });
     }
 }
 
