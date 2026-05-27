@@ -14,6 +14,8 @@
 
 //! WebAuthn client for performing registration and authentication ceremonies.
 
+use base64::Engine as _;
+
 use crate::cbor;
 use crate::core::Connection;
 use crate::ctap2::types::AuthenticatorOptions;
@@ -392,6 +394,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             hmac_state_out.as_ref(),
             att_resp.large_blob_key.is_some(),
             rk,
+            att_resp.unsigned_extension_outputs.as_ref(),
         );
 
         Ok(RegistrationResponse {
@@ -711,6 +714,17 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             entries.push(extensions::min_pin_length::to_cbor());
         }
 
+        // previewSign
+        if let Some(ref sign_input) = ext.preview_sign {
+            let uv_required = options.authenticator_selection.as_ref().is_some_and(|sel| {
+                sel.user_verification == Some(UserVerificationRequirement::Required)
+            });
+            entries.push(extensions::sign::make_credential_to_cbor(
+                sign_input,
+                uv_required,
+            ));
+        }
+
         Ok((extensions::build_extensions_cbor(entries), hmac_state))
     }
 
@@ -748,6 +762,16 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         // largeBlobKey
         if ext.large_blob.is_some() && info.extensions.iter().any(|e| e == "largeBlobKey") {
             entries.push(extensions::large_blob::to_cbor());
+        }
+
+        // previewSign
+        if let Some(ref sign_input) = ext.preview_sign
+            && let Some(cred_id) = selected_cred_id
+        {
+            let cred_id_b64 = base64::prelude::BASE64_URL_SAFE_NO_PAD.encode(cred_id);
+            if let Some(si) = sign_input.sign_by_credential.get(&cred_id_b64) {
+                entries.push(extensions::sign::get_assertion_to_cbor(si));
+            }
         }
 
         Ok((extensions::build_extensions_cbor(entries), hmac_state))
@@ -790,6 +814,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         hmac_state: Option<&prf::HmacSecretState>,
         has_large_blob_key: bool,
         rk: bool,
+        unsigned_ext_outputs: Option<&cbor::Value>,
     ) -> Option<extensions::RegistrationExtensionOutputs> {
         let ext = options.extensions.as_ref()?;
         let auth_exts = extensions::parse_auth_data_extensions(auth_data);
@@ -856,6 +881,22 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             has_output = true;
         }
 
+        // previewSign
+        if ext.preview_sign.is_some()
+            && let Some(ref exts) = auth_exts
+        {
+            match extensions::sign::make_credential_from_outputs(exts, unsigned_ext_outputs) {
+                Ok(Some(sign_out)) => {
+                    outputs.preview_sign = Some(sign_out);
+                    has_output = true;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    log::warn!("previewSign output parse error: {e}");
+                }
+            }
+        }
+
         if has_output { Some(outputs) } else { None }
     }
 
@@ -894,6 +935,22 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         {
             outputs.cred_blob = Some(extensions::cred_blob::AuthenticationOutput { blob });
             has_output = true;
+        }
+
+        // previewSign
+        if ext.preview_sign.is_some()
+            && let Some(ref exts) = auth_exts
+        {
+            match extensions::sign::get_assertion_from_auth_data(exts) {
+                Ok(Some(sign_out)) => {
+                    outputs.preview_sign = Some(sign_out);
+                    has_output = true;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    log::warn!("previewSign output parse error: {e}");
+                }
+            }
         }
 
         // Note: largeBlob output is handled separately via process_large_blob

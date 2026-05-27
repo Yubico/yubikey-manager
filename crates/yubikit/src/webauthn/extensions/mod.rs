@@ -35,6 +35,8 @@ pub mod large_blob;
 pub mod min_pin_length;
 /// Pseudo-Random Function extension (`prf` / `hmac-secret`).
 pub mod prf;
+/// Signing extension (`previewSign`) version 4.
+pub mod sign;
 
 // Re-export key types
 /// Credential protection policy level.
@@ -76,6 +78,10 @@ pub struct RegistrationExtensionInputs {
     /// minPinLength — requests the authenticator's minimum PIN length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_pin_length: Option<bool>,
+
+    /// previewSign — requests generation of a signing key pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_sign: Option<sign::RegistrationInput>,
 }
 
 /// Extension outputs from a registration ceremony.
@@ -105,6 +111,10 @@ pub struct RegistrationExtensionOutputs {
     /// minPinLength output — the authenticator's minimum PIN length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_pin_length: Option<min_pin_length::RegistrationOutput>,
+
+    /// previewSign output — the generated signing key pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_sign: Option<sign::RegistrationOutput>,
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +136,10 @@ pub struct AuthenticationExtensionInputs {
     /// largeBlob — reads or writes large blob data associated with a credential.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub large_blob: Option<large_blob::AuthenticationInput>,
+
+    /// previewSign — requests signing with a signing key pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_sign: Option<sign::AuthenticationInput>,
 }
 
 /// Extension outputs from an authentication ceremony.
@@ -143,6 +157,10 @@ pub struct AuthenticationExtensionOutputs {
     /// largeBlob output — blob data read or write status.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub large_blob: Option<large_blob::AuthenticationOutput>,
+
+    /// previewSign output — the generated signature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_sign: Option<sign::AuthenticationOutput>,
 }
 
 // ---------------------------------------------------------------------------

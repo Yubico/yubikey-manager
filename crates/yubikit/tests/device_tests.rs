@@ -14,6 +14,8 @@
 //! **WARNING**: Some tests are destructive (they reset applications).
 //! Only run against a test/development YubiKey.
 
+mod arkg_p256;
+
 use rstest::{fixture, rstest};
 use std::sync::{Mutex, OnceLock};
 use yubikit::core::Transport;
@@ -2809,6 +2811,194 @@ mod fido {
                 eprintln!("  rk credential: rk={}", cp.rk);
                 assert!(cp.rk, "resident credential should have rk=true");
             }
+        });
+    }
+
+    // ─── previewSign extension ───────────────────────────────────────────
+
+    use super::arkg_p256;
+
+    #[rstest]
+    #[case::smartcard(TestConnection::SmartCard)]
+    #[case::scp(TestConnection::SmartCardScp11b)]
+    fn test_webauthn_preview_sign(#[case] tc: TestConnection) {
+        use sha2::{Digest, Sha256};
+        use yubikit::webauthn::extensions::RegistrationExtensionInputs;
+        use yubikit::webauthn::extensions::sign::{GenerateKeyInput, RegistrationInput};
+        use yubikit::webauthn::{
+            DefaultClientDataCollector, PublicKeyCredentialCreationOptions,
+            PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
+            PublicKeyCredentialRpEntity, PublicKeyCredentialType, PublicKeyCredentialUserEntity,
+            WebAuthnClient,
+        };
+
+        require_transport!(Transport::Nfc);
+        require_fido_pin!();
+        with_fido_session!(tc, |open, info| {
+            if !info.extensions.iter().any(|e| e == "previewSign") {
+                skip!("previewSign extension not supported");
+            }
+
+            // ESP256_SPLIT_ARKG_PLACEHOLDER = -65539
+            const ALG_ESP256_SPLIT_ARKG: i64 = -65539;
+
+            // ── Registration with previewSign (key generation) ────────────────
+            power_cycle_nfc().expect("power_cycle_nfc before MC");
+
+            let session = open();
+            let collector = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
+            let mut client = WebAuthnClient::new(session, TestInteraction, collector);
+
+            let create_options = PublicKeyCredentialCreationOptions {
+                rp: PublicKeyCredentialRpEntity {
+                    name: "Sign Test".to_string(),
+                    id: Some(TEST_RP_ID.to_string()),
+                },
+                user: PublicKeyCredentialUserEntity {
+                    id: b"sign-test-user".to_vec(),
+                    name: Some("sign@test".to_string()),
+                    display_name: Some("Sign Test".to_string()),
+                },
+                challenge: vec![0x60; 32],
+                pub_key_cred_params: vec![PublicKeyCredentialParameters {
+                    type_: PublicKeyCredentialType::PublicKey,
+                    alg: -7, // ES256 for the credential itself
+                }],
+                timeout: None,
+                exclude_credentials: None,
+                authenticator_selection: None,
+                hints: None,
+                attestation: None,
+                attestation_formats: None,
+                extensions: Some(RegistrationExtensionInputs {
+                    preview_sign: Some(RegistrationInput {
+                        generate_key: GenerateKeyInput {
+                            algorithms: vec![ALG_ESP256_SPLIT_ARKG],
+                        },
+                    }),
+                    ..Default::default()
+                }),
+            };
+
+            let reg = client
+                .make_credential(&create_options, None)
+                .expect("make_credential with previewSign");
+            let credential_id = reg.id.clone();
+            assert!(
+                !credential_id.is_empty(),
+                "credential ID should not be empty"
+            );
+
+            // Verify extension output
+            let ext = reg
+                .client_extension_results
+                .as_ref()
+                .expect("should have extension results");
+            let sign_out = ext
+                .preview_sign
+                .as_ref()
+                .expect("should have previewSign output");
+
+            let generated = &sign_out.generated_key;
+            assert_eq!(
+                generated.algorithm, ALG_ESP256_SPLIT_ARKG,
+                "algorithm should be ESP256_SPLIT_ARKG_PLACEHOLDER"
+            );
+            assert!(
+                !generated.public_key.is_empty(),
+                "public_key should not be empty (COSE_Key)"
+            );
+            assert!(
+                !generated.attestation_object.is_empty(),
+                "attestation_object should not be empty"
+            );
+
+            // Parse the ARKG master public key and derive a child key
+            let master_key = arkg_p256::ArkgMasterKey::from_cbor(&generated.public_key);
+            let ctx = b"yubikit-rs.test_webauthn_preview_sign";
+            let ikm: Vec<u8> = (0..32).collect(); // deterministic IKM for testing
+            let (derived_pk, args_cbor) = arkg_p256::derive_public_key(&master_key, &ikm, ctx);
+
+            // ── Authentication with previewSign (signing) ────────────────────
+            let message = b"test message for previewSign";
+            let ph_data = Sha256::digest(message);
+
+            drop(client);
+            power_cycle_nfc().expect("power_cycle_nfc before GA");
+
+            let mut session2 = open();
+
+            // Build the previewSign extension input for getAssertion
+            let sign_entries: Vec<(yubikit::cbor::Value, yubikit::cbor::Value)> = vec![
+                (
+                    yubikit::cbor::Value::Int(2),
+                    yubikit::cbor::Value::Bytes(generated.key_handle.clone()),
+                ),
+                (
+                    yubikit::cbor::Value::Int(6),
+                    yubikit::cbor::Value::Bytes(ph_data.to_vec()),
+                ),
+                (
+                    yubikit::cbor::Value::Int(7),
+                    yubikit::cbor::Value::Bytes(args_cbor),
+                ),
+            ];
+            let ext_cbor = yubikit::cbor::Value::Map(vec![(
+                yubikit::cbor::Value::Text("previewSign".to_string()),
+                yubikit::cbor::Value::Map(sign_entries),
+            )]);
+
+            // Get PIN token and compute pin_uv_auth
+            let mut cp = ClientPin::new_with_protocol(session2, PinProtocol::V2);
+            let token = cp
+                .get_pin_token(TEST_PIN, Some(Permissions::GET_ASSERTION), Some(TEST_RP_ID))
+                .expect("get_pin_token for GA");
+            session2 = cp.into_session();
+
+            let client_data_hash = Sha256::digest(b"dummy client data for test");
+            let pin_auth = PinProtocol::V2.authenticate(&token, &client_data_hash);
+
+            let allow = vec![PublicKeyCredentialDescriptor {
+                type_: PublicKeyCredentialType::PublicKey,
+                id: credential_id.clone(),
+                transports: None,
+            }];
+
+            let resp = session2
+                .get_assertion(
+                    TEST_RP_ID,
+                    &client_data_hash,
+                    Some(&allow),
+                    Some(ext_cbor),
+                    None,
+                    Some(&pin_auth),
+                    Some(2),
+                    None,
+                    None,
+                )
+                .expect("get_assertion with previewSign");
+
+            // Parse the extension output from authenticator data
+            // Auth data: rpIdHash(32) + flags(1) + counter(4) + [extensions if ED flag set]
+            let auth_data = &resp.auth_data;
+            let flags = auth_data[32];
+            assert!(flags & 0x80 != 0, "ED flag should be set in auth_data");
+
+            let ext_cbor_bytes = &auth_data[37..];
+            let ext_parsed = yubikit::cbor::decode(ext_cbor_bytes).expect("decode extensions CBOR");
+            let entries = ext_parsed.as_map().expect("extensions should be a map");
+            let sign_ext = entries
+                .iter()
+                .find(|(k, _)| k.as_text() == Some("previewSign"))
+                .expect("previewSign extension in auth_data");
+            let signature = sign_ext
+                .1
+                .map_get_int(6)
+                .and_then(|v| v.as_bytes())
+                .expect("signature at key 6");
+
+            // Verify the ECDSA signature with the ARKG-derived public key
+            arkg_p256::verify_signature(&derived_pk, message, signature);
         });
     }
 }
