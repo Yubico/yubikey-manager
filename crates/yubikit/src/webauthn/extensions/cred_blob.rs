@@ -76,6 +76,110 @@ pub(crate) fn get_assertion_from_cbor(value: &Value) -> Option<Vec<u8>> {
     value.as_bytes().map(|b| b.to_vec())
 }
 
+// ---------------------------------------------------------------------------
+// Extension processor implementation
+// ---------------------------------------------------------------------------
+
+use crate::ctap2::Info;
+use crate::webauthn::extensions::{
+    AuthenticationExtensionOutputs, AuthenticationProcessor, Ctap2Extension, ExtensionContext,
+    OutputContext, RegistrationExtensionOutputs, RegistrationProcessor,
+};
+use crate::webauthn::types::{
+    PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
+};
+
+/// The credBlob extension definition.
+pub struct CredBlobExtension;
+
+impl Ctap2Extension for CredBlobExtension {
+    fn make_credential(
+        &self,
+        info: &Info,
+        options: &PublicKeyCredentialCreationOptions,
+    ) -> Result<Option<Box<dyn RegistrationProcessor>>, String> {
+        let ext = match &options.extensions {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        let blob = match &ext.cred_blob {
+            Some(cb) => cb.blob.clone(),
+            None => return Ok(None),
+        };
+        if !info.extensions.iter().any(|e| e == EXTENSION_ID) {
+            return Ok(None);
+        }
+        if let Some(max_len) = info.max_cred_blob_length.filter(|&max| blob.len() > max) {
+            return Err(format!("credBlob too large: {} > {}", blob.len(), max_len));
+        }
+        Ok(Some(Box::new(CredBlobRegistrationProcessor { blob })))
+    }
+
+    fn get_assertion(
+        &self,
+        info: &Info,
+        options: &PublicKeyCredentialRequestOptions,
+    ) -> Result<Option<Box<dyn AuthenticationProcessor>>, String> {
+        let ext = match &options.extensions {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        if ext.get_cred_blob != Some(true) {
+            return Ok(None);
+        }
+        if !info.extensions.iter().any(|e| e == EXTENSION_ID) {
+            return Ok(None);
+        }
+        Ok(Some(Box::new(CredBlobAuthenticationProcessor)))
+    }
+}
+
+struct CredBlobRegistrationProcessor {
+    blob: Vec<u8>,
+}
+
+impl RegistrationProcessor for CredBlobRegistrationProcessor {
+    fn prepare_inputs(&self, _ctx: &mut ExtensionContext) -> Result<Vec<(String, Value)>, String> {
+        Ok(vec![make_credential_to_cbor(&self.blob)])
+    }
+
+    fn prepare_outputs(&self, ctx: &OutputContext<'_>, outputs: &mut RegistrationExtensionOutputs) {
+        if let Some((_, val)) = ctx
+            .auth_data_extensions
+            .and_then(|exts| exts.iter().find(|(k, _)| k == EXTENSION_ID))
+            && let Some(stored) = make_credential_from_cbor(val)
+        {
+            outputs.cred_blob = Some(RegistrationOutput { stored });
+        }
+    }
+}
+
+struct CredBlobAuthenticationProcessor;
+
+impl AuthenticationProcessor for CredBlobAuthenticationProcessor {
+    fn prepare_inputs(
+        &self,
+        _selected_cred_id: Option<&[u8]>,
+        _ctx: &mut ExtensionContext,
+    ) -> Result<Vec<(String, Value)>, String> {
+        Ok(vec![get_assertion_to_cbor()])
+    }
+
+    fn prepare_outputs(
+        &self,
+        ctx: &OutputContext<'_>,
+        outputs: &mut AuthenticationExtensionOutputs,
+    ) {
+        if let Some((_, val)) = ctx
+            .auth_data_extensions
+            .and_then(|exts| exts.iter().find(|(k, _)| k == EXTENSION_ID))
+            && let Some(blob) = get_assertion_from_cbor(val)
+        {
+            outputs.cred_blob = Some(AuthenticationOutput { blob });
+        }
+    }
+}
+
 fn b64_ser<S: Serializer>(bytes: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&BASE64_URL_SAFE_NO_PAD.encode(bytes))
 }

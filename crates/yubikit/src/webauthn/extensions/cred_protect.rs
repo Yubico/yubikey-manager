@@ -116,6 +116,73 @@ pub(crate) fn from_cbor(value: &Value) -> Option<CredProtectPolicy> {
         .and_then(|v| CredProtectPolicy::from_u32(v as u32))
 }
 
+// ---------------------------------------------------------------------------
+// Extension processor implementation
+// ---------------------------------------------------------------------------
+
+use crate::ctap2::Info;
+use crate::webauthn::extensions::{
+    Ctap2Extension, ExtensionContext, OutputContext, RegistrationExtensionOutputs,
+    RegistrationProcessor,
+};
+use crate::webauthn::types::{
+    PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
+};
+
+/// The credProtect extension definition.
+pub struct CredProtectExtension;
+
+impl Ctap2Extension for CredProtectExtension {
+    fn make_credential(
+        &self,
+        info: &Info,
+        options: &PublicKeyCredentialCreationOptions,
+    ) -> Result<Option<Box<dyn RegistrationProcessor>>, String> {
+        let ext = match &options.extensions {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        let cp = match &ext.cred_protect {
+            Some(cp) => cp.clone(),
+            None => return Ok(None),
+        };
+        if cp.enforce && !info.extensions.iter().any(|e| e == EXTENSION_ID) {
+            return Err("credProtect not supported by authenticator".into());
+        }
+        Ok(Some(Box::new(CredProtectRegistrationProcessor {
+            policy: cp.policy,
+        })))
+    }
+
+    fn get_assertion(
+        &self,
+        _info: &Info,
+        _options: &PublicKeyCredentialRequestOptions,
+    ) -> Result<Option<Box<dyn super::AuthenticationProcessor>>, String> {
+        Ok(None)
+    }
+}
+
+struct CredProtectRegistrationProcessor {
+    policy: CredProtectPolicy,
+}
+
+impl RegistrationProcessor for CredProtectRegistrationProcessor {
+    fn prepare_inputs(&self, _ctx: &mut ExtensionContext) -> Result<Vec<(String, Value)>, String> {
+        Ok(vec![to_cbor(self.policy)])
+    }
+
+    fn prepare_outputs(&self, ctx: &OutputContext<'_>, outputs: &mut RegistrationExtensionOutputs) {
+        if let Some((_, val)) = ctx
+            .auth_data_extensions
+            .and_then(|exts| exts.iter().find(|(k, _)| k == EXTENSION_ID))
+            && let Some(policy) = from_cbor(val)
+        {
+            outputs.cred_protect = Some(RegistrationOutput { policy });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

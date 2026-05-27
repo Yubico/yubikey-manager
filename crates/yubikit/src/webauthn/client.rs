@@ -14,8 +14,6 @@
 
 //! WebAuthn client for performing registration and authentication ceremonies.
 
-use base64::Engine as _;
-
 use crate::cbor;
 use crate::core::Connection;
 use crate::ctap2::types::AuthenticatorOptions;
@@ -191,15 +189,32 @@ pub struct WebAuthnClient<C: Connection + 'static, U: UserInteraction, D: Client
     session: Option<Ctap2Session<C>>,
     user_interaction: U,
     client_data_collector: D,
+    extensions: Vec<Box<dyn extensions::Ctap2Extension>>,
 }
 
 impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAuthnClient<C, U, D> {
-    /// Create a new WebAuthn client.
+    /// Create a new WebAuthn client with the default set of extensions.
     pub fn new(session: Ctap2Session<C>, user_interaction: U, client_data_collector: D) -> Self {
         Self {
             session: Some(session),
             user_interaction,
             client_data_collector,
+            extensions: extensions::default_extensions(),
+        }
+    }
+
+    /// Create a new WebAuthn client with a custom set of extensions.
+    pub fn with_extensions(
+        session: Ctap2Session<C>,
+        user_interaction: U,
+        client_data_collector: D,
+        extensions: Vec<Box<dyn extensions::Ctap2Extension>>,
+    ) -> Self {
+        Self {
+            session: Some(session),
+            user_interaction,
+            client_data_collector,
+            extensions,
         }
     }
 
@@ -281,11 +296,19 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         };
 
         let hmac_state_out;
+        let mut processors;
         let att_resp = loop {
+            // Initialize extension processors (inside loop — may change with UV retry)
+            processors = self.init_registration_processors(options)?;
+
             // Need GET_ASSERTION permission if we have an exclude list to filter
             let mut permissions = Permissions::MAKE_CREDENTIAL;
             if options.exclude_credentials.is_some() {
                 permissions |= Permissions::GET_ASSERTION;
+            }
+            // Add permissions from extensions
+            for proc in &processors {
+                permissions |= proc.permissions();
             }
 
             // Get PIN/UV token
@@ -325,7 +348,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             // Build extension inputs (must be inside loop — ECDH key agreement
             // for hmac-secret is tied to the PIN protocol session)
             let (ext_cbor, hmac_state) =
-                self.build_make_credential_extensions(options, protocol)?;
+                self.build_registration_extensions(&processors, protocol)?;
 
             let mut session = self.session.take().expect("session already taken");
             let interaction = &self.user_interaction;
@@ -389,7 +412,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
 
         // Parse extension outputs
         let ext_outputs = self.parse_registration_extensions(
-            options,
+            &processors,
             &att_resp.auth_data,
             hmac_state_out.as_ref(),
             att_resp.large_blob_key.is_some(),
@@ -442,16 +465,16 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         let mut token;
         let mut protocol;
         let hmac_state_out;
+        let mut processors;
 
         loop {
-            let mut permissions = Permissions::GET_ASSERTION;
+            // Initialize extension processors
+            processors = self.init_authentication_processors(options)?;
 
-            // Large blob write requires an additional permission
-            if let Some(ref ext) = options.extensions
-                && let Some(ref lb) = ext.large_blob
-                && lb.write.is_some()
-            {
-                permissions |= Permissions::LARGE_BLOB_WRITE;
+            let mut permissions = Permissions::GET_ASSERTION;
+            // Add permissions from extensions
+            for proc in &processors {
+                permissions |= proc.permissions();
             }
 
             let (tok, proto, internal_uv) =
@@ -498,8 +521,8 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
 
             // Build extension inputs (must be inside loop — ECDH key agreement
             // for hmac-secret is tied to the PIN protocol session)
-            let (ext_cbor, hmac_state) = self.build_get_assertion_extensions(
-                options,
+            let (ext_cbor, hmac_state) = self.build_authentication_extensions(
+                &processors,
                 protocol,
                 selected_cred_id.as_deref(),
             )?;
@@ -556,7 +579,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             .unwrap_or_default();
 
         let ext_outputs = self.parse_authentication_extensions(
-            options,
+            &processors,
             &first.auth_data,
             hmac_state_out.as_ref(),
         );
@@ -611,7 +634,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 .unwrap_or_default();
 
             let next_ext_outputs = self.parse_authentication_extensions(
-                options,
+                &processors,
                 &next.auth_data,
                 hmac_state_out.as_ref(),
             );
@@ -634,147 +657,162 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
     }
 
     // -----------------------------------------------------------------------
-    // Extension building and parsing
+    // Extension processing
     // -----------------------------------------------------------------------
 
-    /// Build CTAP2 extension CBOR for makeCredential.
-    fn build_make_credential_extensions(
-        &mut self,
+    /// Initialize extension processors for makeCredential.
+    fn init_registration_processors(
+        &self,
         options: &PublicKeyCredentialCreationOptions,
+    ) -> Result<Vec<Box<dyn extensions::RegistrationProcessor>>, ClientError<C::Error>> {
+        let info = self.cached_info();
+        let mut processors: Vec<Box<dyn extensions::RegistrationProcessor>> = Vec::new();
+        for ext in &self.extensions {
+            match ext.make_credential(info, options) {
+                Ok(Some(p)) => processors.push(p),
+                Ok(None) => {}
+                Err(e) => return Err(ClientError::ConfigurationUnsupported(e)),
+            }
+        }
+        Ok(processors)
+    }
+
+    /// Initialize extension processors for getAssertion.
+    fn init_authentication_processors(
+        &self,
+        options: &PublicKeyCredentialRequestOptions,
+    ) -> Result<Vec<Box<dyn extensions::AuthenticationProcessor>>, ClientError<C::Error>> {
+        let info = self.cached_info();
+        let mut processors: Vec<Box<dyn extensions::AuthenticationProcessor>> = Vec::new();
+        for ext in &self.extensions {
+            match ext.get_assertion(info, options) {
+                Ok(Some(p)) => processors.push(p),
+                Ok(None) => {}
+                Err(e) => return Err(ClientError::ConfigurationUnsupported(e)),
+            }
+        }
+        Ok(processors)
+    }
+
+    /// Build CTAP2 extension CBOR from registration processors.
+    fn build_registration_extensions(
+        &mut self,
+        processors: &[Box<dyn extensions::RegistrationProcessor>],
         protocol: Option<PinProtocol>,
     ) -> Result<(Option<cbor::Value>, Option<prf::HmacSecretState>), ClientError<C::Error>> {
-        let ext = match &options.extensions {
-            Some(e) => e,
-            None => return Ok((None, None)),
-        };
+        let mut ctx = extensions::ExtensionContext::new(protocol);
+
+        // Obtain hmac-secret shared secret if needed (any PRF processor will use it)
+        if let Some(state) = self.get_hmac_secret_state(protocol)? {
+            ctx.hmac_secret_state = Some(state);
+        }
 
         let mut entries: Vec<(String, cbor::Value)> = Vec::new();
-        let mut hmac_state = None;
-        let info = self.cached_info().clone();
-
-        // PRF / hmac-secret
-        if let Some(ref prf_input) = ext.prf
-            && info.extensions.iter().any(|e| e == "hmac-secret")
-        {
-            if let Some(ref eval) = prf_input.eval {
-                // hmac-secret-mc: need key agreement + salt encryption
-                if let Some(state) = self.get_hmac_secret_state(protocol)? {
-                    for entry in prf::make_credential_salts_cbor(eval, &state) {
-                        entries.push(entry);
-                    }
-                    hmac_state = Some(state);
-                }
-            } else {
-                // Simple enable
-                entries.push(prf::make_credential_enable_cbor());
+        for proc in processors {
+            match proc.prepare_inputs(&mut ctx) {
+                Ok(inputs) => entries.extend(inputs),
+                Err(e) => return Err(ClientError::ConfigurationUnsupported(e)),
             }
         }
 
-        // credProtect
-        if let Some(ref cp) = ext.cred_protect {
-            if cp.enforce && !info.extensions.iter().any(|e| e == "credProtect") {
-                return Err(ClientError::ConfigurationUnsupported(
-                    "credProtect not supported by authenticator".into(),
-                ));
-            }
-            entries.push(extensions::cred_protect::to_cbor(cp.policy));
-        }
-
-        // credBlob
-        if let Some(ref cb) = ext.cred_blob
-            && info.extensions.iter().any(|e| e == "credBlob")
-        {
-            if let Some(max_len) = info.max_cred_blob_length
-                && cb.blob.len() > max_len
-            {
-                return Err(ClientError::BadRequest(format!(
-                    "credBlob too large: {} > {}",
-                    cb.blob.len(),
-                    max_len,
-                )));
-            }
-            entries.push(extensions::cred_blob::make_credential_to_cbor(&cb.blob));
-        }
-
-        // largeBlobKey
-        if let Some(ref lb) = ext.large_blob {
-            let supported = info.extensions.iter().any(|e| e == "largeBlobKey");
-            if lb.support == extensions::large_blob::LargeBlobSupport::Required && !supported {
-                return Err(ClientError::ConfigurationUnsupported(
-                    "largeBlob not supported by authenticator".into(),
-                ));
-            }
-            if supported {
-                entries.push(extensions::large_blob::to_cbor());
-            }
-        }
-
-        // minPinLength
-        if ext.min_pin_length == Some(true) && info.extensions.iter().any(|e| e == "minPinLength") {
-            entries.push(extensions::min_pin_length::to_cbor());
-        }
-
-        // previewSign
-        if let Some(ref sign_input) = ext.preview_sign {
-            let uv_required = options.authenticator_selection.as_ref().is_some_and(|sel| {
-                sel.user_verification == Some(UserVerificationRequirement::Required)
-            });
-            entries.push(extensions::sign::make_credential_to_cbor(
-                sign_input,
-                uv_required,
-            ));
-        }
-
+        let hmac_state = ctx.hmac_secret_state;
         Ok((extensions::build_extensions_cbor(entries), hmac_state))
     }
 
-    /// Build CTAP2 extension CBOR for getAssertion.
-    fn build_get_assertion_extensions(
+    /// Build CTAP2 extension CBOR from authentication processors.
+    fn build_authentication_extensions(
         &mut self,
-        options: &PublicKeyCredentialRequestOptions,
+        processors: &[Box<dyn extensions::AuthenticationProcessor>],
         protocol: Option<PinProtocol>,
         selected_cred_id: Option<&[u8]>,
     ) -> Result<(Option<cbor::Value>, Option<prf::HmacSecretState>), ClientError<C::Error>> {
-        let ext = match &options.extensions {
-            Some(e) => e,
-            None => return Ok((None, None)),
-        };
+        let mut ctx = extensions::ExtensionContext::new(protocol);
+
+        // Obtain hmac-secret shared secret if needed
+        if let Some(state) = self.get_hmac_secret_state(protocol)? {
+            ctx.hmac_secret_state = Some(state);
+        }
 
         let mut entries: Vec<(String, cbor::Value)> = Vec::new();
-        let mut hmac_state = None;
-        let info = self.cached_info().clone();
-
-        // PRF / hmac-secret
-        if let Some(ref prf_input) = ext.prf
-            && info.extensions.iter().any(|e| e == "hmac-secret")
-            && let Some(eval) = prf::select_eval(prf_input, selected_cred_id)
-            && let Some(state) = self.get_hmac_secret_state(protocol)?
-        {
-            entries.push(prf::get_assertion_cbor(eval, &state));
-            hmac_state = Some(state);
-        }
-
-        // credBlob (getCredBlob)
-        if ext.get_cred_blob == Some(true) && info.extensions.iter().any(|e| e == "credBlob") {
-            entries.push(extensions::cred_blob::get_assertion_to_cbor());
-        }
-
-        // largeBlobKey
-        if ext.large_blob.is_some() && info.extensions.iter().any(|e| e == "largeBlobKey") {
-            entries.push(extensions::large_blob::to_cbor());
-        }
-
-        // previewSign
-        if let Some(ref sign_input) = ext.preview_sign
-            && let Some(cred_id) = selected_cred_id
-        {
-            let cred_id_b64 = base64::prelude::BASE64_URL_SAFE_NO_PAD.encode(cred_id);
-            if let Some(si) = sign_input.sign_by_credential.get(&cred_id_b64) {
-                entries.push(extensions::sign::get_assertion_to_cbor(si));
+        for proc in processors {
+            match proc.prepare_inputs(selected_cred_id, &mut ctx) {
+                Ok(inputs) => entries.extend(inputs),
+                Err(e) => return Err(ClientError::ConfigurationUnsupported(e)),
             }
         }
 
+        let hmac_state = ctx.hmac_secret_state;
         Ok((extensions::build_extensions_cbor(entries), hmac_state))
+    }
+
+    /// Parse extension outputs from a makeCredential response.
+    fn parse_registration_extensions(
+        &self,
+        processors: &[Box<dyn extensions::RegistrationProcessor>],
+        auth_data: &[u8],
+        hmac_state: Option<&prf::HmacSecretState>,
+        has_large_blob_key: bool,
+        rk: bool,
+        unsigned_ext_outputs: Option<&cbor::Value>,
+    ) -> Option<extensions::RegistrationExtensionOutputs> {
+        let auth_exts = extensions::parse_auth_data_extensions(auth_data);
+        let auth_exts_ref = auth_exts.as_deref();
+
+        let ctx = extensions::OutputContext {
+            rk,
+            auth_data_extensions: auth_exts_ref,
+            unsigned_extension_outputs: unsigned_ext_outputs,
+            has_large_blob_key,
+            hmac_secret_state: hmac_state,
+        };
+
+        let mut outputs = extensions::RegistrationExtensionOutputs::default();
+        for proc in processors {
+            proc.prepare_outputs(&ctx, &mut outputs);
+        }
+
+        // Check if any field was populated
+        let has_output = outputs.prf.is_some()
+            || outputs.cred_protect.is_some()
+            || outputs.cred_blob.is_some()
+            || outputs.large_blob.is_some()
+            || outputs.cred_props.is_some()
+            || outputs.min_pin_length.is_some()
+            || outputs.preview_sign.is_some();
+
+        if has_output { Some(outputs) } else { None }
+    }
+
+    /// Parse extension outputs from a getAssertion response.
+    fn parse_authentication_extensions(
+        &self,
+        processors: &[Box<dyn extensions::AuthenticationProcessor>],
+        auth_data: &[u8],
+        hmac_state: Option<&prf::HmacSecretState>,
+    ) -> Option<extensions::AuthenticationExtensionOutputs> {
+        let auth_exts = extensions::parse_auth_data_extensions(auth_data);
+        let auth_exts_ref = auth_exts.as_deref();
+
+        let ctx = extensions::OutputContext {
+            rk: false,
+            auth_data_extensions: auth_exts_ref,
+            unsigned_extension_outputs: None,
+            has_large_blob_key: false,
+            hmac_secret_state: hmac_state,
+        };
+
+        let mut outputs = extensions::AuthenticationExtensionOutputs::default();
+        for proc in processors {
+            proc.prepare_outputs(&ctx, &mut outputs);
+        }
+
+        // Check if any field was populated
+        let has_output = outputs.prf.is_some()
+            || outputs.cred_blob.is_some()
+            || outputs.large_blob.is_some()
+            || outputs.preview_sign.is_some();
+
+        if has_output { Some(outputs) } else { None }
     }
 
     /// Perform ECDH key agreement for hmac-secret.
@@ -804,158 +842,6 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
             peer_key,
             shared_secret,
         )))
-    }
-
-    /// Parse extension outputs from a makeCredential response.
-    fn parse_registration_extensions(
-        &self,
-        options: &PublicKeyCredentialCreationOptions,
-        auth_data: &[u8],
-        hmac_state: Option<&prf::HmacSecretState>,
-        has_large_blob_key: bool,
-        rk: bool,
-        unsigned_ext_outputs: Option<&cbor::Value>,
-    ) -> Option<extensions::RegistrationExtensionOutputs> {
-        let ext = options.extensions.as_ref()?;
-        let auth_exts = extensions::parse_auth_data_extensions(auth_data);
-
-        let mut outputs = extensions::RegistrationExtensionOutputs::default();
-        let mut has_output = false;
-
-        // PRF
-        if ext.prf.is_some()
-            && let Some(ref exts) = auth_exts
-        {
-            match prf::make_credential_from_auth_data(exts, hmac_state) {
-                Ok(Some(prf_out)) => {
-                    outputs.prf = Some(prf_out);
-                    has_output = true;
-                }
-                Ok(None) => {}
-                Err(_) => {} // Silently ignore parse errors
-            }
-        }
-
-        // credProtect
-        if ext.cred_protect.is_some()
-            && let Some(ref exts) = auth_exts
-            && let Some((_, val)) = exts.iter().find(|(k, _)| k == "credProtect")
-            && let Some(policy) = extensions::cred_protect::from_cbor(val)
-        {
-            outputs.cred_protect = Some(extensions::cred_protect::RegistrationOutput { policy });
-            has_output = true;
-        }
-
-        // credBlob
-        if ext.cred_blob.is_some()
-            && let Some(ref exts) = auth_exts
-            && let Some((_, val)) = exts.iter().find(|(k, _)| k == "credBlob")
-            && let Some(stored) = extensions::cred_blob::make_credential_from_cbor(val)
-        {
-            outputs.cred_blob = Some(extensions::cred_blob::RegistrationOutput { stored });
-            has_output = true;
-        }
-
-        // largeBlob
-        if ext.large_blob.is_some() {
-            outputs.large_blob = Some(extensions::large_blob::RegistrationOutput {
-                supported: has_large_blob_key,
-            });
-            has_output = true;
-        }
-
-        // credProps (client-side only)
-        if ext.cred_props == Some(true) {
-            outputs.cred_props = Some(extensions::cred_props::RegistrationOutput { rk });
-            has_output = true;
-        }
-
-        // minPinLength
-        if ext.min_pin_length == Some(true)
-            && let Some(ref exts) = auth_exts
-            && let Some((_, val)) = exts.iter().find(|(k, _)| k == "minPinLength")
-            && let Some(length) = extensions::min_pin_length::from_cbor(val)
-        {
-            outputs.min_pin_length =
-                Some(extensions::min_pin_length::RegistrationOutput { length });
-            has_output = true;
-        }
-
-        // previewSign
-        if ext.preview_sign.is_some()
-            && let Some(ref exts) = auth_exts
-        {
-            match extensions::sign::make_credential_from_outputs(exts, unsigned_ext_outputs) {
-                Ok(Some(sign_out)) => {
-                    outputs.preview_sign = Some(sign_out);
-                    has_output = true;
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    log::warn!("previewSign output parse error: {e}");
-                }
-            }
-        }
-
-        if has_output { Some(outputs) } else { None }
-    }
-
-    /// Parse extension outputs from a getAssertion response.
-    fn parse_authentication_extensions(
-        &self,
-        options: &PublicKeyCredentialRequestOptions,
-        auth_data: &[u8],
-        hmac_state: Option<&prf::HmacSecretState>,
-    ) -> Option<extensions::AuthenticationExtensionOutputs> {
-        let ext = options.extensions.as_ref()?;
-        let auth_exts = extensions::parse_auth_data_extensions(auth_data);
-
-        let mut outputs = extensions::AuthenticationExtensionOutputs::default();
-        let mut has_output = false;
-
-        // PRF
-        if ext.prf.is_some()
-            && let (Some(exts), Some(state)) = (&auth_exts, hmac_state)
-        {
-            match prf::get_assertion_from_auth_data(exts, state) {
-                Ok(Some(results)) => {
-                    outputs.prf = Some(prf::AuthenticationOutput { results });
-                    has_output = true;
-                }
-                Ok(None) => {}
-                Err(_) => {}
-            }
-        }
-
-        // credBlob
-        if ext.get_cred_blob == Some(true)
-            && let Some(ref exts) = auth_exts
-            && let Some((_, val)) = exts.iter().find(|(k, _)| k == "credBlob")
-            && let Some(blob) = extensions::cred_blob::get_assertion_from_cbor(val)
-        {
-            outputs.cred_blob = Some(extensions::cred_blob::AuthenticationOutput { blob });
-            has_output = true;
-        }
-
-        // previewSign
-        if ext.preview_sign.is_some()
-            && let Some(ref exts) = auth_exts
-        {
-            match extensions::sign::get_assertion_from_auth_data(exts) {
-                Ok(Some(sign_out)) => {
-                    outputs.preview_sign = Some(sign_out);
-                    has_output = true;
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    log::warn!("previewSign output parse error: {e}");
-                }
-            }
-        }
-
-        // Note: largeBlob output is handled separately via process_large_blob
-
-        if has_output { Some(outputs) } else { None }
     }
 
     /// Process large blob read/write after authentication.

@@ -20,6 +20,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::cbor::Value;
+use crate::ctap2::Info;
+use crate::webauthn::extensions::{
+    Ctap2Extension, ExtensionContext, OutputContext, RegistrationExtensionOutputs,
+    RegistrationProcessor,
+};
+use crate::webauthn::types::{
+    PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
+};
 
 /// CTAP2 extension identifier for minPinLength.
 pub const EXTENSION_ID: &str = "minPinLength";
@@ -40,6 +48,59 @@ pub(crate) fn to_cbor() -> (String, Value) {
 
 pub(crate) fn from_cbor(value: &Value) -> Option<u32> {
     value.as_int().map(|v| v as u32)
+}
+
+// ---------------------------------------------------------------------------
+// Extension processor implementation
+// ---------------------------------------------------------------------------
+
+/// The minPinLength extension definition.
+pub struct MinPinLengthExtension;
+
+impl Ctap2Extension for MinPinLengthExtension {
+    fn make_credential(
+        &self,
+        info: &Info,
+        options: &PublicKeyCredentialCreationOptions,
+    ) -> Result<Option<Box<dyn RegistrationProcessor>>, String> {
+        let ext = match &options.extensions {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        if ext.min_pin_length != Some(true) {
+            return Ok(None);
+        }
+        if !info.extensions.iter().any(|e| e == EXTENSION_ID) {
+            return Ok(None);
+        }
+        Ok(Some(Box::new(MinPinLengthRegistrationProcessor)))
+    }
+
+    fn get_assertion(
+        &self,
+        _info: &Info,
+        _options: &PublicKeyCredentialRequestOptions,
+    ) -> Result<Option<Box<dyn super::AuthenticationProcessor>>, String> {
+        Ok(None)
+    }
+}
+
+struct MinPinLengthRegistrationProcessor;
+
+impl RegistrationProcessor for MinPinLengthRegistrationProcessor {
+    fn prepare_inputs(&self, _ctx: &mut ExtensionContext) -> Result<Vec<(String, Value)>, String> {
+        Ok(vec![to_cbor()])
+    }
+
+    fn prepare_outputs(&self, ctx: &OutputContext<'_>, outputs: &mut RegistrationExtensionOutputs) {
+        if let Some((_, val)) = ctx
+            .auth_data_extensions
+            .and_then(|exts| exts.iter().find(|(k, _)| k == EXTENSION_ID))
+            && let Some(length) = from_cbor(val)
+        {
+            outputs.min_pin_length = Some(RegistrationOutput { length });
+        }
+    }
 }
 
 #[cfg(test)]

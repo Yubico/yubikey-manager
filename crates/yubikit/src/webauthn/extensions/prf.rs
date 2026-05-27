@@ -317,6 +317,137 @@ pub(crate) fn select_eval<'a>(
 }
 
 // ---------------------------------------------------------------------------
+// Extension processor implementation
+// ---------------------------------------------------------------------------
+
+use crate::ctap2::Info;
+use crate::webauthn::extensions::{
+    AuthenticationExtensionOutputs, AuthenticationProcessor, Ctap2Extension, ExtensionContext,
+    OutputContext, RegistrationExtensionOutputs, RegistrationProcessor,
+};
+use crate::webauthn::types::{
+    PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
+};
+
+/// The hmac-secret / PRF extension definition.
+pub struct HmacSecretExtension;
+
+impl Ctap2Extension for HmacSecretExtension {
+    fn make_credential(
+        &self,
+        info: &Info,
+        options: &PublicKeyCredentialCreationOptions,
+    ) -> Result<Option<Box<dyn RegistrationProcessor>>, String> {
+        let ext = match &options.extensions {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        let prf_input = match &ext.prf {
+            Some(p) => p.clone(),
+            None => return Ok(None),
+        };
+        if !info.extensions.iter().any(|e| e == HMAC_SECRET_ID) {
+            return Ok(None);
+        }
+        let has_mc = info.extensions.iter().any(|e| e == HMAC_SECRET_MC_ID);
+        Ok(Some(Box::new(PrfRegistrationProcessor {
+            input: prf_input,
+            has_mc,
+        })))
+    }
+
+    fn get_assertion(
+        &self,
+        info: &Info,
+        options: &PublicKeyCredentialRequestOptions,
+    ) -> Result<Option<Box<dyn AuthenticationProcessor>>, String> {
+        let ext = match &options.extensions {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        let prf_input = match &ext.prf {
+            Some(p) => p.clone(),
+            None => return Ok(None),
+        };
+        if !info.extensions.iter().any(|e| e == HMAC_SECRET_ID) {
+            return Ok(None);
+        }
+        Ok(Some(Box::new(PrfAuthenticationProcessor {
+            input: prf_input,
+        })))
+    }
+}
+
+struct PrfRegistrationProcessor {
+    input: RegistrationInput,
+    has_mc: bool,
+}
+
+impl RegistrationProcessor for PrfRegistrationProcessor {
+    fn prepare_inputs(&self, ctx: &mut ExtensionContext) -> Result<Vec<(String, Value)>, String> {
+        if let Some(ref eval) = self.input.eval
+            && self.has_mc
+            && let Some(ref state) = ctx.hmac_secret_state
+        {
+            // hmac-secret-mc: need shared secret for salt encryption
+            return Ok(make_credential_salts_cbor(eval, state));
+        }
+        // Simple enable
+        Ok(vec![make_credential_enable_cbor()])
+    }
+
+    fn prepare_outputs(&self, ctx: &OutputContext<'_>, outputs: &mut RegistrationExtensionOutputs) {
+        if let Some(exts) = ctx.auth_data_extensions {
+            match make_credential_from_auth_data(exts, ctx.hmac_secret_state) {
+                Ok(Some(prf_out)) => {
+                    outputs.prf = Some(prf_out);
+                }
+                Ok(None) => {}
+                Err(_) => {}
+            }
+        }
+    }
+}
+
+struct PrfAuthenticationProcessor {
+    input: AuthenticationInput,
+}
+
+impl AuthenticationProcessor for PrfAuthenticationProcessor {
+    fn prepare_inputs(
+        &self,
+        selected_cred_id: Option<&[u8]>,
+        ctx: &mut ExtensionContext,
+    ) -> Result<Vec<(String, Value)>, String> {
+        let eval = match select_eval(&self.input, selected_cred_id) {
+            Some(e) => e,
+            None => return Ok(vec![]),
+        };
+        let state = match &ctx.hmac_secret_state {
+            Some(s) => s,
+            None => return Ok(vec![]),
+        };
+        Ok(vec![get_assertion_cbor(eval, state)])
+    }
+
+    fn prepare_outputs(
+        &self,
+        ctx: &OutputContext<'_>,
+        outputs: &mut AuthenticationExtensionOutputs,
+    ) {
+        if let (Some(exts), Some(state)) = (ctx.auth_data_extensions, ctx.hmac_secret_state) {
+            match get_assertion_from_auth_data(exts, state) {
+                Ok(Some(results)) => {
+                    outputs.prf = Some(AuthenticationOutput { results });
+                }
+                Ok(None) => {}
+                Err(_) => {}
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Serde helpers for base64url byte fields
 // ---------------------------------------------------------------------------
 

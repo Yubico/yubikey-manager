@@ -18,10 +18,20 @@
 //! serialization. The aggregate [`RegistrationExtensionInputs`](crate::webauthn::extensions::RegistrationExtensionInputs) and
 //! [`AuthenticationExtensionInputs`](crate::webauthn::extensions::AuthenticationExtensionInputs) structs are used in the WebAuthn
 //! options, while the output types appear in ceremony responses.
+//!
+//! ## Extension Processing Architecture
+//!
+//! Extensions are pluggable via the [`Ctap2Extension`] trait. Each extension
+//! optionally produces a [`RegistrationProcessor`] or [`AuthenticationProcessor`]
+//! for a given ceremony, which handles building authenticator inputs and parsing
+//! outputs.
 
 use serde::{Deserialize, Serialize};
 
 use crate::cbor::{self, Value};
+use crate::ctap2::{Info, Permissions, PinProtocol};
+
+use super::types::{PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions};
 
 /// Credential Blob extension (`credBlob`).
 pub mod cred_blob;
@@ -45,6 +55,125 @@ pub use cred_protect::CredProtectPolicy;
 pub use large_blob::LargeBlobSupport;
 /// PRF evaluation inputs and derived results.
 pub use prf::{PrfEval, PrfResults};
+
+// ---------------------------------------------------------------------------
+// Extension processing traits
+// ---------------------------------------------------------------------------
+
+/// Context provided to extension processors during input preparation.
+///
+/// Provides access to the PIN protocol and a way to obtain the ECDH shared
+/// secret (needed by hmac-secret).
+pub struct ExtensionContext {
+    /// The negotiated PIN protocol, if any.
+    pub pin_protocol: Option<PinProtocol>,
+    /// The ECDH shared secret state, if obtained.
+    pub(crate) hmac_secret_state: Option<prf::HmacSecretState>,
+}
+
+impl ExtensionContext {
+    pub(crate) fn new(pin_protocol: Option<PinProtocol>) -> Self {
+        Self {
+            pin_protocol,
+            hmac_secret_state: None,
+        }
+    }
+}
+
+/// Context provided to extension processors during output processing.
+pub struct OutputContext<'a> {
+    /// Whether the credential was created as a resident/discoverable key.
+    pub rk: bool,
+    /// The parsed extensions map from authenticator data, if present.
+    pub auth_data_extensions: Option<&'a [(String, Value)]>,
+    /// Unsigned extension outputs from the authenticator response.
+    pub unsigned_extension_outputs: Option<&'a Value>,
+    /// Whether the response contained a large_blob_key.
+    pub has_large_blob_key: bool,
+    /// The hmac-secret ECDH state, for decrypting PRF outputs.
+    pub(crate) hmac_secret_state: Option<&'a prf::HmacSecretState>,
+}
+
+/// A WebAuthn extension definition. Stateless and reusable across requests.
+///
+/// Implementations check whether the extension is applicable and produce
+/// per-request processors that handle the input/output lifecycle.
+pub trait Ctap2Extension {
+    /// Begin registration processing. Returns `None` if the extension is not
+    /// applicable to this request (e.g. not requested in options, or not
+    /// supported by the authenticator).
+    fn make_credential(
+        &self,
+        info: &Info,
+        options: &PublicKeyCredentialCreationOptions,
+    ) -> Result<Option<Box<dyn RegistrationProcessor>>, String>;
+
+    /// Begin authentication processing. Returns `None` if not applicable.
+    fn get_assertion(
+        &self,
+        info: &Info,
+        options: &PublicKeyCredentialRequestOptions,
+    ) -> Result<Option<Box<dyn AuthenticationProcessor>>, String>;
+}
+
+/// Per-request registration extension processing.
+pub trait RegistrationProcessor {
+    /// Additional PIN/UV token permissions required by this extension.
+    fn permissions(&self) -> Permissions {
+        Permissions::new(0)
+    }
+
+    /// Prepare authenticator extension inputs as CBOR entries.
+    ///
+    /// May mutate the `ctx` to store state (e.g. hmac-secret shared secret).
+    fn prepare_inputs(&self, ctx: &mut ExtensionContext) -> Result<Vec<(String, Value)>, String>;
+
+    /// Parse outputs and write into the typed output struct.
+    fn prepare_outputs(&self, ctx: &OutputContext<'_>, outputs: &mut RegistrationExtensionOutputs);
+}
+
+/// Per-request authentication extension processing.
+pub trait AuthenticationProcessor {
+    /// Additional PIN/UV token permissions required by this extension.
+    fn permissions(&self) -> Permissions {
+        Permissions::new(0)
+    }
+
+    /// Prepare authenticator extension inputs as CBOR entries.
+    ///
+    /// `selected_cred_id` is the credential ID selected during pre-flight
+    /// filtering (needed for per-credential extension data like prf
+    /// `eval_by_credential`).
+    fn prepare_inputs(
+        &self,
+        selected_cred_id: Option<&[u8]>,
+        ctx: &mut ExtensionContext,
+    ) -> Result<Vec<(String, Value)>, String>;
+
+    /// Parse outputs and write into the typed output struct.
+    fn prepare_outputs(
+        &self,
+        ctx: &OutputContext<'_>,
+        outputs: &mut AuthenticationExtensionOutputs,
+    );
+}
+
+/// Returns the default list of WebAuthn extensions.
+///
+/// This includes all standard extensions supported by the library. The list
+/// can be customized by replacing it with a subset or by appending additional
+/// extensions.
+pub fn default_extensions() -> Vec<Box<dyn Ctap2Extension>> {
+    vec![
+        Box::new(prf::HmacSecretExtension),
+        Box::new(cred_protect::CredProtectExtension),
+        Box::new(cred_blob::CredBlobExtension),
+        Box::new(large_blob::LargeBlobExtension),
+        Box::new(min_pin_length::MinPinLengthExtension),
+        Box::new(cred_props::CredPropsExtension),
+        Box::new(sign::PreviewSignExtension),
+    ]
+}
 
 // ---------------------------------------------------------------------------
 // Registration (makeCredential)

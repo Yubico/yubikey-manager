@@ -349,8 +349,134 @@ fn extract_attested_credential_data(auth_data: &[u8]) -> Result<(Vec<u8>, Vec<u8
 }
 
 // ---------------------------------------------------------------------------
-// Serde helpers for base64url byte fields
+// Extension processor implementation
 // ---------------------------------------------------------------------------
+
+use crate::ctap2::Info;
+use crate::webauthn::extensions::{
+    AuthenticationExtensionOutputs, AuthenticationProcessor, Ctap2Extension, ExtensionContext,
+    OutputContext, RegistrationExtensionOutputs, RegistrationProcessor,
+};
+use crate::webauthn::types::{
+    PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
+    UserVerificationRequirement,
+};
+
+/// The previewSign extension definition.
+pub struct PreviewSignExtension;
+
+impl Ctap2Extension for PreviewSignExtension {
+    fn make_credential(
+        &self,
+        info: &Info,
+        options: &PublicKeyCredentialCreationOptions,
+    ) -> Result<Option<Box<dyn RegistrationProcessor>>, String> {
+        let ext = match &options.extensions {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        let sign_input = match &ext.preview_sign {
+            Some(si) => si.clone(),
+            None => return Ok(None),
+        };
+        if !info.extensions.iter().any(|e| e == EXTENSION_ID) {
+            return Ok(None);
+        }
+        let uv_required = options.authenticator_selection.as_ref().is_some_and(|sel| {
+            sel.user_verification == Some(UserVerificationRequirement::Required)
+        });
+        Ok(Some(Box::new(PreviewSignRegistrationProcessor {
+            input: sign_input,
+            uv_required,
+        })))
+    }
+
+    fn get_assertion(
+        &self,
+        info: &Info,
+        options: &PublicKeyCredentialRequestOptions,
+    ) -> Result<Option<Box<dyn AuthenticationProcessor>>, String> {
+        let ext = match &options.extensions {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        let sign_input = match &ext.preview_sign {
+            Some(si) => si.clone(),
+            None => return Ok(None),
+        };
+        if !info.extensions.iter().any(|e| e == EXTENSION_ID) {
+            return Ok(None);
+        }
+        Ok(Some(Box::new(PreviewSignAuthenticationProcessor {
+            input: sign_input,
+        })))
+    }
+}
+
+struct PreviewSignRegistrationProcessor {
+    input: RegistrationInput,
+    uv_required: bool,
+}
+
+impl RegistrationProcessor for PreviewSignRegistrationProcessor {
+    fn prepare_inputs(&self, _ctx: &mut ExtensionContext) -> Result<Vec<(String, Value)>, String> {
+        Ok(vec![make_credential_to_cbor(&self.input, self.uv_required)])
+    }
+
+    fn prepare_outputs(&self, ctx: &OutputContext<'_>, outputs: &mut RegistrationExtensionOutputs) {
+        if let Some(exts) = ctx.auth_data_extensions {
+            match make_credential_from_outputs(exts, ctx.unsigned_extension_outputs) {
+                Ok(Some(sign_out)) => {
+                    outputs.preview_sign = Some(sign_out);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    log::warn!("previewSign output parse error: {e}");
+                }
+            }
+        }
+    }
+}
+
+struct PreviewSignAuthenticationProcessor {
+    input: AuthenticationInput,
+}
+
+impl AuthenticationProcessor for PreviewSignAuthenticationProcessor {
+    fn prepare_inputs(
+        &self,
+        selected_cred_id: Option<&[u8]>,
+        _ctx: &mut ExtensionContext,
+    ) -> Result<Vec<(String, Value)>, String> {
+        let Some(cred_id) = selected_cred_id else {
+            return Ok(vec![]);
+        };
+        let cred_id_b64 = BASE64_URL_SAFE_NO_PAD.encode(cred_id);
+        if let Some(si) = self.input.sign_by_credential.get(&cred_id_b64) {
+            Ok(vec![get_assertion_to_cbor(si)])
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    fn prepare_outputs(
+        &self,
+        ctx: &OutputContext<'_>,
+        outputs: &mut AuthenticationExtensionOutputs,
+    ) {
+        if let Some(exts) = ctx.auth_data_extensions {
+            match get_assertion_from_auth_data(exts) {
+                Ok(Some(sign_out)) => {
+                    outputs.preview_sign = Some(sign_out);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    log::warn!("previewSign output parse error: {e}");
+                }
+            }
+        }
+    }
+}
 
 fn b64_ser<S: Serializer>(bytes: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&BASE64_URL_SAFE_NO_PAD.encode(bytes))

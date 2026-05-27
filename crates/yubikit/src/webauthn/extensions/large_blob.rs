@@ -108,6 +108,115 @@ pub(crate) fn to_cbor() -> (String, Value) {
     (LARGE_BLOB_KEY_EXT_ID.into(), Value::Bool(true))
 }
 
+// ---------------------------------------------------------------------------
+// Extension processor implementation
+// ---------------------------------------------------------------------------
+
+use crate::ctap2::{Info, Permissions};
+use crate::webauthn::extensions::{
+    AuthenticationExtensionOutputs, AuthenticationProcessor, Ctap2Extension, ExtensionContext,
+    OutputContext, RegistrationExtensionOutputs, RegistrationProcessor,
+};
+use crate::webauthn::types::{
+    PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions,
+};
+
+/// The largeBlob extension definition.
+pub struct LargeBlobExtension;
+
+impl Ctap2Extension for LargeBlobExtension {
+    fn make_credential(
+        &self,
+        info: &Info,
+        options: &PublicKeyCredentialCreationOptions,
+    ) -> Result<Option<Box<dyn RegistrationProcessor>>, String> {
+        let ext = match &options.extensions {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        let lb = match &ext.large_blob {
+            Some(lb) => lb,
+            None => return Ok(None),
+        };
+        let supported = info.extensions.iter().any(|e| e == LARGE_BLOB_KEY_EXT_ID);
+        if lb.support == LargeBlobSupport::Required && !supported {
+            return Err("largeBlob not supported by authenticator".into());
+        }
+        if !supported {
+            return Ok(None);
+        }
+        Ok(Some(Box::new(LargeBlobRegistrationProcessor)))
+    }
+
+    fn get_assertion(
+        &self,
+        info: &Info,
+        options: &PublicKeyCredentialRequestOptions,
+    ) -> Result<Option<Box<dyn AuthenticationProcessor>>, String> {
+        let ext = match &options.extensions {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        let lb = match &ext.large_blob {
+            Some(lb) => lb,
+            None => return Ok(None),
+        };
+        if !info.extensions.iter().any(|e| e == LARGE_BLOB_KEY_EXT_ID) {
+            return Ok(None);
+        }
+        let needs_write = lb.write.is_some();
+        Ok(Some(Box::new(LargeBlobAuthenticationProcessor {
+            needs_write,
+        })))
+    }
+}
+
+struct LargeBlobRegistrationProcessor;
+
+impl RegistrationProcessor for LargeBlobRegistrationProcessor {
+    fn prepare_inputs(&self, _ctx: &mut ExtensionContext) -> Result<Vec<(String, Value)>, String> {
+        Ok(vec![to_cbor()])
+    }
+
+    fn prepare_outputs(&self, ctx: &OutputContext<'_>, outputs: &mut RegistrationExtensionOutputs) {
+        outputs.large_blob = Some(RegistrationOutput {
+            supported: ctx.has_large_blob_key,
+        });
+    }
+}
+
+struct LargeBlobAuthenticationProcessor {
+    needs_write: bool,
+}
+
+impl AuthenticationProcessor for LargeBlobAuthenticationProcessor {
+    fn permissions(&self) -> Permissions {
+        if self.needs_write {
+            Permissions::LARGE_BLOB_WRITE
+        } else {
+            Permissions::new(0)
+        }
+    }
+
+    fn prepare_inputs(
+        &self,
+        _selected_cred_id: Option<&[u8]>,
+        _ctx: &mut ExtensionContext,
+    ) -> Result<Vec<(String, Value)>, String> {
+        Ok(vec![to_cbor()])
+    }
+
+    fn prepare_outputs(
+        &self,
+        _ctx: &OutputContext<'_>,
+        _outputs: &mut AuthenticationExtensionOutputs,
+    ) {
+        // Large blob read/write is handled separately by the client after
+        // get_assertion, since it needs session access. The output is written
+        // by the client's process_large_blob method.
+    }
+}
+
 fn b64_opt_ser<S: serde::Serializer>(v: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error> {
     match v {
         Some(b) => s.serialize_str(&BASE64_URL_SAFE_NO_PAD.encode(b)),
