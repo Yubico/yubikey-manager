@@ -54,13 +54,9 @@ pub struct DiagnosticsReport {
     pub features: Vec<String>,
     pub platform: String,
     pub arch: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub pcsc: Option<ResultOrError<PcscDiag>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub otp: Option<ResultOrError<BTreeMap<String, OtpDeviceDiag>>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub fido: Option<ResultOrError<BTreeMap<String, FidoDeviceDiag>>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub svc: Option<ResultOrError<SvcDiag>>,
 }
 
@@ -81,7 +77,6 @@ pub struct PcscDeviceDiag {
     pub oath: ResultOrError<OathDiag>,
     pub openpgp: ResultOrError<OpenPgpDiag>,
     pub hsmauth: ResultOrError<HsmAuthDiag>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub fido: Option<ResultOrError<Ctap2Diag>>,
 }
 
@@ -162,7 +157,6 @@ pub struct DeviceInfoDiag {
     pub fips_approved: CapabilityDiag,
     pub pin_complexity: bool,
     pub reset_blocked: CapabilityDiag,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub version_qualifier: Option<VersionQualifierDiag>,
 }
 
@@ -206,16 +200,11 @@ pub struct VersionQualifierDiag {
 #[derive(Debug, Serialize)]
 pub struct PivDiag {
     pub version: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub pin_tries: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub puk_tries: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub management_key_algorithm: Option<String>,
     pub warnings: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub chuid: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ccc: Option<String>,
     pub slots: BTreeMap<String, PivSlotDiag>,
 }
@@ -223,7 +212,6 @@ pub struct PivDiag {
 #[derive(Debug, Serialize)]
 pub struct PivSlotDiag {
     pub key_type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub fingerprint: Option<String>,
 }
 
@@ -237,22 +225,16 @@ pub struct OathDiag {
 pub struct OpenPgpDiag {
     pub openpgp_version: String,
     pub application_version: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub pin_tries: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub reset_code_tries: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_pin_tries: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub signature_pin_policy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub kdf_enabled: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct HsmAuthDiag {
     pub version: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub management_key_retries: Option<String>,
 }
 
@@ -271,13 +253,10 @@ pub struct SvcDeviceDiag {
     /// Management info read directly from the cached device data.
     pub management: ResultOrError<ManagementDiag>,
     /// CCID (SmartCard) application diagnostics, if the device has CCID.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ccid: Option<ResultOrError<SvcCcidDiag>>,
     /// FIDO/CTAP diagnostics, if the device has CTAP.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ctap: Option<ResultOrError<SvcFidoDiag>>,
     /// OTP diagnostics, if the device has OTP.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub otp: Option<ResultOrError<OtpDeviceDiag>>,
 }
 
@@ -302,57 +281,64 @@ pub struct SvcFidoDiag {
 
 #[derive(Debug, Default, Serialize)]
 pub struct Ctap2InfoDiag {
+    /// 0x01
     pub versions: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// 0x02
     pub extensions: Vec<String>,
+    /// 0x03
     pub aaguid: String,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    /// 0x04
     pub options: BTreeMap<String, bool>,
+    /// 0x05
     pub max_msg_size: usize,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// 0x06
     pub pin_uv_auth_protocols: Vec<u32>,
-    #[serde(skip_serializing_if = "is_zero_usize")]
-    pub max_creds_in_list: usize,
-    #[serde(skip_serializing_if = "is_zero_usize")]
-    pub max_cred_id_length: usize,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// 0x07
+    pub max_creds_in_list: Option<usize>,
+    /// 0x08
+    pub max_cred_id_length: Option<usize>,
+    /// 0x09
     pub transports: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// 0x0A
     pub algorithms: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// 0x0B
     pub max_large_blob: Option<usize>,
-    #[serde(skip_serializing_if = "is_four")]
-    pub min_pin_length: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_pin_length: Option<usize>,
-    #[serde(skip_serializing_if = "is_zero_u64")]
-    pub firmware_version: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_cred_blob_length: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_rpids_for_min_pin: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub remaining_disc_creds: Option<u32>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub attestation_formats: Vec<String>,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub certifications: BTreeMap<String, String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub transports_for_reset: Vec<String>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    /// 0x0C
     pub force_pin_change: bool,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    /// 0x0D
+    pub min_pin_length: usize,
+    /// 0x0E
+    pub firmware_version: Option<u64>,
+    /// 0x0F
+    pub max_cred_blob_length: Option<usize>,
+    /// 0x10
+    pub max_rpids_for_min_pin: Option<usize>,
+    /// 0x11
+    pub preferred_platform_uv_attempts: Option<usize>,
+    /// 0x12
+    pub uv_modality: Option<u32>,
+    /// 0x13
+    pub certifications: BTreeMap<String, String>,
+    /// 0x14
+    pub remaining_disc_creds: Option<u32>,
+    /// 0x15
+    pub vendor_prototype_config_commands: Vec<u32>,
+    /// 0x16
+    pub attestation_formats: Vec<String>,
+    /// 0x17
+    pub uv_count_since_pin: Option<u32>,
+    /// 0x18
     pub long_touch_for_reset: bool,
-}
-
-fn is_zero_usize(v: &usize) -> bool {
-    *v == 0
-}
-fn is_zero_u64(v: &u64) -> bool {
-    *v == 0
-}
-fn is_four(v: &usize) -> bool {
-    *v == 4
+    /// 0x1A
+    pub transports_for_reset: Vec<String>,
+    /// 0x1B
+    pub pin_complexity_policy: Option<bool>,
+    /// 0x1C
+    pub pin_complexity_policy_url: Option<String>,
+    /// 0x1D
+    pub max_pin_length: Option<usize>,
+    /// 0x1F
+    pub config_commands: Vec<u32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -448,6 +434,10 @@ fn ctap2_info_diag(info: &yubikit::ctap2::Info) -> Ctap2InfoDiag {
         .iter()
         .map(|(k, v)| (k.clone(), format!("{v:?}")))
         .collect();
+    let pin_complexity_policy_url = info
+        .pin_complexity_policy_url
+        .as_ref()
+        .map(|b| String::from_utf8_lossy(b).into_owned());
     Ctap2InfoDiag {
         versions: info.versions.clone(),
         extensions: info.extensions.clone(),
@@ -455,22 +445,29 @@ fn ctap2_info_diag(info: &yubikit::ctap2::Info) -> Ctap2InfoDiag {
         options: info.options.clone(),
         max_msg_size: info.max_msg_size,
         pin_uv_auth_protocols: info.pin_uv_protocols.clone(),
-        max_creds_in_list: info.max_creds_in_list.unwrap_or(0),
-        max_cred_id_length: info.max_cred_id_length.unwrap_or(0),
+        max_creds_in_list: info.max_creds_in_list,
+        max_cred_id_length: info.max_cred_id_length,
         transports: info.transports.clone(),
         algorithms,
         max_large_blob: info.max_large_blob,
+        force_pin_change: info.force_pin_change,
         min_pin_length: info.min_pin_length,
-        max_pin_length: info.max_pin_length,
-        firmware_version: info.firmware_version.unwrap_or(0),
+        firmware_version: info.firmware_version,
         max_cred_blob_length: info.max_cred_blob_length,
         max_rpids_for_min_pin: info.max_rpids_for_min_pin,
-        remaining_disc_creds: info.remaining_disc_creds,
-        attestation_formats: info.attestation_formats.clone(),
+        preferred_platform_uv_attempts: info.preferred_platform_uv_attempts,
+        uv_modality: info.uv_modality,
         certifications,
-        transports_for_reset: info.transports_for_reset.clone(),
-        force_pin_change: info.force_pin_change,
+        remaining_disc_creds: info.remaining_disc_creds,
+        vendor_prototype_config_commands: info.vendor_prototype_config_commands.clone(),
+        attestation_formats: info.attestation_formats.clone(),
+        uv_count_since_pin: info.uv_count_since_pin,
         long_touch_for_reset: info.long_touch_for_reset,
+        transports_for_reset: info.transports_for_reset.clone(),
+        pin_complexity_policy: info.pin_complexity_policy,
+        pin_complexity_policy_url,
+        max_pin_length: info.max_pin_length,
+        config_commands: info.config_commands.clone(),
     }
 }
 
