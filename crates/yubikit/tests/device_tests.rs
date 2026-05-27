@@ -15,6 +15,7 @@
 //! Only run against a test/development YubiKey.
 
 mod arkg_p256;
+mod controller;
 
 use rstest::{fixture, rstest};
 use std::sync::{Mutex, OnceLock};
@@ -1468,6 +1469,8 @@ mod yubiotp {
 
 mod fido {
     use super::*;
+    use crate::controller::{Controller, NfcController, PrintController};
+    use std::sync::Arc;
     use yubikit::ctap::CtapSession;
     use yubikit::ctap2::{
         Aaguid, ClientPin, CredentialManagement, Ctap2Error, Ctap2Session, CtapStatus, LargeBlobs,
@@ -1477,6 +1480,32 @@ mod fido {
 
     const TEST_PIN: &str = "12345679";
     const TEST_RP_ID: &str = "test.rs.yubikey.example";
+
+    /// Get the appropriate controller for the current device transport.
+    fn get_controller() -> Arc<dyn Controller> {
+        let dev = get_device();
+        match dev.transport() {
+            Transport::Nfc => {
+                let reader_name = dev
+                    .reader_name
+                    .as_deref()
+                    .expect("NFC device must have a reader name");
+                Arc::new(NfcController::new(reader_name))
+            }
+            Transport::Usb => Arc::new(PrintController),
+        }
+    }
+
+    /// Reset the UP budget before an operation that requires user presence.
+    ///
+    /// On NFC this power-cycles the card (reinsert). On USB this is a no-op
+    /// because UP is satisfied by physical touch via the controller's
+    /// `prompt_up` callback.
+    fn reset_up_budget() {
+        if get_device().transport() == Transport::Nfc {
+            get_controller().reinsert();
+        }
+    }
 
     /// One-time setup: ensure the FIDO PIN is in a known state.
     ///
@@ -1560,22 +1589,38 @@ mod fido {
 
         if needs_reset {
             eprintln!("FIDO setup: PIN mismatch or blocked, resetting applet...");
-            // Power-cycle the NFC card so the "recently powered up" window is
-            // satisfied for the FIDO reset command (NFC only).
-            if get_device().transport() == Transport::Nfc
-                && let Err(e) = power_cycle_nfc()
-            {
-                panic!("FIDO setup: NFC power cycle failed: {e}");
-            }
+            let ctrl = get_controller();
+            // Reinsert to satisfy the "recently powered up" window for FIDO reset.
+            ctrl.reinsert();
             let mut session = match open_session() {
                 Ok(s) => s,
                 Err(e) => {
-                    panic!("FIDO setup: open session (post-power-cycle) failed: {e}");
+                    panic!("FIDO setup: open session (post-reinsert) failed: {e}");
                 }
             };
-            if let Err(e) = session.reset(None, None) {
+            // For reset, UP may be required (long touch on some devices).
+            let info = session.get_info().ok();
+            let long_touch = info
+                .as_ref()
+                .map(|i| i.long_touch_for_reset)
+                .unwrap_or(false);
+            if long_touch {
+                ctrl.touch();
+            }
+            let result = session.reset(
+                Some(&mut |status: u8| {
+                    if status == 0x02 && !long_touch {
+                        ctrl.touch();
+                    }
+                }),
+                None,
+            );
+            if long_touch {
+                ctrl.release();
+            }
+            if let Err(e) = result {
                 panic!(
-                    "FIDO setup: reset failed: {e}\n  NOTE: For NFC, remove the card and re-tap it, then run the tests within 10 seconds."
+                    "FIDO setup: reset failed: {e}\n  NOTE: Ensure the device was recently inserted/tapped."
                 );
             }
             eprintln!("FIDO setup: reset done");
@@ -1599,52 +1644,6 @@ mod fido {
         }
         eprintln!("FIDO setup: PIN set to TEST_PIN");
         true
-    }
-
-    /// Power-cycle the NFC card using PCSC so the "recently powered up"
-    /// window is reset for commands like FIDO reset.
-    ///
-    /// Tries `UnpowerCard` first; falls back to `ResetCard` (warm reset /
-    /// NFC deactivation + reactivation) if the card is unavailable after
-    /// unpowering.
-    fn power_cycle_nfc() -> Result<(), String> {
-        use ::pcsc::{Context, Disposition, Protocols, Scope, ShareMode};
-        use std::ffi::CString;
-
-        let reader_name = get_device()
-            .reader_name
-            .as_deref()
-            .ok_or("device has no PCSC reader name")?;
-        let c_reader = CString::new(reader_name).map_err(|e| e.to_string())?;
-        let ctx = Context::establish(Scope::User).map_err(|e| e.to_string())?;
-
-        eprintln!("FIDO setup: power-cycling NFC card via PCSC...");
-
-        // Try UnpowerCard (cold reset / field off) first.
-        {
-            let card = ctx
-                .connect(&c_reader, ShareMode::Shared, Protocols::ANY)
-                .map_err(|e| e.to_string())?;
-            card.disconnect(Disposition::UnpowerCard)
-                .map_err(|(_, e)| e.to_string())?;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-
-        // Reconnect to confirm the card came back; use ResetCard to also
-        // ensure the card goes through its ATR sequence (warm reset).
-        {
-            let mut card = ctx
-                .connect(&c_reader, ShareMode::Shared, Protocols::ANY)
-                .map_err(|e| e.to_string())?;
-            card.reconnect(ShareMode::Shared, Protocols::ANY, Disposition::ResetCard)
-                .map_err(|e| e.to_string())?;
-            card.disconnect(Disposition::LeaveCard)
-                .map_err(|(_, e)| e.to_string())?;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-
-        eprintln!("FIDO setup: NFC card power-cycled");
-        Ok(())
     }
 
     fn ensure_fido_pin() -> bool {
@@ -1719,7 +1718,7 @@ mod fido {
     /// Handles skip checks (FIDO2 capability, FIDOCCID for SmartCard, USB for HID),
     /// then provides an `open` closure and the authenticator `info` to the body.
     /// Call `open()` to get a new `Ctap2Session` — can be called multiple times
-    /// for tests that need separate sessions (e.g. with power_cycle_nfc between).
+    /// for tests that need separate sessions (e.g. with reset_up_budget between).
     macro_rules! with_fido_session {
         ($tc:expr, |$open:ident, $info:ident| $body:block) => {{
             skip_if_needed!($tc);
@@ -1768,11 +1767,23 @@ mod fido {
         }};
     }
 
-    /// Simple [`UserInteraction`] for tests: always returns `TEST_PIN`, never uses UV.
-    struct TestInteraction;
+    /// [`UserInteraction`] for tests: uses the controller for UP, always returns `TEST_PIN`.
+    struct TestInteraction {
+        controller: Arc<dyn Controller>,
+    }
+
+    impl TestInteraction {
+        fn new() -> Self {
+            Self {
+                controller: get_controller(),
+            }
+        }
+    }
 
     impl yubikit::webauthn::UserInteraction for TestInteraction {
-        fn prompt_up(&self) {}
+        fn prompt_up(&self) {
+            self.controller.touch();
+        }
         fn request_pin(&self, _permissions: Permissions, _rp_id: Option<&str>) -> Option<String> {
             Some(TEST_PIN.to_string())
         }
@@ -1924,9 +1935,8 @@ mod fido {
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_ctap2_selection(#[case] tc: TestConnection) {
-        require_transport!(Transport::Nfc);
-        power_cycle_nfc().expect("power_cycle_nfc before selection");
         with_fido_session!(tc, |open, info| {
             let supports_selection = info
                 .versions
@@ -1936,9 +1946,17 @@ mod fido {
                 skip!("authenticatorSelection requires CTAP 2.1");
             }
 
+            reset_up_budget();
+            let ctrl = get_controller();
             let mut session = open();
-            // On NFC the card is already present, so UP is satisfied without physical touch.
-            match session.selection(None, None) {
+            match session.selection(
+                Some(&mut |status: u8| {
+                    if status == 0x02 {
+                        ctrl.touch();
+                    }
+                }),
+                None,
+            ) {
                 Ok(()) => eprintln!("selection: OK"),
                 Err(Ctap2Error::StatusError(CtapStatus::InvalidCommand))
                 | Err(Ctap2Error::StatusError(CtapStatus::InvalidCbor)) => {
@@ -1958,6 +1976,7 @@ mod fido {
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_ctap2_make_and_get_credential(#[case] tc: TestConnection) {
         use yubikit::webauthn::{
             AuthenticatorSelectionCriteria, DefaultClientDataCollector,
@@ -1965,15 +1984,14 @@ mod fido {
             PublicKeyCredentialRpEntity, PublicKeyCredentialType, ResidentKeyRequirement,
             UserVerificationRequirement, WebAuthnClient,
         };
-        require_transport!(Transport::Nfc);
         require_fido_pin!();
         with_fido_session!(tc, |open, _info| {
-            power_cycle_nfc().expect("power_cycle_nfc before MC");
+            reset_up_budget();
 
             // ── Registration ─────────────────────────────────────────────────
             let session = open();
             let collector = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut mc_client = WebAuthnClient::new(session, TestInteraction, collector);
+            let mut mc_client = WebAuthnClient::new(session, TestInteraction::new(), collector);
 
             let create_options = PublicKeyCredentialCreationOptions {
                 rp: PublicKeyCredentialRpEntity {
@@ -2010,12 +2028,12 @@ mod fido {
             assert!(!cred_id.is_empty(), "credential ID should not be empty");
 
             drop(mc_client);
-            power_cycle_nfc().expect("power_cycle_nfc between MC and GA");
+            reset_up_budget();
 
             // ── Authentication ────────────────────────────────────────────────
             let session2 = open();
             let collector2 = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut ga_client = WebAuthnClient::new(session2, TestInteraction, collector2);
+            let mut ga_client = WebAuthnClient::new(session2, TestInteraction::new(), collector2);
 
             let get_options = PublicKeyCredentialRequestOptions {
                 challenge: vec![0xAB; 32],
@@ -2105,8 +2123,8 @@ mod fido {
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_ctap2_large_blobs(#[case] tc: TestConnection) {
-        require_transport!(Transport::Nfc);
         with_fido_session!(tc, |open, info| {
             if info.options.get("largeBlobs") != Some(&true) {
                 skip!("largeBlobs not supported");
@@ -2179,6 +2197,7 @@ mod fido {
     /// Test credProtect extension: create credentials at each protection level.
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
     fn test_webauthn_cred_protect(#[case] tc: TestConnection) {
         use yubikit::webauthn::extensions::RegistrationExtensionInputs;
@@ -2189,7 +2208,6 @@ mod fido {
             PublicKeyCredentialUserEntity, WebAuthnClient,
         };
 
-        require_transport!(Transport::Nfc);
         require_fido_pin!();
         with_fido_session!(tc, |open, info| {
             if !info.extensions.iter().any(|e| e == "credProtect") {
@@ -2206,11 +2224,11 @@ mod fido {
             ];
 
             for (policy, label) in &policies {
-                power_cycle_nfc().expect("power_cycle_nfc before MC");
+                reset_up_budget();
 
                 let session = open();
                 let collector = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-                let mut client = WebAuthnClient::new(session, TestInteraction, collector);
+                let mut client = WebAuthnClient::new(session, TestInteraction::new(), collector);
 
                 let create_options = PublicKeyCredentialCreationOptions {
                     rp: PublicKeyCredentialRpEntity {
@@ -2263,6 +2281,7 @@ mod fido {
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_webauthn_cred_blob(#[case] tc: TestConnection) {
         use yubikit::webauthn::extensions::cred_blob::RegistrationInput;
         use yubikit::webauthn::extensions::{
@@ -2276,7 +2295,6 @@ mod fido {
             WebAuthnClient,
         };
 
-        require_transport!(Transport::Nfc);
         require_fido_pin!();
         with_fido_session!(tc, |open, info| {
             if !info.extensions.iter().any(|e| e == "credBlob") {
@@ -2286,11 +2304,11 @@ mod fido {
             let blob_data = b"test-cred-blob-data".to_vec();
 
             // ── Registration with credBlob ───────────────────────────────────
-            power_cycle_nfc().expect("power_cycle_nfc before MC");
+            reset_up_budget();
 
             let session = open();
             let collector = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut client = WebAuthnClient::new(session, TestInteraction, collector);
+            let mut client = WebAuthnClient::new(session, TestInteraction::new(), collector);
 
             let create_options = PublicKeyCredentialCreationOptions {
                 rp: PublicKeyCredentialRpEntity {
@@ -2337,11 +2355,11 @@ mod fido {
             drop(client);
 
             // ── Authentication with getCredBlob ──────────────────────────────
-            power_cycle_nfc().expect("power_cycle_nfc before GA");
+            reset_up_budget();
 
             let session2 = open();
             let collector2 = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut ga_client = WebAuthnClient::new(session2, TestInteraction, collector2);
+            let mut ga_client = WebAuthnClient::new(session2, TestInteraction::new(), collector2);
 
             let get_options = PublicKeyCredentialRequestOptions {
                 challenge: vec![0x21; 32],
@@ -2380,6 +2398,7 @@ mod fido {
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_webauthn_prf(#[case] tc: TestConnection) {
         use yubikit::webauthn::extensions::prf::{AuthenticationInput, PrfEval, RegistrationInput};
         use yubikit::webauthn::extensions::{
@@ -2393,7 +2412,6 @@ mod fido {
             WebAuthnClient,
         };
 
-        require_transport!(Transport::Nfc);
         require_fido_pin!();
         with_fido_session!(tc, |open, info| {
             if !info.extensions.iter().any(|e| e == "hmac-secret") {
@@ -2401,11 +2419,11 @@ mod fido {
             }
 
             // ── Registration with PRF enabled ────────────────────────────────
-            power_cycle_nfc().expect("power_cycle_nfc before MC");
+            reset_up_budget();
 
             let session = open();
             let collector = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut client = WebAuthnClient::new(session, TestInteraction, collector);
+            let mut client = WebAuthnClient::new(session, TestInteraction::new(), collector);
 
             let create_options = PublicKeyCredentialCreationOptions {
                 rp: PublicKeyCredentialRpEntity {
@@ -2450,11 +2468,11 @@ mod fido {
             drop(client);
 
             // ── First authentication with PRF eval ───────────────────────────
-            power_cycle_nfc().expect("power_cycle_nfc before GA1");
+            reset_up_budget();
 
             let session2 = open();
             let collector2 = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut ga_client = WebAuthnClient::new(session2, TestInteraction, collector2);
+            let mut ga_client = WebAuthnClient::new(session2, TestInteraction::new(), collector2);
 
             let salt = b"test PRF salt input".to_vec();
             let get_options = PublicKeyCredentialRequestOptions {
@@ -2497,11 +2515,11 @@ mod fido {
             drop(ga_client);
 
             // ── Second authentication: same salt → same secret ───────────────
-            power_cycle_nfc().expect("power_cycle_nfc before GA2");
+            reset_up_budget();
 
             let session3 = open();
             let collector3 = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut ga_client2 = WebAuthnClient::new(session3, TestInteraction, collector3);
+            let mut ga_client2 = WebAuthnClient::new(session3, TestInteraction::new(), collector3);
 
             let get_options2 = PublicKeyCredentialRequestOptions {
                 challenge: vec![0x32; 32],
@@ -2545,6 +2563,7 @@ mod fido {
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_webauthn_large_blob(#[case] tc: TestConnection) {
         use yubikit::webauthn::extensions::large_blob::{
             AuthenticationInput, LargeBlobSupport, RegistrationInput,
@@ -2560,7 +2579,6 @@ mod fido {
             ResidentKeyRequirement, UserVerificationRequirement, WebAuthnClient,
         };
 
-        require_transport!(Transport::Nfc);
         require_fido_pin!();
         with_fido_session!(tc, |open, info| {
             if info.options.get("largeBlobs") != Some(&true) {
@@ -2568,11 +2586,11 @@ mod fido {
             }
 
             // ── Registration with largeBlob support required ─────────────────
-            power_cycle_nfc().expect("power_cycle_nfc before MC");
+            reset_up_budget();
 
             let session = open();
             let collector = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut client = WebAuthnClient::new(session, TestInteraction, collector);
+            let mut client = WebAuthnClient::new(session, TestInteraction::new(), collector);
 
             let create_options = PublicKeyCredentialCreationOptions {
                 rp: PublicKeyCredentialRpEntity {
@@ -2624,11 +2642,12 @@ mod fido {
 
             // ── Write blob ───────────────────────────────────────────────────
             let blob_data = b"hello from largeBlob test!".to_vec();
-            power_cycle_nfc().expect("power_cycle_nfc before write");
+            reset_up_budget();
 
             let session2 = open();
             let collector2 = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut write_client = WebAuthnClient::new(session2, TestInteraction, collector2);
+            let mut write_client =
+                WebAuthnClient::new(session2, TestInteraction::new(), collector2);
 
             let write_options = PublicKeyCredentialRequestOptions {
                 challenge: vec![0x41; 32],
@@ -2661,11 +2680,11 @@ mod fido {
             drop(write_client);
 
             // ── Read blob back ───────────────────────────────────────────────
-            power_cycle_nfc().expect("power_cycle_nfc before read");
+            reset_up_budget();
 
             let session3 = open();
             let collector3 = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut read_client = WebAuthnClient::new(session3, TestInteraction, collector3);
+            let mut read_client = WebAuthnClient::new(session3, TestInteraction::new(), collector3);
 
             let read_options = PublicKeyCredentialRequestOptions {
                 challenge: vec![0x42; 32],
@@ -2704,6 +2723,7 @@ mod fido {
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
     #[case::scp11b(TestConnection::SmartCardScp11b)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_webauthn_cred_props(#[case] tc: TestConnection) {
         use yubikit::webauthn::extensions::RegistrationExtensionInputs;
         use yubikit::webauthn::{
@@ -2713,17 +2733,16 @@ mod fido {
             ResidentKeyRequirement, WebAuthnClient,
         };
 
-        require_transport!(Transport::Nfc);
         require_fido_pin!();
         with_fido_session!(tc, |open, info| {
             let _ = &info; // available if needed for feature checks
 
             // ── Non-resident credential ──────────────────────────────────────
-            power_cycle_nfc().expect("power_cycle_nfc before MC (non-rk)");
+            reset_up_budget();
 
             let session = open();
             let collector = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut client = WebAuthnClient::new(session, TestInteraction, collector);
+            let mut client = WebAuthnClient::new(session, TestInteraction::new(), collector);
 
             let create_options = PublicKeyCredentialCreationOptions {
                 rp: PublicKeyCredentialRpEntity {
@@ -2771,11 +2790,11 @@ mod fido {
             drop(client);
 
             // ── Resident credential ──────────────────────────────────────────
-            power_cycle_nfc().expect("power_cycle_nfc before MC (rk)");
+            reset_up_budget();
 
             let session2 = open();
             let collector2 = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut client2 = WebAuthnClient::new(session2, TestInteraction, collector2);
+            let mut client2 = WebAuthnClient::new(session2, TestInteraction::new(), collector2);
 
             let create_options_rk = PublicKeyCredentialCreationOptions {
                 rp: PublicKeyCredentialRpEntity {
@@ -2829,6 +2848,7 @@ mod fido {
     #[rstest]
     #[case::smartcard(TestConnection::SmartCard)]
     #[case::scp(TestConnection::SmartCardScp11b)]
+    #[case::usb_hid(TestConnection::UsbHid)]
     fn test_webauthn_preview_sign(#[case] tc: TestConnection) {
         use sha2::{Digest, Sha256};
         use yubikit::webauthn::extensions::RegistrationExtensionInputs;
@@ -2840,7 +2860,6 @@ mod fido {
             WebAuthnClient,
         };
 
-        require_transport!(Transport::Nfc);
         require_fido_pin!();
         with_fido_session!(tc, |open, info| {
             if !info.extensions.iter().any(|e| e == "previewSign") {
@@ -2851,11 +2870,11 @@ mod fido {
             const ALG_ESP256_SPLIT_ARKG: i64 = -65539;
 
             // ── Registration with previewSign (key generation) ────────────────
-            power_cycle_nfc().expect("power_cycle_nfc before MC");
+            reset_up_budget();
 
             let session = open();
             let collector = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
-            let mut client = WebAuthnClient::new(session, TestInteraction, collector);
+            let mut client = WebAuthnClient::new(session, TestInteraction::new(), collector);
 
             let create_options = PublicKeyCredentialCreationOptions {
                 rp: PublicKeyCredentialRpEntity {
@@ -2932,7 +2951,7 @@ mod fido {
             let ph_data = Sha256::digest(message);
 
             drop(client);
-            power_cycle_nfc().expect("power_cycle_nfc before GA");
+            reset_up_budget();
 
             let mut session2 = open();
 
