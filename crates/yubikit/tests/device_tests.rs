@@ -46,7 +46,7 @@ macro_rules! skip_if_needed {
 /// Skip the current test with a printed reason.
 macro_rules! skip {
     ($($arg:tt)*) => {{
-        eprintln!("SKIP: {}", format_args!($($arg)*));
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m {}", format_args!($($arg)*));
         return;
     }};
 }
@@ -1154,7 +1154,7 @@ mod openpgp {
                 assert!(challenge.iter().any(|&b| b != 0));
             }
             Err(OpenPgpError::NotSupported(_)) => {
-                eprintln!("SKIP: get_challenge not supported");
+                skip!("get_challenge not supported");
             }
             Err(e) => {
                 panic!("get_challenge failed: {e}");

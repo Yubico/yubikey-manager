@@ -155,17 +155,20 @@ The test suite automatically detects whether the device is connected over USB or
 Tests that require a physical USB connection (e.g., OTP/FIDO HID) are automatically
 skipped when the device is connected over NFC.
 
-    $ YUBIKEY_SERIAL=123456 cargo test -p yubikit --test device_tests -- --test-threads=1
+    $ YUBIKEY_SERIAL=123456 cargo test -p yubikit --test device_tests -- --test-threads=1 --no-capture
 
 For devices without a serial number, use `YUBIKEY_NO_SERIAL=1` instead:
 
-    $ YUBIKEY_NO_SERIAL=1 cargo test -p yubikit --test device_tests -- --test-threads=1
+    $ YUBIKEY_NO_SERIAL=1 cargo test -p yubikit --test device_tests -- --test-threads=1  --no-capture
 
 The same command works whether the device is connected via USB or via an NFC reader.
-No additional environment variables are needed for NFC devices.
 
-The transport variant is visible in each test name (e.g., `::smart_card`, `::scp11b`,
-`::usb_hid`), and skipped tests print the reason why they were skipped.
+You can target specific tests by specifying the test name after the command,
+eg. append "fido" to only run the FIDO tests.
+
+NOTE: --test-threads 1 is required as the device tests interact with a connected
+YubiKey and cannot be run in parallel. --no-capture displays output showing which
+tests were skipped, and why.
 
 === Python device tests
 
