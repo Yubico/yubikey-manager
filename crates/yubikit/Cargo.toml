@@ -49,7 +49,7 @@ hidapi = { version = "2", default-features = false, features = ["linux-static-hi
 hidapi = { version = "2", optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Win32_Devices_DeviceAndDriverInstallation",
     "Win32_Devices_HumanInterfaceDevice",
 ] }
@@ -63,7 +63,7 @@ ml-kem = "0.3"
 p256 = { version = "0.13", features = ["ecdsa", "hash2curve", "pkcs8"] }
 pcsc = "2"
 rsa = "0.9"
-rstest = "0.25"
+rstest = "0.26"
 sha2 = { version = "0.10", features = ["oid"] }
 
 [[example]]

@@ -906,7 +906,10 @@ fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>, CliError> {
                     "Key" if in_key_package => {
                         for attr in e.attributes().flatten() {
                             let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
-                            let val = attr.unescape_value().unwrap_or_default().to_string();
+                            let val = attr
+                                .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                                .unwrap_or_default()
+                                .to_string();
                             match local_name(key.as_bytes()).as_str() {
                                 "Id" => current_id = Some(val),
                                 "Algorithm" => current_algorithm = Some(val),
@@ -924,7 +927,10 @@ fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>, CliError> {
                         _in_response_format = true;
                         for attr in e.attributes().flatten() {
                             let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
-                            let val = attr.unescape_value().unwrap_or_default().to_string();
+                            let val = attr
+                                .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                                .unwrap_or_default()
+                                .to_string();
                             if local_name(key.as_bytes()) == "Length" {
                                 current_response_length = val.parse().ok();
                             }
@@ -950,7 +956,10 @@ fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>, CliError> {
                 }
             }
             Ok(Event::Text(ref e)) => {
-                let text = e.unescape().unwrap_or_default().to_string();
+                let text = e
+                    .xml_content(quick_xml::XmlVersion::Implicit1_0)
+                    .unwrap_or_default()
+                    .to_string();
                 if in_plain_value && in_secret {
                     current_secret_b64 = Some(text.clone());
                 }

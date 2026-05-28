@@ -19,8 +19,8 @@ hex = "0.4.3"
 ctrlc = "3.5.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-service = "0.7"
-windows-sys = { version = "0.59", features = [
+windows-service = "0.8"
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Security_Authorization",
