@@ -8,11 +8,47 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Once;
 
 use fernet::Fernet;
+use keyring_core::Entry;
 
 const KEYRING_SERVICE: &str = "ykman";
 const KEYRING_USERNAME: &str = "wrap_key";
+
+/// Initialize the platform-specific credential store (once).
+fn init_keyring_store() {
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        #[cfg(target_os = "linux")]
+        {
+            let store = dbus_secret_service_keyring_store::Store::new()
+                .expect("Failed to initialize Secret Service keyring store");
+            keyring_core::set_default_store(store);
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let store = apple_native_keyring_store::Store::new()
+                .expect("Failed to initialize Apple keyring store");
+            keyring_core::set_default_store(store);
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let store = windows_native_keyring_store::Store::new()
+                .expect("Failed to initialize Windows keyring store");
+            keyring_core::set_default_store(store);
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        {
+            let store = keyring_core::sample::Store::new()
+                .expect("Failed to initialize sample keyring store");
+            keyring_core::set_default_store(store);
+        }
+    });
+}
 
 fn data_dir() -> PathBuf {
     dirs::data_dir()
@@ -20,7 +56,7 @@ fn data_dir() -> PathBuf {
         .join("ykman")
 }
 
-fn generate_and_store_key(entry: &keyring::Entry) -> Result<Fernet, String> {
+fn generate_and_store_key(entry: &Entry) -> Result<Fernet, String> {
     let key = Fernet::generate_key();
     entry
         .set_password(&key)
@@ -75,7 +111,9 @@ impl AppData {
             return Ok(());
         }
 
-        let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USERNAME)
+        init_keyring_store();
+
+        let entry = Entry::new(KEYRING_SERVICE, KEYRING_USERNAME)
             .map_err(|e| format!("Keyring error: {e}"))?;
 
         let fernet = match entry.get_password() {
@@ -86,7 +124,7 @@ impl AppData {
                     generate_and_store_key(&entry)?
                 }
             },
-            Err(keyring::Error::NoEntry) => generate_and_store_key(&entry)?,
+            Err(keyring_core::Error::NoEntry) => generate_and_store_key(&entry)?,
             Err(e) => return Err(format!("Keyring error: {e}")),
         };
 

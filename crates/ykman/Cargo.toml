@@ -27,13 +27,16 @@ dirs = "6"
 fernet = { version = "0.2", default-features = false, features = ["rustcrypto"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+keyring-core = "1"
+dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3", features = ["apple-native"] }
+keyring-core = "1"
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = { version = "3", features = ["windows-native"] }
+keyring-core = "1"
+windows-native-keyring-store = "1"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
@@ -43,7 +46,7 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [target.'cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))'.dependencies]
-keyring = "3"
+keyring-core = { version = "1", features = ["sample"] }
 
 [dev-dependencies]
 base64 = "0.22.1"
