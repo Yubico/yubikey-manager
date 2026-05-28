@@ -8,6 +8,89 @@ rust-version = "1.85"
 license = "Apache-2.0"
 repository = "https://github.com/Yubico/yubikey-manager"
 
+[workspace.dependencies]
+# Internal crates
+yubikit = { version = "0.1.0", path = "crates/yubikit", default-features = false }
+ykman = { version = "6.0.0-dev.0", path = "crates/ykman", default-features = false }
+
+# Cryptography
+aes = "0.8"
+aes-gcm = "0.10"
+cbc = { version = "0.1", features = ["alloc"] }
+cipher = "0.4"
+cmac = "0.7"
+des = "0.8"
+ecdsa = { version = "0.16", features = ["verifying"] }
+ed25519-dalek = "2"
+elliptic-curve = { version = "0.13", features = ["sec1"] }
+hkdf = "0.12"
+hmac = "0.12"
+p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+p384 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+pbkdf2 = { version = "0.12", features = ["hmac"] }
+pkcs8 = { version = "0.10.2", features = ["encryption", "pem"] }
+rsa = "0.9"
+sha1 = "0.10"
+sha2 = "0.10"
+signature = { version = "2.2", features = ["std"] }
+subtle = "2"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+zeroize = { version = "1", features = ["derive"] }
+
+# Serialization
+base32 = "0.5"
+base64 = "0.22"
+hex = "0.4"
+quick-xml = "0.40"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Utilities
+chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3.5"
+dirs = "6"
+fernet = { version = "0.2", default-features = false, features = ["rustcrypto"] }
+flate2 = "1"
+getrandom = "0.3"
+log = "0.4"
+thiserror = "2"
+x509-cert = { version = "0.2.5", features = ["builder", "pem"] }
+
+# Hardware
+hidapi = { version = "2", default-features = false }
+pcsc = "2"
+
+# Keyring
+keyring-core = "1"
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
+windows-native-keyring-store = "1"
+
+# Platform
+windows = "0.62"
+windows-service = "0.8"
+windows-sys = "0.61"
+
+# Python
+pyo3 = { version = "0.28", features = ["extension-module"] }
+
+# CLI
+p12-keystore = "0.2"
+rpassword = "7"
+
+# Testing
+assert_cmd = "2"
+ml-dsa = "0.1"
+ml-kem = "0.3"
+predicates = "3"
+rstest = "0.26"
+serial_test = "3"
+tempfile = "3"
+
+# Build
+winresource = "0.1"
+
 [workspace.lints.clippy]
 too_many_arguments = "allow"
 type_complexity = "allow"

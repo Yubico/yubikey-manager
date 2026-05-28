@@ -18,30 +18,30 @@ default = ["hardware"]
 hardware = ["yubikit/hardware"]
 
 [dependencies]
-yubikit = { version = "0.1.0", path = "../yubikit", default-features = false }
-chrono = "0.4"
-clap = { version = "4", features = ["derive"] }
-ctrlc = "3.5.2"
-hex = "0.4.3"
-log = { version = "0.4", features = ["std"] }
-sha2 = "0.10"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
-dirs = "6"
-fernet = { version = "0.2", default-features = false, features = ["rustcrypto"] }
+yubikit.workspace = true
+chrono.workspace = true
+clap.workspace = true
+ctrlc.workspace = true
+hex.workspace = true
+log = { workspace = true, features = ["std"] }
+sha2.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+dirs.workspace = true
+fernet.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring-core = "1"
-dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
+keyring-core.workspace = true
+dbus-secret-service-keyring-store.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring-core = "1"
-apple-native-keyring-store = { version = "1", features = ["keychain"] }
+keyring-core.workspace = true
+apple-native-keyring-store.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring-core = "1"
-windows-native-keyring-store = "1"
-windows-sys = { version = "0.61", features = [
+keyring-core.workspace = true
+windows-native-keyring-store.workspace = true
+windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
     "Win32_Security_WinTrust",
@@ -50,10 +50,10 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [target.'cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))'.dependencies]
-keyring-core = { version = "1", features = ["sample"] }
+keyring-core = { workspace = true, features = ["sample"] }
 
 [dev-dependencies]
-base64 = "0.22.1"
+base64.workspace = true
 
 [lints]
 workspace = true

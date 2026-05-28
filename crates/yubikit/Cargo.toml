@@ -15,60 +15,60 @@ default = ["hardware"]
 hardware = ["dep:hidapi", "dep:pcsc"]
 
 [dependencies]
-aes = "0.8"
-aes-gcm = "0.10"
-base32 = "0.5"
-base64 = "0.22"
-cbc = { version = "0.1", features = ["alloc"] }
-cmac = "0.7"
-cipher = "0.4"
-getrandom = "0.3"
-hkdf = "0.12"
-hmac = "0.12"
-log = { version = "0.4", features = ["max_level_trace", "release_max_level_trace"] }
-pbkdf2 = { version = "0.12", features = ["hmac"] }
-pcsc = { version = "2", optional = true }
-sha1 = "0.10"
-sha2 = "0.10"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-subtle = "2"
-elliptic-curve = { version = "0.13", features = ["sec1"] }
-p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
-p384 = { version = "0.13", features = ["ecdh", "ecdsa"] }
-rsa = "0.9"
-ed25519-dalek = "2"
-x25519-dalek = { version = "2", features = ["static_secrets"] }
-des = "0.8"
-flate2 = "1"
-thiserror = "2"
-zeroize = { version = "1", features = ["derive"] }
-x509-cert = { version = "0.2.5", features = ["builder", "pem"] }
-signature = { version = "2.2.0", features = ["std"] }
+aes.workspace = true
+aes-gcm.workspace = true
+base32.workspace = true
+base64.workspace = true
+cbc.workspace = true
+cmac.workspace = true
+cipher.workspace = true
+getrandom.workspace = true
+hkdf.workspace = true
+hmac.workspace = true
+log = { workspace = true, features = ["max_level_trace", "release_max_level_trace"] }
+pbkdf2.workspace = true
+pcsc = { workspace = true, optional = true }
+sha1.workspace = true
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+subtle.workspace = true
+elliptic-curve.workspace = true
+p256.workspace = true
+p384.workspace = true
+rsa.workspace = true
+ed25519-dalek.workspace = true
+x25519-dalek.workspace = true
+des.workspace = true
+flate2.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+x509-cert.workspace = true
+signature.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-hidapi = { version = "2", default-features = false, features = ["linux-static-hidraw"], optional = true }
+hidapi = { workspace = true, default-features = false, features = ["linux-static-hidraw"], optional = true }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-hidapi = { version = "2", optional = true }
+hidapi = { workspace = true, default-features = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = [
+windows = { workspace = true, features = [
     "Win32_Devices_DeviceAndDriverInstallation",
     "Win32_Devices_HumanInterfaceDevice",
 ] }
 
 [dev-dependencies]
-ecdsa = { version = "0.16", features = ["verifying"] }
-elliptic-curve = { version = "0.13", features = ["pkcs8", "sec1"] }
-getrandom = "0.3"
-ml-dsa = "0.1"
-ml-kem = "0.3"
-p256 = { version = "0.13", features = ["ecdsa", "hash2curve", "pkcs8"] }
-pcsc = "2"
-rsa = "0.9"
-rstest = "0.26"
-sha2 = { version = "0.10", features = ["oid"] }
+ecdsa.workspace = true
+elliptic-curve = { workspace = true, features = ["pkcs8", "sec1"] }
+getrandom.workspace = true
+ml-dsa.workspace = true
+ml-kem.workspace = true
+p256 = { workspace = true, features = ["ecdsa", "hash2curve", "pkcs8"] }
+pcsc.workspace = true
+rsa.workspace = true
+rstest.workspace = true
+sha2 = { workspace = true, features = ["oid"] }
 
 [[example]]
 name = "ctap2_selection"

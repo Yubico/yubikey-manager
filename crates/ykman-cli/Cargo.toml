@@ -22,41 +22,41 @@ default = ["hardware"]
 hardware = ["ykman/hardware", "yubikit/hardware"]
 
 [dependencies]
-ykman = { version = "6.0.0-dev.0", path = "../ykman", default-features = false }
-yubikit = { version = "0.1.0", path = "../yubikit", default-features = false }
-clap = { version = "4", features = ["derive"] }
-chrono = "0.4"
-getrandom = "0.3"
-hex = "0.4.3"
-base32 = "0.5"
-base64 = "0.22.1"
-log = { version = "0.4", features = ["std"] }
-elliptic-curve = { version = "0.13", features = ["pkcs8", "sec1"] }
-p256 = { version = "0.13", features = ["pkcs8", "ecdsa"] }
-p384 = { version = "0.13", features = ["pkcs8", "ecdsa"] }
-sha2 = "0.10"
-quick-xml = "0.40"
-rpassword = "7"
-x509-cert = { version = "0.2.5", features = ["pem"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
-ctrlc = "3.5.2"
-flate2 = "1"
-pkcs8 = { version = "0.10.2", features = ["encryption", "pem"] }
-p12-keystore = "0.2.1"
+ykman.workspace = true
+yubikit.workspace = true
+clap.workspace = true
+chrono.workspace = true
+getrandom.workspace = true
+hex.workspace = true
+base32.workspace = true
+base64.workspace = true
+log = { workspace = true, features = ["std"] }
+elliptic-curve = { workspace = true, features = ["pkcs8", "sec1"] }
+p256 = { workspace = true, features = ["pkcs8", "ecdsa"] }
+p384 = { workspace = true, features = ["pkcs8", "ecdsa"] }
+sha2.workspace = true
+quick-xml.workspace = true
+rpassword.workspace = true
+x509-cert = { workspace = true, features = ["pem"] }
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+ctrlc.workspace = true
+flate2.workspace = true
+pkcs8.workspace = true
+p12-keystore.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell"] }
 
 [build-dependencies]
-flate2 = "1"
-winresource = "0.1"
+flate2.workspace = true
+winresource.workspace = true
 
 [dev-dependencies]
-assert_cmd = "2"
-predicates = "3"
-serial_test = "3"
-tempfile = "3"
+assert_cmd.workspace = true
+predicates.workspace = true
+serial_test.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true
