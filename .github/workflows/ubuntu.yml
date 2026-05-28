@@ -41,3 +41,10 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: dist
+
+  deny:
+    runs-on: ubuntu-latest
+    name: cargo deny
+    steps:
+      - uses: actions/checkout@v6
+      - uses: EmbarkStudios/cargo-deny-action@v2
