@@ -1,9 +1,13 @@
 [package]
 name = "yubikit"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "YubiKey management library"
-license = "Apache-2.0"
+keywords = ["yubikey", "fido2", "webauthn", "smartcard", "security"]
+categories = ["authentication", "cryptography", "hardware-support"]
 autoexamples = false
 
 [features]

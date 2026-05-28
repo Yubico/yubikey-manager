@@ -1,9 +1,13 @@
 [package]
 name = "ykman"
 version = "6.0.0-dev.0"
-edition = "2024"
-description = "YubiKey Manager library (Rust)"
-license = "Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "YubiKey Manager library"
+keywords = ["yubikey", "fido2", "oath", "piv", "security"]
+categories = ["authentication", "cryptography", "hardware-support"]
 
 [lib]
 name = "ykman"
@@ -14,7 +18,7 @@ default = ["hardware"]
 hardware = ["yubikit/hardware"]
 
 [dependencies]
-yubikit = { path = "../yubikit", default-features = false }
+yubikit = { version = "0.1.0", path = "../yubikit", default-features = false }
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3.5.2"

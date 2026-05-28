@@ -1,9 +1,13 @@
 [package]
 name = "ykman-cli"
 version = "6.0.0-dev.0"
-edition = "2024"
-description = "YubiKey Manager CLI (Rust)"
-license = "Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "YubiKey Manager CLI"
+keywords = ["yubikey", "cli", "fido2", "oath", "security"]
+categories = ["authentication", "command-line-utilities"]
 
 [[bin]]
 name = "ykman"
@@ -18,8 +22,8 @@ default = ["hardware"]
 hardware = ["ykman/hardware", "yubikit/hardware"]
 
 [dependencies]
-ykman = { path = "../ykman", default-features = false }
-yubikit = { path = "../yubikit", default-features = false }
+ykman = { version = "6.0.0-dev.0", path = "../ykman", default-features = false }
+yubikit = { version = "0.1.0", path = "../yubikit", default-features = false }
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 getrandom = "0.3"
