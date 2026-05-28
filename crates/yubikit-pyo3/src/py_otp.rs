@@ -26,7 +26,7 @@ use crate::py_bridge::{BoxedOtpConnection, extract_otp_connection, restore_otp_c
 #[pyclass(unsendable)]
 pub struct OtpProtocol {
     inner: Option<RustOtpProtocol<BoxedOtpConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl OtpProtocol {
@@ -76,12 +76,12 @@ impl OtpProtocol {
         slot: u8,
         data: Option<&[u8]>,
         expected_len: Option<i32>,
-        event: Option<PyObject>,
-        on_keepalive: Option<PyObject>,
+        event: Option<Py<PyAny>>,
+        on_keepalive: Option<Py<PyAny>>,
     ) -> PyResult<Option<Vec<u8>>> {
         // Bridge Python Event to cancel closure
         let cancel_fn = || {
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 if let Some(ref evt) = event
                     && let Ok(is_set) = evt.call_method0(py, "is_set")
                     && is_set.extract::<bool>(py).unwrap_or(false)
@@ -100,7 +100,7 @@ impl OtpProtocol {
         // Build keepalive callback
         let keepalive_fn = |status: u8| {
             if let Some(ref cb) = on_keepalive {
-                Python::with_gil(|py| {
+                Python::attach(|py| {
                     let _ = cb.call1(py, (status,));
                 });
             }
@@ -115,7 +115,7 @@ impl OtpProtocol {
             .send_and_receive_with_cancel(slot, data, expected_len, cancel_ref, keepalive_ref)
             .map_err(|e| match e {
                 OtpError::CommandRejected(msg) => {
-                    Python::with_gil(|py| match py.import("yubikit.core.otp") {
+                    Python::attach(|py| match py.import("yubikit.core.otp") {
                         Ok(module) => match module.getattr("CommandRejectedError") {
                             Ok(cls) => match cls.call1((msg.clone(),)) {
                                 Ok(exc) => PyErr::from_value(exc),
@@ -126,7 +126,7 @@ impl OtpProtocol {
                         Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
                     })
                 }
-                OtpError::Timeout(msg) => Python::with_gil(|py| match py.import("yubikit.core") {
+                OtpError::Timeout(msg) => Python::attach(|py| match py.import("yubikit.core") {
                     Ok(module) => match module.getattr("TimeoutError") {
                         Ok(cls) => match cls.call1((msg.clone(),)) {
                             Ok(exc) => PyErr::from_value(exc),

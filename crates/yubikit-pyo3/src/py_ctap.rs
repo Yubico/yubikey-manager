@@ -38,20 +38,20 @@ fn ctap_err<E: std::error::Error + Send + Sync + 'static>(e: yubikit::ctap::Ctap
 // Keepalive / cancel helpers
 // ---------------------------------------------------------------------------
 
-fn make_keepalive_fn(on_keepalive: &Option<PyObject>) -> impl FnMut(u8) + '_ {
+fn make_keepalive_fn(on_keepalive: &Option<Py<PyAny>>) -> impl FnMut(u8) + '_ {
     move |status: u8| {
         if let Some(cb) = on_keepalive {
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 let _ = cb.call1(py, (status,));
             });
         }
     }
 }
 
-pub(crate) fn make_cancel_fn(event: &Option<PyObject>) -> impl Fn() -> bool + '_ {
+pub(crate) fn make_cancel_fn(event: &Option<Py<PyAny>>) -> impl Fn() -> bool + '_ {
     move || {
         if let Some(evt) = event {
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 evt.call_method0(py, "is_set")
                     .and_then(|v| v.extract::<bool>(py))
                     .unwrap_or(false)
@@ -66,7 +66,7 @@ pub(crate) fn make_cancel_fn(event: &Option<PyObject>) -> impl Fn() -> bool + '_
 // Info → Python dict
 // ---------------------------------------------------------------------------
 
-fn info_to_py(py: Python<'_>, info: &Info) -> PyResult<PyObject> {
+fn info_to_py(py: Python<'_>, info: &Info) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
 
     dict.set_item("versions", &info.versions)?;
@@ -128,7 +128,7 @@ fn info_to_py(py: Python<'_>, info: &Info) -> PyResult<PyObject> {
     Ok(dict.into())
 }
 
-fn options_to_py(py: Python<'_>, options: &BTreeMap<String, bool>) -> PyResult<PyObject> {
+fn options_to_py(py: Python<'_>, options: &BTreeMap<String, bool>) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     for (k, v) in options {
         dict.set_item(k, *v)?;
@@ -136,7 +136,7 @@ fn options_to_py(py: Python<'_>, options: &BTreeMap<String, bool>) -> PyResult<P
     Ok(dict.into())
 }
 
-fn algorithms_to_py(py: Python<'_>, info: &Info) -> PyResult<PyObject> {
+fn algorithms_to_py(py: Python<'_>, info: &Info) -> PyResult<Py<PyAny>> {
     let list = PyList::empty(py);
     for alg in &info.algorithms {
         let d = PyDict::new(py);
@@ -150,7 +150,7 @@ fn algorithms_to_py(py: Python<'_>, info: &Info) -> PyResult<PyObject> {
 fn certifications_to_py(
     py: Python<'_>,
     certs: &BTreeMap<String, cbor::Value>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     for (k, v) in certs {
         dict.set_item(k, cbor_value_to_py(py, v)?)?;
@@ -158,7 +158,7 @@ fn certifications_to_py(
     Ok(dict.into())
 }
 
-fn cbor_value_to_py(py: Python<'_>, value: &cbor::Value) -> PyResult<PyObject> {
+fn cbor_value_to_py(py: Python<'_>, value: &cbor::Value) -> PyResult<Py<PyAny>> {
     match value {
         cbor::Value::Int(n) => Ok(n.into_pyobject(py)?.into_any().unbind()),
         cbor::Value::Bytes(b) => Ok(PyBytes::new(py, b).into_any().unbind()),
@@ -188,7 +188,7 @@ fn cbor_value_to_py(py: Python<'_>, value: &cbor::Value) -> PyResult<PyObject> {
 #[pyclass(name = "Ctap2SessionCcid", unsendable)]
 pub struct PyCtap2SessionCcid {
     session: Option<Ctap2Session<BoxedSmartCardConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl PyCtap2SessionCcid {
@@ -223,7 +223,7 @@ impl PyCtap2SessionCcid {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         let ctap = if let Some(params) = scp_key_params {
             let scp_params = crate::py_bridge::scp_key_params_from_py(params)?;
@@ -267,8 +267,8 @@ impl PyCtap2SessionCcid {
     #[pyo3(signature = (event=None, on_keepalive=None))]
     fn selection(
         &mut self,
-        event: Option<PyObject>,
-        on_keepalive: Option<PyObject>,
+        event: Option<Py<PyAny>>,
+        on_keepalive: Option<Py<PyAny>>,
     ) -> PyResult<()> {
         let cancel_fn = make_cancel_fn(&event);
         let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
@@ -287,7 +287,7 @@ impl PyCtap2SessionCcid {
             .map_err(ctap2_err)
     }
 
-    fn get_info<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+    fn get_info<'py>(&mut self, py: Python<'py>) -> PyResult<Py<PyAny>> {
         let info = self.get_session_mut()?.get_info().map_err(ctap2_err)?;
         info_to_py(py, &info)
     }
@@ -298,8 +298,8 @@ impl PyCtap2SessionCcid {
         py: Python<'py>,
         cmd: u8,
         data: Option<&[u8]>,
-        event: Option<PyObject>,
-        on_keepalive: Option<PyObject>,
+        event: Option<Py<PyAny>>,
+        on_keepalive: Option<Py<PyAny>>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let cancel_fn = make_cancel_fn(&event);
         let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
@@ -322,7 +322,7 @@ impl PyCtap2SessionCcid {
     }
 
     #[pyo3(signature = (event=None, on_keepalive=None))]
-    fn reset(&mut self, event: Option<PyObject>, on_keepalive: Option<PyObject>) -> PyResult<()> {
+    fn reset(&mut self, event: Option<Py<PyAny>>, on_keepalive: Option<Py<PyAny>>) -> PyResult<()> {
         let cancel_fn = make_cancel_fn(&event);
         let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
         let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
@@ -344,7 +344,7 @@ impl PyCtap2SessionCcid {
 #[pyclass(name = "Ctap2SessionFido", unsendable)]
 pub struct PyCtap2SessionFido {
     session: Option<Ctap2Session<BoxedFidoConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl PyCtap2SessionFido {
@@ -375,7 +375,7 @@ impl PyCtap2SessionFido {
 impl PyCtap2SessionFido {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_fido_connection(connection)?;
         let ctap = CtapSession::new_fido(conn).map_err(|(e, conn)| {
             let _ = restore_fido_connection(connection, conn);
@@ -411,8 +411,8 @@ impl PyCtap2SessionFido {
     #[pyo3(signature = (event=None, on_keepalive=None))]
     fn selection(
         &mut self,
-        event: Option<PyObject>,
-        on_keepalive: Option<PyObject>,
+        event: Option<Py<PyAny>>,
+        on_keepalive: Option<Py<PyAny>>,
     ) -> PyResult<()> {
         let cancel_fn = make_cancel_fn(&event);
         let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
@@ -431,7 +431,7 @@ impl PyCtap2SessionFido {
             .map_err(ctap2_err)
     }
 
-    fn get_info<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+    fn get_info<'py>(&mut self, py: Python<'py>) -> PyResult<Py<PyAny>> {
         let info = self.get_session_mut()?.get_info().map_err(ctap2_err)?;
         info_to_py(py, &info)
     }
@@ -442,8 +442,8 @@ impl PyCtap2SessionFido {
         py: Python<'py>,
         cmd: u8,
         data: Option<&[u8]>,
-        event: Option<PyObject>,
-        on_keepalive: Option<PyObject>,
+        event: Option<Py<PyAny>>,
+        on_keepalive: Option<Py<PyAny>>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let cancel_fn = make_cancel_fn(&event);
         let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
@@ -466,7 +466,7 @@ impl PyCtap2SessionFido {
     }
 
     #[pyo3(signature = (event=None, on_keepalive=None))]
-    fn reset(&mut self, event: Option<PyObject>, on_keepalive: Option<PyObject>) -> PyResult<()> {
+    fn reset(&mut self, event: Option<Py<PyAny>>, on_keepalive: Option<Py<PyAny>>) -> PyResult<()> {
         let cancel_fn = make_cancel_fn(&event);
         let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
         let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
@@ -623,8 +623,8 @@ impl PyClientPinCcid {
         py: Python<'py>,
         permissions: Option<u8>,
         permissions_rpid: Option<&str>,
-        event: Option<PyObject>,
-        on_keepalive: Option<PyObject>,
+        event: Option<Py<PyAny>>,
+        on_keepalive: Option<Py<PyAny>>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let perms = permissions.map(Permissions::new);
         let cancel_fn = make_cancel_fn(&event);
@@ -748,8 +748,8 @@ impl PyClientPinFido {
         py: Python<'py>,
         permissions: Option<u8>,
         permissions_rpid: Option<&str>,
-        event: Option<PyObject>,
-        on_keepalive: Option<PyObject>,
+        event: Option<Py<PyAny>>,
+        on_keepalive: Option<Py<PyAny>>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let perms = permissions.map(Permissions::new);
         let cancel_fn = make_cancel_fn(&event);
@@ -776,7 +776,7 @@ impl PyClientPinFido {
 // Helper: typed CTAP2 results → Python dicts
 // ---------------------------------------------------------------------------
 
-fn rp_info_to_py(py: Python<'_>, info: &RpInfo) -> PyResult<PyObject> {
+fn rp_info_to_py(py: Python<'_>, info: &RpInfo) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     let rp_dict = PyDict::new(py);
     rp_dict.set_item("id", &info.rp.id)?;
@@ -788,7 +788,7 @@ fn rp_info_to_py(py: Python<'_>, info: &RpInfo) -> PyResult<PyObject> {
     Ok(dict.into())
 }
 
-fn credential_info_to_py(py: Python<'_>, info: &CredentialInfo) -> PyResult<PyObject> {
+fn credential_info_to_py(py: Python<'_>, info: &CredentialInfo) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     let user_dict = PyDict::new(py);
     user_dict.set_item("id", PyBytes::new(py, &info.user.id))?;
@@ -817,7 +817,7 @@ fn credential_info_to_py(py: Python<'_>, info: &CredentialInfo) -> PyResult<PyOb
 }
 
 fn py_to_credential_descriptor(obj: &Bound<'_, PyAny>) -> PyResult<PublicKeyCredentialDescriptor> {
-    let dict = obj.downcast::<PyDict>()?;
+    let dict = obj.cast::<PyDict>()?;
     let id = dict
         .get_item("id")?
         .ok_or_else(|| PyValueError::new_err("credential descriptor missing 'id'"))?
@@ -830,7 +830,7 @@ fn py_to_credential_descriptor(obj: &Bound<'_, PyAny>) -> PyResult<PublicKeyCred
 }
 
 fn py_to_user_entity(obj: &Bound<'_, PyAny>) -> PyResult<PublicKeyCredentialUserEntity> {
-    let dict = obj.downcast::<PyDict>()?;
+    let dict = obj.cast::<PyDict>()?;
     let id = dict
         .get_item("id")?
         .ok_or_else(|| PyValueError::new_err("user entity missing 'id'"))?
@@ -853,7 +853,7 @@ fn py_to_user_entity(obj: &Bound<'_, PyAny>) -> PyResult<PublicKeyCredentialUser
 fn enroll_sample_result_to_py(
     py: Python<'_>,
     result: &yubikit::ctap2::EnrollSampleResult,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item(4u32, PyBytes::new(py, &result.template_id))?;
     dict.set_item(5u32, result.last_sample_status)?;
@@ -864,7 +864,7 @@ fn enroll_sample_result_to_py(
 fn fingerprint_templates_to_py(
     py: Python<'_>,
     templates: &[yubikit::ctap2::FingerprintTemplate],
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     let list = PyList::empty(py);
     for t in templates {
@@ -940,7 +940,7 @@ impl PyCredentialManagementCcid {
         self.get_mut()?.get_metadata().map_err(ctap2_err)
     }
 
-    fn enumerate_rps<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+    fn enumerate_rps<'py>(&mut self, py: Python<'py>) -> PyResult<Py<PyAny>> {
         let rps = self.get_mut()?.enumerate_rps().map_err(ctap2_err)?;
         let list = PyList::empty(py);
         for rp in &rps {
@@ -949,7 +949,7 @@ impl PyCredentialManagementCcid {
         Ok(list.into())
     }
 
-    fn enumerate_creds<'py>(&mut self, py: Python<'py>, rp_id_hash: &[u8]) -> PyResult<PyObject> {
+    fn enumerate_creds<'py>(&mut self, py: Python<'py>, rp_id_hash: &[u8]) -> PyResult<Py<PyAny>> {
         let creds = self
             .get_mut()?
             .enumerate_creds(rp_id_hash)
@@ -1040,7 +1040,7 @@ impl PyCredentialManagementFido {
         self.get_mut()?.get_metadata().map_err(ctap2_err)
     }
 
-    fn enumerate_rps<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+    fn enumerate_rps<'py>(&mut self, py: Python<'py>) -> PyResult<Py<PyAny>> {
         let rps = self.get_mut()?.enumerate_rps().map_err(ctap2_err)?;
         let list = PyList::empty(py);
         for rp in &rps {
@@ -1049,7 +1049,7 @@ impl PyCredentialManagementFido {
         Ok(list.into())
     }
 
-    fn enumerate_creds<'py>(&mut self, py: Python<'py>, rp_id_hash: &[u8]) -> PyResult<PyObject> {
+    fn enumerate_creds<'py>(&mut self, py: Python<'py>, rp_id_hash: &[u8]) -> PyResult<Py<PyAny>> {
         let creds = self
             .get_mut()?
             .enumerate_creds(rp_id_hash)
@@ -1260,7 +1260,7 @@ impl PyBioEnrollmentCcid {
         Ok(())
     }
 
-    fn get_fingerprint_sensor_info<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+    fn get_fingerprint_sensor_info<'py>(&mut self, py: Python<'py>) -> PyResult<Py<PyAny>> {
         let info = self
             .get_mut()?
             .get_fingerprint_sensor_info()
@@ -1276,9 +1276,9 @@ impl PyBioEnrollmentCcid {
         &mut self,
         py: Python<'py>,
         timeout: Option<u32>,
-        event: Option<PyObject>,
-        on_keepalive: Option<PyObject>,
-    ) -> PyResult<PyObject> {
+        event: Option<Py<PyAny>>,
+        on_keepalive: Option<Py<PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
         let cancel_fn = make_cancel_fn(&event);
         let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
         let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
@@ -1304,9 +1304,9 @@ impl PyBioEnrollmentCcid {
         py: Python<'py>,
         template_id: &[u8],
         timeout: Option<u32>,
-        event: Option<PyObject>,
-        on_keepalive: Option<PyObject>,
-    ) -> PyResult<PyObject> {
+        event: Option<Py<PyAny>>,
+        on_keepalive: Option<Py<PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
         let cancel_fn = make_cancel_fn(&event);
         let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
         let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
@@ -1330,7 +1330,7 @@ impl PyBioEnrollmentCcid {
         self.get_mut()?.enroll_cancel().map_err(ctap2_err)
     }
 
-    fn enumerate_enrollments<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+    fn enumerate_enrollments<'py>(&mut self, py: Python<'py>) -> PyResult<Py<PyAny>> {
         let templates = self.get_mut()?.enumerate_enrollments().map_err(ctap2_err)?;
         fingerprint_templates_to_py(py, &templates)
     }
@@ -1393,7 +1393,7 @@ impl PyBioEnrollmentFido {
         Ok(())
     }
 
-    fn get_fingerprint_sensor_info<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+    fn get_fingerprint_sensor_info<'py>(&mut self, py: Python<'py>) -> PyResult<Py<PyAny>> {
         let info = self
             .get_mut()?
             .get_fingerprint_sensor_info()
@@ -1409,9 +1409,9 @@ impl PyBioEnrollmentFido {
         &mut self,
         py: Python<'py>,
         timeout: Option<u32>,
-        event: Option<PyObject>,
-        on_keepalive: Option<PyObject>,
-    ) -> PyResult<PyObject> {
+        event: Option<Py<PyAny>>,
+        on_keepalive: Option<Py<PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
         let cancel_fn = make_cancel_fn(&event);
         let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
         let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
@@ -1437,9 +1437,9 @@ impl PyBioEnrollmentFido {
         py: Python<'py>,
         template_id: &[u8],
         timeout: Option<u32>,
-        event: Option<PyObject>,
-        on_keepalive: Option<PyObject>,
-    ) -> PyResult<PyObject> {
+        event: Option<Py<PyAny>>,
+        on_keepalive: Option<Py<PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
         let cancel_fn = make_cancel_fn(&event);
         let mut keepalive_fn = make_keepalive_fn(&on_keepalive);
         let cancel_ref: Option<&dyn Fn() -> bool> = if event.is_some() {
@@ -1463,7 +1463,7 @@ impl PyBioEnrollmentFido {
         self.get_mut()?.enroll_cancel().map_err(ctap2_err)
     }
 
-    fn enumerate_enrollments<'py>(&mut self, py: Python<'py>) -> PyResult<PyObject> {
+    fn enumerate_enrollments<'py>(&mut self, py: Python<'py>) -> PyResult<Py<PyAny>> {
         let templates = self.get_mut()?.enumerate_enrollments().map_err(ctap2_err)?;
         fingerprint_templates_to_py(py, &templates)
     }

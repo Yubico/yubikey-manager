@@ -12,7 +12,7 @@ fn yubiotp_err<E: std::fmt::Debug + std::fmt::Display>(e: yubiotp::YubiOtpError<
     use pyo3::exceptions::*;
     match e {
         yubiotp::YubiOtpError::NotSupported(msg) => {
-            Python::with_gil(|py| match py.import("yubikit.core") {
+            Python::attach(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("NotSupportedError") {
                     Ok(cls) => match cls.call1((msg.clone(),)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -63,7 +63,7 @@ fn parse_ndef_type(ndef_type: u8) -> PyResult<NdefType> {
 #[pyclass(name = "YubiOtpSessionCcid", unsendable)]
 pub struct PyYubiOtpSessionCcid {
     session: Option<YubiOtpSession<BoxedSmartCardConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl PyYubiOtpSessionCcid {
@@ -88,7 +88,7 @@ impl PyYubiOtpSessionCcid {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
@@ -226,7 +226,7 @@ impl PyYubiOtpSessionCcid {
 #[pyclass(name = "YubiOtpSessionOtp", unsendable)]
 pub struct PyYubiOtpSessionOtp {
     session: Option<YubiOtpSession<BoxedOtpConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl PyYubiOtpSessionOtp {
@@ -247,7 +247,7 @@ impl PyYubiOtpSessionOtp {
 impl PyYubiOtpSessionOtp {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_otp_connection(connection)?;
         let session = YubiOtpSession::new_otp(conn).map_err(|(e, _)| yubiotp_err(e))?;
         Ok(Self {
@@ -353,12 +353,12 @@ impl PyYubiOtpSessionOtp {
         py: Python<'py>,
         slot: u8,
         challenge: &[u8],
-        event: Option<PyObject>,
-        on_keepalive: Option<PyObject>,
+        event: Option<Py<PyAny>>,
+        on_keepalive: Option<Py<PyAny>>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let s = parse_slot(slot)?;
         let cancel_fn = || {
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 if let Some(ref evt) = event
                     && let Ok(is_set) = evt.call_method0(py, "is_set")
                     && is_set.extract::<bool>(py).unwrap_or(false)
@@ -375,7 +375,7 @@ impl PyYubiOtpSessionOtp {
         };
         let keepalive_fn = |status: u8| {
             if let Some(ref cb) = on_keepalive {
-                Python::with_gil(|py| {
+                Python::attach(|py| {
                     let _ = cb.call1(py, (status,));
                 });
             }

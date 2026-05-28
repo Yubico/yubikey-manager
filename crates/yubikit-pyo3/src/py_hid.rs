@@ -8,7 +8,7 @@ fn hid_err(e: hidapi::HidError) -> PyErr {
     PyOSError::new_err(e.to_string())
 }
 
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 struct HidDeviceInfo {
     #[pyo3(get)]
@@ -110,7 +110,7 @@ fn ctap_err(e: yubikit::fido::FidoError) -> PyErr {
     PyOSError::new_err(e.to_string())
 }
 
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct FidoDeviceInfo {
     #[pyo3(get)]

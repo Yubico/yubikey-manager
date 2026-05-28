@@ -13,7 +13,7 @@ fn piv_err(e: piv::PivError) -> PyErr {
     match e {
         piv::PivError::Connection(sc) => smartcard_err(sc),
         piv::PivError::InvalidPin(retries) => {
-            Python::with_gil(|py| match py.import("yubikit.core") {
+            Python::attach(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("InvalidPinError") {
                     Ok(cls) => match cls.call1((retries,)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -32,19 +32,17 @@ fn piv_err(e: piv::PivError) -> PyErr {
                 }
             })
         }
-        piv::PivError::NotSupported(msg) => {
-            Python::with_gil(|py| match py.import("yubikit.core") {
-                Ok(module) => match module.getattr("NotSupportedError") {
-                    Ok(cls) => match cls.call1((msg.clone(),)) {
-                        Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyRuntimeError::new_err(msg),
-                    },
+        piv::PivError::NotSupported(msg) => Python::attach(|py| match py.import("yubikit.core") {
+            Ok(module) => match module.getattr("NotSupportedError") {
+                Ok(cls) => match cls.call1((msg.clone(),)) {
+                    Ok(exc) => PyErr::from_value(exc),
                     Err(_) => PyRuntimeError::new_err(msg),
                 },
                 Err(_) => PyRuntimeError::new_err(msg),
-            })
-        }
-        piv::PivError::InvalidData(msg) => Python::with_gil(|py| match py.import("yubikit.core") {
+            },
+            Err(_) => PyRuntimeError::new_err(msg),
+        }),
+        piv::PivError::InvalidData(msg) => Python::attach(|py| match py.import("yubikit.core") {
             Ok(module) => match module.getattr("BadResponseError") {
                 Ok(cls) => match cls.call1((msg.clone(),)) {
                     Ok(exc) => PyErr::from_value(exc),
@@ -91,7 +89,7 @@ fn parse_touch_policy(v: u8) -> PyResult<TouchPolicy> {
 #[pyclass]
 pub struct PivSession {
     inner: Option<RustPivSession<BoxedSmartCardConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl PivSession {
@@ -116,7 +114,7 @@ impl PivSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;

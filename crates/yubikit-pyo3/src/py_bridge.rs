@@ -86,11 +86,11 @@ pub type BoxedSmartCardConnection = PySmartCardConn;
 /// being a native Rust connection.
 pub struct PythonSmartCardConnection {
     /// The Python connection's `send_and_receive` bound method.
-    send_fn: PyObject,
+    send_fn: Py<PyAny>,
     transport: Transport,
 }
 
-/// `Py<PyAny>` / `PyObject` is Send+Sync by design in pyo3 ≥0.21 — it's a
+/// `Py<PyAny>` / `Py<PyAny>` is Send+Sync by design in pyo3 ≥0.21 — it's a
 /// GIL-independent handle. We only touch the Python object while holding the GIL.
 unsafe impl Send for PythonSmartCardConnection {}
 unsafe impl Sync for PythonSmartCardConnection {}
@@ -122,7 +122,7 @@ impl yubikit::core::Connection for PythonSmartCardConnection {
 
 impl SmartCardConnection for PythonSmartCardConnection {
     fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let apdu_bytes = PyBytes::new(py, apdu);
             let result = self
                 .send_fn
@@ -151,14 +151,14 @@ impl SmartCardConnection for PythonSmartCardConnection {
 /// bridge that calls `send_and_receive()` via the GIL.
 pub fn extract_smartcard_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedSmartCardConnection> {
     // Fast path: direct PyO3 PcscConnection pyclass
-    if let Ok(pcsc) = obj.downcast::<PcscConnection>() {
+    if let Ok(pcsc) = obj.cast::<PcscConnection>() {
         let conn = pcsc.borrow_mut().take_inner()?;
         return Ok(PySmartCardConn::Native(conn));
     }
 
     // Fast path: Python wrapper with ._native attribute holding a PcscConnection
     if let Ok(inner) = obj.getattr("_native")
-        && let Ok(pcsc) = inner.downcast::<PcscConnection>()
+        && let Ok(pcsc) = inner.cast::<PcscConnection>()
     {
         let conn = pcsc.borrow_mut().take_inner()?;
         return Ok(PySmartCardConn::Native(conn));
@@ -227,7 +227,7 @@ pub type BoxedFidoConnection = PyFidoConn;
 /// construction time. Used as the slow-path bridge when the connection is
 /// implemented in Python rather than being a native Rust connection.
 pub struct PythonFidoConnection {
-    call_fn: PyObject,
+    call_fn: Py<PyAny>,
     device_version: (u8, u8, u8),
     capabilities: CtapHidCapability,
 }
@@ -261,7 +261,7 @@ impl FidoConnectionTrait for PythonFidoConnection {
         _on_keepalive: Option<&mut dyn FnMut(u8)>,
         _cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, FidoError> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let data_bytes = PyBytes::new(py, data);
             let result = self
                 .call_fn
@@ -292,14 +292,14 @@ impl FidoConnectionTrait for PythonFidoConnection {
 /// that calls `call(cmd, data)` via the GIL.
 pub fn extract_fido_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedFidoConnection> {
     // Fast path: direct PyO3 FidoConnection pyclass
-    if let Ok(fido) = obj.downcast::<crate::py_hid::FidoConnection>() {
+    if let Ok(fido) = obj.cast::<crate::py_hid::FidoConnection>() {
         let conn = fido.borrow_mut().take_inner()?;
         return Ok(PyFidoConn::Native(conn));
     }
 
     // Fast path: Python wrapper with ._native attribute holding a FidoConnection
     if let Ok(inner) = obj.getattr("_native")
-        && let Ok(fido) = inner.downcast::<crate::py_hid::FidoConnection>()
+        && let Ok(fido) = inner.cast::<crate::py_hid::FidoConnection>()
     {
         let conn = fido.borrow_mut().take_inner()?;
         return Ok(PyFidoConn::Native(conn));
@@ -321,13 +321,13 @@ pub fn restore_smartcard_connection(
     match conn {
         PySmartCardConn::Native(inner) => {
             // Direct PyO3 PcscConnection
-            if let Ok(pcsc) = py_conn.downcast::<PcscConnection>() {
+            if let Ok(pcsc) = py_conn.cast::<PcscConnection>() {
                 pcsc.borrow_mut().restore_inner(inner);
                 return Ok(());
             }
             // Python wrapper with ._native attribute
             if let Ok(attr) = py_conn.getattr("_native")
-                && let Ok(pcsc) = attr.downcast::<PcscConnection>()
+                && let Ok(pcsc) = attr.cast::<PcscConnection>()
             {
                 pcsc.borrow_mut().restore_inner(inner);
                 return Ok(());
@@ -352,13 +352,13 @@ pub fn restore_fido_connection(
     match conn {
         PyFidoConn::Native(inner) => {
             // Direct PyO3 FidoConnection
-            if let Ok(fido) = py_conn.downcast::<crate::py_hid::FidoConnection>() {
+            if let Ok(fido) = py_conn.cast::<crate::py_hid::FidoConnection>() {
                 fido.borrow_mut().restore_inner(inner);
                 return Ok(());
             }
             // Python wrapper with ._native attribute
             if let Ok(attr) = py_conn.getattr("_native")
-                && let Ok(fido) = attr.downcast::<crate::py_hid::FidoConnection>()
+                && let Ok(fido) = attr.cast::<crate::py_hid::FidoConnection>()
             {
                 fido.borrow_mut().restore_inner(inner);
                 return Ok(());
@@ -414,8 +414,8 @@ pub type BoxedOtpConnection = PyOtpConn;
 
 /// A Rust `OtpConnection` backed by a Python connection object.
 pub struct PythonOtpConnection {
-    receive_fn: PyObject,
-    send_fn: PyObject,
+    receive_fn: Py<PyAny>,
+    send_fn: Py<PyAny>,
 }
 
 unsafe impl Send for PythonOtpConnection {}
@@ -439,20 +439,20 @@ impl yubikit::core::Connection for PythonOtpConnection {
 
 impl OtpConnectionTrait for PythonOtpConnection {
     fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let result = self
                 .receive_fn
                 .call0(py)
-                .map_err(|e| OtpError::BadResponse(e.to_string()))?;
+                .map_err(|e: PyErr| OtpError::BadResponse(e.to_string()))?;
             let bytes: Vec<u8> = result
                 .extract(py)
-                .map_err(|e| OtpError::BadResponse(e.to_string()))?;
+                .map_err(|e: PyErr| OtpError::BadResponse(e.to_string()))?;
             Ok(bytes)
         })
     }
 
     fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let py_bytes = PyBytes::new(py, data);
             self.send_fn
                 .call1(py, (py_bytes,))
@@ -470,14 +470,14 @@ impl OtpConnectionTrait for PythonOtpConnection {
 /// **Slow path**: wrap the Python object in a `PythonOtpConnection` bridge.
 pub fn extract_otp_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedOtpConnection> {
     // Direct PyO3 OtpConnection pyclass
-    if let Ok(otp) = obj.downcast::<crate::py_hid::OtpConnection>() {
+    if let Ok(otp) = obj.cast::<crate::py_hid::OtpConnection>() {
         let conn = otp.borrow_mut().take_inner()?;
         return Ok(PyOtpConn::Native(conn));
     }
 
     // Python wrapper with ._native attribute holding an OtpConnection
     if let Ok(inner) = obj.getattr("_native")
-        && let Ok(otp) = inner.downcast::<crate::py_hid::OtpConnection>()
+        && let Ok(otp) = inner.cast::<crate::py_hid::OtpConnection>()
     {
         let conn = otp.borrow_mut().take_inner()?;
         return Ok(PyOtpConn::Native(conn));
@@ -495,13 +495,13 @@ pub fn restore_otp_connection(
     match conn {
         PyOtpConn::Native(inner) => {
             // Direct PyO3 OtpConnection
-            if let Ok(otp) = py_conn.downcast::<crate::py_hid::OtpConnection>() {
+            if let Ok(otp) = py_conn.cast::<crate::py_hid::OtpConnection>() {
                 otp.borrow_mut().restore_inner(inner);
                 return Ok(());
             }
             // Python wrapper with ._native attribute
             if let Ok(attr) = py_conn.getattr("_native")
-                && let Ok(otp) = attr.downcast::<crate::py_hid::OtpConnection>()
+                && let Ok(otp) = attr.cast::<crate::py_hid::OtpConnection>()
             {
                 otp.borrow_mut().restore_inner(inner);
                 return Ok(());
@@ -530,7 +530,7 @@ pub fn fido_err(e: FidoError) -> PyErr {
 /// - Others → `RuntimeError`
 pub fn smartcard_err(e: SmartCardError) -> PyErr {
     use pyo3::exceptions::*;
-    Python::with_gil(|py| match &e {
+    Python::attach(|py| match &e {
         SmartCardError::Apdu { data, sw } => match py.import("yubikit.core.smartcard") {
             Ok(module) => match module.getattr("ApduError") {
                 Ok(cls) => {

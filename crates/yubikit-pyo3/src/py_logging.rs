@@ -1,7 +1,7 @@
 //! Bridge from Rust `log` crate to Python `logging` module.
 //!
 //! When initialized, Rust log messages are forwarded to Python's logging system.
-//! Calls into Python using `Python::with_gil`, and only forwards log records
+//! Calls into Python using `Python::attach`, and only forwards log records
 //! from the Python main thread, with a thread-local flag used to prevent
 //! reentrant logging.
 
@@ -92,7 +92,7 @@ impl Log for PyLogger {
         let msg = format!("{}", record.args());
 
         // Safe: we verified we're on the Python thread
-        let _ = Python::with_gil(|py| -> PyResult<()> {
+        let _ = Python::attach(|py| -> PyResult<()> {
             let logging = py.import("logging")?;
             let logger = logging.call_method1("getLogger", (&module,))?;
             logger.call_method1("log", (py_level, &msg))?;

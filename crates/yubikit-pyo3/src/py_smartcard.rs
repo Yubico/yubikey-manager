@@ -30,7 +30,7 @@ use crate::py_bridge::{
 #[pyclass]
 pub struct SmartCardProtocol {
     inner: Option<RustSmartCardProtocol<BoxedSmartCardConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl SmartCardProtocol {

@@ -19,7 +19,7 @@ fn management_ccid_err(
     match e {
         yubikit::management::ManagementError::Connection(sc) => smartcard_err(sc),
         yubikit::management::ManagementError::NotSupported(msg) => {
-            Python::with_gil(|py| match py.import("yubikit.core") {
+            Python::attach(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("NotSupportedError") {
                     Ok(cls) => match cls.call1((msg.clone(),)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -31,7 +31,7 @@ fn management_ccid_err(
             })
         }
         yubikit::management::ManagementError::InvalidData(msg) => {
-            Python::with_gil(|py| match py.import("yubikit.core") {
+            Python::attach(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("BadResponseError") {
                     Ok(cls) => match cls.call1((msg.clone(),)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -46,7 +46,7 @@ fn management_ccid_err(
     }
 }
 
-pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObject> {
+pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<Py<PyAny>> {
     let dict = pyo3::types::PyDict::new(py);
 
     dict.set_item("serial", info.serial)?;
@@ -107,7 +107,7 @@ pub fn device_info_to_dict(py: Python<'_>, info: &DeviceInfo) -> PyResult<PyObje
 #[pyclass(name = "ManagementSessionCcid", unsendable)]
 pub struct ManagementSessionCcid {
     inner: Option<ManagementSession<BoxedSmartCardConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl ManagementSessionCcid {
@@ -132,7 +132,7 @@ impl ManagementSessionCcid {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
@@ -172,7 +172,7 @@ impl ManagementSessionCcid {
     }
 
     /// Read device info. Returns a dict with parsed fields.
-    fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    fn read_device_info(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let info = self
             .session_mut()?
             .read_device_info()
@@ -250,7 +250,7 @@ impl ManagementSessionCcid {
 #[pyclass(name = "ManagementSessionOtp", unsendable)]
 pub struct ManagementSessionOtp {
     inner: Option<ManagementSession<BoxedOtpConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl ManagementSessionOtp {
@@ -271,7 +271,7 @@ impl ManagementSessionOtp {
 impl ManagementSessionOtp {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let hid_conn = extract_otp_connection(connection)?;
         let inner = ManagementSession::new_otp(hid_conn).map_err(|(e, conn)| {
             let _ = restore_otp_connection(connection, conn);
@@ -297,7 +297,7 @@ impl ManagementSessionOtp {
         Ok((v.0, v.1, v.2))
     }
 
-    fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    fn read_device_info(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let info = self
             .session_mut()?
             .read_device_info()
@@ -366,7 +366,7 @@ impl ManagementSessionOtp {
 #[pyclass(name = "ManagementSessionFido", unsendable)]
 pub struct ManagementSessionFido {
     inner: Option<ManagementSession<BoxedFidoConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl ManagementSessionFido {
@@ -387,7 +387,7 @@ impl ManagementSessionFido {
 impl ManagementSessionFido {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_fido_connection(connection)?;
         let inner = ManagementSession::new_fido(conn).map_err(|(e, conn)| {
             let _ = restore_fido_connection(connection, conn);
@@ -413,7 +413,7 @@ impl ManagementSessionFido {
         Ok((v.0, v.1, v.2))
     }
 
-    fn read_device_info(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    fn read_device_info(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let info = self
             .session_mut()?
             .read_device_info()
@@ -483,7 +483,7 @@ impl ManagementSessionFido {
 ///
 /// Returns a list of dicts with 'path' and 'pid' keys.
 #[pyfunction]
-pub fn py_list_fido_devices(py: Python<'_>) -> PyResult<PyObject> {
+pub fn py_list_fido_devices(py: Python<'_>) -> PyResult<Py<PyAny>> {
     let devices =
         list_fido_devices().map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?;
     let list = pyo3::types::PyList::empty(py);

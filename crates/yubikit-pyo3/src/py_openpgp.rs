@@ -14,7 +14,7 @@ fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
     match e {
         openpgp::OpenPgpError::Connection(sc) => smartcard_err(sc),
         openpgp::OpenPgpError::InvalidPin(retries) => {
-            Python::with_gil(|py| match py.import("yubikit.core") {
+            Python::attach(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("InvalidPinError") {
                     Ok(cls) => match cls.call1((retries,)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -33,20 +33,18 @@ fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
                 }
             })
         }
-        openpgp::OpenPgpError::PinBlocked => {
-            Python::with_gil(|py| match py.import("yubikit.core") {
-                Ok(module) => match module.getattr("InvalidPinError") {
-                    Ok(cls) => match cls.call1((0i32, "PIN blocked")) {
-                        Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyRuntimeError::new_err("PIN blocked"),
-                    },
+        openpgp::OpenPgpError::PinBlocked => Python::attach(|py| match py.import("yubikit.core") {
+            Ok(module) => match module.getattr("InvalidPinError") {
+                Ok(cls) => match cls.call1((0i32, "PIN blocked")) {
+                    Ok(exc) => PyErr::from_value(exc),
                     Err(_) => PyRuntimeError::new_err("PIN blocked"),
                 },
                 Err(_) => PyRuntimeError::new_err("PIN blocked"),
-            })
-        }
+            },
+            Err(_) => PyRuntimeError::new_err("PIN blocked"),
+        }),
         openpgp::OpenPgpError::NotSupported(msg) => {
-            Python::with_gil(|py| match py.import("yubikit.core") {
+            Python::attach(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("NotSupportedError") {
                     Ok(cls) => match cls.call1((msg.clone(),)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -183,7 +181,7 @@ fn parse_pw(v: u8) -> PyResult<Pw> {
 #[pyclass]
 pub struct OpenPgpSession {
     inner: Option<RustOpenPgpSession<BoxedSmartCardConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl OpenPgpSession {
@@ -208,7 +206,7 @@ impl OpenPgpSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
@@ -296,7 +294,7 @@ impl OpenPgpSession {
     }
 
     /// Returns dict mapping key_ref (u8) to key_status (u8).
-    fn get_key_information(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    fn get_key_information(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let info = self
             .session_mut()?
             .get_key_information()
@@ -309,7 +307,7 @@ impl OpenPgpSession {
     }
 
     /// Returns dict mapping key_ref (u8) to generation timestamp (u32).
-    fn get_generation_times(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    fn get_generation_times(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let times = self
             .session_mut()?
             .get_generation_times()
@@ -322,7 +320,7 @@ impl OpenPgpSession {
     }
 
     /// Returns dict mapping key_ref (u8) to fingerprint bytes.
-    fn get_fingerprints(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    fn get_fingerprints(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let fps = self
             .session_mut()?
             .get_fingerprints()
@@ -419,7 +417,7 @@ impl OpenPgpSession {
     /// Get supported algorithm information.
     ///
     /// Returns dict mapping key_ref (u8) to list of encoded algorithm attribute bytes.
-    fn get_algorithm_information(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    fn get_algorithm_information(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let info = self
             .session_mut()?
             .get_algorithm_information()

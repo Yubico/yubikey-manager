@@ -14,7 +14,7 @@ fn sd_err(e: SecurityDomainError) -> PyErr {
     match e {
         SecurityDomainError::Connection(sc) => smartcard_err(sc),
         SecurityDomainError::NotSupported(msg) => {
-            Python::with_gil(|py| match py.import("yubikit.core") {
+            Python::attach(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("NotSupportedError") {
                     Ok(cls) => match cls.call1((msg.clone(),)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -40,7 +40,7 @@ fn parse_curve(v: u8) -> PyResult<Curve> {
 #[pyclass]
 pub struct SecurityDomainSession {
     inner: Option<RustSecurityDomainSession<BoxedSmartCardConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl SecurityDomainSession {
@@ -63,7 +63,7 @@ impl SecurityDomainSession {
 impl SecurityDomainSession {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         let inner = RustSecurityDomainSession::new(conn).map_err(|(e, conn)| {
             let _ = restore_smartcard_connection(connection, conn);
@@ -122,7 +122,7 @@ impl SecurityDomainSession {
     }
 
     /// Returns dict mapping (kid, kvn) tuples to dict of {component_id: version}.
-    fn get_key_information(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    fn get_key_information(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let info = self.session_mut()?.get_key_information().map_err(sd_err)?;
         let dict = pyo3::types::PyDict::new(py);
         for (key_ref, components) in &info {
@@ -147,7 +147,7 @@ impl SecurityDomainSession {
         kloc: bool,
         klcc: bool,
         py: Python<'_>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let ids = self
             .session_mut()?
             .get_supported_ca_identifiers(kloc, klcc)

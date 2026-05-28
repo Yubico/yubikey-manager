@@ -32,7 +32,7 @@ mod py_yubiotp;
 
 use pyo3::prelude::*;
 
-#[pymodule]
+#[pymodule(gil_used = true)]
 fn _yubikit_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     py_logging::init();
     py_pcsc::register(m)?;

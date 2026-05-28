@@ -33,18 +33,18 @@ fn webauthn_err<E: std::error::Error + Send + Sync + 'static>(e: ClientError<E>)
 // ---------------------------------------------------------------------------
 
 struct PyUserInteraction {
-    obj: PyObject,
+    obj: Py<PyAny>,
 }
 
 impl UserInteraction for PyUserInteraction {
     fn prompt_up(&self) {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let _ = self.obj.call_method0(py, "prompt_up");
         });
     }
 
     fn request_pin(&self, permissions: Permissions, rp_id: Option<&str>) -> Option<String> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             self.obj
                 .call_method1(py, "request_pin", (permissions.bits(), rp_id))
                 .ok()
@@ -54,7 +54,7 @@ impl UserInteraction for PyUserInteraction {
     }
 
     fn request_uv(&self, permissions: Permissions, rp_id: Option<&str>) -> bool {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             self.obj
                 .call_method1(py, "request_uv", (permissions.bits(), rp_id))
                 .and_then(|v| v.extract::<bool>(py))
@@ -68,7 +68,7 @@ impl UserInteraction for PyUserInteraction {
 // ---------------------------------------------------------------------------
 
 struct PyClientDataCollector {
-    obj: PyObject,
+    obj: Py<PyAny>,
 }
 
 impl ClientDataCollector for PyClientDataCollector {
@@ -79,7 +79,7 @@ impl ClientDataCollector for PyClientDataCollector {
         let options_json = options
             .to_json()
             .map_err(|e| format!("failed to serialize options: {e}"))?;
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let result = self
                 .obj
                 .call_method1(py, "collect_create", (options_json,))
@@ -99,7 +99,7 @@ impl ClientDataCollector for PyClientDataCollector {
         let options_json = options
             .to_json()
             .map_err(|e| format!("failed to serialize options: {e}"))?;
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let result = self
                 .obj
                 .call_method1(py, "collect_get", (options_json,))
@@ -123,7 +123,7 @@ type FidoWebAuthnClientInner =
 #[pyclass(name = "WebAuthnClientFido", unsendable)]
 pub struct PyWebAuthnClientFido {
     client: Option<FidoWebAuthnClientInner>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 #[pymethods]
@@ -131,10 +131,10 @@ impl PyWebAuthnClientFido {
     #[new]
     fn new(
         connection: &Bound<'_, PyAny>,
-        user_interaction: PyObject,
-        client_data_collector: PyObject,
+        user_interaction: Py<PyAny>,
+        client_data_collector: Py<PyAny>,
     ) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_fido_connection(connection)?;
         let ctap = yubikit::ctap::CtapSession::new_fido(conn)
             .map_err(|(e, _)| PyOSError::new_err(e.to_string()))?;
@@ -159,7 +159,11 @@ impl PyWebAuthnClientFido {
     }
 
     #[pyo3(signature = (options_json, event=None))]
-    fn make_credential(&mut self, options_json: &str, event: Option<PyObject>) -> PyResult<String> {
+    fn make_credential(
+        &mut self,
+        options_json: &str,
+        event: Option<Py<PyAny>>,
+    ) -> PyResult<String> {
         let options = PublicKeyCredentialCreationOptions::from_json(options_json)
             .map_err(|e| PyValueError::new_err(format!("invalid options JSON: {e}")))?;
         let client = self
@@ -183,7 +187,7 @@ impl PyWebAuthnClientFido {
     fn get_assertion(
         &mut self,
         options_json: &str,
-        event: Option<PyObject>,
+        event: Option<Py<PyAny>>,
     ) -> PyResult<Vec<String>> {
         let options = PublicKeyCredentialRequestOptions::from_json(options_json)
             .map_err(|e| PyValueError::new_err(format!("invalid options JSON: {e}")))?;
@@ -225,7 +229,7 @@ type SmartCardWebAuthnClientInner =
 #[pyclass(name = "WebAuthnClientCcid", unsendable)]
 pub struct PyWebAuthnClientCcid {
     client: Option<SmartCardWebAuthnClientInner>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 #[pymethods]
@@ -234,11 +238,11 @@ impl PyWebAuthnClientCcid {
     #[pyo3(signature = (connection, user_interaction, client_data_collector, scp_key_params=None))]
     fn new(
         connection: &Bound<'_, PyAny>,
-        user_interaction: PyObject,
-        client_data_collector: PyObject,
+        user_interaction: Py<PyAny>,
+        client_data_collector: Py<PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         let ctap = if let Some(params) = scp_key_params {
             let scp_params = crate::py_bridge::scp_key_params_from_py(params)?;
@@ -269,7 +273,11 @@ impl PyWebAuthnClientCcid {
     }
 
     #[pyo3(signature = (options_json, event=None))]
-    fn make_credential(&mut self, options_json: &str, event: Option<PyObject>) -> PyResult<String> {
+    fn make_credential(
+        &mut self,
+        options_json: &str,
+        event: Option<Py<PyAny>>,
+    ) -> PyResult<String> {
         let options = PublicKeyCredentialCreationOptions::from_json(options_json)
             .map_err(|e| PyValueError::new_err(format!("invalid options JSON: {e}")))?;
         let client = self
@@ -293,7 +301,7 @@ impl PyWebAuthnClientCcid {
     fn get_assertion(
         &mut self,
         options_json: &str,
-        event: Option<PyObject>,
+        event: Option<Py<PyAny>>,
     ) -> PyResult<Vec<String>> {
         let options = PublicKeyCredentialRequestOptions::from_json(options_json)
             .map_err(|e| PyValueError::new_err(format!("invalid options JSON: {e}")))?;

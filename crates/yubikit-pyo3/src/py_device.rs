@@ -34,7 +34,7 @@ fn device_err(e: device::DeviceError) -> PyErr {
 /// Accepts a SmartCardConnection, OtpConnection, or FidoConnection.
 /// Returns a dict matching the Python DeviceInfo structure.
 #[pyfunction]
-pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     // Try OTP connection
     if let Ok(native) = extract_otp_connection(connection) {
         match platform_device::read_info_otp(native) {
@@ -145,7 +145,7 @@ pub fn get_name(
 /// Returns (pid_counts, state) where pid_counts maps PID to count
 /// and state is a hash that changes when attached devices change.
 #[pyfunction]
-pub fn scan_devices(py: Python<'_>) -> PyResult<PyObject> {
+pub fn scan_devices(py: Python<'_>) -> PyResult<Py<PyAny>> {
     let (counts, state) = platform_device::scan_usb_devices();
     let dict = PyDict::new(py);
     for (pid, count) in counts {
@@ -163,7 +163,7 @@ pub struct NativeYubiKeyDevice {
 #[pymethods]
 impl NativeYubiKeyDevice {
     /// Get the device info as a dict.
-    fn info(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         device_info_to_dict(py, self.inner.info())
     }
 
@@ -217,8 +217,8 @@ impl NativeYubiKeyDevice {
     fn reinsert(
         &mut self,
         py: Python<'_>,
-        status_cb: PyObject,
-        cancelled_cb: PyObject,
+        status_cb: Py<PyAny>,
+        cancelled_cb: Py<PyAny>,
     ) -> PyResult<()> {
         self.inner
             .reinsert(
@@ -227,14 +227,14 @@ impl NativeYubiKeyDevice {
                         device::ReinsertStatus::Remove => "remove",
                         device::ReinsertStatus::Reinsert => "reinsert",
                     };
-                    Python::with_gil(|py| {
+                    Python::attach(|py| {
                         let _ = status_cb.call1(py, (status_str,));
                     });
                 },
                 &|| {
                     // Release the GIL while sleeping in Rust, but acquire
                     // it briefly to call the Python cancellation check.
-                    Python::with_gil(|py| {
+                    Python::attach(|py| {
                         cancelled_cb
                             .call0(py)
                             .and_then(|r| r.extract::<bool>(py))

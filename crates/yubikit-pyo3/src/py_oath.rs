@@ -10,7 +10,7 @@ fn oath_err(e: OathError) -> PyErr {
     use pyo3::exceptions::*;
     match e {
         OathError::Connection(sc) => smartcard_err(sc),
-        OathError::NotSupported(msg) => Python::with_gil(|py| match py.import("yubikit.core") {
+        OathError::NotSupported(msg) => Python::attach(|py| match py.import("yubikit.core") {
             Ok(module) => match module.getattr("NotSupportedError") {
                 Ok(cls) => match cls.call1((msg.clone(),)) {
                     Ok(exc) => PyErr::from_value(exc),
@@ -49,7 +49,7 @@ fn parse_b32_key(key: &str) -> PyResult<Vec<u8>> {
 #[pyclass]
 pub struct OathSession {
     inner: Option<RustOathSession<BoxedSmartCardConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl OathSession {
@@ -74,7 +74,7 @@ impl OathSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;

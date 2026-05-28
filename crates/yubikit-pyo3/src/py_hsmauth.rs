@@ -11,7 +11,7 @@ fn hsmauth_err(e: hsmauth::HsmAuthError) -> PyErr {
     match e {
         hsmauth::HsmAuthError::Connection(sc) => smartcard_err(sc),
         hsmauth::HsmAuthError::InvalidPin(retries) => {
-            Python::with_gil(|py| match py.import("yubikit.core") {
+            Python::attach(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("InvalidPinError") {
                     Ok(cls) => match cls.call1((retries,)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -31,7 +31,7 @@ fn hsmauth_err(e: hsmauth::HsmAuthError) -> PyErr {
             })
         }
         hsmauth::HsmAuthError::NotSupported(msg) => {
-            Python::with_gil(|py| match py.import("yubikit.core") {
+            Python::attach(|py| match py.import("yubikit.core") {
                 Ok(module) => match module.getattr("NotSupportedError") {
                     Ok(cls) => match cls.call1((msg.clone(),)) {
                         Ok(exc) => PyErr::from_value(exc),
@@ -55,7 +55,7 @@ fn cred_to_tuple(c: hsmauth::Credential) -> (String, u8, u32, bool) {
 #[pyclass]
 pub struct HsmAuthSession {
     inner: Option<RustHsmAuthSession<BoxedSmartCardConnection>>,
-    py_connection: PyObject,
+    py_connection: Py<PyAny>,
 }
 
 impl HsmAuthSession {
@@ -80,7 +80,7 @@ impl HsmAuthSession {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        let py_connection: PyObject = connection.clone().unbind();
+        let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
         if let Some(params) = scp_key_params {
             let scp_params = scp_key_params_from_py(params)?;
