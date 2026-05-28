@@ -74,7 +74,7 @@ pub fn modhex_encode(data: &[u8]) -> String {
 
 /// Decode modhex string to bytes.
 pub fn modhex_decode(string: &str) -> Result<Vec<u8>, OtpCodecError> {
-    if !string.len().is_multiple_of(2) {
+    if string.len() % 2 != 0 {
         return Err(OtpCodecError::OddLength);
     }
     let bytes = string.as_bytes();

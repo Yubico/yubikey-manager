@@ -78,7 +78,7 @@ fn write_config(
 }
 
 fn parse_lock_code(hex: &str) -> Result<Vec<u8>, CliError> {
-    if !hex.len().is_multiple_of(2) {
+    if hex.len() % 2 != 0 {
         return Err(CliError(
             "Lock code hex string must have even length.".into(),
         ));

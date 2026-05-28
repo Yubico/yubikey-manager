@@ -900,7 +900,7 @@ impl SlotConfiguration {
 
     /// Set initial moving factor for HOTP.
     pub fn imf(mut self, imf: u32) -> Result<Self, YubiOtpError> {
-        if !imf.is_multiple_of(16) || imf > 0xFFFF0 {
+        if imf % 16 != 0 || imf > 0xFFFF0 {
             return Err(YubiOtpError::InvalidData(
                 "imf should be between 0 and 1048560, evenly divisible by 16".into(),
             ));
