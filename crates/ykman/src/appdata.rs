@@ -29,7 +29,7 @@ fn init_keyring_store() {
 
         #[cfg(target_os = "macos")]
         {
-            let store = apple_native_keyring_store::Store::new()
+            let store = apple_native_keyring_store::keychain::Store::new()
                 .expect("Failed to initialize Apple keyring store");
             keyring_core::set_default_store(store);
         }
