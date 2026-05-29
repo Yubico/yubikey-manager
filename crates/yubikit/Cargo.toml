@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "YubiKey management library"
+readme = "README.md"
 keywords = ["yubikey", "fido2", "webauthn", "smartcard", "security"]
 categories = ["authentication", "cryptography", "hardware-support"]
 autoexamples = false

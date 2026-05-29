@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "YubiKey Manager CLI"
+readme = "README.md"
 keywords = ["yubikey", "cli", "fido2", "oath", "security"]
 categories = ["authentication", "command-line-utilities"]
 

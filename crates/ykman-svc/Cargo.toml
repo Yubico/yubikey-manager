@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "YubiKey Manager background service"
+readme = "README.md"
 keywords = ["yubikey", "service", "daemon"]
 categories = ["authentication", "hardware-support"]
 
