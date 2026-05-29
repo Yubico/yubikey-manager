@@ -848,4 +848,4 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cryptography", specifier = ">=3.0,<49" }]
+requires-dist = [{ name = "cryptography", specifier = ">=37,<49" }]

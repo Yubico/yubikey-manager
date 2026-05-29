@@ -29,7 +29,6 @@ from yubikit.piv import (
     TOUCH_POLICY,
     InvalidPinError,
     PivSession,
-    _do_check_key_support,
 )
 
 from ..util import open_file
@@ -220,11 +219,10 @@ def verify_cert_signature(cert, public_key=None):
 
 
 def skip_unsupported_key_type(
-    key_type, info, pin_policy=PIN_POLICY.DEFAULT, generate=True
+    session, key_type, info, pin_policy=PIN_POLICY.DEFAULT, generate=True
 ):
     try:
-        _do_check_key_support(
-            info.version,
+        session.check_key_support(
             key_type,
             pin_policy,
             TOUCH_POLICY.DEFAULT,
@@ -243,7 +241,7 @@ class TestCertificateSignatures:
     def test_generate_self_signed_certificate(
         self, info, session, key_type, hash_algorithm, keys, scp
     ):
-        skip_unsupported_key_type(key_type, info, generate=False)
+        skip_unsupported_key_type(session, key_type, info, generate=False)
 
         slot = SLOT.SIGNATURE
         public_key = import_key(session, scp, keys, slot, key_type)
@@ -266,7 +264,7 @@ class TestDecrypt:
         [KEY_TYPE.RSA1024, KEY_TYPE.RSA2048, KEY_TYPE.RSA3072, KEY_TYPE.RSA4096],
     )
     def test_import_decrypt(self, session, info, key_type, keys, scp):
-        skip_unsupported_key_type(key_type, info)
+        skip_unsupported_key_type(session, key_type, info)
 
         public_key = import_key(
             session, scp, keys, SLOT.KEY_MANAGEMENT, key_type=key_type
@@ -282,7 +280,7 @@ class TestDecrypt:
 class TestKeyAgreement:
     @pytest.mark.parametrize("key_type", ECDH_KEY_TYPES)
     def test_generate_ecdh(self, session, info, key_type, keys, scp):
-        skip_unsupported_key_type(key_type, info)
+        skip_unsupported_key_type(session, key_type, info)
 
         e_priv = generate_sw_key(key_type)
         public_key = generate_key(
@@ -300,7 +298,7 @@ class TestKeyAgreement:
 
     @pytest.mark.parametrize("key_type", ECDH_KEY_TYPES)
     def test_import_ecdh(self, session, info, key_type, keys, scp):
-        skip_unsupported_key_type(key_type, info, generate=False)
+        skip_unsupported_key_type(session, key_type, info, generate=False)
 
         e_priv = generate_sw_key(key_type)
         public_key = import_key(
@@ -786,7 +784,7 @@ class TestMetadata:
 
     @pytest.mark.parametrize("key_type", list(KEY_TYPE))
     def test_slot_metadata_generate(self, session, info, keys, key_type, scp):
-        skip_unsupported_key_type(key_type, info)
+        skip_unsupported_key_type(session, key_type, info)
 
         slot = SLOT.SIGNATURE
         key = generate_key(session, scp, keys, slot, key_type)
@@ -824,7 +822,7 @@ class TestMetadata:
     )
     def test_slot_metadata_put(self, session, info, keys, key, slot, pin_policy):
         key_type = KEY_TYPE.from_public_key(key.public_key())
-        skip_unsupported_key_type(key_type, info, pin_policy)
+        skip_unsupported_key_type(session, key_type, info, pin_policy)
         session.authenticate(keys.mgmt)
         session.put_key(slot, key)
         data = session.get_slot_metadata(slot)

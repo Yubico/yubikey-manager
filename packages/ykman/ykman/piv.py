@@ -29,9 +29,7 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import struct
-import warnings
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, Mapping, TypeAlias, cast
 from uuid import uuid4
@@ -43,7 +41,6 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from cryptography.x509.oid import NameOID
 from yubikit.core import BadResponseError, NotSupportedError, Tlv, int2bytes
 from yubikit.core.smartcard import SW, ApduError
 from yubikit.piv import (
@@ -79,101 +76,6 @@ logger = logging.getLogger(__name__)
 
 OBJECT_ID_PIVMAN_DATA = 0x5FFF00
 OBJECT_ID_PIVMAN_PROTECTED_DATA = OBJECT_ID.PRINTED  # Use slot for printed information.
-
-
-_NAME_ATTRIBUTES = {
-    "CN": NameOID.COMMON_NAME,
-    "L": NameOID.LOCALITY_NAME,
-    "ST": NameOID.STATE_OR_PROVINCE_NAME,
-    "O": NameOID.ORGANIZATION_NAME,
-    "OU": NameOID.ORGANIZATIONAL_UNIT_NAME,
-    "C": NameOID.COUNTRY_NAME,
-    "STREET": NameOID.STREET_ADDRESS,
-    "DC": NameOID.DOMAIN_COMPONENT,
-    "UID": NameOID.USER_ID,
-}
-
-
-_ESCAPED = "\\\"+,'<> #="
-
-
-def _parse(value: str) -> list[list[str]]:
-    remaining = list(value)
-    name = []
-    entry = []
-    buf = ""
-    hexbuf = b""
-    while remaining:
-        c = remaining.pop(0)
-        if c == "\\":
-            c1 = remaining.pop(0)
-            if c1 in _ESCAPED:
-                c = c1
-            else:
-                c2 = remaining.pop(0)
-                hexbuf += bytes.fromhex(c1 + c2)
-                try:
-                    c = hexbuf.decode()
-                    hexbuf = b""
-                except UnicodeDecodeError:
-                    continue  # Possibly multi-byte, expect more hex
-        elif c in ",+":
-            entry.append(buf)
-            buf = ""
-            if c == ",":
-                name.append(entry)
-                entry = []
-            continue
-        if hexbuf:
-            raise ValueError("Invalid UTF-8 data")
-        buf += c
-    entry.append(buf)
-    name.append(entry)
-    return name
-
-
-_DOTTED_STRING_RE = re.compile(r"\d(\.\d+)+")
-
-
-# TODO: Require cryptography >= 37 and remove this function
-def parse_rfc4514_string(value: str) -> x509.Name:
-    """Parse an RFC 4514 string into a x509.Name.
-
-    See: https://tools.ietf.org/html/rfc4514.html
-
-    :param value: An RFC 4514 string.
-    :deprecated: Use x509.Name.from_rfc4514_string() instead.
-    """
-    warnings.warn(
-        "Deprecated: use x509.Name.from_rfc4514_string() instead.",
-        DeprecationWarning,
-    )
-    try:
-        return x509.Name.from_rfc4514_string(value)
-    except AttributeError:
-        # cryptography < 37, use fallback implementation
-        return _parse_rfc4514_string(value)
-
-
-def _parse_rfc4514_string(value: str) -> x509.Name:
-    name = _parse(value)
-    attributes: list[x509.RelativeDistinguishedName] = []
-    for entry in name:
-        parts = []
-        for part in entry:
-            if "=" not in part:
-                raise ValueError("Invalid RFC 4514 string")
-            k, v = part.split("=", 1)
-            if k in _NAME_ATTRIBUTES:
-                attr = _NAME_ATTRIBUTES[k]
-            elif _DOTTED_STRING_RE.fullmatch(k):
-                attr = x509.ObjectIdentifier(k)
-            else:
-                raise ValueError(f"Unsupported attribute: '{k}'")
-            parts.append(x509.NameAttribute(attr, v))
-        attributes.insert(0, x509.RelativeDistinguishedName(parts))
-
-    return x509.Name(attributes)
 
 
 def _dummy_key(key_type):
@@ -805,7 +707,7 @@ def generate_self_signed_certificate(
     if TYPE_CHECKING:
         public_key = cast(CertificatePublicKeyTypes, public_key)
 
-    subject = parse_rfc4514_string(subject_str)
+    subject = x509.Name.from_rfc4514_string(subject_str)
     builder = (
         x509.CertificateBuilder()
         .public_key(public_key)
@@ -836,7 +738,7 @@ def generate_csr(
     """
     logger.debug("Generating a CSR")
     builder = x509.CertificateSigningRequestBuilder().subject_name(
-        parse_rfc4514_string(subject_str)
+        x509.Name.from_rfc4514_string(subject_str)
     )
 
     return sign_csr_builder(session, slot, public_key, builder, hash_algorithm)

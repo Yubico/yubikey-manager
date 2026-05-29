@@ -27,7 +27,6 @@
 
 import abc
 import logging
-import warnings
 from enum import Enum, IntEnum, unique
 
 from _yubikit_native.core import SmartCardProtocol as _NativeSmartCardProtocol
@@ -149,13 +148,6 @@ class SmartCardProtocol(Closable):
 
     def close(self) -> None:
         self._native.close()
-
-    def enable_touch_workaround(self, version: Version) -> None:
-        warnings.warn(
-            "Deprecated: use SmartCardProtocol.configure(version) instead.",
-            DeprecationWarning,
-        )
-        self.configure(version)
 
     def configure(self, version: Version, force_short: bool = False) -> None:
         """Configure the connection optimally for the given YubiKey version."""

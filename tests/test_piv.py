@@ -4,71 +4,12 @@ from datetime import date
 
 import pytest
 
-from yubikit.core import BadResponseError, NotSupportedError, Version
+from yubikit.core import BadResponseError
 from yubikit.piv import (
-    KEY_TYPE,
-    PIN_POLICY,
-    TOUCH_POLICY,
     Chuid,
     FascN,
-    _do_check_key_support,
     decompress_certificate,
 )
-
-
-class TestPivFunctions:
-    def test_supported_algorithms(self):
-        with pytest.raises(NotSupportedError):
-            _do_check_key_support(
-                Version(3, 1, 1),
-                KEY_TYPE.ECCP384,
-                PIN_POLICY.DEFAULT,
-                TOUCH_POLICY.DEFAULT,
-            )
-
-        with pytest.raises(NotSupportedError):
-            _do_check_key_support(
-                Version(4, 4, 1),
-                KEY_TYPE.RSA1024,
-                PIN_POLICY.DEFAULT,
-                TOUCH_POLICY.DEFAULT,
-            )
-
-        for key_type in (KEY_TYPE.RSA1024, KEY_TYPE.X25519):
-            with pytest.raises(NotSupportedError):
-                _do_check_key_support(
-                    Version(5, 7, 0),
-                    key_type,
-                    PIN_POLICY.DEFAULT,
-                    TOUCH_POLICY.DEFAULT,
-                    fips_restrictions=True,
-                )
-
-        with pytest.raises(NotSupportedError):
-            _do_check_key_support(
-                Version(5, 7, 0),
-                KEY_TYPE.RSA2048,
-                PIN_POLICY.NEVER,
-                TOUCH_POLICY.DEFAULT,
-                fips_restrictions=True,
-            )
-
-        for key_type in (KEY_TYPE.RSA1024, KEY_TYPE.RSA2048):
-            with pytest.raises(NotSupportedError):
-                _do_check_key_support(
-                    Version(4, 3, 4), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
-                )
-
-        for key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
-            with pytest.raises(NotSupportedError):
-                _do_check_key_support(
-                    Version(5, 6, 0), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
-                )
-
-        for key_type in KEY_TYPE:
-            _do_check_key_support(
-                Version(5, 7, 0), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
-            )
 
 
 def test_fascn():

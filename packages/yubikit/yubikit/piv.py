@@ -30,12 +30,11 @@ from __future__ import annotations
 import gzip
 import logging
 import re
-import warnings
 import zlib
 from dataclasses import astuple, dataclass
 from datetime import date
 from enum import Enum, IntEnum, unique
-from typing import TYPE_CHECKING, TypeAlias, overload
+from typing import TYPE_CHECKING, TypeAlias
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -54,13 +53,11 @@ from cryptography.hazmat.primitives.serialization import (
 from .core import (
     BadResponseError,
     InvalidPinError,  # noqa: F401 - re-exported
-    NotSupportedError,
     Session,
     Tlv,
     Version,
     bytes2int,
     int2bytes,
-    require_version,
 )
 from .core.smartcard import (
     ScpKeyParams,
@@ -543,68 +540,6 @@ def _unpad_message(padded, padding):
     return dummy.decrypt(encrypted, padding)
 
 
-def check_key_support(
-    version: Version,
-    key_type: KEY_TYPE,
-    pin_policy: PIN_POLICY,
-    touch_policy: TOUCH_POLICY,
-    generate: bool = True,
-) -> None:
-    """Check if a key type is supported by a specific YubiKey firmware version.
-
-    This method will return None if the key (with PIN and touch policies) is supported,
-    or it will raise a NotSupportedError if it is not.
-
-    :deprecated: Use PivSession.check_key_support() instead.
-    """
-    warnings.warn(
-        "Deprecated: use PivSession.check_key_support() instead.",
-        DeprecationWarning,
-    )
-    _do_check_key_support(version, key_type, pin_policy, touch_policy, generate)
-
-
-def _do_check_key_support(
-    version: Version,
-    key_type: KEY_TYPE,
-    pin_policy: PIN_POLICY,
-    touch_policy: TOUCH_POLICY,
-    generate: bool = True,
-    fips_restrictions: bool = False,
-) -> None:
-    if key_type == KEY_TYPE.ECCP384:
-        require_version(version, (4, 0, 0), "ECCP384 requires YubiKey 4 or later")
-    if touch_policy != TOUCH_POLICY.DEFAULT or pin_policy != PIN_POLICY.DEFAULT:
-        require_version(
-            version, (4, 0, 0), "PIN/Touch policy requires YubiKey 4 or later"
-        )
-    if touch_policy == TOUCH_POLICY.CACHED:
-        require_version(
-            version, (4, 3, 0), "Cached touch policy requires YubiKey 4.3 or later"
-        )
-
-    # ROCA
-    if (4, 2, 0) <= version < (4, 3, 5):
-        if generate and key_type.algorithm == ALGORITHM.RSA:
-            raise NotSupportedError("RSA key generation not supported on this YubiKey")
-
-    # FIPS
-    if fips_restrictions or (4, 4, 0) <= version < (4, 5, 0):
-        if key_type in (KEY_TYPE.RSA1024, KEY_TYPE.X25519):
-            raise NotSupportedError("RSA 1024 not supported on YubiKey FIPS")
-        if pin_policy == PIN_POLICY.NEVER:
-            raise NotSupportedError("PIN_POLICY.NEVER not allowed on YubiKey FIPS")
-
-    # New key types
-    if key_type in (
-        KEY_TYPE.RSA3072,
-        KEY_TYPE.RSA4096,
-        KEY_TYPE.ED25519,
-        KEY_TYPE.X25519,
-    ):
-        require_version(version, (5, 7, 0), f"{key_type} requires YubiKey 5.7 or later")
-
-
 def decompress_certificate(cert_data: bytes) -> bytes:
     """
     Decompress a compressed certificate using various methods.
@@ -694,39 +629,11 @@ class PivSession(Session):
         """Get the serial number of the YubiKey."""
         return self._native.get_serial()
 
-    @overload
-    def authenticate(self, management_key: bytes) -> None: ...
-
-    @overload
-    # TODO: remove in 6.0
-    def authenticate(
-        self, key_type: MANAGEMENT_KEY_TYPE, management_key: bytes
-    ) -> None: ...
-
-    def authenticate(self, *args, **kwargs) -> None:
+    def authenticate(self, management_key: bytes) -> None:
         """Authenticate to PIV with management key.
 
         :param bytes management_key: The management key in raw bytes.
         """
-        key_type = kwargs.get("key_type")
-        management_key = kwargs.get("management_key")
-        if len(args) == 2:
-            key_type, management_key = args
-        elif len(args) == 1:
-            management_key = args[0]
-        else:
-            key_type = kwargs.get("key_type")
-            management_key = kwargs.get("management_key")
-        if key_type:
-            warnings.warn(
-                "Deprecated: call authenticate() without passing management_key_type.",
-                DeprecationWarning,
-            )
-            if self.management_key_type != key_type:
-                raise ValueError("Incorrect management key type")
-        if not isinstance(management_key, bytes):
-            raise TypeError("management_key must be bytes")
-
         self._native.authenticate(management_key)
 
     def set_management_key(
