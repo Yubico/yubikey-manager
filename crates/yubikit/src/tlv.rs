@@ -134,7 +134,16 @@ pub(crate) fn tlv_get(tlvs: &[(u32, Vec<u8>)], tag: u32) -> Option<&[u8]> {
 /// Encode a tag and value into BER-TLV format.
 pub fn tlv_encode(tag: u32, value: &[u8]) -> Vec<u8> {
     let mut buf = Vec::new();
+    tlv_append(&mut buf, tag, value);
+    buf
+}
 
+/// Append a TLV-encoded tag and value directly into an existing buffer.
+///
+/// This avoids creating a temporary `Vec` that would contain a copy of the
+/// value — important when the value is secret key material that must not
+/// linger in unzeroized memory.
+pub fn tlv_append(buf: &mut Vec<u8>, tag: u32, value: &[u8]) {
     // Encode tag (big-endian, variable width)
     if tag > 0xFFFF {
         buf.push((tag >> 24) as u8);
@@ -158,7 +167,6 @@ pub fn tlv_encode(tag: u32, value: &[u8]) -> Vec<u8> {
     }
 
     buf.extend_from_slice(value);
-    buf
 }
 
 /// Decode OID bytes to dotted string notation.

@@ -50,8 +50,8 @@ use crate::core::Version;
 use crate::core::{bytes2int, int2bytes, patch_version};
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
 use crate::tlv::{
-    TlvError, oid_from_string, oid_to_string, parse_tlv_dict, parse_tlv_list, tlv_encode,
-    tlv_unpack,
+    TlvError, oid_from_string, oid_to_string, parse_tlv_dict, parse_tlv_list, tlv_append,
+    tlv_encode, tlv_unpack,
 };
 
 // ---------------------------------------------------------------------------
@@ -1462,16 +1462,15 @@ fn build_private_key_template(
     // 0x5F48: concatenated values (contains secret key material)
     let mut values = Zeroizing::new(Vec::new());
     for (tag, value) in &component_tlvs {
-        let encoded = tlv_encode(*tag, value);
-        // Header = everything before the value = tag + length bytes
+        let encoded = Zeroizing::new(tlv_encode(*tag, value));
         let header_len = encoded.len() - value.len();
         headers.extend_from_slice(&encoded[..header_len]);
         values.extend_from_slice(value);
     }
 
     let mut inner = Zeroizing::new(key_ref.crt());
-    inner.extend_from_slice(&tlv_encode(0x7F48, &headers));
-    inner.extend_from_slice(&tlv_encode(0x5F48, &values));
+    tlv_append(&mut inner, 0x7F48, &headers);
+    tlv_append(&mut inner, 0x5F48, &values);
 
     Zeroizing::new(tlv_encode(0x4D, &inner))
 }

@@ -45,7 +45,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 use crate::core::Version;
 use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
-use crate::tlv::{parse_tlv_list, tlv_encode};
+use crate::tlv::{parse_tlv_list, tlv_append, tlv_encode};
 
 // ---------------------------------------------------------------------------
 // TLV tags
@@ -507,31 +507,30 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         let parsed_label = parse_label(label)?;
 
         let mut data = Zeroizing::new(Vec::new());
-        data.extend_from_slice(&tlv_encode(
+        tlv_append(
+            &mut data,
             TAG_MANAGEMENT_KEY,
             management_key.expose_secret(),
-        ));
-        data.extend_from_slice(&tlv_encode(TAG_LABEL, &parsed_label));
-        data.extend_from_slice(&tlv_encode(TAG_ALGORITHM, &[algorithm as u8]));
+        );
+        tlv_append(&mut data, TAG_LABEL, &parsed_label);
+        tlv_append(&mut data, TAG_ALGORITHM, &[algorithm as u8]);
 
         match algorithm {
             Algorithm::Aes128YubicoAuthentication => {
-                data.extend_from_slice(&tlv_encode(TAG_KEY_ENC, &key[..16]));
-                data.extend_from_slice(&tlv_encode(TAG_KEY_MAC, &key[16..]));
+                tlv_append(&mut data, TAG_KEY_ENC, &key[..16]);
+                tlv_append(&mut data, TAG_KEY_MAC, &key[16..]);
             }
             Algorithm::EcP256YubicoAuthentication => {
-                data.extend_from_slice(&tlv_encode(TAG_PRIVATE_KEY, key));
+                tlv_append(&mut data, TAG_PRIVATE_KEY, key);
             }
         }
 
-        data.extend_from_slice(&tlv_encode(
+        tlv_append(
+            &mut data,
             TAG_CREDENTIAL_PASSWORD,
             credential_password.expose_secret(),
-        ));
-        data.extend_from_slice(&tlv_encode(
-            TAG_TOUCH,
-            &[if touch_required { 1 } else { 0 }],
-        ));
+        );
+        tlv_append(&mut data, TAG_TOUCH, &[if touch_required { 1 } else { 0 }]);
 
         self.protocol
             .send_apdu(0, INS_PUT, 0, 0, &data)
@@ -678,12 +677,14 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         label: &str,
     ) -> Result<(), HsmAuthError> {
         log::debug!("Deleting credential");
+        let parsed_label = parse_label(label)?;
         let mut data = Zeroizing::new(Vec::new());
-        data.extend_from_slice(&tlv_encode(
+        tlv_append(
+            &mut data,
             TAG_MANAGEMENT_KEY,
             management_key.expose_secret(),
-        ));
-        data.extend_from_slice(&tlv_encode(TAG_LABEL, &parse_label(label)?));
+        );
+        tlv_append(&mut data, TAG_LABEL, &parsed_label);
 
         self.protocol
             .send_apdu(0, INS_DELETE, 0, 0, &data)
@@ -716,16 +717,19 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     ) -> Result<(), HsmAuthError> {
         log::debug!("Changing credential password");
 
+        let parsed_label = parse_label(label)?;
         let mut data = Zeroizing::new(Vec::new());
-        data.extend_from_slice(&tlv_encode(TAG_LABEL, &parse_label(label)?));
-        data.extend_from_slice(&tlv_encode(
+        tlv_append(&mut data, TAG_LABEL, &parsed_label);
+        tlv_append(
+            &mut data,
             TAG_CREDENTIAL_PASSWORD,
             credential_password.expose_secret(),
-        ));
-        data.extend_from_slice(&tlv_encode(
+        );
+        tlv_append(
+            &mut data,
             TAG_CREDENTIAL_PASSWORD,
             new_credential_password.expose_secret(),
-        ));
+        );
 
         self.change_credential_password_inner(&data, false)?;
         log::info!("Credential password changed");
@@ -743,16 +747,19 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     ) -> Result<(), HsmAuthError> {
         log::debug!("Changing credential password (admin)");
 
+        let parsed_label = parse_label(label)?;
         let mut data = Zeroizing::new(Vec::new());
-        data.extend_from_slice(&tlv_encode(TAG_LABEL, &parse_label(label)?));
-        data.extend_from_slice(&tlv_encode(
+        tlv_append(&mut data, TAG_LABEL, &parsed_label);
+        tlv_append(
+            &mut data,
             TAG_MANAGEMENT_KEY,
             management_key.expose_secret(),
-        ));
-        data.extend_from_slice(&tlv_encode(
+        );
+        tlv_append(
+            &mut data,
             TAG_CREDENTIAL_PASSWORD,
             new_credential_password.expose_secret(),
-        ));
+        );
 
         self.change_credential_password_inner(&data, true)?;
         log::info!("Credential password changed");
@@ -768,14 +775,16 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         log::debug!("Updating management key");
 
         let mut data = Zeroizing::new(Vec::new());
-        data.extend_from_slice(&tlv_encode(
+        tlv_append(
+            &mut data,
             TAG_MANAGEMENT_KEY,
             management_key.expose_secret(),
-        ));
-        data.extend_from_slice(&tlv_encode(
+        );
+        tlv_append(
+            &mut data,
             TAG_MANAGEMENT_KEY,
             new_management_key.expose_secret(),
-        ));
+        );
 
         self.protocol
             .send_apdu(0, INS_PUT_MANAGEMENT_KEY, 0, 0, &data)
@@ -811,22 +820,24 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         card_crypto: Option<&[u8]>,
         public_key: Option<&[u8]>,
     ) -> Result<Vec<u8>, HsmAuthError> {
+        let parsed_label = parse_label(label)?;
         let mut data = Zeroizing::new(Vec::new());
-        data.extend_from_slice(&tlv_encode(TAG_LABEL, &parse_label(label)?));
-        data.extend_from_slice(&tlv_encode(TAG_CONTEXT, context));
+        tlv_append(&mut data, TAG_LABEL, &parsed_label);
+        tlv_append(&mut data, TAG_CONTEXT, context);
 
         if let Some(pk) = public_key {
-            data.extend_from_slice(&tlv_encode(TAG_PUBLIC_KEY, pk));
+            tlv_append(&mut data, TAG_PUBLIC_KEY, pk);
         }
 
         if let Some(cc) = card_crypto {
-            data.extend_from_slice(&tlv_encode(TAG_RESPONSE, cc));
+            tlv_append(&mut data, TAG_RESPONSE, cc);
         }
 
-        data.extend_from_slice(&tlv_encode(
+        tlv_append(
+            &mut data,
             TAG_CREDENTIAL_PASSWORD,
             credential_password.expose_secret(),
-        ));
+        );
 
         let response = self
             .protocol
@@ -896,12 +907,14 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     ) -> Result<Vec<u8>, HsmAuthError> {
         require_version(self.version, Version(5, 6, 0), "get_challenge")?;
 
-        let mut data = tlv_encode(TAG_LABEL, &parse_label(label)?);
+        let parsed_label = parse_label(label)?;
+        let mut data = Zeroizing::new(Vec::new());
+        tlv_append(&mut data, TAG_LABEL, &parsed_label);
 
         if let Some(pw) = credential_password
             && (self.version >= Version(5, 7, 1) || self.version.0 == 0)
         {
-            data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, pw.expose_secret()));
+            tlv_append(&mut data, TAG_CREDENTIAL_PASSWORD, pw.expose_secret());
         }
 
         let response = self.protocol.send_apdu(0, INS_GET_CHALLENGE, 0, 0, &data)?;

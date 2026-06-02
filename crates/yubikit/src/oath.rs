@@ -46,7 +46,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 use crate::core::Version;
 use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
-use crate::tlv::{TlvError, parse_tlv_list, tlv_encode, tlv_get, tlv_unpack};
+use crate::tlv::{TlvError, parse_tlv_list, tlv_append, tlv_encode, tlv_get, tlv_unpack};
 
 // TLV tags
 const TAG_NAME: u32 = 0x71;
@@ -430,9 +430,10 @@ fn build_set_key_data(key: &[u8], challenge: &[u8]) -> Zeroizing<Vec<u8>> {
     let mut key_val = Zeroizing::new(vec![OathType::Totp as u8 | HashAlgorithm::Sha1 as u8]);
     key_val.extend_from_slice(key);
 
-    let mut data = Zeroizing::new(tlv_encode(TAG_KEY, &key_val));
-    data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, challenge));
-    data.extend_from_slice(&tlv_encode(TAG_RESPONSE, &response));
+    let mut data = Zeroizing::new(Vec::new());
+    tlv_append(&mut data, TAG_KEY, &key_val);
+    tlv_append(&mut data, TAG_CHALLENGE, challenge);
+    tlv_append(&mut data, TAG_RESPONSE, &response);
     data
 }
 
@@ -443,8 +444,9 @@ fn build_validate_data(
     host_challenge: &[u8],
 ) -> Zeroizing<Vec<u8>> {
     let response = hmac_sha1(key, device_challenge);
-    let mut data = Zeroizing::new(tlv_encode(TAG_RESPONSE, &response));
-    data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, host_challenge));
+    let mut data = Zeroizing::new(Vec::new());
+    tlv_append(&mut data, TAG_RESPONSE, &response);
+    tlv_append(&mut data, TAG_CHALLENGE, host_challenge);
     data
 }
 

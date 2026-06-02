@@ -62,7 +62,7 @@ use zeroize::Zeroizing;
 
 use crate::core::{Version, int2bytes, patch_version};
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
-use crate::tlv::{parse_tlv_dict, tlv_encode, tlv_parse, tlv_unpack};
+use crate::tlv::{parse_tlv_dict, tlv_append, tlv_encode, tlv_parse, tlv_unpack};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -1449,10 +1449,11 @@ impl<C: SmartCardConnection> PivSession<C> {
         }
 
         let mut data = Zeroizing::new(vec![key_type as u8]);
-        data.extend_from_slice(&tlv_encode(
+        tlv_append(
+            &mut data,
             SLOT_CARD_MANAGEMENT as u32,
             management_key.expose_secret(),
-        ));
+        );
 
         let p2 = if require_touch { 0xFE } else { 0xFF };
         self.protocol
@@ -2306,11 +2307,12 @@ fn build_rsa_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Zeroizing<Vec
     let dq = Zeroizing::new(bigint_to_bytes(fields[7], ln));
     let qinv = Zeroizing::new(bigint_to_bytes(fields[8], ln));
 
-    let mut data = Zeroizing::new(tlv_encode(0x01, &p));
-    data.extend_from_slice(&tlv_encode(0x02, &q));
-    data.extend_from_slice(&tlv_encode(0x03, &dp));
-    data.extend_from_slice(&tlv_encode(0x04, &dq));
-    data.extend_from_slice(&tlv_encode(0x05, &qinv));
+    let mut data = Zeroizing::new(Vec::new());
+    tlv_append(&mut data, 0x01, &p);
+    tlv_append(&mut data, 0x02, &q);
+    tlv_append(&mut data, 0x03, &dp);
+    tlv_append(&mut data, 0x04, &dq);
+    tlv_append(&mut data, 0x05, &qinv);
 
     Ok(data)
 }
