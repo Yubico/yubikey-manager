@@ -1043,12 +1043,12 @@ fn require_version(version: Version, required: Version, feature: &str) -> Result
 }
 
 fn mgmt_key_block_op(
-    key_type: ManagementKeyType,
-    key: &[u8],
+    management_key: &ManagementKey,
     data: &[u8],
     encrypt: bool,
 ) -> Result<Vec<u8>, PivError> {
-    match key_type {
+    let key = management_key.expose_secret();
+    match management_key.key_type() {
         ManagementKeyType::Tdes => {
             let cipher = TdesEde3::new_from_slice(key)
                 .map_err(|_| PivError::InvalidData("Invalid TDES key".into()))?;
@@ -1096,20 +1096,12 @@ fn mgmt_key_block_op(
     }
 }
 
-fn mgmt_key_encrypt(
-    key_type: ManagementKeyType,
-    key: &[u8],
-    data: &[u8],
-) -> Result<Vec<u8>, PivError> {
-    mgmt_key_block_op(key_type, key, data, true)
+fn mgmt_key_encrypt(management_key: &ManagementKey, data: &[u8]) -> Result<Vec<u8>, PivError> {
+    mgmt_key_block_op(management_key, data, true)
 }
 
-fn mgmt_key_decrypt(
-    key_type: ManagementKeyType,
-    key: &[u8],
-    data: &[u8],
-) -> Result<Vec<u8>, PivError> {
-    mgmt_key_block_op(key_type, key, data, false)
+fn mgmt_key_decrypt(management_key: &ManagementKey, data: &[u8]) -> Result<Vec<u8>, PivError> {
+    mgmt_key_block_op(management_key, data, false)
 }
 
 /// Decompress a compressed certificate using various methods.
@@ -1384,6 +1376,13 @@ impl<C: SmartCardConnection> PivSession<C> {
         log::debug!("Authenticating with management key");
         let key_type = self.mgmt_key_type;
 
+        if management_key.key_type() != key_type {
+            return Err(PivError::InvalidData(format!(
+                "Management key type mismatch: expected {key_type}, got {}",
+                management_key.key_type()
+            )));
+        }
+
         // Step 1: Request witness from card
         let witness_request = tlv_encode(TAG_DYN_AUTH, &tlv_encode(TAG_AUTH_WITNESS, &[]));
         let response = self.protocol.send_apdu(
@@ -1398,11 +1397,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         let witness = tlv_unpack(TAG_AUTH_WITNESS, &dyn_auth)?;
 
         // Step 2: Decrypt witness, send back with our challenge
-        let decrypted = Zeroizing::new(mgmt_key_decrypt(
-            key_type,
-            management_key.expose_secret(),
-            &witness,
-        )?);
+        let decrypted = Zeroizing::new(mgmt_key_decrypt(management_key, &witness)?);
 
         let challenge_len = key_type.challenge_len();
         let mut challenge = Zeroizing::new(vec![0u8; challenge_len]);
@@ -1425,11 +1420,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         let dyn_auth = tlv_unpack(TAG_DYN_AUTH, &response)?;
         let encrypted = tlv_unpack(TAG_AUTH_RESPONSE, &dyn_auth)?;
 
-        let expected = Zeroizing::new(mgmt_key_encrypt(
-            key_type,
-            management_key.expose_secret(),
-            &challenge,
-        )?);
+        let expected = Zeroizing::new(mgmt_key_encrypt(management_key, &challenge)?);
         if expected.ct_eq(&encrypted).into() {
             Ok(())
         } else {
@@ -2971,19 +2962,19 @@ mod tests {
 
     #[test]
     fn test_mgmt_key_encrypt_decrypt_tdes() {
-        let key = DEFAULT_MANAGEMENT_KEY;
+        let key = ManagementKey::new(ManagementKeyType::Tdes, DEFAULT_MANAGEMENT_KEY).unwrap();
         let data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
-        let encrypted = mgmt_key_encrypt(ManagementKeyType::Tdes, key, &data).unwrap();
-        let decrypted = mgmt_key_decrypt(ManagementKeyType::Tdes, key, &encrypted).unwrap();
+        let encrypted = mgmt_key_encrypt(&key, &data).unwrap();
+        let decrypted = mgmt_key_decrypt(&key, &encrypted).unwrap();
         assert_eq!(decrypted, data);
     }
 
     #[test]
     fn test_mgmt_key_encrypt_decrypt_aes128() {
-        let key = [0u8; 16];
+        let key = ManagementKey::new(ManagementKeyType::Aes128, &[0u8; 16]).unwrap();
         let data = [0u8; 16];
-        let encrypted = mgmt_key_encrypt(ManagementKeyType::Aes128, &key, &data).unwrap();
-        let decrypted = mgmt_key_decrypt(ManagementKeyType::Aes128, &key, &encrypted).unwrap();
+        let encrypted = mgmt_key_encrypt(&key, &data).unwrap();
+        let decrypted = mgmt_key_decrypt(&key, &encrypted).unwrap();
         assert_eq!(decrypted, data);
     }
 

@@ -42,10 +42,16 @@ pub struct Ctap2Pin(crate::secret::SecretValue<Vec<u8>>);
 impl Ctap2Pin {
     /// Create a new CTAP2 PIN from a string value.
     ///
-    /// Returns an error if the PIN is shorter than 4 bytes.
+    /// Returns an error if the PIN is shorter than 4 bytes or if the padded
+    /// representation would exceed 255 bytes.
     pub fn new(pin: &str) -> Result<Self, String> {
         if pin.len() < 4 {
             return Err("PIN must be at least 4 bytes".into());
+        }
+        // Validate that the padded length won't exceed the CTAP2 limit
+        let padded_len = pin.len().max(64).next_multiple_of(16);
+        if padded_len > 255 {
+            return Err("PIN must be at most 255 bytes when padded".into());
         }
         Ok(Self(crate::secret::SecretValue::new(
             pin.as_bytes().to_vec(),

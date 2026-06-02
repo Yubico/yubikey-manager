@@ -86,15 +86,6 @@ fn parse_management_key(s: &str) -> Result<Vec<u8>, CliError> {
     hex::decode(s).map_err(|_| CliError("Management key must be hex-encoded.".into()))
 }
 
-fn current_management_key_type(
-    session: &mut PivSession<impl SmartCardConnection>,
-) -> ManagementKeyType {
-    session
-        .get_management_key_metadata()
-        .map(|meta| meta.key_type)
-        .unwrap_or(ManagementKeyType::Tdes)
-}
-
 fn to_management_key(key_type: ManagementKeyType, key: &[u8]) -> Result<ManagementKey, CliError> {
     ManagementKey::new(key_type, key).map_err(|e| CliError(format!("Invalid management key: {e}")))
 }
@@ -266,7 +257,7 @@ fn authenticate_session(
 ) -> Result<bool, CliError> {
     if let Some(k) = mgmt_key {
         let key = parse_management_key(k)?;
-        let management_key = to_management_key(current_management_key_type(session), &key)?;
+        let management_key = to_management_key(session.management_key_type(), &key)?;
         session
             .authenticate(&management_key)
             .map_err(|e| CliError(format!("Authentication failed: {e}")))?;
@@ -279,7 +270,7 @@ fn authenticate_session(
         ensure_pin(session, pin)?;
         let prot = get_pivman_protected_data(session);
         if let Some((_, key)) = prot.iter().find(|(t, _)| *t == TAG_PIVMAN_KEY) {
-            let management_key = to_management_key(current_management_key_type(session), key)?;
+            let management_key = to_management_key(session.management_key_type(), key)?;
             session
                 .authenticate(&management_key)
                 .map_err(|e| CliError(format!("Authentication with stored key failed: {e}")))?;
@@ -292,14 +283,14 @@ fn authenticate_session(
 
     // Try default key first, prompt if it fails
     if let Ok(default_key) =
-        to_management_key(current_management_key_type(session), DEFAULT_MANAGEMENT_KEY)
+        to_management_key(session.management_key_type(), DEFAULT_MANAGEMENT_KEY)
         && session.authenticate(&default_key).is_ok()
     {
         return Ok(false);
     }
     let input = crate::util::prompt_secret("Enter management key")?;
     let key = parse_management_key(&input)?;
-    let management_key = to_management_key(current_management_key_type(session), &key)?;
+    let management_key = to_management_key(session.management_key_type(), &key)?;
     session
         .authenticate(&management_key)
         .map_err(|e| CliError(format!("Authentication failed: {e}")))?;

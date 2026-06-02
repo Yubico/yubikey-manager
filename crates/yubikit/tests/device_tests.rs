@@ -490,8 +490,8 @@ mod piv {
     use super::*;
     use x509_cert::der::{Decode, Encode};
     use yubikit::piv::{
-        DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, ManagementKey, ManagementKeyType,
-        PinPolicy, PivPin, PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
+        DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, ManagementKey, PinPolicy, PivPin,
+        PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
     };
 
     fn open_piv_session(tc: &TestConnection) -> PivSession<PcscSmartCardConnection> {
@@ -508,8 +508,9 @@ mod piv {
         PivPin::new("123456").unwrap()
     }
 
-    fn default_management_key() -> ManagementKey {
-        ManagementKey::new(ManagementKeyType::Tdes, DEFAULT_MANAGEMENT_KEY).unwrap()
+    fn default_management_key_for(session: &PivSession<PcscSmartCardConnection>) -> ManagementKey {
+        let key_type = session.management_key_type();
+        ManagementKey::new(key_type, DEFAULT_MANAGEMENT_KEY).unwrap()
     }
 
     #[rstest]
@@ -558,7 +559,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(&default_management_key())
+            .authenticate(&default_management_key_for(&session))
             .expect("authenticate");
 
         let spki_der = session
@@ -582,7 +583,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(&default_management_key())
+            .authenticate(&default_management_key_for(&session))
             .expect("authenticate");
 
         let spki_der = session
@@ -606,7 +607,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(&default_management_key())
+            .authenticate(&default_management_key_for(&session))
             .expect("authenticate");
         session.verify_pin(&default_piv_pin()).expect("verify PIN");
 
@@ -650,7 +651,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(&default_management_key())
+            .authenticate(&default_management_key_for(&session))
             .expect("authenticate");
         session.verify_pin(&default_piv_pin()).expect("verify PIN");
 
@@ -736,7 +737,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(&default_management_key())
+            .authenticate(&default_management_key_for(&session))
             .expect("authenticate");
         session.verify_pin(&default_piv_pin()).expect("verify PIN");
 
@@ -797,7 +798,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(&default_management_key())
+            .authenticate(&default_management_key_for(&session))
             .expect("authenticate");
         session.verify_pin(&default_piv_pin()).expect("verify PIN");
 
@@ -858,7 +859,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(&default_management_key())
+            .authenticate(&default_management_key_for(&session))
             .expect("authenticate");
         session.verify_pin(&default_piv_pin()).expect("verify PIN");
 
@@ -902,7 +903,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(&default_management_key())
+            .authenticate(&default_management_key_for(&session))
             .expect("authenticate");
         session.verify_pin(&default_piv_pin()).expect("verify PIN");
 
@@ -959,7 +960,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(&default_management_key())
+            .authenticate(&default_management_key_for(&session))
             .expect("authenticate");
 
         let spki_der = session
@@ -992,7 +993,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(&default_management_key())
+            .authenticate(&default_management_key_for(&session))
             .expect("authenticate");
 
         let spki_der = session
@@ -1024,7 +1025,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(&default_management_key())
+            .authenticate(&default_management_key_for(&session))
             .expect("authenticate");
 
         let spki_der = session
@@ -1069,7 +1070,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(&default_management_key())
+            .authenticate(&default_management_key_for(&session))
             .expect("authenticate");
 
         let spki_der = session
