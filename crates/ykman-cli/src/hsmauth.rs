@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use yubikit::device::YubiKeyDevice;
-use yubikit::hsmauth::{HsmAuthSession, credential_password_from_str};
+use yubikit::hsmauth::{CredentialPassword, HsmAuthManagementKey, HsmAuthSession};
 use yubikit::management::Capability;
 
 use crate::cli_enums::CliFormat;
@@ -44,17 +44,19 @@ fn confirm(msg: &str) -> bool {
 }
 
 /// Parse a management password: UTF-8 string (≤16 bytes, null-padded) or hex (32 chars).
-fn parse_management_password(value: &str) -> Result<Vec<u8>, CliError> {
+fn parse_management_password(value: &str) -> Result<HsmAuthManagementKey, CliError> {
     let encoded = value.as_bytes();
     if encoded.len() <= MANAGEMENT_KEY_LEN {
-        let mut key = vec![0u8; MANAGEMENT_KEY_LEN];
+        let mut key = [0u8; MANAGEMENT_KEY_LEN];
         key[..encoded.len()].copy_from_slice(encoded);
-        return Ok(key);
+        return HsmAuthManagementKey::new(&key)
+            .map_err(|e| CliError(format!("Invalid management password: {e}")));
     }
     if encoded.len() == MANAGEMENT_KEY_LEN * 2
         && let Ok(bytes) = hex::decode(value)
     {
-        return Ok(bytes);
+        return HsmAuthManagementKey::new(&bytes)
+            .map_err(|e| CliError(format!("Invalid management password: {e}")));
     }
     Err(CliError(
         "Management password must be at most 16 characters, or 32 hex digits.".into(),
@@ -62,7 +64,9 @@ fn parse_management_password(value: &str) -> Result<Vec<u8>, CliError> {
 }
 
 /// Get the management password: from CLI arg, or prompt.
-fn require_management_password(management_password: Option<&str>) -> Result<Vec<u8>, CliError> {
+fn require_management_password(
+    management_password: Option<&str>,
+) -> Result<HsmAuthManagementKey, CliError> {
     match management_password {
         Some(p) => parse_management_password(p),
         None => {
@@ -73,16 +77,18 @@ fn require_management_password(management_password: Option<&str>) -> Result<Vec<
 }
 
 /// Get the credential password: from CLI arg, or prompt (with confirmation).
-fn require_credential_password(credential_password: Option<&str>) -> Result<[u8; 16], CliError> {
+fn require_credential_password(
+    credential_password: Option<&str>,
+) -> Result<CredentialPassword, CliError> {
     match credential_password {
-        Some(p) => Ok(credential_password_from_str(p)),
+        Some(p) => Ok(CredentialPassword::from_password(p)),
         None => {
             let p1 = crate::util::prompt_secret("Enter credential password")?;
             let p2 = crate::util::prompt_secret("Confirm credential password")?;
             if p1 != p2 {
                 return Err(CliError("Passwords do not match.".into()));
             }
-            Ok(credential_password_from_str(&p1))
+            Ok(CredentialPassword::from_password(&p1))
         }
     }
 }
@@ -283,21 +289,21 @@ pub fn run_credentials_change_password(
     new_credential_password: Option<&str>,
 ) -> Result<(), CliError> {
     let old_pw = match credential_password {
-        Some(p) => credential_password_from_str(p),
+        Some(p) => CredentialPassword::from_password(p),
         None => {
             let p = crate::util::prompt_secret("Enter current credential password")?;
-            credential_password_from_str(&p)
+            CredentialPassword::from_password(&p)
         }
     };
     let new_pw = match new_credential_password {
-        Some(p) => credential_password_from_str(p),
+        Some(p) => CredentialPassword::from_password(p),
         None => {
             let p1 = crate::util::prompt_secret("Enter new credential password")?;
             let p2 = crate::util::prompt_secret("Confirm new credential password")?;
             if p1 != p2 {
                 return Err(CliError("Passwords do not match.".into()));
             }
-            credential_password_from_str(&p1)
+            CredentialPassword::from_password(&p1)
         }
     };
 
@@ -483,7 +489,8 @@ pub fn run_access_change_management_key(
     let new_key = if generate {
         let mut k = [0u8; 16];
         getrandom::fill(&mut k).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
-        k.to_vec()
+        HsmAuthManagementKey::new(&k)
+            .map_err(|e| CliError(format!("Failed to create management password: {e}")))?
     } else if let Some(k) = new_management_key {
         parse_management_password(k)?
     } else {
@@ -505,7 +512,10 @@ pub fn run_access_change_management_key(
             ))
         })?;
     if generate {
-        eprintln!("Management password changed: {}", hex::encode(&new_key));
+        eprintln!(
+            "Management password changed: {}",
+            hex::encode(new_key.expose_secret())
+        );
     } else {
         eprintln!("Management password changed.");
     }

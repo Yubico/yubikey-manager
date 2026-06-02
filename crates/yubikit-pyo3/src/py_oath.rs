@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikit::oath::{self, OathError, OathSession as RustOathSession};
+use yubikit::oath::{self, OathAccessKey, OathError, OathSession as RustOathSession};
 
 use crate::py_bridge::{
     BoxedSmartCardConnection, extract_smartcard_connection, restore_smartcard_connection,
@@ -44,6 +44,10 @@ fn format_cred_id(
 #[pyfunction]
 fn parse_b32_key(key: &str) -> PyResult<Vec<u8>> {
     oath::parse_b32_key(key).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+}
+
+fn access_key_from_py(key: &[u8]) -> PyResult<OathAccessKey> {
+    OathAccessKey::new(key).map_err(oath_err)
 }
 
 #[pyclass]
@@ -132,15 +136,21 @@ impl OathSession {
     }
 
     fn derive_key(&self, password: &str) -> PyResult<Vec<u8>> {
-        Ok(self.session()?.derive_key(password).to_vec())
+        Ok(self
+            .session()?
+            .derive_key(password)
+            .expose_secret()
+            .to_vec())
     }
 
     fn validate(&mut self, key: &[u8]) -> PyResult<()> {
-        self.session_mut()?.validate(key).map_err(oath_err)
+        let key = access_key_from_py(key)?;
+        self.session_mut()?.validate(&key).map_err(oath_err)
     }
 
     fn set_key(&mut self, key: &[u8]) -> PyResult<()> {
-        self.session_mut()?.set_key(key).map_err(oath_err)
+        let key = access_key_from_py(key)?;
+        self.session_mut()?.set_key(&key).map_err(oath_err)
     }
 
     fn unset_key(&mut self) -> PyResult<()> {

@@ -4,7 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::oath::{
-    Code, Credential, CredentialData, HashAlgorithm, OathSession, OathType, parse_b32_key,
+    Code, Credential, CredentialData, HashAlgorithm, OathAccessKey, OathSession, OathType,
+    parse_b32_key,
 };
 
 use crate::appdata::AppData;
@@ -19,7 +20,7 @@ fn oath_keys() -> AppData {
 /// Validate the key against the session, optionally remembering it.
 fn validate_and_remember(
     session: &mut OathSession<impl yubikit::smartcard::SmartCardConnection>,
-    key: &[u8],
+    key: &OathAccessKey,
     remember: bool,
     keys: &mut AppData,
 ) -> Result<(), CliError> {
@@ -27,7 +28,7 @@ fn validate_and_remember(
         .validate(key)
         .map_err(|_| CliError("Invalid password.".into()))?;
     if remember {
-        keys.put_secret(session.device_id(), &hex::encode(key))
+        keys.put_secret(session.device_id(), &hex::encode(key.expose_secret()))
             .map_err(|e| CliError(format!("Failed to remember password: {e}")))?;
         eprintln!("Password remembered.");
     }
@@ -78,10 +79,16 @@ fn open_session<'a>(
         if keys.contains(&device_id) {
             match keys.get_secret(&device_id) {
                 Ok(hex_key) => match hex::decode(&hex_key) {
-                    Ok(key) => match session.validate(&key) {
-                        Ok(()) => return Ok(session),
+                    Ok(key_bytes) => match OathAccessKey::new(&key_bytes) {
+                        Ok(key) => match session.validate(&key) {
+                            Ok(()) => return Ok(session),
+                            Err(_) => {
+                                log::debug!("Remembered key incorrect, removing");
+                                let _ = keys.remove(&device_id);
+                            }
+                        },
                         Err(_) => {
-                            log::debug!("Remembered key incorrect, removing");
+                            log::warn!("Stored key has invalid length, removing");
                             let _ = keys.remove(&device_id);
                         }
                     },
@@ -527,7 +534,7 @@ pub fn run_access_change(
         eprintln!("Password set.");
         if remember {
             let mut keys = oath_keys();
-            keys.put_secret(session.device_id(), &hex::encode(key))
+            keys.put_secret(session.device_id(), &hex::encode(key.expose_secret()))
                 .map_err(|e| CliError(format!("Failed to remember password: {e}")))?;
             eprintln!("Password remembered.");
         }

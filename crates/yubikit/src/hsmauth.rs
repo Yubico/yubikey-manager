@@ -96,10 +96,102 @@ const MIN_LABEL_LEN: usize = 1;
 const MAX_LABEL_LEN: usize = 64;
 
 /// The default management key (all zeros).
-#[allow(dead_code)]
-const DEFAULT_MANAGEMENT_KEY: [u8; MANAGEMENT_KEY_LEN] = [0u8; MANAGEMENT_KEY_LEN];
+pub const DEFAULT_MANAGEMENT_KEY: &[u8; MANAGEMENT_KEY_LEN] = &[0u8; MANAGEMENT_KEY_LEN];
 /// The initial retry counter value for new credentials.
 const INITIAL_RETRY_COUNTER: u32 = 8;
+
+// ---------------------------------------------------------------------------
+// Secret newtypes
+// ---------------------------------------------------------------------------
+
+/// A 16-byte management key for the YubiHSM Auth application.
+///
+/// The key is automatically zeroized when dropped.
+///
+/// # Examples
+///
+/// ```
+/// use yubikit::hsmauth::{HsmAuthManagementKey, DEFAULT_MANAGEMENT_KEY};
+///
+/// let key = HsmAuthManagementKey::new(DEFAULT_MANAGEMENT_KEY).unwrap();
+/// ```
+#[derive(Clone)]
+pub struct HsmAuthManagementKey(crate::secret::SecretValue<[u8; MANAGEMENT_KEY_LEN]>);
+
+impl HsmAuthManagementKey {
+    /// Create a new management key from a 16-byte slice.
+    ///
+    /// Returns an error if the slice is not exactly 16 bytes.
+    pub fn new(key: &[u8]) -> Result<Self, HsmAuthError> {
+        let arr: [u8; MANAGEMENT_KEY_LEN] = key.try_into().map_err(|_| {
+            HsmAuthError::InvalidData(format!(
+                "Management key must be {MANAGEMENT_KEY_LEN} bytes long"
+            ))
+        })?;
+        Ok(Self(crate::secret::SecretValue::new(arr)))
+    }
+
+    /// Access the raw key bytes.
+    pub fn expose_secret(&self) -> &[u8] {
+        self.0.expose_secret()
+    }
+}
+
+impl fmt::Debug for HsmAuthManagementKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("HsmAuthManagementKey([REDACTED])")
+    }
+}
+
+/// A 16-byte credential password for the YubiHSM Auth application.
+///
+/// The password is automatically zeroized when dropped.
+///
+/// # Examples
+///
+/// ```
+/// use yubikit::hsmauth::CredentialPassword;
+///
+/// let pw = CredentialPassword::new(&[0u8; 16]).unwrap();
+/// let pw_from_str = CredentialPassword::from_password("my-password");
+/// ```
+#[derive(Clone)]
+pub struct CredentialPassword(crate::secret::SecretValue<[u8; CREDENTIAL_PASSWORD_LEN]>);
+
+impl CredentialPassword {
+    /// Create a credential password from a 16-byte slice.
+    ///
+    /// Returns an error if the slice is not exactly 16 bytes.
+    pub fn new(password: &[u8]) -> Result<Self, HsmAuthError> {
+        let arr: [u8; CREDENTIAL_PASSWORD_LEN] = password.try_into().map_err(|_| {
+            HsmAuthError::InvalidData(format!(
+                "Credential password must be {CREDENTIAL_PASSWORD_LEN} bytes long"
+            ))
+        })?;
+        Ok(Self(crate::secret::SecretValue::new(arr)))
+    }
+
+    /// Create a credential password from a string, padding with zeros or
+    /// truncating to 16 bytes as needed.
+    pub fn from_password(password: &str) -> Self {
+        let mut pw = [0u8; CREDENTIAL_PASSWORD_LEN];
+        let bytes = password.as_bytes();
+        let len = bytes.len().min(CREDENTIAL_PASSWORD_LEN);
+        pw[..len].copy_from_slice(&bytes[..len]);
+        Self(crate::secret::SecretValue::new(pw))
+    }
+
+    /// Access the raw password bytes.
+    pub(crate) fn expose_secret(&self) -> &[u8] {
+        self.0.expose_secret()
+    }
+}
+
+impl fmt::Debug for CredentialPassword {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CredentialPassword([REDACTED])")
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Algorithm
@@ -244,24 +336,6 @@ fn parse_label(label: &str) -> Result<Vec<u8>, HsmAuthError> {
     Ok(bytes.to_vec())
 }
 
-fn parse_credential_password(password: &[u8]) -> Result<[u8; 16], HsmAuthError> {
-    password.try_into().map_err(|_| {
-        HsmAuthError::InvalidData(format!(
-            "Credential password must be {CREDENTIAL_PASSWORD_LEN} bytes long"
-        ))
-    })
-}
-
-/// Convert a string password into a 16-byte credential password,
-/// padding with zeros or truncating as needed.
-pub fn credential_password_from_str(password: &str) -> [u8; 16] {
-    let mut pw = [0u8; 16];
-    let bytes = password.as_bytes();
-    let len = bytes.len().min(16);
-    pw[..len].copy_from_slice(&bytes[..len]);
-    pw
-}
-
 fn password_to_key(password: &str) -> ([u8; 16], [u8; 16]) {
     let mut key = [0u8; 32];
     pbkdf2::pbkdf2_hmac::<sha2::Sha256>(password.as_bytes(), b"Yubico", 10000, &mut key);
@@ -281,15 +355,6 @@ fn retries_from_sw(sw: u16) -> Option<u32> {
 
 fn require_version(version: Version, required: Version, feature: &str) -> Result<(), HsmAuthError> {
     crate::core::require_version(version, required, feature).map_err(HsmAuthError::NotSupported)
-}
-
-fn validate_management_key(key: &[u8]) -> Result<(), HsmAuthError> {
-    if key.len() != MANAGEMENT_KEY_LEN {
-        return Err(HsmAuthError::InvalidData(format!(
-            "Management key must be {MANAGEMENT_KEY_LEN} bytes long"
-        )));
-    }
-    Ok(())
 }
 
 /// Map APDU errors to InvalidPin where applicable, otherwise propagate.
@@ -432,19 +497,20 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
 
     fn put_credential(
         &mut self,
-        management_key: &[u8],
+        management_key: &HsmAuthManagementKey,
         label: &str,
         key: &[u8],
         algorithm: Algorithm,
-        credential_password: &[u8],
+        credential_password: &CredentialPassword,
         touch_required: bool,
     ) -> Result<Credential, HsmAuthError> {
-        validate_management_key(management_key)?;
         let parsed_label = parse_label(label)?;
-        let parsed_password = parse_credential_password(credential_password)?;
 
         let mut data = Vec::new();
-        data.extend_from_slice(&tlv_encode(TAG_MANAGEMENT_KEY, management_key));
+        data.extend_from_slice(&tlv_encode(
+            TAG_MANAGEMENT_KEY,
+            management_key.expose_secret(),
+        ));
         data.extend_from_slice(&tlv_encode(TAG_LABEL, &parsed_label));
         data.extend_from_slice(&tlv_encode(TAG_ALGORITHM, &[algorithm as u8]));
 
@@ -458,7 +524,10 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
             }
         }
 
-        data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, &parsed_password));
+        data.extend_from_slice(&tlv_encode(
+            TAG_CREDENTIAL_PASSWORD,
+            credential_password.expose_secret(),
+        ));
         data.extend_from_slice(&tlv_encode(
             TAG_TOUCH,
             &[if touch_required { 1 } else { 0 }],
@@ -479,11 +548,11 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     /// Store an AES-128 symmetric credential with explicit encryption and MAC keys.
     pub fn put_credential_symmetric(
         &mut self,
-        management_key: &[u8],
+        management_key: &HsmAuthManagementKey,
         label: &str,
         key_enc: &[u8],
         key_mac: &[u8],
-        credential_password: &[u8],
+        credential_password: &CredentialPassword,
         touch_required: bool,
     ) -> Result<Credential, HsmAuthError> {
         log::debug!("Storing symmetric credential");
@@ -513,10 +582,10 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     /// Store an AES-128 symmetric credential with keys derived from a password.
     pub fn put_credential_derived(
         &mut self,
-        management_key: &[u8],
+        management_key: &HsmAuthManagementKey,
         label: &str,
         derivation_password: &str,
-        credential_password: &[u8],
+        credential_password: &CredentialPassword,
         touch_required: bool,
     ) -> Result<Credential, HsmAuthError> {
         log::debug!("Storing derived credential");
@@ -538,10 +607,10 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     /// Requires firmware version 5.6.0 or later.
     pub fn put_credential_asymmetric(
         &mut self,
-        management_key: &[u8],
+        management_key: &HsmAuthManagementKey,
         label: &str,
         private_key: &p256::SecretKey,
-        credential_password: &[u8],
+        credential_password: &CredentialPassword,
         touch_required: bool,
     ) -> Result<Credential, HsmAuthError> {
         log::debug!("Storing asymmetric credential");
@@ -565,9 +634,9 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     /// Requires firmware version 5.6.0 or later.
     pub fn generate_credential_asymmetric(
         &mut self,
-        management_key: &[u8],
+        management_key: &HsmAuthManagementKey,
         label: &str,
-        credential_password: &[u8],
+        credential_password: &CredentialPassword,
         touch_required: bool,
     ) -> Result<Credential, HsmAuthError> {
         log::debug!("Generating asymmetric credential");
@@ -605,13 +674,15 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     /// Delete a credential from the YubiKey.
     pub fn delete_credential(
         &mut self,
-        management_key: &[u8],
+        management_key: &HsmAuthManagementKey,
         label: &str,
     ) -> Result<(), HsmAuthError> {
         log::debug!("Deleting credential");
-        validate_management_key(management_key)?;
         let mut data = Vec::new();
-        data.extend_from_slice(&tlv_encode(TAG_MANAGEMENT_KEY, management_key));
+        data.extend_from_slice(&tlv_encode(
+            TAG_MANAGEMENT_KEY,
+            management_key.expose_secret(),
+        ));
         data.extend_from_slice(&tlv_encode(TAG_LABEL, &parse_label(label)?));
 
         self.protocol
@@ -640,17 +711,21 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     pub fn change_credential_password(
         &mut self,
         label: &str,
-        credential_password: &[u8],
-        new_credential_password: &[u8],
+        credential_password: &CredentialPassword,
+        new_credential_password: &CredentialPassword,
     ) -> Result<(), HsmAuthError> {
         log::debug!("Changing credential password");
-        let parsed_pw = parse_credential_password(credential_password)?;
-        let parsed_new_pw = parse_credential_password(new_credential_password)?;
 
         let mut data = Vec::new();
         data.extend_from_slice(&tlv_encode(TAG_LABEL, &parse_label(label)?));
-        data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, &parsed_pw));
-        data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, &parsed_new_pw));
+        data.extend_from_slice(&tlv_encode(
+            TAG_CREDENTIAL_PASSWORD,
+            credential_password.expose_secret(),
+        ));
+        data.extend_from_slice(&tlv_encode(
+            TAG_CREDENTIAL_PASSWORD,
+            new_credential_password.expose_secret(),
+        ));
 
         self.change_credential_password_inner(&data, false)?;
         log::info!("Credential password changed");
@@ -662,18 +737,22 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     /// Requires firmware version 5.8.0 or later.
     pub fn change_credential_password_admin(
         &mut self,
-        management_key: &[u8],
+        management_key: &HsmAuthManagementKey,
         label: &str,
-        new_credential_password: &[u8],
+        new_credential_password: &CredentialPassword,
     ) -> Result<(), HsmAuthError> {
         log::debug!("Changing credential password (admin)");
-        validate_management_key(management_key)?;
-        let parsed_new_pw = parse_credential_password(new_credential_password)?;
 
         let mut data = Vec::new();
         data.extend_from_slice(&tlv_encode(TAG_LABEL, &parse_label(label)?));
-        data.extend_from_slice(&tlv_encode(TAG_MANAGEMENT_KEY, management_key));
-        data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, &parsed_new_pw));
+        data.extend_from_slice(&tlv_encode(
+            TAG_MANAGEMENT_KEY,
+            management_key.expose_secret(),
+        ));
+        data.extend_from_slice(&tlv_encode(
+            TAG_CREDENTIAL_PASSWORD,
+            new_credential_password.expose_secret(),
+        ));
 
         self.change_credential_password_inner(&data, true)?;
         log::info!("Credential password changed");
@@ -683,16 +762,20 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     /// Replace the management key with a new one.
     pub fn put_management_key(
         &mut self,
-        management_key: &[u8],
-        new_management_key: &[u8],
+        management_key: &HsmAuthManagementKey,
+        new_management_key: &HsmAuthManagementKey,
     ) -> Result<(), HsmAuthError> {
         log::debug!("Updating management key");
-        validate_management_key(management_key)?;
-        validate_management_key(new_management_key)?;
 
         let mut data = Vec::new();
-        data.extend_from_slice(&tlv_encode(TAG_MANAGEMENT_KEY, management_key));
-        data.extend_from_slice(&tlv_encode(TAG_MANAGEMENT_KEY, new_management_key));
+        data.extend_from_slice(&tlv_encode(
+            TAG_MANAGEMENT_KEY,
+            management_key.expose_secret(),
+        ));
+        data.extend_from_slice(&tlv_encode(
+            TAG_MANAGEMENT_KEY,
+            new_management_key.expose_secret(),
+        ));
 
         self.protocol
             .send_apdu(0, INS_PUT_MANAGEMENT_KEY, 0, 0, &data)
@@ -724,12 +807,10 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         &mut self,
         label: &str,
         context: &[u8],
-        credential_password: &[u8],
+        credential_password: &CredentialPassword,
         card_crypto: Option<&[u8]>,
         public_key: Option<&[u8]>,
     ) -> Result<Vec<u8>, HsmAuthError> {
-        let parsed_pw = parse_credential_password(credential_password)?;
-
         let mut data = Vec::new();
         data.extend_from_slice(&tlv_encode(TAG_LABEL, &parse_label(label)?));
         data.extend_from_slice(&tlv_encode(TAG_CONTEXT, context));
@@ -742,7 +823,10 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
             data.extend_from_slice(&tlv_encode(TAG_RESPONSE, cc));
         }
 
-        data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, &parsed_pw));
+        data.extend_from_slice(&tlv_encode(
+            TAG_CREDENTIAL_PASSWORD,
+            credential_password.expose_secret(),
+        ));
 
         let response = self
             .protocol
@@ -756,7 +840,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         &mut self,
         label: &str,
         context: &[u8],
-        credential_password: &[u8],
+        credential_password: &CredentialPassword,
         card_crypto: Option<&[u8]>,
     ) -> Result<SessionKeys, HsmAuthError> {
         log::debug!("Calculating symmetric session keys");
@@ -778,7 +862,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         label: &str,
         context: &[u8],
         peer_public_key: &p256::PublicKey,
-        credential_password: &[u8],
+        credential_password: &CredentialPassword,
         card_crypto: &[u8],
     ) -> Result<SessionKeys, HsmAuthError> {
         log::debug!("Calculating asymmetric session keys");
@@ -808,7 +892,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     pub fn get_challenge(
         &mut self,
         label: &str,
-        credential_password: Option<&[u8]>,
+        credential_password: Option<&CredentialPassword>,
     ) -> Result<Vec<u8>, HsmAuthError> {
         require_version(self.version, Version(5, 6, 0), "get_challenge")?;
 
@@ -817,8 +901,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         if let Some(pw) = credential_password
             && (self.version >= Version(5, 7, 1) || self.version.0 == 0)
         {
-            let parsed_pw = parse_credential_password(pw)?;
-            data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, &parsed_pw));
+            data.extend_from_slice(&tlv_encode(TAG_CREDENTIAL_PASSWORD, pw.expose_secret()));
         }
 
         let response = self.protocol.send_apdu(0, INS_GET_CHALLENGE, 0, 0, &data)?;
@@ -878,18 +961,19 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_credential_password() {
-        assert!(parse_credential_password(&[0u8; 16]).is_ok());
-        assert!(parse_credential_password(&[0u8; 15]).is_err());
-        assert!(parse_credential_password(&[0u8; 17]).is_err());
+    fn test_credential_password() {
+        assert!(CredentialPassword::new(&[0u8; 16]).is_ok());
+        assert!(CredentialPassword::new(&[0u8; 15]).is_err());
+        assert!(CredentialPassword::new(&[0u8; 17]).is_err());
     }
 
     #[test]
     fn test_credential_password_from_str() {
-        let pw = credential_password_from_str("hello");
-        assert_eq!(pw.len(), 16);
-        assert_eq!(&pw[..5], b"hello");
-        assert_eq!(&pw[5..], &[0u8; 11]);
+        let pw = CredentialPassword::from_password("hello");
+        let bytes = pw.expose_secret();
+        assert_eq!(bytes.len(), 16);
+        assert_eq!(&bytes[..5], b"hello");
+        assert_eq!(&bytes[5..], &[0u8; 11]);
     }
 
     #[test]
@@ -918,9 +1002,9 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_management_key() {
-        assert!(validate_management_key(&[0u8; 16]).is_ok());
-        assert!(validate_management_key(&[0u8; 15]).is_err());
+    fn test_management_key() {
+        assert!(HsmAuthManagementKey::new(&[0u8; 16]).is_ok());
+        assert!(HsmAuthManagementKey::new(&[0u8; 15]).is_err());
     }
 
     #[test]

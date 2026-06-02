@@ -95,7 +95,57 @@ const HMAC_MINIMUM_KEY_SIZE: usize = 14;
 
 const PROP_REQUIRE_TOUCH: u8 = 0x02;
 
+/// Access key length in bytes.
+const ACCESS_KEY_LEN: usize = 16;
+
 type HmacSha1 = Hmac<Sha1>;
+
+// ---------------------------------------------------------------------------
+// Secret newtypes
+// ---------------------------------------------------------------------------
+
+/// A 16-byte access key for protecting the OATH application.
+///
+/// Derived from a password using PBKDF2, or provided directly as raw bytes.
+/// The key is automatically zeroized when dropped.
+///
+/// # Examples
+///
+/// ```
+/// use yubikit::oath::OathAccessKey;
+///
+/// let key = OathAccessKey::new(&[0u8; 16]).unwrap();
+/// ```
+#[derive(Clone)]
+pub struct OathAccessKey(crate::secret::SecretValue<[u8; ACCESS_KEY_LEN]>);
+
+impl OathAccessKey {
+    /// Create an access key from a 16-byte slice.
+    ///
+    /// Returns an error if the slice is not exactly 16 bytes.
+    pub fn new(key: &[u8]) -> Result<Self, OathError> {
+        let arr: [u8; ACCESS_KEY_LEN] = key.try_into().map_err(|_| {
+            OathError::InvalidData(format!("Access key must be {ACCESS_KEY_LEN} bytes"))
+        })?;
+        Ok(Self(crate::secret::SecretValue::new(arr)))
+    }
+
+    /// Create an access key from raw bytes (internal, already validated).
+    fn from_array(key: [u8; ACCESS_KEY_LEN]) -> Self {
+        Self(crate::secret::SecretValue::new(key))
+    }
+
+    /// Access the raw key bytes.
+    pub fn expose_secret(&self) -> &[u8] {
+        self.0.expose_secret()
+    }
+}
+
+impl std::fmt::Debug for OathAccessKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OathAccessKey([REDACTED])")
+    }
+}
 
 /// Hash algorithm used for OATH credential computation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -288,10 +338,10 @@ fn hmac_verify(key: &[u8], message: &[u8], expected: &[u8]) -> bool {
 }
 
 /// Derive OATH access key from password and salt.
-pub fn derive_key(salt: &[u8], passphrase: &str) -> [u8; 16] {
-    let mut key = [0u8; 16];
+pub fn derive_key(salt: &[u8], passphrase: &str) -> OathAccessKey {
+    let mut key = [0u8; ACCESS_KEY_LEN];
     pbkdf2::pbkdf2_hmac::<Sha1>(passphrase.as_bytes(), salt, 1000, &mut key);
-    key
+    OathAccessKey::from_array(key)
 }
 
 /// Shorten HMAC key per RFC 2104.
@@ -638,12 +688,12 @@ impl<C: SmartCardConnection> OathSession<C> {
     }
 
     /// Derive an access key from a password.
-    pub fn derive_key(&self, password: &str) -> [u8; 16] {
+    pub fn derive_key(&self, password: &str) -> OathAccessKey {
         derive_key(&self.salt, password)
     }
 
     /// Validate (unlock) the session with an access key.
-    pub fn validate(&mut self, key: &[u8]) -> Result<(), OathError> {
+    pub fn validate(&mut self, key: &OathAccessKey) -> Result<(), OathError> {
         log::debug!("Validating OATH session");
         let challenge = self
             .challenge
@@ -651,11 +701,11 @@ impl<C: SmartCardConnection> OathSession<C> {
             .ok_or_else(|| OathError::InvalidData("Session is not locked".into()))?;
 
         let host_challenge: [u8; 8] = rand_bytes();
-        let data = build_validate_data(key, challenge, &host_challenge);
+        let data = build_validate_data(key.expose_secret(), challenge, &host_challenge);
         let resp = self.protocol.send_apdu(0, INS_VALIDATE, 0, 0, &data)?;
 
         let resp_value = tlv_unpack(TAG_RESPONSE, &resp)?;
-        if !hmac_verify(key, &host_challenge, &resp_value) {
+        if !hmac_verify(key.expose_secret(), &host_challenge, &resp_value) {
             return Err(OathError::InvalidData(
                 "Response from validation does not match verification".into(),
             ));
@@ -666,10 +716,10 @@ impl<C: SmartCardConnection> OathSession<C> {
     }
 
     /// Set an access key.
-    pub fn set_key(&mut self, key: &[u8]) -> Result<(), OathError> {
+    pub fn set_key(&mut self, key: &OathAccessKey) -> Result<(), OathError> {
         log::debug!("Setting OATH access key");
         let challenge: [u8; 8] = rand_bytes();
-        let data = build_set_key_data(key, &challenge);
+        let data = build_set_key_data(key.expose_secret(), &challenge);
         self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, &data)?;
         self.has_key = true;
         log::info!("OATH access key set");
@@ -948,7 +998,7 @@ mod tests {
     fn test_derive_key() {
         let salt = b"test_salt";
         let key = derive_key(salt, "password");
-        assert_eq!(key.len(), 16);
+        assert_eq!(key.expose_secret().len(), 16);
     }
 
     #[test]
