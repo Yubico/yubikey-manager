@@ -138,10 +138,14 @@ pub(crate) struct HmacSecretState {
 
 impl HmacSecretState {
     /// Create state from a pre-computed key agreement.
-    pub fn new(protocol: PinProtocol, key_agreement: Value, shared_secret: Vec<u8>) -> Self {
+    pub fn new(
+        protocol: PinProtocol,
+        key_agreement: Value,
+        shared_secret: Zeroizing<Vec<u8>>,
+    ) -> Self {
         Self {
             key_agreement,
-            shared_secret: Zeroizing::new(shared_secret),
+            shared_secret,
             protocol,
         }
     }

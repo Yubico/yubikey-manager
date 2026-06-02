@@ -58,6 +58,7 @@ use x509_cert::spki::{
     self, AlgorithmIdentifierOwned, DynSignatureAlgorithmIdentifier, EncodePublicKey,
     ObjectIdentifier, SignatureBitStringEncoding, SubjectPublicKeyInfoOwned,
 };
+use zeroize::Zeroizing;
 
 use crate::core::{Version, int2bytes, patch_version};
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
@@ -879,14 +880,14 @@ const PUK_P2: u8 = 0x81;
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn pin_bytes(pin: &str) -> Result<Vec<u8>, PivError> {
+fn pin_bytes(pin: &str) -> Result<Zeroizing<Vec<u8>>, PivError> {
     let bytes = pin.as_bytes();
     if bytes.len() > PIN_LEN {
         return Err(PivError::InvalidData(
             "PIN/PUK must be no longer than 8 bytes".into(),
         ));
     }
-    let mut padded = vec![0xff; PIN_LEN];
+    let mut padded = Zeroizing::new(vec![0xff; PIN_LEN]);
     padded[..bytes.len()].copy_from_slice(bytes);
     Ok(padded)
 }
@@ -1298,11 +1299,11 @@ impl<C: SmartCardConnection> PivSession<C> {
         let witness = tlv_unpack(TAG_AUTH_WITNESS, &dyn_auth)?;
 
         // Step 2: Decrypt witness, send back with our challenge
-        let decrypted = mgmt_key_decrypt(key_type, management_key, &witness)?;
+        let decrypted = Zeroizing::new(mgmt_key_decrypt(key_type, management_key, &witness)?);
 
         let challenge_len = key_type.challenge_len();
-        let mut challenge = vec![0u8; challenge_len];
-        getrandom::fill(&mut challenge)
+        let mut challenge = Zeroizing::new(vec![0u8; challenge_len]);
+        getrandom::fill(challenge.as_mut_slice())
             .map_err(|_| PivError::InvalidData("Failed to generate random bytes".into()))?;
 
         let mut auth_data = tlv_encode(TAG_AUTH_WITNESS, &decrypted);
@@ -1321,7 +1322,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         let dyn_auth = tlv_unpack(TAG_DYN_AUTH, &response)?;
         let encrypted = tlv_unpack(TAG_AUTH_RESPONSE, &dyn_auth)?;
 
-        let expected = mgmt_key_encrypt(key_type, management_key, &challenge)?;
+        let expected = Zeroizing::new(mgmt_key_encrypt(key_type, management_key, &challenge)?);
         if expected.ct_eq(&encrypted).into() {
             Ok(())
         } else {
@@ -1351,7 +1352,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             )));
         }
 
-        let mut data = vec![key_type as u8];
+        let mut data = Zeroizing::new(vec![key_type as u8]);
         data.extend_from_slice(&tlv_encode(SLOT_CARD_MANAGEMENT as u32, management_key));
 
         let p2 = if require_touch { 0xFE } else { 0xFF };
@@ -2055,7 +2056,7 @@ impl<C: SmartCardConnection> PivSession<C> {
         value1: &str,
         value2: &str,
     ) -> Result<(), PivError> {
-        let mut data = pin_bytes(value1)?;
+        let mut data = Zeroizing::new(pin_bytes(value1)?.to_vec());
         data.extend_from_slice(&pin_bytes(value2)?);
         match self.protocol.send_apdu(0, ins, 0, p2, &data) {
             Ok(_) => Ok(()),
@@ -2817,13 +2818,13 @@ mod tests {
     #[test]
     fn test_pin_padding() {
         let padded = pin_bytes("123456").unwrap();
-        assert_eq!(padded, [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0xFF, 0xFF]);
+        assert_eq!(*padded, [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0xFF, 0xFF]);
 
         let padded = pin_bytes("12345678").unwrap();
-        assert_eq!(padded, [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38]);
+        assert_eq!(*padded, [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38]);
 
         let padded = pin_bytes("").unwrap();
-        assert_eq!(padded, [0xFF; 8]);
+        assert_eq!(*padded, [0xFF; 8]);
 
         assert!(pin_bytes("123456789").is_err());
     }

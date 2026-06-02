@@ -44,6 +44,7 @@ use std::fmt;
 
 use sha2::Digest;
 use thiserror::Error;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::core::Version;
 use crate::core::{bytes2int, int2bytes, patch_version};
@@ -1288,7 +1289,7 @@ fn kdf_s2k_hash(
     salt: &[u8],
     pin: &str,
 ) -> Vec<u8> {
-    let data: Vec<u8> = [salt, pin.as_bytes()].concat();
+    let data = Zeroizing::new([salt, pin.as_bytes()].concat());
     let count = iteration_count as usize;
     let (full_rounds, trailing) = if data.is_empty() {
         (0, 0)
@@ -1300,7 +1301,7 @@ fn kdf_s2k_hash(
         HashAlgorithm::Sha256 => {
             let mut digest = sha2::Sha256::new();
             for _ in 0..full_rounds {
-                digest.update(&data);
+                digest.update(data.as_slice());
             }
             if trailing > 0 {
                 digest.update(&data[..trailing]);
@@ -1310,7 +1311,7 @@ fn kdf_s2k_hash(
         HashAlgorithm::Sha512 => {
             let mut digest = sha2::Sha512::new();
             for _ in 0..full_rounds {
-                digest.update(&data);
+                digest.update(data.as_slice());
             }
             if trailing > 0 {
                 digest.update(&data[..trailing]);
@@ -1325,7 +1326,7 @@ fn kdf_s2k_hash(
 // ---------------------------------------------------------------------------
 
 /// A private key to be imported into an OpenPGP key slot.
-#[derive(Clone)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub enum OpenPgpPrivateKey {
     /// RSA private key in standard format (e, p, q).
     Rsa {
@@ -1736,7 +1737,12 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     // -- PIN Management --
 
-    fn process_pin(&self, kdf: &Kdf, pw: Pw, pin: &str) -> Result<Vec<u8>, OpenPgpError> {
+    fn process_pin(
+        &self,
+        kdf: &Kdf,
+        pw: Pw,
+        pin: &str,
+    ) -> Result<Zeroizing<Vec<u8>>, OpenPgpError> {
         if matches!(kdf, Kdf::None) {
             let pin_len = pin.len();
             let min_len: usize = if matches!(pw, Pw::User) { 6 } else { 8 };
@@ -1747,7 +1753,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
                 )));
             }
         }
-        Ok(kdf.process(pw, pin))
+        Ok(Zeroizing::new(kdf.process(pw, pin)))
     }
 
     fn verify_inner(&mut self, pw: Pw, pin: &str, mode: u8) -> Result<(), OpenPgpError> {
@@ -1793,7 +1799,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
 
     fn change_inner(&mut self, pw: Pw, pin: &str, new_pin: &str) -> Result<(), OpenPgpError> {
         let kdf = self.get_kdf()?;
-        let mut data = self.process_pin(&kdf, pw, pin)?;
+        let mut data = Zeroizing::new(self.process_pin(&kdf, pw, pin)?.to_vec());
         data.extend_from_slice(&self.process_pin(&kdf, pw, new_pin)?);
         match self
             .protocol
@@ -1852,12 +1858,12 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         log::debug!("Resetting OpenPGP PIN");
         let kdf = self.get_kdf()?;
         let new_pin_data = self.process_pin(&kdf, Pw::User, new_pin)?;
-        let (p1, data) = if let Some(code) = reset_code {
-            let mut d = self.process_pin(&kdf, Pw::Reset, code)?;
+        let (p1, data): (u8, Zeroizing<Vec<u8>>) = if let Some(code) = reset_code {
+            let mut d = Zeroizing::new(self.process_pin(&kdf, Pw::Reset, code)?.to_vec());
             d.extend_from_slice(&new_pin_data);
-            (0u8, d)
+            (0, d)
         } else {
-            (2u8, new_pin_data)
+            (2, new_pin_data)
         };
 
         match self

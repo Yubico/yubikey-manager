@@ -24,6 +24,7 @@ use p256::elliptic_curve::rand_core::OsRng;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::{EncodedPoint, PublicKey, SecretKey};
 use sha2::{Digest, Sha256};
+use zeroize::Zeroize;
 
 use crate::cbor::Value;
 
@@ -194,7 +195,6 @@ impl PinProtocol {
     }
 
     fn kdf(&self, z: &[u8]) -> Vec<u8> {
-        use zeroize::Zeroize;
         match self {
             Self::V1 => {
                 let mut hasher = Sha256::new();

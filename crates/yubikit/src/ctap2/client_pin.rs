@@ -419,7 +419,9 @@ impl<C: Connection + 'static> ClientPin<C> {
         ))
     }
 
-    pub(crate) fn get_shared_secret(&mut self) -> Result<(CoseKey, Vec<u8>), Ctap2Error<C::Error>> {
+    pub(crate) fn get_shared_secret(
+        &mut self,
+    ) -> Result<(CoseKey, Zeroizing<Vec<u8>>), Ctap2Error<C::Error>> {
         let resp = self.send(
             client_pin_cmd::GET_KEY_AGREEMENT,
             None,
@@ -438,6 +440,7 @@ impl<C: Connection + 'static> ClientPin<C> {
 
         self.protocol
             .encapsulate(peer_key)
+            .map(|(key, secret)| (key, Zeroizing::new(secret)))
             .map_err(|e| Ctap2Error::InvalidResponse(format!("key agreement failed: {e}")))
     }
 }

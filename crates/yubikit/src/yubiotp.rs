@@ -40,6 +40,7 @@
 
 use sha1::{Digest, Sha1};
 use thiserror::Error;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::core::Version;
 use crate::core::patch_version;
@@ -451,17 +452,17 @@ fn require_version(version: Version, required: Version, feature: &str) -> Result
 // Helper: shorten HMAC key
 // ---------------------------------------------------------------------------
 
-fn shorten_hmac_key(key: &[u8]) -> Result<Vec<u8>, YubiOtpError> {
+fn shorten_hmac_key(key: &[u8]) -> Result<Zeroizing<Vec<u8>>, YubiOtpError> {
     if key.len() > SHA1_BLOCK_SIZE {
         let mut hasher = Sha1::new();
         hasher.update(key);
-        Ok(hasher.finalize().to_vec())
+        Ok(Zeroizing::new(hasher.finalize().to_vec()))
     } else if key.len() > HMAC_KEY_SIZE {
         Err(YubiOtpError::NotSupported(format!(
             "Key lengths > {HMAC_KEY_SIZE} bytes not supported"
         )))
     } else {
-        Ok(key.to_vec())
+        Ok(Zeroizing::new(key.to_vec()))
     }
 }
 
@@ -586,14 +587,18 @@ fn build_ndef_config(value: Option<&str>, ndef_type: NdefType) -> Result<Vec<u8>
 /// Use one of the constructors ([`SlotConfiguration::yubiotp`],
 /// [`SlotConfiguration::hmac_sha1`], etc.) to create a configuration, then
 /// chain builder methods to customise flags.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
 pub struct SlotConfiguration {
     fixed: Vec<u8>,
     uid: [u8; UID_SIZE],
     key: [u8; KEY_SIZE],
+    #[zeroize(skip)]
     ext_flags: u8,
+    #[zeroize(skip)]
     tkt_flags: u8,
+    #[zeroize(skip)]
     cfg_flags: u8,
+    #[zeroize(skip)]
     kind: SlotConfigKind,
 }
 
