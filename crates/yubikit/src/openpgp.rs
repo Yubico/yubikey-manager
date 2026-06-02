@@ -588,6 +588,51 @@ const PKCS1_SHA512: &[u8] = &[
 ];
 
 // ---------------------------------------------------------------------------
+// Secret value types
+// ---------------------------------------------------------------------------
+
+/// An OpenPGP PIN, admin PIN, or reset code.
+///
+/// OpenPGP PINs are UTF-8 strings. Length validation is deferred to the session
+/// methods since limits depend on the card's configuration. The value is
+/// automatically zeroized when dropped.
+///
+/// # Examples
+///
+/// ```
+/// use yubikit::openpgp::OpenPgpPin;
+///
+/// let pin = OpenPgpPin::new("123456");
+/// ```
+#[derive(Clone)]
+pub struct OpenPgpPin(crate::secret::SecretValue<Vec<u8>>);
+
+impl OpenPgpPin {
+    /// Create a new OpenPGP PIN from a string value.
+    pub fn new(pin: &str) -> Self {
+        Self(crate::secret::SecretValue::new(pin.as_bytes().to_vec()))
+    }
+
+    /// Access the raw PIN bytes (internal use only).
+    #[allow(dead_code)]
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        self.0.expose_secret()
+    }
+
+    /// Access the PIN as a UTF-8 string (for KDF processing).
+    pub(crate) fn as_str(&self) -> &str {
+        // Safety: we only construct from &str in new()
+        std::str::from_utf8(self.0.expose_secret()).expect("OpenPgpPin is always valid UTF-8")
+    }
+}
+
+impl fmt::Debug for OpenPgpPin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("OpenPgpPin([REDACTED])")
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
 
@@ -1756,9 +1801,9 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Ok(Zeroizing::new(kdf.process(pw, pin)))
     }
 
-    fn verify_inner(&mut self, pw: Pw, pin: &str, mode: u8) -> Result<(), OpenPgpError> {
+    fn verify_inner(&mut self, pw: Pw, pin: &OpenPgpPin, mode: u8) -> Result<(), OpenPgpError> {
         let kdf = self.get_kdf()?;
-        let pin_enc = self.process_pin(&kdf, pw, pin)?;
+        let pin_enc = self.process_pin(&kdf, pw, pin.as_str())?;
         match self
             .protocol
             .send_apdu(0, INS_VERIFY, 0, pw as u8 + mode, &pin_enc)
@@ -1776,14 +1821,14 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     }
 
     /// Verify the user PIN. If `extended` is true, uses extended mode (PW1 for signing).
-    pub fn verify_pin(&mut self, pin: &str, extended: bool) -> Result<(), OpenPgpError> {
+    pub fn verify_pin(&mut self, pin: &OpenPgpPin, extended: bool) -> Result<(), OpenPgpError> {
         log::debug!("Verifying OpenPGP PIN");
         let mode = if extended { 1 } else { 0 };
         self.verify_inner(Pw::User, pin, mode)
     }
 
     /// Verify the admin PIN.
-    pub fn verify_admin(&mut self, admin_pin: &str) -> Result<(), OpenPgpError> {
+    pub fn verify_admin(&mut self, admin_pin: &OpenPgpPin) -> Result<(), OpenPgpError> {
         log::debug!("Verifying OpenPGP admin PIN");
         self.verify_inner(Pw::Admin, admin_pin, 0)
     }
@@ -1797,10 +1842,15 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         Ok(())
     }
 
-    fn change_inner(&mut self, pw: Pw, pin: &str, new_pin: &str) -> Result<(), OpenPgpError> {
+    fn change_inner(
+        &mut self,
+        pw: Pw,
+        pin: &OpenPgpPin,
+        new_pin: &OpenPgpPin,
+    ) -> Result<(), OpenPgpError> {
         let kdf = self.get_kdf()?;
-        let mut data = Zeroizing::new(self.process_pin(&kdf, pw, pin)?.to_vec());
-        data.extend_from_slice(&self.process_pin(&kdf, pw, new_pin)?);
+        let mut data = Zeroizing::new(self.process_pin(&kdf, pw, pin.as_str())?.to_vec());
+        data.extend_from_slice(&self.process_pin(&kdf, pw, new_pin.as_str())?);
         match self
             .protocol
             .send_apdu(0, INS_CHANGE_PIN, 0, pw as u8, &data)
@@ -1818,7 +1868,11 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     }
 
     /// Change the user PIN from `pin` to `new_pin`.
-    pub fn change_pin(&mut self, pin: &str, new_pin: &str) -> Result<(), OpenPgpError> {
+    pub fn change_pin(
+        &mut self,
+        pin: &OpenPgpPin,
+        new_pin: &OpenPgpPin,
+    ) -> Result<(), OpenPgpError> {
         log::debug!("Changing OpenPGP PIN");
         self.change_inner(Pw::User, pin, new_pin)?;
         log::info!("OpenPGP PIN changed");
@@ -1828,8 +1882,8 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     /// Change the admin PIN from `admin_pin` to `new_admin_pin`.
     pub fn change_admin(
         &mut self,
-        admin_pin: &str,
-        new_admin_pin: &str,
+        admin_pin: &OpenPgpPin,
+        new_admin_pin: &OpenPgpPin,
     ) -> Result<(), OpenPgpError> {
         log::debug!("Changing OpenPGP admin PIN");
         self.change_inner(Pw::Admin, admin_pin, new_admin_pin)?;
@@ -1838,10 +1892,10 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     }
 
     /// Set the resetting code used to unblock the user PIN.
-    pub fn set_reset_code(&mut self, reset_code: &str) -> Result<(), OpenPgpError> {
+    pub fn set_reset_code(&mut self, reset_code: &OpenPgpPin) -> Result<(), OpenPgpError> {
         log::debug!("Setting OpenPGP reset code");
         let kdf = self.get_kdf()?;
-        let data = self.process_pin(&kdf, Pw::Reset, reset_code)?;
+        let data = self.process_pin(&kdf, Pw::Reset, reset_code.as_str())?;
         self.put_data(Do::ResettingCode, &data)?;
         log::info!("OpenPGP reset code set");
         Ok(())
@@ -1852,14 +1906,14 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     /// If `reset_code` is `None`, the admin PIN must have been verified first.
     pub fn reset_pin(
         &mut self,
-        new_pin: &str,
-        reset_code: Option<&str>,
+        new_pin: &OpenPgpPin,
+        reset_code: Option<&OpenPgpPin>,
     ) -> Result<(), OpenPgpError> {
         log::debug!("Resetting OpenPGP PIN");
         let kdf = self.get_kdf()?;
-        let new_pin_data = self.process_pin(&kdf, Pw::User, new_pin)?;
+        let new_pin_data = self.process_pin(&kdf, Pw::User, new_pin.as_str())?;
         let (p1, data): (u8, Zeroizing<Vec<u8>>) = if let Some(code) = reset_code {
-            let mut d = Zeroizing::new(self.process_pin(&kdf, Pw::Reset, code)?.to_vec());
+            let mut d = Zeroizing::new(self.process_pin(&kdf, Pw::Reset, code.as_str())?.to_vec());
             d.extend_from_slice(&new_pin_data);
             (0, d)
         } else {

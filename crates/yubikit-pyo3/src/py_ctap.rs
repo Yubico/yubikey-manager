@@ -6,7 +6,7 @@ use pyo3::types::{PyBool, PyBytes, PyDict, PyList};
 use yubikit::cbor;
 use yubikit::ctap::CtapSession;
 use yubikit::ctap2::{
-    BioEnrollment, ClientPin, Config, CredentialInfo, CredentialManagement, Ctap2Error,
+    BioEnrollment, ClientPin, Config, CredentialInfo, CredentialManagement, Ctap2Error, Ctap2Pin,
     Ctap2Session, Info, LargeBlobs, Permissions, PinProtocol, PublicKeyCredentialDescriptor,
     PublicKeyCredentialUserEntity, RpInfo,
 };
@@ -60,6 +60,10 @@ pub(crate) fn make_cancel_fn(event: &Option<Py<PyAny>>) -> impl Fn() -> bool + '
             false
         }
     }
+}
+
+fn parse_ctap2_pin(pin: &str) -> PyResult<Ctap2Pin> {
+    Ctap2Pin::new(pin).map_err(PyValueError::new_err)
 }
 
 // ---------------------------------------------------------------------------
@@ -592,12 +596,15 @@ impl PyClientPinCcid {
     }
 
     fn set_pin(&mut self, pin: &str) -> PyResult<()> {
-        self.get_mut()?.set_pin(pin).map_err(ctap2_err)
+        let pin = parse_ctap2_pin(pin)?;
+        self.get_mut()?.set_pin(&pin).map_err(ctap2_err)
     }
 
     fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> PyResult<()> {
+        let old_pin = parse_ctap2_pin(old_pin)?;
+        let new_pin = parse_ctap2_pin(new_pin)?;
         self.get_mut()?
-            .change_pin(old_pin, new_pin)
+            .change_pin(&old_pin, &new_pin)
             .map_err(ctap2_err)
     }
 
@@ -609,10 +616,11 @@ impl PyClientPinCcid {
         permissions: Option<u8>,
         permissions_rpid: Option<&str>,
     ) -> PyResult<Bound<'py, PyBytes>> {
+        let pin = parse_ctap2_pin(pin)?;
         let perms = permissions.map(Permissions::new);
         let token = self
             .get_mut()?
-            .get_pin_token(pin, perms, permissions_rpid)
+            .get_pin_token(&pin, perms, permissions_rpid)
             .map_err(ctap2_err)?;
         Ok(PyBytes::new(py, &token))
     }
@@ -717,12 +725,15 @@ impl PyClientPinFido {
     }
 
     fn set_pin(&mut self, pin: &str) -> PyResult<()> {
-        self.get_mut()?.set_pin(pin).map_err(ctap2_err)
+        let pin = parse_ctap2_pin(pin)?;
+        self.get_mut()?.set_pin(&pin).map_err(ctap2_err)
     }
 
     fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> PyResult<()> {
+        let old_pin = parse_ctap2_pin(old_pin)?;
+        let new_pin = parse_ctap2_pin(new_pin)?;
         self.get_mut()?
-            .change_pin(old_pin, new_pin)
+            .change_pin(&old_pin, &new_pin)
             .map_err(ctap2_err)
     }
 
@@ -734,10 +745,11 @@ impl PyClientPinFido {
         permissions: Option<u8>,
         permissions_rpid: Option<&str>,
     ) -> PyResult<Bound<'py, PyBytes>> {
+        let pin = parse_ctap2_pin(pin)?;
         let perms = permissions.map(Permissions::new);
         let token = self
             .get_mut()?
-            .get_pin_token(pin, perms, permissions_rpid)
+            .get_pin_token(&pin, perms, permissions_rpid)
             .map_err(ctap2_err)?;
         Ok(PyBytes::new(py, &token))
     }

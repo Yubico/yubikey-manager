@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use yubikit::openpgp::{
-    self, Do, KeyRef, OpenPgpSession as RustOpenPgpSession, PrehashAlgorithm, Pw, RsaSize,
-    SignHashAlgorithm, Uif,
+    self, Do, KeyRef, OpenPgpPin, OpenPgpSession as RustOpenPgpSession, PrehashAlgorithm, Pw,
+    RsaSize, SignHashAlgorithm, Uif,
 };
 
 use crate::py_bridge::{
@@ -178,6 +178,10 @@ fn parse_pw(v: u8) -> PyResult<Pw> {
     }
 }
 
+fn parse_openpgp_pin(pin: &str) -> OpenPgpPin {
+    OpenPgpPin::new(pin)
+}
+
 #[pyclass]
 pub struct OpenPgpSession {
     inner: Option<RustOpenPgpSession<BoxedSmartCardConnection>>,
@@ -333,14 +337,16 @@ impl OpenPgpSession {
     }
 
     fn verify_pin(&mut self, pin: &str, extended: bool) -> PyResult<()> {
+        let pin = parse_openpgp_pin(pin);
         self.session_mut()?
-            .verify_pin(pin, extended)
+            .verify_pin(&pin, extended)
             .map_err(openpgp_err)
     }
 
     fn verify_admin(&mut self, admin_pin: &str) -> PyResult<()> {
+        let admin_pin = parse_openpgp_pin(admin_pin);
         self.session_mut()?
-            .verify_admin(admin_pin)
+            .verify_admin(&admin_pin)
             .map_err(openpgp_err)
     }
 
@@ -350,26 +356,33 @@ impl OpenPgpSession {
     }
 
     fn change_pin(&mut self, pin: &str, new_pin: &str) -> PyResult<()> {
+        let pin = parse_openpgp_pin(pin);
+        let new_pin = parse_openpgp_pin(new_pin);
         self.session_mut()?
-            .change_pin(pin, new_pin)
+            .change_pin(&pin, &new_pin)
             .map_err(openpgp_err)
     }
 
     fn change_admin(&mut self, admin_pin: &str, new_admin_pin: &str) -> PyResult<()> {
+        let admin_pin = parse_openpgp_pin(admin_pin);
+        let new_admin_pin = parse_openpgp_pin(new_admin_pin);
         self.session_mut()?
-            .change_admin(admin_pin, new_admin_pin)
+            .change_admin(&admin_pin, &new_admin_pin)
             .map_err(openpgp_err)
     }
 
     fn set_reset_code(&mut self, reset_code: &str) -> PyResult<()> {
+        let reset_code = parse_openpgp_pin(reset_code);
         self.session_mut()?
-            .set_reset_code(reset_code)
+            .set_reset_code(&reset_code)
             .map_err(openpgp_err)
     }
 
     fn reset_pin(&mut self, new_pin: &str, reset_code: Option<&str>) -> PyResult<()> {
+        let new_pin = parse_openpgp_pin(new_pin);
+        let reset_code = reset_code.map(parse_openpgp_pin);
         self.session_mut()?
-            .reset_pin(new_pin, reset_code)
+            .reset_pin(&new_pin, reset_code.as_ref())
             .map_err(openpgp_err)
     }
 

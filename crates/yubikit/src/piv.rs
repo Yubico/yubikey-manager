@@ -806,6 +806,116 @@ pub struct BioMetadata {
 }
 
 // ---------------------------------------------------------------------------
+// Secret value types
+// ---------------------------------------------------------------------------
+
+/// A PIV PIN or PUK value.
+///
+/// PIV PINs and PUKs are 1-8 byte ASCII strings. The value is automatically
+/// zeroized when dropped.
+///
+/// # Examples
+///
+/// ```
+/// use yubikit::piv::PivPin;
+///
+/// let pin = PivPin::new("123456").unwrap();
+/// ```
+#[derive(Clone)]
+pub struct PivPin(crate::secret::SecretValue<Vec<u8>>);
+
+impl PivPin {
+    /// Create a new PIV PIN/PUK from a string value.
+    ///
+    /// Returns an error if the PIN is empty or longer than 8 bytes.
+    pub fn new(pin: &str) -> Result<Self, PivError> {
+        let bytes = pin.as_bytes();
+        if bytes.is_empty() || bytes.len() > PIN_LEN {
+            return Err(PivError::InvalidData("PIN/PUK must be 1-8 bytes".into()));
+        }
+        Ok(Self(crate::secret::SecretValue::new(bytes.to_vec())))
+    }
+
+    /// Returns the PIN bytes, padded to 8 bytes with 0xFF.
+    pub(crate) fn padded(&self) -> Zeroizing<Vec<u8>> {
+        let mut padded = Zeroizing::new(vec![0xff; PIN_LEN]);
+        let bytes = self.0.expose_secret();
+        padded[..bytes.len()].copy_from_slice(bytes);
+        padded
+    }
+
+    /// Create from raw bytes without validation (internal use only).
+    fn from_raw(bytes: Vec<u8>) -> Self {
+        Self(crate::secret::SecretValue::new(bytes))
+    }
+}
+
+impl fmt::Debug for PivPin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("PivPin([REDACTED])")
+    }
+}
+
+/// A PIV management key.
+///
+/// The management key is used to authenticate administrative operations.
+/// Its length depends on the algorithm: 24 bytes for Triple-DES, 16/24/32 bytes
+/// for AES-128/192/256.
+///
+/// The value is automatically zeroized when dropped.
+///
+/// # Examples
+///
+/// ```
+/// use yubikit::piv::{ManagementKey, ManagementKeyType, DEFAULT_MANAGEMENT_KEY};
+///
+/// let key = ManagementKey::new(ManagementKeyType::Tdes, DEFAULT_MANAGEMENT_KEY).unwrap();
+/// ```
+#[derive(Clone)]
+pub struct ManagementKey {
+    inner: crate::secret::SecretValue<Vec<u8>>,
+    key_type: ManagementKeyType,
+}
+
+impl ManagementKey {
+    /// Create a new management key with the given type and raw bytes.
+    ///
+    /// Returns an error if the key length doesn't match the expected length for the key type.
+    pub fn new(key_type: ManagementKeyType, key: &[u8]) -> Result<Self, PivError> {
+        if key.len() != key_type.key_len() {
+            return Err(PivError::InvalidData(format!(
+                "Management key must be {} bytes for {:?}",
+                key_type.key_len(),
+                key_type
+            )));
+        }
+        Ok(Self {
+            inner: crate::secret::SecretValue::new(key.to_vec()),
+            key_type,
+        })
+    }
+
+    /// Returns the key type (algorithm).
+    pub fn key_type(&self) -> ManagementKeyType {
+        self.key_type
+    }
+
+    /// Access the raw key bytes.
+    pub(crate) fn expose_secret(&self) -> &[u8] {
+        self.inner.expose_secret()
+    }
+}
+
+impl fmt::Debug for ManagementKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ManagementKey")
+            .field("key_type", &self.key_type)
+            .field("value", &"[REDACTED]")
+            .finish()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -879,18 +989,6 @@ const PUK_P2: u8 = 0x81;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn pin_bytes(pin: &str) -> Result<Zeroizing<Vec<u8>>, PivError> {
-    let bytes = pin.as_bytes();
-    if bytes.len() > PIN_LEN {
-        return Err(PivError::InvalidData(
-            "PIN/PUK must be no longer than 8 bytes".into(),
-        ));
-    }
-    let mut padded = Zeroizing::new(vec![0xff; PIN_LEN]);
-    padded[..bytes.len()].copy_from_slice(bytes);
-    Ok(padded)
-}
 
 fn retries_from_sw(sw: u16) -> Option<u32> {
     if sw == Sw::AuthMethodBlocked as u16 {
@@ -1227,9 +1325,10 @@ impl<C: SmartCardConnection> PivSession<C> {
         }
 
         // Block PIN
+        let invalid_pin = PivPin::from_raw(vec![]);
         let mut counter = self.get_pin_attempts()?;
         while counter > 0 {
-            match self.verify_pin("") {
+            match self.verify_pin(&invalid_pin) {
                 Ok(()) => break,
                 Err(PivError::InvalidPin(r)) => counter = r,
                 Err(e) => return Err(e),
@@ -1242,7 +1341,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             Err(_) => 1,
         };
         while counter > 0 {
-            match self.change_reference(INS_RESET_RETRY, PIN_P2, "", "") {
+            match self.change_reference(INS_RESET_RETRY, PIN_P2, &invalid_pin, &invalid_pin) {
                 Ok(()) => break,
                 Err(PivError::InvalidPin(r)) => counter = r,
                 Err(e) => return Err(e),
@@ -1281,7 +1380,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     // -----------------------------------------------------------------------
 
     /// Authenticate with the management key using a mutual-authentication protocol.
-    pub fn authenticate(&mut self, management_key: &[u8]) -> Result<(), PivError> {
+    pub fn authenticate(&mut self, management_key: &ManagementKey) -> Result<(), PivError> {
         log::debug!("Authenticating with management key");
         let key_type = self.mgmt_key_type;
 
@@ -1299,7 +1398,11 @@ impl<C: SmartCardConnection> PivSession<C> {
         let witness = tlv_unpack(TAG_AUTH_WITNESS, &dyn_auth)?;
 
         // Step 2: Decrypt witness, send back with our challenge
-        let decrypted = Zeroizing::new(mgmt_key_decrypt(key_type, management_key, &witness)?);
+        let decrypted = Zeroizing::new(mgmt_key_decrypt(
+            key_type,
+            management_key.expose_secret(),
+            &witness,
+        )?);
 
         let challenge_len = key_type.challenge_len();
         let mut challenge = Zeroizing::new(vec![0u8; challenge_len]);
@@ -1322,7 +1425,11 @@ impl<C: SmartCardConnection> PivSession<C> {
         let dyn_auth = tlv_unpack(TAG_DYN_AUTH, &response)?;
         let encrypted = tlv_unpack(TAG_AUTH_RESPONSE, &dyn_auth)?;
 
-        let expected = Zeroizing::new(mgmt_key_encrypt(key_type, management_key, &challenge)?);
+        let expected = Zeroizing::new(mgmt_key_encrypt(
+            key_type,
+            management_key.expose_secret(),
+            &challenge,
+        )?);
         if expected.ct_eq(&encrypted).into() {
             Ok(())
         } else {
@@ -1337,23 +1444,20 @@ impl<C: SmartCardConnection> PivSession<C> {
     /// Set a new management key, optionally requiring touch.
     pub fn set_management_key(
         &mut self,
-        key_type: ManagementKeyType,
-        management_key: &[u8],
+        management_key: &ManagementKey,
         require_touch: bool,
     ) -> Result<(), PivError> {
         log::debug!("Setting management key");
+        let key_type = management_key.key_type();
         if key_type != ManagementKeyType::Tdes {
             require_version(self.version, Version(5, 4, 0), "AES management key")?;
         }
-        if management_key.len() != key_type.key_len() {
-            return Err(PivError::InvalidData(format!(
-                "Management key must be {} bytes",
-                key_type.key_len()
-            )));
-        }
 
         let mut data = Zeroizing::new(vec![key_type as u8]);
-        data.extend_from_slice(&tlv_encode(SLOT_CARD_MANAGEMENT as u32, management_key));
+        data.extend_from_slice(&tlv_encode(
+            SLOT_CARD_MANAGEMENT as u32,
+            management_key.expose_secret(),
+        ));
 
         let p2 = if require_touch { 0xFE } else { 0xFF };
         self.protocol
@@ -1368,9 +1472,9 @@ impl<C: SmartCardConnection> PivSession<C> {
     // -----------------------------------------------------------------------
 
     /// Verify the PIV PIN. On failure, returns [`PivError::InvalidPin`] with remaining attempts.
-    pub fn verify_pin(&mut self, pin: &str) -> Result<(), PivError> {
+    pub fn verify_pin(&mut self, pin: &PivPin) -> Result<(), PivError> {
         log::debug!("Verifying PIN");
-        let data = pin_bytes(pin)?;
+        let data = pin.padded();
         match self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, &data) {
             Ok(_) => {
                 self.current_pin_retries = self.max_pin_retries;
@@ -1501,7 +1605,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     }
 
     /// Change the PIV PIN from `old_pin` to `new_pin`.
-    pub fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> Result<(), PivError> {
+    pub fn change_pin(&mut self, old_pin: &PivPin, new_pin: &PivPin) -> Result<(), PivError> {
         log::debug!("Changing PIN");
         self.change_reference(INS_CHANGE_REFERENCE, PIN_P2, old_pin, new_pin)?;
         log::info!("PIN changed");
@@ -1509,7 +1613,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     }
 
     /// Change the PUK from `old_puk` to `new_puk`.
-    pub fn change_puk(&mut self, old_puk: &str, new_puk: &str) -> Result<(), PivError> {
+    pub fn change_puk(&mut self, old_puk: &PivPin, new_puk: &PivPin) -> Result<(), PivError> {
         log::debug!("Changing PUK");
         match self.change_reference(INS_CHANGE_REFERENCE, PUK_P2, old_puk, new_puk) {
             Err(PivError::Connection(SmartCardError::Apdu { sw, .. }))
@@ -1528,7 +1632,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     }
 
     /// Unblock a locked PIN using the PUK and set a new PIN.
-    pub fn unblock_pin(&mut self, puk: &str, new_pin: &str) -> Result<(), PivError> {
+    pub fn unblock_pin(&mut self, puk: &PivPin, new_pin: &PivPin) -> Result<(), PivError> {
         log::debug!("Unblocking PIN");
         match self.change_reference(INS_RESET_RETRY, PIN_P2, puk, new_pin) {
             Err(PivError::Connection(SmartCardError::Apdu { sw, .. }))
@@ -2053,11 +2157,11 @@ impl<C: SmartCardConnection> PivSession<C> {
         &mut self,
         ins: u8,
         p2: u8,
-        value1: &str,
-        value2: &str,
+        value1: &PivPin,
+        value2: &PivPin,
     ) -> Result<(), PivError> {
-        let mut data = Zeroizing::new(pin_bytes(value1)?.to_vec());
-        data.extend_from_slice(&pin_bytes(value2)?);
+        let mut data = Zeroizing::new(value1.padded().to_vec());
+        data.extend_from_slice(&value2.padded());
         match self.protocol.send_apdu(0, ins, 0, p2, &data) {
             Ok(_) => Ok(()),
             Err(e) => {
@@ -2817,16 +2921,23 @@ mod tests {
 
     #[test]
     fn test_pin_padding() {
-        let padded = pin_bytes("123456").unwrap();
-        assert_eq!(*padded, [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0xFF, 0xFF]);
+        let pin = PivPin::new("123456").unwrap();
+        assert_eq!(
+            *pin.padded(),
+            [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0xFF, 0xFF]
+        );
 
-        let padded = pin_bytes("12345678").unwrap();
-        assert_eq!(*padded, [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38]);
+        let pin = PivPin::new("12345678").unwrap();
+        assert_eq!(
+            *pin.padded(),
+            [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38]
+        );
 
-        let padded = pin_bytes("").unwrap();
-        assert_eq!(*padded, [0xFF; 8]);
+        // Empty PIN is invalid
+        assert!(PivPin::new("").is_err());
 
-        assert!(pin_bytes("123456789").is_err());
+        // Too-long PIN is invalid
+        assert!(PivPin::new("123456789").is_err());
     }
 
     #[test]

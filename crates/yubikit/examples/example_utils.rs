@@ -6,7 +6,7 @@
 use std::io::{self, Write};
 
 use yubikit::ctap::CtapSession;
-use yubikit::ctap2::{Ctap2Session, Info, Permissions};
+use yubikit::ctap2::{Ctap2Pin, Ctap2Session, Info, Permissions};
 use yubikit::platform::hidapi::{HidFidoConnection, list_fido_devices};
 use yubikit::webauthn::{
     ClientDataCollector, CollectedClientData, PublicKeyCredentialCreationOptions,
@@ -27,13 +27,17 @@ impl UserInteraction for ConsoleInteraction {
         println!("\n👆 Touch your security key...");
     }
 
-    fn request_pin(&self, _permissions: Permissions, _rp_id: Option<&str>) -> Option<String> {
+    fn request_pin(&self, _permissions: Permissions, _rp_id: Option<&str>) -> Option<Ctap2Pin> {
         print!("🔑 Enter PIN: ");
         io::stdout().flush().ok();
         let mut pin = String::new();
         io::stdin().read_line(&mut pin).ok()?;
         let pin = pin.trim().to_string();
-        if pin.is_empty() { None } else { Some(pin) }
+        if pin.is_empty() {
+            None
+        } else {
+            Ctap2Pin::new(&pin).ok()
+        }
     }
 
     fn request_uv(&self, _permissions: Permissions, _rp_id: Option<&str>) -> bool {

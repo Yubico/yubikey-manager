@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
-use yubikit::openpgp::{KeyRef, KeyStatus, OpenPgpSession, PinPolicy, Uif};
+use yubikit::openpgp::{KeyRef, KeyStatus, OpenPgpPin, OpenPgpSession, PinPolicy, Uif};
 
 use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
 use crate::scp::{self, ScpConfig, ScpParams};
@@ -41,17 +41,17 @@ fn confirm(msg: &str) -> bool {
     matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
-fn ensure_admin_pin(admin_pin: Option<&str>) -> Result<String, CliError> {
+fn ensure_admin_pin(admin_pin: Option<&str>) -> Result<OpenPgpPin, CliError> {
     match admin_pin {
-        Some(p) => Ok(p.to_string()),
-        None => crate::util::prompt_secret("Enter Admin PIN"),
+        Some(p) => Ok(OpenPgpPin::new(p)),
+        None => crate::util::prompt_secret("Enter Admin PIN").map(|p| OpenPgpPin::new(&p)),
     }
 }
 
-fn ensure_pin(pin: Option<&str>) -> Result<String, CliError> {
+fn ensure_pin(pin: Option<&str>) -> Result<OpenPgpPin, CliError> {
     match pin {
-        Some(p) => Ok(p.to_string()),
-        None => crate::util::prompt_secret("Enter PIN"),
+        Some(p) => Ok(OpenPgpPin::new(p)),
+        None => crate::util::prompt_secret("Enter PIN").map(|p| OpenPgpPin::new(&p)),
     }
 }
 
@@ -230,8 +230,8 @@ pub fn run_change_pin(
 ) -> Result<(), CliError> {
     let old = ensure_pin(pin)?;
     let new = match new_pin {
-        Some(p) => p.to_string(),
-        None => crate::util::prompt_new_secret("New PIN")?,
+        Some(p) => OpenPgpPin::new(p),
+        None => crate::util::prompt_new_secret("New PIN").map(|p| OpenPgpPin::new(&p))?,
     };
     let mut session = open_session(dev, scp_params)?;
     session
@@ -249,8 +249,8 @@ pub fn run_change_admin_pin(
 ) -> Result<(), CliError> {
     let old = ensure_admin_pin(admin_pin)?;
     let new = match new_admin_pin {
-        Some(p) => p.to_string(),
-        None => crate::util::prompt_new_secret("New Admin PIN")?,
+        Some(p) => OpenPgpPin::new(p),
+        None => crate::util::prompt_new_secret("New Admin PIN").map(|p| OpenPgpPin::new(&p))?,
     };
     let mut session = open_session(dev, scp_params)?;
     session
@@ -267,8 +267,8 @@ pub fn run_change_reset_code(
     reset_code: Option<&str>,
 ) -> Result<(), CliError> {
     let rc = match reset_code {
-        Some(p) => p.to_string(),
-        None => crate::util::prompt_new_secret("New reset code")?,
+        Some(p) => OpenPgpPin::new(p),
+        None => crate::util::prompt_new_secret("New reset code").map(|p| OpenPgpPin::new(&p))?,
     };
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
@@ -290,18 +290,19 @@ pub fn run_unblock_pin(
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
     let new = match new_pin {
-        Some(p) => p.to_string(),
-        None => crate::util::prompt_new_secret("New PIN")?,
+        Some(p) => OpenPgpPin::new(p),
+        None => crate::util::prompt_new_secret("New PIN").map(|p| OpenPgpPin::new(&p))?,
     };
     let mut session = open_session(dev, scp_params)?;
     if let Some(ap) = admin_pin {
-        let ap = ap.to_string();
+        let ap = OpenPgpPin::new(ap);
         session
             .verify_admin(&ap)
             .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
     }
+    let reset_code = reset_code.map(OpenPgpPin::new);
     session
-        .reset_pin(&new, reset_code)
+        .reset_pin(&new, reset_code.as_ref())
         .map_err(|e| CliError(format!("Failed to unblock PIN: {e}")))?;
     eprintln!("PIN unblocked.");
     Ok(())

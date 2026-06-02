@@ -490,8 +490,8 @@ mod piv {
     use super::*;
     use x509_cert::der::{Decode, Encode};
     use yubikit::piv::{
-        DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, PinPolicy, PivSession, PivSignature,
-        PivSigner, Slot, TouchPolicy,
+        DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, ManagementKey, ManagementKeyType,
+        PinPolicy, PivPin, PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
     };
 
     fn open_piv_session(tc: &TestConnection) -> PivSession<PcscSmartCardConnection> {
@@ -502,6 +502,14 @@ mod piv {
         } else {
             PivSession::new(conn).expect("PivSession::new")
         }
+    }
+
+    fn default_piv_pin() -> PivPin {
+        PivPin::new("123456").unwrap()
+    }
+
+    fn default_management_key() -> ManagementKey {
+        ManagementKey::new(ManagementKeyType::Tdes, DEFAULT_MANAGEMENT_KEY).unwrap()
     }
 
     #[rstest]
@@ -523,7 +531,9 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
 
-        session.verify_pin("123456").expect("verify default PIN");
+        session
+            .verify_pin(&default_piv_pin())
+            .expect("verify default PIN");
     }
 
     #[rstest]
@@ -548,7 +558,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .authenticate(&default_management_key())
             .expect("authenticate");
 
         let spki_der = session
@@ -572,7 +582,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .authenticate(&default_management_key())
             .expect("authenticate");
 
         let spki_der = session
@@ -596,9 +606,9 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .authenticate(&default_management_key())
             .expect("authenticate");
-        session.verify_pin("123456").expect("verify PIN");
+        session.verify_pin(&default_piv_pin()).expect("verify PIN");
 
         let spki_der = session
             .generate_key(
@@ -640,9 +650,9 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .authenticate(&default_management_key())
             .expect("authenticate");
-        session.verify_pin("123456").expect("verify PIN");
+        session.verify_pin(&default_piv_pin()).expect("verify PIN");
 
         let spki_der = session
             .generate_key(
@@ -726,9 +736,9 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .authenticate(&default_management_key())
             .expect("authenticate");
-        session.verify_pin("123456").expect("verify PIN");
+        session.verify_pin(&default_piv_pin()).expect("verify PIN");
 
         let spki_der = session
             .generate_key(
@@ -787,9 +797,9 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .authenticate(&default_management_key())
             .expect("authenticate");
-        session.verify_pin("123456").expect("verify PIN");
+        session.verify_pin(&default_piv_pin()).expect("verify PIN");
 
         let spki_der = session
             .generate_key(
@@ -848,9 +858,9 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .authenticate(&default_management_key())
             .expect("authenticate");
-        session.verify_pin("123456").expect("verify PIN");
+        session.verify_pin(&default_piv_pin()).expect("verify PIN");
 
         let spki_der = session
             .generate_key(
@@ -892,9 +902,9 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .authenticate(&default_management_key())
             .expect("authenticate");
-        session.verify_pin("123456").expect("verify PIN");
+        session.verify_pin(&default_piv_pin()).expect("verify PIN");
 
         let spki_der = session
             .generate_key(
@@ -949,7 +959,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .authenticate(&default_management_key())
             .expect("authenticate");
 
         let spki_der = session
@@ -966,7 +976,7 @@ mod piv {
             KeyType::MlDsa44
         );
 
-        session.verify_pin("123456").expect("verify PIN");
+        session.verify_pin(&default_piv_pin()).expect("verify PIN");
         let sig = session
             .sign(Slot::Authentication, KeyType::MlDsa44, b"test message")
             .expect("sign MlDsa44");
@@ -982,7 +992,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .authenticate(&default_management_key())
             .expect("authenticate");
 
         let spki_der = session
@@ -1014,7 +1024,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .authenticate(&default_management_key())
             .expect("authenticate");
 
         let spki_der = session
@@ -1027,7 +1037,7 @@ mod piv {
             .expect("generate_key MlDsa44");
 
         let msg = b"test message for ml-dsa44 verification";
-        session.verify_pin("123456").expect("verify PIN");
+        session.verify_pin(&default_piv_pin()).expect("verify PIN");
         let sig_bytes = session
             .sign(Slot::Authentication, KeyType::MlDsa44, msg)
             .expect("sign");
@@ -1059,7 +1069,7 @@ mod piv {
         let mut session = open_piv_session(&tc);
         session.reset().expect("reset");
         session
-            .authenticate(DEFAULT_MANAGEMENT_KEY)
+            .authenticate(&default_management_key())
             .expect("authenticate");
 
         let spki_der = session
@@ -1085,7 +1095,7 @@ mod piv {
         let (ciphertext, host_shared_secret) = ek.encapsulate_deterministic(&m.into());
 
         // Device decapsulates and returns shared secret
-        session.verify_pin("123456").expect("verify PIN");
+        session.verify_pin(&default_piv_pin()).expect("verify PIN");
         let device_shared_secret = session
             .calculate_secret(
                 Slot::KeyManagement,
@@ -1106,7 +1116,7 @@ mod piv {
 
 mod openpgp {
     use super::*;
-    use yubikit::openpgp::OpenPgpSession;
+    use yubikit::openpgp::{OpenPgpPin, OpenPgpSession};
 
     fn open_openpgp_session(tc: &TestConnection) -> OpenPgpSession<PcscSmartCardConnection> {
         let conn = open_smartcard_connection(tc);
@@ -1116,6 +1126,14 @@ mod openpgp {
         } else {
             OpenPgpSession::new(conn).expect("OpenPgpSession::new")
         }
+    }
+
+    fn default_admin_pin() -> OpenPgpPin {
+        OpenPgpPin::new(yubikit::openpgp::DEFAULT_ADMIN_PIN)
+    }
+
+    fn default_user_pin() -> OpenPgpPin {
+        OpenPgpPin::new(yubikit::openpgp::DEFAULT_USER_PIN)
     }
 
     #[rstest]
@@ -1177,10 +1195,10 @@ mod openpgp {
         let mut session = open_openpgp_session(&tc);
         session.reset().expect("reset");
         session
-            .verify_admin(yubikit::openpgp::DEFAULT_ADMIN_PIN)
+            .verify_admin(&default_admin_pin())
             .expect("verify admin");
         session
-            .verify_pin(yubikit::openpgp::DEFAULT_USER_PIN, false)
+            .verify_pin(&default_user_pin(), false)
             .expect("verify PIN");
 
         // Generate EC P-256 signing key
@@ -1229,10 +1247,10 @@ mod openpgp {
         let mut session = open_openpgp_session(&tc);
         session.reset().expect("reset");
         session
-            .verify_admin(yubikit::openpgp::DEFAULT_ADMIN_PIN)
+            .verify_admin(&default_admin_pin())
             .expect("verify admin");
         session
-            .verify_pin(yubikit::openpgp::DEFAULT_USER_PIN, false)
+            .verify_pin(&default_user_pin(), false)
             .expect("verify PIN");
 
         // Generate RSA 2048 signing key
@@ -1279,10 +1297,10 @@ mod openpgp {
         let mut session = open_openpgp_session(&tc);
         session.reset().expect("reset");
         session
-            .verify_admin(yubikit::openpgp::DEFAULT_ADMIN_PIN)
+            .verify_admin(&default_admin_pin())
             .expect("verify admin");
         session
-            .verify_pin(yubikit::openpgp::DEFAULT_USER_PIN, true)
+            .verify_pin(&default_user_pin(), true)
             .expect("verify PIN for decrypt");
 
         // Generate RSA 2048 decryption key
@@ -1327,10 +1345,10 @@ mod openpgp {
         let mut session = open_openpgp_session(&tc);
         session.reset().expect("reset");
         session
-            .verify_admin(yubikit::openpgp::DEFAULT_ADMIN_PIN)
+            .verify_admin(&default_admin_pin())
             .expect("verify admin");
         session
-            .verify_pin(yubikit::openpgp::DEFAULT_USER_PIN, true)
+            .verify_pin(&default_user_pin(), true)
             .expect("verify PIN for decrypt");
 
         // Generate EC P-256 decryption key
@@ -1374,7 +1392,7 @@ mod openpgp {
 
 mod yubiotp {
     use super::*;
-    use yubikit::yubiotp::{Slot, SlotConfiguration, YubiOtpSession};
+    use yubikit::yubiotp::{HmacKey, Slot, SlotConfiguration, YubiOtpSession};
 
     #[rstest]
     #[case::smart_card(TestConnection::SmartCard)]
@@ -1421,7 +1439,8 @@ mod yubiotp {
         {
             let conn = dev.open_smartcard().expect("open smartcard");
             let mut session = YubiOtpSession::new(conn).expect("YubiOtpSession");
-            let config = SlotConfiguration::hmac_sha1(&[0x0b; 20])
+            let hmac_key = HmacKey::new(&[0x0b; 20]).unwrap();
+            let config = SlotConfiguration::hmac_sha1(&hmac_key)
                 .expect("hmac config")
                 .require_touch(true);
             session
@@ -1473,13 +1492,17 @@ mod fido {
     use std::sync::Arc;
     use yubikit::ctap::CtapSession;
     use yubikit::ctap2::{
-        Aaguid, ClientPin, CredentialManagement, Ctap2Error, Ctap2Session, CtapStatus, LargeBlobs,
-        Permissions, PinProtocol, PublicKeyCredentialDescriptor, PublicKeyCredentialParameters,
-        PublicKeyCredentialUserEntity,
+        Aaguid, ClientPin, CredentialManagement, Ctap2Error, Ctap2Pin, Ctap2Session, CtapStatus,
+        LargeBlobs, Permissions, PinProtocol, PublicKeyCredentialDescriptor,
+        PublicKeyCredentialParameters, PublicKeyCredentialUserEntity,
     };
 
     const TEST_PIN: &str = "12345679";
     const TEST_RP_ID: &str = "test.rs.yubikey.example";
+
+    fn ctap2_pin(pin: &str) -> Ctap2Pin {
+        Ctap2Pin::new(pin).unwrap()
+    }
 
     /// Get the appropriate controller for the current device transport.
     fn get_controller() -> Arc<dyn Controller> {
@@ -1549,7 +1572,7 @@ mod fido {
                         panic!("FIDO setup: ClientPin::new failed: {e}");
                     }
                 };
-                match cp.get_pin_token(TEST_PIN, None, None) {
+                match cp.get_pin_token(&ctap2_pin(TEST_PIN), None, None) {
                     Ok(_) => {
                         // PIN is already TEST_PIN — no reset required.
                         eprintln!("FIDO setup: PIN already set to TEST_PIN, no reset needed");
@@ -1639,7 +1662,7 @@ mod fido {
                 panic!("FIDO setup: ClientPin::new failed: {e}");
             }
         };
-        if let Err(e) = cp.set_pin(TEST_PIN) {
+        if let Err(e) = cp.set_pin(&ctap2_pin(TEST_PIN)) {
             panic!("FIDO setup: set_pin failed: {e}");
         }
         eprintln!("FIDO setup: PIN set to TEST_PIN");
@@ -1784,8 +1807,8 @@ mod fido {
         fn prompt_up(&self) {
             self.controller.touch();
         }
-        fn request_pin(&self, _permissions: Permissions, _rp_id: Option<&str>) -> Option<String> {
-            Some(TEST_PIN.to_string())
+        fn request_pin(&self, _permissions: Permissions, _rp_id: Option<&str>) -> Option<Ctap2Pin> {
+            Some(ctap2_pin(TEST_PIN))
         }
         fn request_uv(&self, _permissions: Permissions, _rp_id: Option<&str>) -> bool {
             false
@@ -1867,16 +1890,20 @@ mod fido {
             // ── Get PIN token with correct PIN ───────────────────────────────
             let session = open();
             let mut cp = ClientPin::new_with_protocol(session, protocol);
-            let token = get_pin_token_or_skip!(cp, TEST_PIN, None, None);
+            let token = get_pin_token_or_skip!(cp, &ctap2_pin(TEST_PIN), None, None);
             assert!(!token.is_empty(), "PIN token should not be empty");
 
             // ── Get PIN token with permissions ───────────────────────────────
-            let token2 =
-                get_pin_token_or_skip!(cp, TEST_PIN, Some(Permissions::CREDENTIAL_MGMT), None);
+            let token2 = get_pin_token_or_skip!(
+                cp,
+                &ctap2_pin(TEST_PIN),
+                Some(Permissions::CREDENTIAL_MGMT),
+                None
+            );
             assert!(!token2.is_empty());
 
             // ── Wrong PIN should fail ────────────────────────────────────────
-            let wrong_result = cp.get_pin_token("wrong-pin-999", None, None);
+            let wrong_result = cp.get_pin_token(&ctap2_pin("wrong-pin-999"), None, None);
             match wrong_result {
                 Err(Ctap2Error::StatusError(CtapStatus::PinInvalid)) => {
                     // Expected result: wrong PIN should be rejected.
@@ -1891,38 +1918,38 @@ mod fido {
 
             // ── Change PIN ───────────────────────────────────────────────────
             const TEMP_PIN: &str = "99887766";
-            cp.change_pin(TEST_PIN, TEMP_PIN)
+            cp.change_pin(&ctap2_pin(TEST_PIN), &ctap2_pin(TEMP_PIN))
                 .expect("change_pin to TEMP_PIN");
 
             // Verify new PIN works
             let token3 = cp
-                .get_pin_token(TEMP_PIN, None, None)
+                .get_pin_token(&ctap2_pin(TEMP_PIN), None, None)
                 .expect("get_pin_token with TEMP_PIN");
             assert!(!token3.is_empty());
 
             // Old PIN should fail now
-            match cp.get_pin_token(TEST_PIN, None, None) {
+            match cp.get_pin_token(&ctap2_pin(TEST_PIN), None, None) {
                 Err(Ctap2Error::StatusError(CtapStatus::PinInvalid)) => {
                     // Expected result: old PIN should no longer work.
                 }
                 Err(e) => {
                     // Restore PIN before panicking
-                    let _ = cp.change_pin(TEMP_PIN, TEST_PIN);
+                    let _ = cp.change_pin(&ctap2_pin(TEMP_PIN), &ctap2_pin(TEST_PIN));
                     panic!("unexpected error for old PIN: {e}");
                 }
                 Ok(_) => {
-                    let _ = cp.change_pin(TEMP_PIN, TEST_PIN);
+                    let _ = cp.change_pin(&ctap2_pin(TEMP_PIN), &ctap2_pin(TEST_PIN));
                     panic!("old PIN should not work after change");
                 }
             }
 
             // ── Restore original PIN ─────────────────────────────────────────
-            cp.change_pin(TEMP_PIN, TEST_PIN)
+            cp.change_pin(&ctap2_pin(TEMP_PIN), &ctap2_pin(TEST_PIN))
                 .expect("restore PIN to TEST_PIN");
 
             // Confirm restored PIN works
             let token4 = cp
-                .get_pin_token(TEST_PIN, None, None)
+                .get_pin_token(&ctap2_pin(TEST_PIN), None, None)
                 .expect("get_pin_token after restore");
             assert!(!token4.is_empty());
         });
@@ -2086,8 +2113,12 @@ mod fido {
             let mut cp = ClientPin::new(session)
                 .map_err(|(e, _)| e)
                 .expect("ClientPin for credmgmt");
-            let token =
-                get_pin_token_or_skip!(cp, TEST_PIN, Some(Permissions::CREDENTIAL_MGMT), None);
+            let token = get_pin_token_or_skip!(
+                cp,
+                &ctap2_pin(TEST_PIN),
+                Some(Permissions::CREDENTIAL_MGMT),
+                None
+            );
             let protocol = cp.protocol();
             let session = cp.into_session();
             let mut credmgmt = CredentialManagement::new(session, protocol, token)
@@ -2978,7 +3009,11 @@ mod fido {
             // Get PIN token and compute pin_uv_auth
             let mut cp = ClientPin::new_with_protocol(session2, PinProtocol::V2);
             let token = cp
-                .get_pin_token(TEST_PIN, Some(Permissions::GET_ASSERTION), Some(TEST_RP_ID))
+                .get_pin_token(
+                    &ctap2_pin(TEST_PIN),
+                    Some(Permissions::GET_ASSERTION),
+                    Some(TEST_RP_ID),
+                )
                 .expect("get_pin_token for GA");
             session2 = cp.into_session();
 

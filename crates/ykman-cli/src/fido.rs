@@ -17,8 +17,8 @@
 use yubikit::core::{Connection, Transport};
 use yubikit::ctap::CtapSession;
 use yubikit::ctap2::{
-    BioEnrollment, ClientPin, Config, CredentialManagement, Ctap2Error, Ctap2Session, CtapStatus,
-    Info, Permissions, PinProtocol,
+    BioEnrollment, ClientPin, Config, CredentialManagement, Ctap2Error, Ctap2Pin, Ctap2Session,
+    CtapStatus, Info, Permissions, PinProtocol,
 };
 use yubikit::device::{ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
@@ -160,24 +160,25 @@ fn require_pin_from_info(
     info: &Info,
     pin: Option<&str>,
     feature: &str,
-) -> Result<String, CliError> {
+) -> Result<Ctap2Pin, CliError> {
     if info.options.get("clientPin") != Some(&true) {
         return Err(CliError(format!(
             "{feature} requires having a PIN. Set a PIN first."
         )));
     }
-    match pin {
-        Some(p) => Ok(p.to_string()),
+    let pin = match pin {
+        Some(p) => p.to_string(),
         None => {
             eprint!("Enter your PIN: ");
-            rpassword::read_password().map_err(|e| CliError(format!("Failed to read PIN: {e}")))
+            rpassword::read_password().map_err(|e| CliError(format!("Failed to read PIN: {e}")))?
         }
-    }
+    };
+    Ctap2Pin::new(&pin).map_err(CliError)
 }
 
 fn get_pin_token_inner<C: Connection + 'static>(
     client_pin: &mut ClientPin<C>,
-    pin: &str,
+    pin: &Ctap2Pin,
     permissions: Permissions,
 ) -> Result<(Vec<u8>, PinProtocol), CliError> {
     let token = client_pin
@@ -477,15 +478,16 @@ pub fn run_access_change_pin(
         if pin_is_set {
             // Change existing PIN
             let current_pin = match pin {
-                Some(p) => p.to_string(),
+                Some(p) => Ctap2Pin::new(p).map_err(CliError)?,
                 None => {
                     eprint!("Enter your current PIN: ");
-                    rpassword::read_password()
-                        .map_err(|e| CliError(format!("Failed to read PIN: {e}")))?
+                    let pin = rpassword::read_password()
+                        .map_err(|e| CliError(format!("Failed to read PIN: {e}")))?;
+                    Ctap2Pin::new(&pin).map_err(CliError)?
                 }
             };
             let new = match new_pin {
-                Some(p) => p.to_string(),
+                Some(p) => Ctap2Pin::new(p).map_err(CliError)?,
                 None => {
                     eprint!("Enter your new PIN: ");
                     let p1 = rpassword::read_password()
@@ -496,7 +498,7 @@ pub fn run_access_change_pin(
                     if p1 != p2 {
                         return Err(CliError("PINs do not match.".to_string()));
                     }
-                    p1
+                    Ctap2Pin::new(&p1).map_err(CliError)?
                 }
             };
             client_pin
@@ -506,7 +508,7 @@ pub fn run_access_change_pin(
         } else {
             // Set new PIN
             let new = match new_pin.or(pin) {
-                Some(p) => p.to_string(),
+                Some(p) => Ctap2Pin::new(p).map_err(CliError)?,
                 None => {
                     eprint!("Enter your new PIN: ");
                     let p1 = rpassword::read_password()
@@ -517,7 +519,7 @@ pub fn run_access_change_pin(
                     if p1 != p2 {
                         return Err(CliError("PINs do not match.".to_string()));
                     }
-                    p1
+                    Ctap2Pin::new(&p1).map_err(CliError)?
                 }
             };
             client_pin
@@ -536,13 +538,13 @@ pub fn run_access_verify_pin(
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
-        let pin_str = require_pin_from_info(&ctap_info, pin, "PIN verification")?;
+        let pin = require_pin_from_info(&ctap_info, pin, "PIN verification")?;
         let mut client_pin = ClientPin::new(ctap2)
             .map_err(|(e, _)| CliError(format!("Failed to create ClientPin: {e}")))?;
 
         // Get a PIN token to verify the PIN
         client_pin
-            .get_pin_token(&pin_str, None, None)
+            .get_pin_token(&pin, None, None)
             .map_err(|e| format_pin_error(&mut client_pin, "PIN verification failed", &e))?;
 
         println!("PIN verified.");

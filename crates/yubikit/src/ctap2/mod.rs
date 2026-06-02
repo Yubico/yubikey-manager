@@ -64,7 +64,7 @@ pub use crate::webauthn::{
 /// Re-export fingerprint bio enrollment management.
 pub use bio_enrollment::BioEnrollment;
 /// Re-export PIN/UV token management and permission flags.
-pub use client_pin::{ClientPin, Permissions};
+pub use client_pin::{ClientPin, Ctap2Pin, Permissions};
 /// Re-export authenticator configuration management.
 pub use config::Config;
 /// Re-export resident credential management operations.

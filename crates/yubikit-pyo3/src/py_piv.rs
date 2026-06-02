@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use yubikit::piv::{
-    self, KeyType, ManagementKeyType, PinPolicy, PivSession as RustPivSession, Slot, TouchPolicy,
+    self, KeyType, ManagementKey, ManagementKeyType, PinPolicy, PivPin,
+    PivSession as RustPivSession, Slot, TouchPolicy,
 };
 
 use crate::py_bridge::{
@@ -86,6 +87,15 @@ fn parse_touch_policy(v: u8) -> PyResult<TouchPolicy> {
     })
 }
 
+fn parse_piv_pin(pin: &str) -> PyResult<PivPin> {
+    PivPin::new(pin).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+}
+
+fn parse_management_key(key_type: ManagementKeyType, key: &[u8]) -> PyResult<ManagementKey> {
+    ManagementKey::new(key_type, key)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+}
+
 #[pyclass]
 pub struct PivSession {
     inner: Option<RustPivSession<BoxedSmartCardConnection>>,
@@ -166,8 +176,10 @@ impl PivSession {
     }
 
     fn authenticate(&mut self, management_key: &[u8]) -> PyResult<()> {
+        let key_type = self.session()?.management_key_type();
+        let management_key = parse_management_key(key_type, management_key)?;
         self.session_mut()?
-            .authenticate(management_key)
+            .authenticate(&management_key)
             .map_err(piv_err)
     }
 
@@ -178,13 +190,15 @@ impl PivSession {
         require_touch: bool,
     ) -> PyResult<()> {
         let kt = parse_mgmt_key_type(key_type)?;
+        let management_key = parse_management_key(kt, management_key)?;
         self.session_mut()?
-            .set_management_key(kt, management_key, require_touch)
+            .set_management_key(&management_key, require_touch)
             .map_err(piv_err)
     }
 
     fn verify_pin(&mut self, pin: &str) -> PyResult<()> {
-        self.session_mut()?.verify_pin(pin).map_err(piv_err)
+        let pin = parse_piv_pin(pin)?;
+        self.session_mut()?.verify_pin(&pin).map_err(piv_err)
     }
 
     #[pyo3(signature = (temporary_pin=false, check_only=false))]
@@ -205,20 +219,26 @@ impl PivSession {
     }
 
     fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> PyResult<()> {
+        let old_pin = parse_piv_pin(old_pin)?;
+        let new_pin = parse_piv_pin(new_pin)?;
         self.session_mut()?
-            .change_pin(old_pin, new_pin)
+            .change_pin(&old_pin, &new_pin)
             .map_err(piv_err)
     }
 
     fn change_puk(&mut self, old_puk: &str, new_puk: &str) -> PyResult<()> {
+        let old_puk = parse_piv_pin(old_puk)?;
+        let new_puk = parse_piv_pin(new_puk)?;
         self.session_mut()?
-            .change_puk(old_puk, new_puk)
+            .change_puk(&old_puk, &new_puk)
             .map_err(piv_err)
     }
 
     fn unblock_pin(&mut self, puk: &str, new_pin: &str) -> PyResult<()> {
+        let puk = parse_piv_pin(puk)?;
+        let new_pin = parse_piv_pin(new_pin)?;
         self.session_mut()?
-            .unblock_pin(puk, new_pin)
+            .unblock_pin(&puk, &new_pin)
             .map_err(piv_err)
     }
 

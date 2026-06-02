@@ -12,8 +12,8 @@ use x509_cert::time::Validity;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::piv::{
-    DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, ManagementKeyType, ObjectId, PinPolicy,
-    PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
+    DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, ManagementKey, ManagementKeyType, ObjectId,
+    PinPolicy, PivPin, PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
 };
 
 use yubikit::smartcard::SmartCardConnection;
@@ -84,6 +84,23 @@ fn parse_slot(s: &str) -> Result<Slot, CliError> {
 
 fn parse_management_key(s: &str) -> Result<Vec<u8>, CliError> {
     hex::decode(s).map_err(|_| CliError("Management key must be hex-encoded.".into()))
+}
+
+fn current_management_key_type(
+    session: &mut PivSession<impl SmartCardConnection>,
+) -> ManagementKeyType {
+    session
+        .get_management_key_metadata()
+        .map(|meta| meta.key_type)
+        .unwrap_or(ManagementKeyType::Tdes)
+}
+
+fn to_management_key(key_type: ManagementKeyType, key: &[u8]) -> Result<ManagementKey, CliError> {
+    ManagementKey::new(key_type, key).map_err(|e| CliError(format!("Invalid management key: {e}")))
+}
+
+fn to_piv_pin(pin: &str, label: &str) -> Result<PivPin, CliError> {
+    PivPin::new(pin).map_err(|e| CliError(format!("Invalid {label}: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -199,8 +216,9 @@ fn pivman_set_mgm_key(
     };
 
     // Set the actual management key on the device
+    let management_key = to_management_key(key_type, new_key)?;
     session
-        .set_management_key(key_type, new_key, touch)
+        .set_management_key(&management_key, touch)
         .map_err(|e| CliError(format!("Failed to set management key: {e}")))?;
 
     // Update the stored-key flag
@@ -248,8 +266,9 @@ fn authenticate_session(
 ) -> Result<bool, CliError> {
     if let Some(k) = mgmt_key {
         let key = parse_management_key(k)?;
+        let management_key = to_management_key(current_management_key_type(session), &key)?;
         session
-            .authenticate(&key)
+            .authenticate(&management_key)
             .map_err(|e| CliError(format!("Authentication failed: {e}")))?;
         return Ok(false);
     }
@@ -260,8 +279,9 @@ fn authenticate_session(
         ensure_pin(session, pin)?;
         let prot = get_pivman_protected_data(session);
         if let Some((_, key)) = prot.iter().find(|(t, _)| *t == TAG_PIVMAN_KEY) {
+            let management_key = to_management_key(current_management_key_type(session), key)?;
             session
-                .authenticate(key)
+                .authenticate(&management_key)
                 .map_err(|e| CliError(format!("Authentication with stored key failed: {e}")))?;
             return Ok(true);
         }
@@ -271,13 +291,17 @@ fn authenticate_session(
     }
 
     // Try default key first, prompt if it fails
-    if session.authenticate(DEFAULT_MANAGEMENT_KEY).is_ok() {
+    if let Ok(default_key) =
+        to_management_key(current_management_key_type(session), DEFAULT_MANAGEMENT_KEY)
+        && session.authenticate(&default_key).is_ok()
+    {
         return Ok(false);
     }
     let input = crate::util::prompt_secret("Enter management key")?;
     let key = parse_management_key(&input)?;
+    let management_key = to_management_key(current_management_key_type(session), &key)?;
     session
-        .authenticate(&key)
+        .authenticate(&management_key)
         .map_err(|e| CliError(format!("Authentication failed: {e}")))?;
     Ok(false)
 }
@@ -288,8 +312,8 @@ fn ensure_pin(
     pin: Option<&str>,
 ) -> Result<(), CliError> {
     let pin_value = match pin {
-        Some(p) => p.to_string(),
-        None => crate::util::prompt_secret("Enter PIN")?,
+        Some(p) => to_piv_pin(p, "PIN")?,
+        None => crate::util::prompt_secret("Enter PIN").and_then(|p| to_piv_pin(&p, "PIN"))?,
     };
     session.verify_pin(&pin_value).map_err(|e| match &e {
         yubikit::piv::PivError::InvalidPin(0) => CliError("PIN is blocked.".into()),
@@ -506,9 +530,11 @@ pub fn run_reset(
     let mut session = open_session(dev, scp_params)?;
 
     // Block PIN and PUK first (required by reset)
+    let blocked_pin = PivPin::new("00000000").expect("constant PIN must be valid");
+    let blocked_puk = PivPin::new("00000000").expect("constant PUK must be valid");
     for _ in 0..15 {
-        let _ = session.verify_pin("00000000");
-        let _ = session.change_puk("00000000", "00000000");
+        let _ = session.verify_pin(&blocked_pin);
+        let _ = session.change_puk(&blocked_puk, &blocked_puk);
     }
 
     session
@@ -525,8 +551,9 @@ pub fn run_change_pin(
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
     let old = match pin {
-        Some(p) => p.to_string(),
-        None => crate::util::prompt_secret("Enter the current PIN")?,
+        Some(p) => to_piv_pin(p, "PIN")?,
+        None => crate::util::prompt_secret("Enter the current PIN")
+            .and_then(|p| to_piv_pin(&p, "PIN"))?,
     };
     let new = match new_pin {
         Some(p) => p.to_string(),
@@ -536,6 +563,7 @@ pub fn run_change_pin(
     if new.len() < 6 || new.len() > 8 {
         return Err(CliError("PIN must be 6-8 characters.".into()));
     }
+    let new = to_piv_pin(&new, "PIN")?;
 
     let mut session = open_session(dev, scp_params)?;
     session
@@ -552,8 +580,9 @@ pub fn run_change_puk(
     new_puk: Option<&str>,
 ) -> Result<(), CliError> {
     let old = match puk {
-        Some(p) => p.to_string(),
-        None => crate::util::prompt_secret("Enter the current PUK")?,
+        Some(p) => to_piv_pin(p, "PUK")?,
+        None => crate::util::prompt_secret("Enter the current PUK")
+            .and_then(|p| to_piv_pin(&p, "PUK"))?,
     };
     let new = match new_puk {
         Some(p) => p.to_string(),
@@ -563,6 +592,7 @@ pub fn run_change_puk(
     if new.len() < 6 || new.len() > 8 {
         return Err(CliError("PUK must be 6-8 characters.".into()));
     }
+    let new = to_piv_pin(&new, "PUK")?;
 
     let mut session = open_session(dev, scp_params)?;
     session
@@ -579,8 +609,8 @@ pub fn run_unblock_pin(
     new_pin: Option<&str>,
 ) -> Result<(), CliError> {
     let puk = match puk {
-        Some(p) => p.to_string(),
-        None => crate::util::prompt_secret("Enter the PUK")?,
+        Some(p) => to_piv_pin(p, "PUK")?,
+        None => crate::util::prompt_secret("Enter the PUK").and_then(|p| to_piv_pin(&p, "PUK"))?,
     };
     let new = match new_pin {
         Some(p) => p.to_string(),
@@ -590,6 +620,7 @@ pub fn run_unblock_pin(
     if new.len() < 6 || new.len() > 8 {
         return Err(CliError("New PIN must be 6-8 characters.".into()));
     }
+    let new = to_piv_pin(&new, "PIN")?;
 
     let mut session = open_session(dev, scp_params)?;
     session

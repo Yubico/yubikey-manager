@@ -1,7 +1,7 @@
 use pyo3::exceptions::{PyOSError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
-use yubikit::ctap2::{Ctap2Session, Permissions};
+use yubikit::ctap2::{Ctap2Pin, Ctap2Session, Permissions};
 use yubikit::webauthn::{
     ClientDataCollector, ClientError, CollectedClientData, PublicKeyCredentialCreationOptions,
     PublicKeyCredentialRequestOptions, UserInteraction, WebAuthnClient,
@@ -43,13 +43,14 @@ impl UserInteraction for PyUserInteraction {
         });
     }
 
-    fn request_pin(&self, permissions: Permissions, rp_id: Option<&str>) -> Option<String> {
+    fn request_pin(&self, permissions: Permissions, rp_id: Option<&str>) -> Option<Ctap2Pin> {
         Python::attach(|py| {
             self.obj
                 .call_method1(py, "request_pin", (permissions.bits(), rp_id))
                 .ok()
                 .and_then(|v| v.extract::<Option<String>>(py).ok())
                 .flatten()
+                .and_then(|s| Ctap2Pin::new(&s).ok())
         })
     }
 

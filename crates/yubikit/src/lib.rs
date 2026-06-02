@@ -121,6 +121,8 @@ pub mod piv;
 /// This module is only available when the `direct` feature is enabled (default).
 #[cfg(feature = "hardware")]
 pub mod platform;
+/// Internal secret value wrapper — not part of the public API.
+pub(crate) mod secret;
 /// Security Domain operations for managing SCP keys and certificates.
 pub mod securitydomain;
 /// Smart card communication primitives — APDUs, status words, ISO 7816-4, and SCP.

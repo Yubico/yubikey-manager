@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use yubikit::yubiotp::{self, ConfigSlot, NdefType, Slot, YubiOtpSession};
+use yubikit::yubiotp::{self, AccessCode, ConfigSlot, NdefType, Slot, YubiOtpSession};
 
 use crate::py_bridge::{
     BoxedOtpConnection, BoxedSmartCardConnection, extract_otp_connection,
@@ -54,6 +54,10 @@ fn parse_ndef_type(ndef_type: u8) -> PyResult<NdefType> {
             "Invalid NDEF type (must be ord('T') or ord('U'))",
         )),
     }
+}
+
+fn parse_access_code(code: &[u8]) -> PyResult<AccessCode> {
+    AccessCode::new(code).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
 // ---------------------------------------------------------------------------
@@ -177,8 +181,9 @@ impl PyYubiOtpSessionCcid {
     #[pyo3(signature = (slot, cur_acc_code=None))]
     fn delete_slot(&mut self, slot: u8, cur_acc_code: Option<&[u8]>) -> PyResult<()> {
         let s = parse_slot(slot)?;
+        let cur_acc_code = cur_acc_code.map(parse_access_code).transpose()?;
         self.session_mut()?
-            .delete_slot(s, cur_acc_code)
+            .delete_slot(s, cur_acc_code.as_ref())
             .map_err(yubiotp_ccid_err)
     }
 
@@ -320,8 +325,9 @@ impl PyYubiOtpSessionOtp {
     #[pyo3(signature = (slot, cur_acc_code=None))]
     fn delete_slot(&mut self, slot: u8, cur_acc_code: Option<&[u8]>) -> PyResult<()> {
         let s = parse_slot(slot)?;
+        let cur_acc_code = cur_acc_code.map(parse_access_code).transpose()?;
         self.session_mut()?
-            .delete_slot(s, cur_acc_code)
+            .delete_slot(s, cur_acc_code.as_ref())
             .map_err(yubiotp_err)
     }
 

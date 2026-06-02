@@ -24,6 +24,46 @@ use super::pin_protocol::{CoseKey, PinProtocol};
 use super::session::Ctap2Session;
 use super::{Ctap2Error, Info, build_args_map, ctap2_cmd};
 
+/// A CTAP2 PIN value.
+///
+/// CTAP2 PINs are UTF-8 strings of at least 4 bytes. The value is automatically
+/// zeroized when dropped. Length padding is handled internally per the CTAP2 spec.
+///
+/// # Examples
+///
+/// ```
+/// use yubikit::ctap2::Ctap2Pin;
+///
+/// let pin = Ctap2Pin::new("1234").unwrap();
+/// ```
+#[derive(Clone)]
+pub struct Ctap2Pin(crate::secret::SecretValue<Vec<u8>>);
+
+impl Ctap2Pin {
+    /// Create a new CTAP2 PIN from a string value.
+    ///
+    /// Returns an error if the PIN is shorter than 4 bytes.
+    pub fn new(pin: &str) -> Result<Self, String> {
+        if pin.len() < 4 {
+            return Err("PIN must be at least 4 bytes".into());
+        }
+        Ok(Self(crate::secret::SecretValue::new(
+            pin.as_bytes().to_vec(),
+        )))
+    }
+
+    /// Access the raw PIN bytes.
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        self.0.expose_secret()
+    }
+}
+
+impl std::fmt::Debug for Ctap2Pin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Ctap2Pin([REDACTED])")
+    }
+}
+
 /// ClientPin sub-command identifiers (§6.5.5).
 mod client_pin_cmd {
     /// Get the number of PIN retries remaining.
@@ -112,12 +152,9 @@ pub struct ClientPin<C: Connection> {
     protocol: PinProtocol,
 }
 
-/// Pad a PIN string per CTAP2 spec: UTF-8, left-padded to ≥64 bytes, 16-byte aligned.
-fn pad_pin(pin: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+/// Pad a PIN per CTAP2 spec: UTF-8, padded to ≥64 bytes, 16-byte aligned.
+fn pad_pin(pin: &Ctap2Pin) -> Zeroizing<Vec<u8>> {
     let pin_bytes = pin.as_bytes();
-    if pin_bytes.len() < 4 {
-        return Err("PIN must be at least 4 bytes".into());
-    }
     let mut padded = pin_bytes.to_vec();
     // Pad to at least 64 bytes
     if padded.len() < 64 {
@@ -128,10 +165,7 @@ fn pad_pin(pin: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     if remainder != 0 {
         padded.resize(padded.len() + (16 - remainder), 0);
     }
-    if padded.len() > 255 {
-        return Err("PIN must be at most 255 bytes".into());
-    }
-    Ok(Zeroizing::new(padded))
+    Zeroizing::new(padded)
 }
 
 impl<C: Connection + 'static> ClientPin<C> {
@@ -244,11 +278,11 @@ impl<C: Connection + 'static> ClientPin<C> {
     }
 
     /// Set a PIN on an authenticator that does not have one set.
-    pub fn set_pin(&mut self, pin: &str) -> Result<(), Ctap2Error<C::Error>> {
+    pub fn set_pin(&mut self, pin: &Ctap2Pin) -> Result<(), Ctap2Error<C::Error>> {
         log::debug!("Setting PIN");
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
-        let pin_padded = pad_pin(pin).map_err(Ctap2Error::InvalidResponse)?;
+        let pin_padded = pad_pin(pin);
         let new_pin_enc = self.protocol.encrypt(&shared_secret, &pin_padded);
         let pin_uv_param = self.protocol.authenticate(&shared_secret, &new_pin_enc);
 
@@ -268,14 +302,18 @@ impl<C: Connection + 'static> ClientPin<C> {
     }
 
     /// Change the PIN on an authenticator that already has one.
-    pub fn change_pin(&mut self, old_pin: &str, new_pin: &str) -> Result<(), Ctap2Error<C::Error>> {
+    pub fn change_pin(
+        &mut self,
+        old_pin: &Ctap2Pin,
+        new_pin: &Ctap2Pin,
+    ) -> Result<(), Ctap2Error<C::Error>> {
         log::debug!("Changing PIN");
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
         let mut pin_hash_full = Sha256::digest(old_pin.as_bytes());
         let pin_hash_enc = self.protocol.encrypt(&shared_secret, &pin_hash_full[..16]);
         pin_hash_full.zeroize();
-        let new_pin_padded = pad_pin(new_pin).map_err(Ctap2Error::InvalidResponse)?;
+        let new_pin_padded = pad_pin(new_pin);
         let new_pin_enc = self.protocol.encrypt(&shared_secret, &new_pin_padded);
 
         // pinUvParam = authenticate(shared_secret, newPinEnc || pinHashEnc)
@@ -305,7 +343,7 @@ impl<C: Connection + 'static> ClientPin<C> {
     /// legacy command (0x05).
     pub fn get_pin_token(
         &mut self,
-        pin: &str,
+        pin: &Ctap2Pin,
         permissions: Option<Permissions>,
         permissions_rpid: Option<&str>,
     ) -> Result<Vec<u8>, Ctap2Error<C::Error>> {
@@ -452,17 +490,17 @@ mod tests {
     #[test]
     fn test_pad_pin() {
         // Normal pin
-        let padded = pad_pin("1234").unwrap();
+        let padded = pad_pin(&Ctap2Pin::new("1234").unwrap());
         assert_eq!(padded.len(), 64);
         assert_eq!(&padded[..4], b"1234");
         assert!(padded[4..].iter().all(|&b| b == 0));
 
         // Too short
-        assert!(pad_pin("123").is_err());
+        assert!(Ctap2Pin::new("123").is_err());
 
         // Long pin (64 bytes) → 64 already aligned
-        let long = "a".repeat(64);
-        let padded = pad_pin(&long).unwrap();
+        let long = Ctap2Pin::new(&"a".repeat(64)).unwrap();
+        let padded = pad_pin(&long);
         assert_eq!(padded.len(), 64);
     }
 }

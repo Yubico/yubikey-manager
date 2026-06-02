@@ -8,8 +8,8 @@ use yubikit::management::Capability;
 use yubikit::oath::parse_b32_key;
 use yubikit::otp::{modhex_decode, modhex_encode};
 use yubikit::yubiotp::{
-    ACC_CODE_SIZE, ConfigState, KEY_SIZE, NdefType, Slot, SlotConfiguration, UID_SIZE,
-    YubiOtpSession,
+    ACC_CODE_SIZE, AccessCode, ConfigState, HmacKey, KEY_SIZE, NdefType, Slot, SlotConfiguration,
+    UID_SIZE, YubiOtpSession,
 };
 
 use crate::cancel;
@@ -129,6 +129,10 @@ fn parse_access_code(s: &str) -> Result<[u8; ACC_CODE_SIZE], CliError> {
     let mut arr = [0u8; ACC_CODE_SIZE];
     arr.copy_from_slice(&bytes);
     Ok(arr)
+}
+
+fn to_access_code(code: &[u8; ACC_CODE_SIZE]) -> Result<AccessCode, CliError> {
+    AccessCode::new(code.as_slice()).map_err(|e| CliError(format!("Invalid access code: {e}")))
 }
 
 fn confirm(msg: &str) -> bool {
@@ -262,8 +266,9 @@ pub fn run_delete(
             self,
             session: &mut YubiOtpSession<C>,
         ) -> Result<(), CliError> {
+            let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
-                .delete_slot(self.slot, self.acc.as_ref().map(|a| a.as_slice()))
+                .delete_slot(self.slot, acc.as_ref())
                 .map_err(|e| CliError(format!("Failed to delete slot: {e}")))?;
             eprintln!("Configuration slot {} deleted.", self.slot.map(1, 2));
             Ok(())
@@ -496,13 +501,9 @@ pub fn run_yubiotp(
             self,
             session: &mut YubiOtpSession<C>,
         ) -> Result<Option<u32>, CliError> {
+            let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
-                .put_configuration(
-                    self.slot,
-                    &self.config,
-                    self.acc.as_ref().map(|a| a.as_slice()),
-                    None,
-                )
+                .put_configuration(self.slot, &self.config, acc.as_ref(), None)
                 .map_err(|e| CliError(format!("Failed to program: {e}")))?;
             if self.need_serial {
                 let serial = session
@@ -596,13 +597,9 @@ pub fn run_static(
             if !self.force {
                 confirm_slot_overwrite(session, self.slot);
             }
+            let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
-                .put_configuration(
-                    self.slot,
-                    &self.config,
-                    self.acc.as_ref().map(|a| a.as_slice()),
-                    None,
-                )
+                .put_configuration(self.slot, &self.config, acc.as_ref(), None)
                 .map_err(|e| CliError(format!("Failed to program: {e}")))?;
             eprintln!("Static password stored in slot {}.", self.slot.map(1, 2));
             Ok(())
@@ -684,7 +681,8 @@ pub fn run_chalresp(
         return Err(CliError("Aborted.".into()));
     }
 
-    let mut config = SlotConfiguration::hmac_sha1(&key_bytes)
+    let hmac_key = HmacKey::new(&key_bytes).map_err(|e| CliError(format!("Invalid key: {e}")))?;
+    let mut config = SlotConfiguration::hmac_sha1(&hmac_key)
         .map_err(|e| CliError(format!("Invalid key: {e}")))?;
     if touch {
         config = config.require_touch(true);
@@ -701,13 +699,9 @@ pub fn run_chalresp(
             self,
             session: &mut YubiOtpSession<C>,
         ) -> Result<(), CliError> {
+            let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
-                .put_configuration(
-                    self.slot,
-                    &self.config,
-                    self.acc.as_ref().map(|a| a.as_slice()),
-                    None,
-                )
+                .put_configuration(self.slot, &self.config, acc.as_ref(), None)
                 .map_err(|e| CliError(format!("Failed to program: {e}")))?;
             eprintln!(
                 "{} credential stored in slot {}.",
@@ -907,8 +901,9 @@ pub fn run_hotp(
         return Err(CliError("Aborted.".into()));
     }
 
+    let hmac_key = HmacKey::new(&key_bytes).map_err(|e| CliError(format!("Invalid key: {e}")))?;
     let mut config =
-        SlotConfiguration::hotp(&key_bytes).map_err(|e| CliError(format!("Invalid key: {e}")))?;
+        SlotConfiguration::hotp(&hmac_key).map_err(|e| CliError(format!("Invalid key: {e}")))?;
     if matches!(digits, CliHotpDigits::Eight) {
         config = config.digits8(true);
     }
@@ -936,13 +931,9 @@ pub fn run_hotp(
             self,
             session: &mut YubiOtpSession<C>,
         ) -> Result<(), CliError> {
+            let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
-                .put_configuration(
-                    self.slot,
-                    &self.config,
-                    self.acc.as_ref().map(|a| a.as_slice()),
-                    None,
-                )
+                .put_configuration(self.slot, &self.config, acc.as_ref(), None)
                 .map_err(|e| CliError(format!("Failed to program: {e}")))?;
             eprintln!("HOTP credential stored in slot {}.", self.slot.map(1, 2));
             Ok(())
@@ -1041,13 +1032,10 @@ pub fn run_settings(
             self,
             session: &mut YubiOtpSession<C>,
         ) -> Result<(), CliError> {
+            let new_acc = self.new_acc.as_ref().map(to_access_code).transpose()?;
+            let cur_acc = self.cur_acc.as_ref().map(to_access_code).transpose()?;
             session
-                .update_configuration(
-                    self.slot,
-                    &self.config,
-                    self.new_acc.as_ref().map(|a| a.as_slice()),
-                    self.cur_acc.as_ref().map(|a| a.as_slice()),
-                )
+                .update_configuration(self.slot, &self.config, new_acc.as_ref(), cur_acc.as_ref())
                 .map_err(|e| CliError(format!("Failed to update settings: {e}")))?;
             eprintln!("Settings for slot {} updated.", self.slot.map(1, 2));
             Ok(())

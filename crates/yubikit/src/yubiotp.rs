@@ -178,6 +178,101 @@ const NDEF_URL_PREFIXES: &[&str] = &[
 ];
 
 // ---------------------------------------------------------------------------
+// Secret value types
+// ---------------------------------------------------------------------------
+
+/// An HMAC key for challenge-response or HOTP configuration.
+///
+/// The key is automatically zeroized when dropped. Keys longer than 64 bytes
+/// are shortened via SHA-1 hashing per the HMAC spec.
+///
+/// # Examples
+///
+/// ```
+/// use yubikit::yubiotp::HmacKey;
+///
+/// let key = HmacKey::new(b"my-secret-key-material").unwrap();
+/// ```
+#[derive(Clone)]
+pub struct HmacKey(crate::secret::SecretValue<Vec<u8>>);
+
+impl HmacKey {
+    /// Create a new HMAC key from raw bytes.
+    ///
+    /// Returns an error if the key is empty or has an unsupported length (21-64 bytes).
+    /// Keys longer than 64 bytes are shortened via SHA-1 hashing per the HMAC spec.
+    pub fn new(key: &[u8]) -> Result<Self, YubiOtpError> {
+        if key.is_empty() {
+            return Err(YubiOtpError::InvalidData("Key must not be empty".into()));
+        }
+        if key.len() > SHA1_BLOCK_SIZE {
+            // Per HMAC spec, keys longer than block size are hashed
+            let mut hasher = Sha1::new();
+            Digest::update(&mut hasher, key);
+            Ok(Self(crate::secret::SecretValue::new(
+                hasher.finalize().to_vec(),
+            )))
+        } else if key.len() > HMAC_KEY_SIZE {
+            Err(YubiOtpError::NotSupported(format!(
+                "Key lengths > {HMAC_KEY_SIZE} bytes not supported"
+            )))
+        } else {
+            Ok(Self(crate::secret::SecretValue::new(key.to_vec())))
+        }
+    }
+
+    /// Access the raw key bytes.
+    pub(crate) fn expose_secret(&self) -> &[u8] {
+        self.0.expose_secret()
+    }
+}
+
+impl fmt::Debug for HmacKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("HmacKey([REDACTED])")
+    }
+}
+
+/// A 6-byte access code for protecting OTP slot configurations.
+///
+/// The access code is automatically zeroized when dropped.
+///
+/// # Examples
+///
+/// ```
+/// use yubikit::yubiotp::AccessCode;
+///
+/// let code = AccessCode::new(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]).unwrap();
+/// ```
+#[derive(Clone)]
+pub struct AccessCode(crate::secret::SecretValue<[u8; ACC_CODE_SIZE]>);
+
+impl AccessCode {
+    /// Create a new access code from a 6-byte slice.
+    pub fn new(code: &[u8]) -> Result<Self, YubiOtpError> {
+        if code.len() != ACC_CODE_SIZE {
+            return Err(YubiOtpError::InvalidData(format!(
+                "Access code must be exactly {ACC_CODE_SIZE} bytes"
+            )));
+        }
+        let mut arr = [0u8; ACC_CODE_SIZE];
+        arr.copy_from_slice(code);
+        Ok(Self(crate::secret::SecretValue::new(arr)))
+    }
+
+    /// Access the raw code bytes.
+    pub(crate) fn expose_secret(&self) -> &[u8; ACC_CODE_SIZE] {
+        self.0.expose_secret()
+    }
+}
+
+impl fmt::Debug for AccessCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("AccessCode([REDACTED])")
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Slot / ConfigSlot enums
 // ---------------------------------------------------------------------------
 
@@ -681,16 +776,16 @@ impl SlotConfiguration {
     }
 
     /// HMAC-SHA1 challenge-response configuration.
-    pub fn hmac_sha1(key: &[u8]) -> Result<Self, YubiOtpError> {
-        let key = shorten_hmac_key(key)?;
+    pub fn hmac_sha1(key: &HmacKey) -> Result<Self, YubiOtpError> {
+        let key_bytes = shorten_hmac_key(key.expose_secret())?;
         let mut s = Self::new_base();
         s.kind = SlotConfigKind::HmacSha1;
 
         // Key is packed into key and uid fields
-        let key_part = &key[..KEY_SIZE.min(key.len())];
+        let key_part = &key_bytes[..KEY_SIZE.min(key_bytes.len())];
         s.key[..key_part.len()].copy_from_slice(key_part);
-        if key.len() > KEY_SIZE {
-            let uid_part = &key[KEY_SIZE..];
+        if key_bytes.len() > KEY_SIZE {
+            let uid_part = &key_bytes[KEY_SIZE..];
             s.uid[..uid_part.len()].copy_from_slice(uid_part);
         }
 
@@ -700,15 +795,15 @@ impl SlotConfiguration {
     }
 
     /// HOTP (OATH-HOTP) configuration.
-    pub fn hotp(key: &[u8]) -> Result<Self, YubiOtpError> {
-        let key = shorten_hmac_key(key)?;
+    pub fn hotp(key: &HmacKey) -> Result<Self, YubiOtpError> {
+        let key_bytes = shorten_hmac_key(key.expose_secret())?;
         let mut s = Self::new_keyboard_base();
         s.kind = SlotConfigKind::Hotp;
 
-        let key_part = &key[..KEY_SIZE.min(key.len())];
+        let key_part = &key_bytes[..KEY_SIZE.min(key_bytes.len())];
         s.key[..key_part.len()].copy_from_slice(key_part);
-        if key.len() > KEY_SIZE {
-            let uid_part = &key[KEY_SIZE..];
+        if key_bytes.len() > KEY_SIZE {
+            let uid_part = &key_bytes[KEY_SIZE..];
             s.uid[..uid_part.len()].copy_from_slice(uid_part);
         }
 
@@ -781,7 +876,7 @@ impl SlotConfiguration {
     // -- config serialization ----------------------------------------------
 
     /// Serialize the configuration to bytes (52 bytes with CRC).
-    pub fn get_config(&self, acc_code: Option<&[u8]>) -> Vec<u8> {
+    pub fn get_config(&self, acc_code: Option<&AccessCode>) -> Vec<u8> {
         build_config(
             &self.fixed,
             &self.uid,
@@ -789,7 +884,7 @@ impl SlotConfiguration {
             self.ext_flags,
             self.tkt_flags,
             self.cfg_flags,
-            acc_code,
+            acc_code.map(|c| c.expose_secret().as_slice()),
         )
     }
 
@@ -1107,8 +1202,8 @@ impl<C: Connection + 'static> YubiOtpSession<C> {
         &mut self,
         slot: Slot,
         config: &SlotConfiguration,
-        acc_code: Option<&[u8]>,
-        cur_acc_code: Option<&[u8]>,
+        acc_code: Option<&AccessCode>,
+        cur_acc_code: Option<&AccessCode>,
     ) -> Result<(), YubiOtpError<C::Error>> {
         if !config.is_supported_by(self.version()) {
             return Err(YubiOtpError::NotSupported(
@@ -1116,7 +1211,11 @@ impl<C: Connection + 'static> YubiOtpSession<C> {
             ));
         }
         let config_slot = slot.map(ConfigSlot::Config1, ConfigSlot::Config2);
-        self.write_config(config_slot, &config.get_config(acc_code), cur_acc_code)
+        self.write_config(
+            config_slot,
+            &config.get_config(acc_code),
+            cur_acc_code.map(|c| c.expose_secret().as_slice()),
+        )
     }
 
     /// Update an existing configuration in a slot.
@@ -1124,15 +1223,15 @@ impl<C: Connection + 'static> YubiOtpSession<C> {
         &mut self,
         slot: Slot,
         config: &SlotConfiguration,
-        acc_code: Option<&[u8]>,
-        cur_acc_code: Option<&[u8]>,
+        acc_code: Option<&AccessCode>,
+        cur_acc_code: Option<&AccessCode>,
     ) -> Result<(), YubiOtpError<C::Error>> {
         if !config.is_supported_by(self.version()) {
             return Err(YubiOtpError::NotSupported(
                 "This configuration is not supported on this YubiKey version".into(),
             ));
         }
-        if acc_code != cur_acc_code
+        if acc_code.map(|c| c.expose_secret()) != cur_acc_code.map(|c| c.expose_secret())
             && self.version() >= Version(4, 3, 2)
             && self.version() < Version(4, 3, 6)
         {
@@ -1143,7 +1242,11 @@ impl<C: Connection + 'static> YubiOtpSession<C> {
             ));
         }
         let config_slot = slot.map(ConfigSlot::Update1, ConfigSlot::Update2);
-        self.write_config(config_slot, &config.get_config(acc_code), cur_acc_code)
+        self.write_config(
+            config_slot,
+            &config.get_config(acc_code),
+            cur_acc_code.map(|c| c.expose_secret().as_slice()),
+        )
     }
 
     /// Swap the two slot configurations.
@@ -1155,10 +1258,14 @@ impl<C: Connection + 'static> YubiOtpSession<C> {
     pub fn delete_slot(
         &mut self,
         slot: Slot,
-        cur_acc_code: Option<&[u8]>,
+        cur_acc_code: Option<&AccessCode>,
     ) -> Result<(), YubiOtpError<C::Error>> {
         let config_slot = slot.map(ConfigSlot::Config1, ConfigSlot::Config2);
-        self.write_config(config_slot, &[0u8; CONFIG_SIZE], cur_acc_code)
+        self.write_config(
+            config_slot,
+            &[0u8; CONFIG_SIZE],
+            cur_acc_code.map(|c| c.expose_secret().as_slice()),
+        )
     }
 
     /// Update scan-code map on the YubiKey.
@@ -1619,7 +1726,7 @@ mod tests {
 
     #[test]
     fn test_slot_configuration_hmac_sha1() {
-        let key = [0xABu8; HMAC_KEY_SIZE];
+        let key = HmacKey::new(&[0xABu8; HMAC_KEY_SIZE]).unwrap();
         let cfg = SlotConfiguration::hmac_sha1(&key).unwrap();
         assert!(cfg.is_supported_by(Version(2, 2, 0)));
         assert!(!cfg.is_supported_by(Version(2, 1, 0)));
@@ -1631,7 +1738,7 @@ mod tests {
     #[test]
     fn test_slot_configuration_hmac_long_key() {
         // Key > 64 bytes should be SHA1-hashed
-        let key = [0xCC; 65];
+        let key = HmacKey::new(&[0xCC; 65]).unwrap();
         let cfg = SlotConfiguration::hmac_sha1(&key).unwrap();
         let data = cfg.get_config(None);
         assert!(check_crc(&data));
@@ -1641,12 +1748,12 @@ mod tests {
     fn test_slot_configuration_hmac_invalid_key_len() {
         // Key of 21-64 bytes is invalid (not supported, not > SHA1_BLOCK_SIZE)
         let key = [0xAA; 21];
-        assert!(SlotConfiguration::hmac_sha1(&key).is_err());
+        assert!(HmacKey::new(&key).is_err());
     }
 
     #[test]
     fn test_slot_configuration_hotp() {
-        let key = [0x42u8; HMAC_KEY_SIZE];
+        let key = HmacKey::new(&[0x42u8; HMAC_KEY_SIZE]).unwrap();
         let cfg = SlotConfiguration::hotp(&key).unwrap();
         assert!(cfg.is_supported_by(Version(2, 2, 0)));
         let data = cfg.get_config(None);
@@ -1703,7 +1810,7 @@ mod tests {
 
     #[test]
     fn test_hotp_imf() {
-        let key = [0x42u8; HMAC_KEY_SIZE];
+        let key = HmacKey::new(&[0x42u8; HMAC_KEY_SIZE]).unwrap();
         let cfg = SlotConfiguration::hotp(&key).unwrap().imf(1024).unwrap();
         // IMF 1024 → 1024 >> 4 = 64 → big-endian u16 = [0, 64]
         let data = cfg.get_config(None);
@@ -1714,7 +1821,7 @@ mod tests {
 
     #[test]
     fn test_hotp_imf_invalid() {
-        let key = [0x42u8; HMAC_KEY_SIZE];
+        let key = HmacKey::new(&[0x42u8; HMAC_KEY_SIZE]).unwrap();
         let cfg = SlotConfiguration::hotp(&key).unwrap();
         // Not divisible by 16
         assert!(cfg.clone().imf(17).is_err());

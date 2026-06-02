@@ -17,7 +17,9 @@
 use crate::cbor;
 use crate::core::Connection;
 use crate::ctap2::types::AuthenticatorOptions;
-use crate::ctap2::{ClientPin, Ctap2Error, Ctap2Session, CtapStatus, Permissions, PinProtocol};
+use crate::ctap2::{
+    ClientPin, Ctap2Error, Ctap2Pin, Ctap2Session, CtapStatus, Permissions, PinProtocol,
+};
 
 use super::extensions::{self, prf};
 use super::types::{
@@ -73,7 +75,7 @@ pub trait UserInteraction {
     fn prompt_up(&self);
 
     /// Called when a PIN is needed. Return the PIN, or `None` to cancel.
-    fn request_pin(&self, permissions: Permissions, rp_id: Option<&str>) -> Option<String>;
+    fn request_pin(&self, permissions: Permissions, rp_id: Option<&str>) -> Option<Ctap2Pin>;
 
     /// Called when built-in user verification (e.g. biometrics) is available.
     /// Return `true` to proceed with UV, or `false` to fall back to PIN.
