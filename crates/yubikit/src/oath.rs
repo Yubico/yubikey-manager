@@ -345,18 +345,18 @@ pub fn derive_key(salt: &[u8], passphrase: &str) -> OathAccessKey {
 }
 
 /// Shorten HMAC key per RFC 2104.
-fn hmac_shorten_key(key: &[u8], algo: HashAlgorithm) -> Vec<u8> {
+fn hmac_shorten_key(key: &[u8], algo: HashAlgorithm) -> Zeroizing<Vec<u8>> {
     if key.len() > algo.block_size() {
-        match algo {
+        Zeroizing::new(match algo {
             HashAlgorithm::Sha1 => Sha1::digest(key).to_vec(),
             HashAlgorithm::Sha256 => Sha256::digest(key).to_vec(),
             HashAlgorithm::Sha512 => {
                 use sha2::Sha512;
                 Sha512::digest(key).to_vec()
             }
-        }
+        })
     } else {
-        key.to_vec()
+        Zeroizing::new(key.to_vec())
     }
 }
 
@@ -397,21 +397,17 @@ fn build_put_data(
     secret: &[u8],
     touch_required: bool,
     counter: u32,
-) -> Vec<u8> {
-    let short_secret = hmac_shorten_key(secret, hash_algorithm);
-    let padded_secret = if short_secret.len() < HMAC_MINIMUM_KEY_SIZE {
-        let mut s = short_secret;
-        s.resize(HMAC_MINIMUM_KEY_SIZE, 0);
-        s
-    } else {
-        short_secret
-    };
+) -> Zeroizing<Vec<u8>> {
+    let mut short_secret = hmac_shorten_key(secret, hash_algorithm);
+    if short_secret.len() < HMAC_MINIMUM_KEY_SIZE {
+        short_secret.resize(HMAC_MINIMUM_KEY_SIZE, 0);
+    }
 
-    let mut key_val = vec![oath_type as u8 | hash_algorithm as u8, digits];
-    key_val.extend_from_slice(&padded_secret);
+    let mut key_val = Zeroizing::new(vec![oath_type as u8 | hash_algorithm as u8, digits]);
+    key_val.extend_from_slice(&short_secret);
 
-    let mut data = tlv_encode(TAG_NAME, cred_id);
-    data.extend_from_slice(&tlv_encode(TAG_KEY, &key_val));
+    let mut data = Zeroizing::new(tlv_encode(TAG_NAME, cred_id));
+    tlv_append(&mut data, TAG_KEY, &key_val);
 
     if touch_required {
         data.extend_from_slice(&[TAG_PROPERTY as u8, PROP_REQUIRE_TOUCH]);

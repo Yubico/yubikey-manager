@@ -24,7 +24,7 @@ use p256::elliptic_curve::rand_core::OsRng;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::{EncodedPoint, PublicKey, SecretKey};
 use sha2::{Digest, Sha256};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::cbor::Value;
 
@@ -60,7 +60,10 @@ impl PinProtocol {
     /// Returns `(platform_cose_key, shared_secret)`. The platform COSE key
     /// is sent to the authenticator; the shared secret is used locally for
     /// encrypt/decrypt/authenticate.
-    pub fn encapsulate(&self, peer_cose_key: &CoseKey) -> Result<(CoseKey, Vec<u8>), String> {
+    pub fn encapsulate(
+        &self,
+        peer_cose_key: &CoseKey,
+    ) -> Result<(CoseKey, Zeroizing<Vec<u8>>), String> {
         let peer_map = peer_cose_key.as_map().ok_or("peer key is not a CBOR map")?;
 
         let x = map_get_bytes(peer_map, -2).ok_or("missing x coordinate (-2)")?;
@@ -194,12 +197,12 @@ impl PinProtocol {
         Ok(())
     }
 
-    fn kdf(&self, z: &[u8]) -> Vec<u8> {
+    fn kdf(&self, z: &[u8]) -> Zeroizing<Vec<u8>> {
         match self {
             Self::V1 => {
                 let mut hasher = Sha256::new();
                 hasher.update(z);
-                hasher.finalize().to_vec()
+                Zeroizing::new(hasher.finalize().to_vec())
             }
             Self::V2 => {
                 let salt = [0u8; 32];
@@ -211,7 +214,7 @@ impl PinProtocol {
                 let mut aes_key = [0u8; 32];
                 hk.expand(b"CTAP2 AES key", &mut aes_key)
                     .expect("HKDF expand");
-                let mut result = hmac_key.to_vec();
+                let mut result = Zeroizing::new(hmac_key.to_vec());
                 result.extend_from_slice(&aes_key);
                 hmac_key.zeroize();
                 aes_key.zeroize();

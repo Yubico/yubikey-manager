@@ -562,7 +562,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
             )));
         }
 
-        let mut key = Vec::with_capacity(32);
+        let mut key = Zeroizing::new(Vec::with_capacity(32));
         key.extend_from_slice(key_enc);
         key.extend_from_slice(key_mac);
 
@@ -588,7 +588,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         touch_required: bool,
     ) -> Result<Credential, HsmAuthError> {
         log::debug!("Storing derived credential");
-        let (key_enc, key_mac) = password_to_key(derivation_password);
+        let (mut key_enc, mut key_mac) = password_to_key(derivation_password);
         let result = self.put_credential_symmetric(
             management_key,
             label,
@@ -597,6 +597,8 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
             credential_password,
             touch_required,
         )?;
+        key_enc.zeroize();
+        key_mac.zeroize();
         log::info!("Derived credential stored");
         Ok(result)
     }

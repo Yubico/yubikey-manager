@@ -75,6 +75,9 @@ impl<T: Zeroize> fmt::Display for SecretValue<T> {
     }
 }
 
+/// Non-constant-time comparison. This is intentional — `PartialEq` is used only for
+/// non-security-critical comparisons (e.g. checking if an access code matches for slot
+/// configuration updates). Cryptographic comparisons use `subtle::ConstantTimeEq` directly.
 impl<T: Zeroize + PartialEq> PartialEq for SecretValue<T> {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0

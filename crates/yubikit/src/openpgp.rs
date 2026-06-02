@@ -1277,18 +1277,18 @@ impl Kdf {
         getrandom::fill(&mut salt_admin)
             .map_err(|e| OpenPgpError::InvalidData(format!("RNG error: {e}")))?;
 
-        let initial_hash_user = kdf_s2k_hash(
+        let initial_hash_user = std::mem::take(&mut *kdf_s2k_hash(
             hash_algorithm,
             iteration_count,
             &salt_user,
             DEFAULT_USER_PIN,
-        );
-        let initial_hash_admin = kdf_s2k_hash(
+        ));
+        let initial_hash_admin = std::mem::take(&mut *kdf_s2k_hash(
             hash_algorithm,
             iteration_count,
             &salt_admin,
             DEFAULT_ADMIN_PIN,
-        );
+        ));
 
         Ok(Kdf::IterSaltedS2k {
             hash_algorithm,
@@ -1321,7 +1321,7 @@ impl Kdf {
                     Pw::Reset => salt_reset.as_deref().unwrap_or(salt_user.as_slice()),
                     Pw::Admin => salt_admin.as_deref().unwrap_or(salt_user.as_slice()),
                 };
-                Zeroizing::new(kdf_s2k_hash(*hash_algorithm, *iteration_count, salt, pin))
+                kdf_s2k_hash(*hash_algorithm, *iteration_count, salt, pin)
             }
         }
     }
@@ -1333,7 +1333,7 @@ fn kdf_s2k_hash(
     iteration_count: u32,
     salt: &[u8],
     pin: &str,
-) -> Vec<u8> {
+) -> Zeroizing<Vec<u8>> {
     let data = Zeroizing::new([salt, pin.as_bytes()].concat());
     let count = iteration_count as usize;
     let (full_rounds, trailing) = if data.is_empty() {
@@ -1351,7 +1351,7 @@ fn kdf_s2k_hash(
             if trailing > 0 {
                 digest.update(&data[..trailing]);
             }
-            digest.finalize().to_vec()
+            Zeroizing::new(digest.finalize().to_vec())
         }
         HashAlgorithm::Sha512 => {
             let mut digest = sha2::Sha512::new();
@@ -1361,7 +1361,7 @@ fn kdf_s2k_hash(
             if trailing > 0 {
                 digest.update(&data[..trailing]);
             }
-            digest.finalize().to_vec()
+            Zeroizing::new(digest.finalize().to_vec())
         }
     }
 }

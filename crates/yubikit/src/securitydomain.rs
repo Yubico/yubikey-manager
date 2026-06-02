@@ -419,10 +419,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
             return Err((e, protocol.into_connection()));
         }
         let dek = match protocol.init_scp(scp_key_params) {
-            Ok(dek) => dek.map(|v| {
-                let a: [u8; 16] = v.as_slice().try_into().expect("DEK must be 16 bytes");
-                Zeroizing::new(a)
-            }),
+            Ok(dek) => dek,
             Err(e) => return Err((e, protocol.into_connection())),
         };
         let version = patch_version(Version(5, 3, 0));

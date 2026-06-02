@@ -485,7 +485,6 @@ impl<C: Connection + 'static> ClientPin<C> {
 
         self.protocol
             .encapsulate(peer_key)
-            .map(|(key, secret)| (key, Zeroizing::new(secret)))
             .map_err(|e| Ctap2Error::InvalidResponse(format!("key agreement failed: {e}")))
     }
 }

@@ -28,7 +28,7 @@ use cipher::{BlockDecryptMut, BlockEncryptMut, KeyInit, KeyIvInit};
 use cmac::{Cmac, Mac};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 type Aes128CbcEnc = CbcEncryptor<Aes128>;
 type Aes128CbcDec = CbcDecryptor<Aes128>;
@@ -970,7 +970,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         key_enc: &[u8],
         key_mac: &[u8],
         key_dek: Option<&[u8]>,
-    ) -> Result<Option<Vec<u8>>, SmartCardError> {
+    ) -> Result<Option<Zeroizing<[u8; 16]>>, SmartCardError> {
         // 1. Generate host challenge
         let mut host_challenge = [0u8; 8];
         getrandom::fill(&mut host_challenge)
@@ -1025,7 +1025,11 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         // 8. EXTERNAL AUTHENTICATE (MAC but no encryption)
         self.send_apdu_scp_no_encrypt(0x84, 0x82, 0x33, 0x00, &host_cryptogram)?;
 
-        Ok(key_dek.map(|d| d.to_vec()))
+        Ok(key_dek.map(|d| {
+            let mut arr = [0u8; 16];
+            arr.copy_from_slice(d);
+            Zeroizing::new(arr)
+        }))
     }
 
     // -------------------------------------------------------------------
@@ -1048,7 +1052,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         sk_oce_ecka: Option<&[u8]>,
         certificates: &[&[u8]],
         oce_ref: Option<(u8, u8)>,
-    ) -> Result<Option<Vec<u8>>, SmartCardError> {
+    ) -> Result<Option<Zeroizing<[u8; 16]>>, SmartCardError> {
         use crate::tlv::tlv_encode;
         use elliptic_curve::sec1::FromEncodedPoint;
         use p256::{
@@ -1174,7 +1178,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         };
 
         // Concatenate shared secrets
-        let mut shared_secret = Vec::with_capacity(64);
+        let mut shared_secret = Zeroizing::new(Vec::with_capacity(64));
         shared_secret.extend_from_slice(shared1.raw_secret_bytes().as_slice());
         shared_secret.extend_from_slice(shared2.raw_secret_bytes().as_slice());
 
@@ -1201,11 +1205,14 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         let state = ScpState::new(key_senc, key_smac, key_srmac, Some(receipt), Some(1));
         self.set_scp_state(state);
 
-        Ok(Some(key_dek.to_vec()))
+        Ok(Some(Zeroizing::new(key_dek)))
     }
 
     /// Initialize SCP using key parameters. Returns the DEK if available.
-    pub fn init_scp(&mut self, params: &ScpKeyParams) -> Result<Option<Vec<u8>>, SmartCardError> {
+    pub fn init_scp(
+        &mut self,
+        params: &ScpKeyParams,
+    ) -> Result<Option<Zeroizing<[u8; 16]>>, SmartCardError> {
         match params {
             ScpKeyParams::Scp03 {
                 kvn,
@@ -1307,8 +1314,8 @@ fn aes_cmac(key: &[u8], data: &[u8]) -> Result<[u8; 16], ScpError> {
     Ok(mac.finalize().into_bytes().into())
 }
 
-fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Vec<u8> {
-    let mut output = Vec::with_capacity(length);
+fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Zeroizing<Vec<u8>> {
+    let mut output = Zeroizing::new(Vec::with_capacity(length));
     let mut counter: u32 = 1;
     while output.len() < length {
         let mut hasher = Sha256::new();
@@ -1322,7 +1329,7 @@ fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Vec<u8> 
     output
 }
 
-fn scp03_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> Result<Vec<u8>, ScpError> {
+fn scp03_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> Result<Zeroizing<Vec<u8>>, ScpError> {
     if l != 0x80 && l != 0x40 {
         return Err(ScpError::InvalidDerivationLength);
     }
@@ -1335,5 +1342,5 @@ fn scp03_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> Result<Vec<u8>, Sc
     input.extend_from_slice(context);
 
     let result = aes_cmac(key, &input)?;
-    Ok(result[..(l as usize / 8)].to_vec())
+    Ok(Zeroizing::new(result[..(l as usize / 8)].to_vec()))
 }
