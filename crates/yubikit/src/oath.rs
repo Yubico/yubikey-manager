@@ -41,7 +41,7 @@ use hmac::{Hmac, Mac};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::core::Version;
 use crate::core::patch_version;
@@ -425,21 +425,25 @@ fn build_put_data(
 }
 
 /// Build APDU data for set_key command.
-fn build_set_key_data(key: &[u8], challenge: &[u8]) -> Vec<u8> {
+fn build_set_key_data(key: &[u8], challenge: &[u8]) -> Zeroizing<Vec<u8>> {
     let response = hmac_sha1(key, challenge);
-    let mut key_val = vec![OathType::Totp as u8 | HashAlgorithm::Sha1 as u8];
+    let mut key_val = Zeroizing::new(vec![OathType::Totp as u8 | HashAlgorithm::Sha1 as u8]);
     key_val.extend_from_slice(key);
 
-    let mut data = tlv_encode(TAG_KEY, &key_val);
+    let mut data = Zeroizing::new(tlv_encode(TAG_KEY, &key_val));
     data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, challenge));
     data.extend_from_slice(&tlv_encode(TAG_RESPONSE, &response));
     data
 }
 
 /// Build APDU data for validate command.
-fn build_validate_data(key: &[u8], device_challenge: &[u8], host_challenge: &[u8]) -> Vec<u8> {
+fn build_validate_data(
+    key: &[u8],
+    device_challenge: &[u8],
+    host_challenge: &[u8],
+) -> Zeroizing<Vec<u8>> {
     let response = hmac_sha1(key, device_challenge);
-    let mut data = tlv_encode(TAG_RESPONSE, &response);
+    let mut data = Zeroizing::new(tlv_encode(TAG_RESPONSE, &response));
     data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, host_challenge));
     data
 }

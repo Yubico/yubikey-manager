@@ -40,7 +40,7 @@
 use std::fmt;
 
 use thiserror::Error;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::core::Version;
 use crate::core::patch_version;
@@ -506,7 +506,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     ) -> Result<Credential, HsmAuthError> {
         let parsed_label = parse_label(label)?;
 
-        let mut data = Vec::new();
+        let mut data = Zeroizing::new(Vec::new());
         data.extend_from_slice(&tlv_encode(
             TAG_MANAGEMENT_KEY,
             management_key.expose_secret(),
@@ -678,7 +678,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         label: &str,
     ) -> Result<(), HsmAuthError> {
         log::debug!("Deleting credential");
-        let mut data = Vec::new();
+        let mut data = Zeroizing::new(Vec::new());
         data.extend_from_slice(&tlv_encode(
             TAG_MANAGEMENT_KEY,
             management_key.expose_secret(),
@@ -716,7 +716,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     ) -> Result<(), HsmAuthError> {
         log::debug!("Changing credential password");
 
-        let mut data = Vec::new();
+        let mut data = Zeroizing::new(Vec::new());
         data.extend_from_slice(&tlv_encode(TAG_LABEL, &parse_label(label)?));
         data.extend_from_slice(&tlv_encode(
             TAG_CREDENTIAL_PASSWORD,
@@ -743,7 +743,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     ) -> Result<(), HsmAuthError> {
         log::debug!("Changing credential password (admin)");
 
-        let mut data = Vec::new();
+        let mut data = Zeroizing::new(Vec::new());
         data.extend_from_slice(&tlv_encode(TAG_LABEL, &parse_label(label)?));
         data.extend_from_slice(&tlv_encode(
             TAG_MANAGEMENT_KEY,
@@ -767,7 +767,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
     ) -> Result<(), HsmAuthError> {
         log::debug!("Updating management key");
 
-        let mut data = Vec::new();
+        let mut data = Zeroizing::new(Vec::new());
         data.extend_from_slice(&tlv_encode(
             TAG_MANAGEMENT_KEY,
             management_key.expose_secret(),
@@ -811,7 +811,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         card_crypto: Option<&[u8]>,
         public_key: Option<&[u8]>,
     ) -> Result<Vec<u8>, HsmAuthError> {
-        let mut data = Vec::new();
+        let mut data = Zeroizing::new(Vec::new());
         data.extend_from_slice(&tlv_encode(TAG_LABEL, &parse_label(label)?));
         data.extend_from_slice(&tlv_encode(TAG_CONTEXT, context));
 

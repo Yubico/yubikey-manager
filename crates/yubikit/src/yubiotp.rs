@@ -574,8 +574,8 @@ fn build_config(
     tkt: u8,
     cfg: u8,
     acc_code: Option<&[u8]>,
-) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(CONFIG_SIZE);
+) -> Zeroizing<Vec<u8>> {
+    let mut buf = Zeroizing::new(Vec::with_capacity(CONFIG_SIZE));
 
     // fixed (padded to FIXED_SIZE)
     buf.extend_from_slice(fixed);
@@ -617,7 +617,7 @@ fn build_update(
     tkt: u8,
     cfg: u8,
     acc_code: Option<&[u8]>,
-) -> Result<Vec<u8>, YubiOtpError> {
+) -> Result<Zeroizing<Vec<u8>>, YubiOtpError> {
     // All ext flags are valid for update (EXTFLAG_UPDATE_MASK == 0xFF)
     let _ = ext;
     if tkt & !TKTFLAG_UPDATE_MASK != 0 {
@@ -876,7 +876,7 @@ impl SlotConfiguration {
     // -- config serialization ----------------------------------------------
 
     /// Serialize the configuration to bytes (52 bytes with CRC).
-    pub fn get_config(&self, acc_code: Option<&AccessCode>) -> Vec<u8> {
+    pub fn get_config(&self, acc_code: Option<&AccessCode>) -> Zeroizing<Vec<u8>> {
         build_config(
             &self.fixed,
             &self.uid,

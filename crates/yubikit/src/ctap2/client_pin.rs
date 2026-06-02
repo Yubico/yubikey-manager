@@ -161,7 +161,7 @@ pub struct ClientPin<C: Connection> {
 /// Pad a PIN per CTAP2 spec: UTF-8, padded to ≥64 bytes, 16-byte aligned.
 fn pad_pin(pin: &Ctap2Pin) -> Zeroizing<Vec<u8>> {
     let pin_bytes = pin.as_bytes();
-    let mut padded = pin_bytes.to_vec();
+    let mut padded = Zeroizing::new(pin_bytes.to_vec());
     // Pad to at least 64 bytes
     if padded.len() < 64 {
         padded.resize(64, 0);
@@ -169,9 +169,10 @@ fn pad_pin(pin: &Ctap2Pin) -> Zeroizing<Vec<u8>> {
     // Extend to 16-byte alignment
     let remainder = padded.len() % 16;
     if remainder != 0 {
-        padded.resize(padded.len() + (16 - remainder), 0);
+        let new_len = padded.len() + (16 - remainder);
+        padded.resize(new_len, 0);
     }
-    Zeroizing::new(padded)
+    padded
 }
 
 impl<C: Connection + 'static> ClientPin<C> {
