@@ -776,8 +776,7 @@ pub fn run_keys_import(
         .map_err(|_| CliError("Could not determine key type from file.".into()))?;
 
     // Extract the inner private key data from PKCS#8 wrapper
-    let inner_key = KeyType::extract_private_key_from_pkcs8(&der)
-        .map_err(|e| CliError(format!("Failed to extract private key: {e}")))?;
+    let inner_key = extract_private_key_from_pkcs8(&der)?;
 
     let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
@@ -1606,4 +1605,53 @@ fn write_cert_file(output: &str, cert_der: &[u8], format: CliFormat) -> Result<(
         }
     }
     Ok(())
+}
+
+/// Extract the inner private key bytes from a PKCS#8 DER-encoded key.
+fn extract_private_key_from_pkcs8(pkcs8_der: &[u8]) -> Result<Vec<u8>, CliError> {
+    use yubikit::tlv::tlv_parse;
+
+    let err = |msg: &str| CliError(format!("Invalid PKCS#8: {msg}"));
+
+    // Parse outer SEQUENCE
+    let (_, seq_off, seq_len, _) = tlv_parse(pkcs8_der, 0).map_err(|_| err("Invalid DER"))?;
+    let seq_data = &pkcs8_der[seq_off..seq_off + seq_len];
+
+    // Skip version INTEGER
+    let (_, _, _, ver_end) = tlv_parse(seq_data, 0).map_err(|_| err("Invalid version"))?;
+
+    // Parse AlgorithmIdentifier SEQUENCE
+    let (_, algo_off, algo_len, algo_end) =
+        tlv_parse(seq_data, ver_end).map_err(|_| err("Invalid AlgorithmIdentifier"))?;
+    let algo_data = &seq_data[algo_off..algo_off + algo_len];
+
+    // Parse OID
+    let (_, oid_off, oid_len, _) = tlv_parse(algo_data, 0).map_err(|_| err("Invalid OID"))?;
+    let oid = &algo_data[oid_off..oid_off + oid_len];
+
+    const RSA_OID: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
+    const EC_OID: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
+
+    // Parse OCTET STRING containing the private key
+    let (_, oct_off, oct_len, _) =
+        tlv_parse(seq_data, algo_end).map_err(|_| err("Invalid OCTET STRING"))?;
+    let private_key_data = &seq_data[oct_off..oct_off + oct_len];
+
+    if oid == RSA_OID {
+        Ok(private_key_data.to_vec())
+    } else if oid == EC_OID {
+        // ECPrivateKey SEQUENCE { version, privateKey, ... }
+        let (_, inner_off, inner_len, _) =
+            tlv_parse(private_key_data, 0).map_err(|_| err("Invalid ECPrivateKey"))?;
+        let inner = &private_key_data[inner_off..inner_off + inner_len];
+        let (_, _, _, ver_end) = tlv_parse(inner, 0).map_err(|_| err("Invalid EC version"))?;
+        let (_, key_off, key_len, _) =
+            tlv_parse(inner, ver_end).map_err(|_| err("Invalid EC private key"))?;
+        Ok(inner[key_off..key_off + key_len].to_vec())
+    } else {
+        // Ed25519/X25519/ML-DSA/ML-KEM: OCTET STRING wraps another OCTET STRING
+        let (_, key_off, key_len, _) =
+            tlv_parse(private_key_data, 0).map_err(|_| err("Invalid key OCTET STRING"))?;
+        Ok(private_key_data[key_off..key_off + key_len].to_vec())
+    }
 }

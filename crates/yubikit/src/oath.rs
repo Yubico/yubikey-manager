@@ -41,7 +41,7 @@ use hmac::{Hmac, Mac};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::core::Version;
 use crate::core::patch_version;
@@ -504,31 +504,29 @@ pub struct Code {
 }
 
 /// Data needed to create a credential.
-#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct CredentialData {
     /// Account name for the credential.
-    #[zeroize(skip)]
     pub name: String,
     /// Whether this is a TOTP or HOTP credential.
-    #[zeroize(skip)]
     pub oath_type: OathType,
     /// Hash algorithm to use for code computation.
-    #[zeroize(skip)]
     pub hash_algorithm: HashAlgorithm,
     /// Shared secret key (zeroized on drop).
     pub secret: Vec<u8>,
     /// Number of digits in the generated OTP code.
-    #[zeroize(skip)]
     pub digits: u8,
     /// Time period in seconds for TOTP credentials.
-    #[zeroize(skip)]
     pub period: u32,
     /// Initial counter value for HOTP credentials.
-    #[zeroize(skip)]
     pub counter: u32,
     /// Optional issuer (e.g., service name).
-    #[zeroize(skip)]
     pub issuer: Option<String>,
+}
+
+impl Drop for CredentialData {
+    fn drop(&mut self) {
+        self.secret.zeroize();
+    }
 }
 
 impl CredentialData {

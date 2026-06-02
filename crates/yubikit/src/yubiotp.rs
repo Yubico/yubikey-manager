@@ -40,7 +40,7 @@
 
 use sha1::{Digest, Sha1};
 use thiserror::Error;
-use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::core::Version;
 use crate::core::patch_version;
@@ -682,19 +682,22 @@ fn build_ndef_config(value: Option<&str>, ndef_type: NdefType) -> Result<Vec<u8>
 /// Use one of the constructors ([`SlotConfiguration::yubiotp`],
 /// [`SlotConfiguration::hmac_sha1`], etc.) to create a configuration, then
 /// chain builder methods to customise flags.
-#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Debug, Clone)]
 pub struct SlotConfiguration {
     fixed: Vec<u8>,
     uid: [u8; UID_SIZE],
     key: [u8; KEY_SIZE],
-    #[zeroize(skip)]
     ext_flags: u8,
-    #[zeroize(skip)]
     tkt_flags: u8,
-    #[zeroize(skip)]
     cfg_flags: u8,
-    #[zeroize(skip)]
     kind: SlotConfigKind,
+}
+
+impl Drop for SlotConfiguration {
+    fn drop(&mut self) {
+        self.uid.zeroize();
+        self.key.zeroize();
+    }
 }
 
 /// Tracks which constructor was used, for version gating and update semantics.
@@ -876,7 +879,7 @@ impl SlotConfiguration {
     // -- config serialization ----------------------------------------------
 
     /// Serialize the configuration to bytes (52 bytes with CRC).
-    pub fn get_config(&self, acc_code: Option<&AccessCode>) -> Zeroizing<Vec<u8>> {
+    fn get_config(&self, acc_code: Option<&AccessCode>) -> Zeroizing<Vec<u8>> {
         build_config(
             &self.fixed,
             &self.uid,

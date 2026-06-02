@@ -60,7 +60,7 @@ impl PinProtocol {
     /// Returns `(platform_cose_key, shared_secret)`. The platform COSE key
     /// is sent to the authenticator; the shared secret is used locally for
     /// encrypt/decrypt/authenticate.
-    pub fn encapsulate(
+    pub(crate) fn encapsulate(
         &self,
         peer_cose_key: &CoseKey,
     ) -> Result<(CoseKey, Zeroizing<Vec<u8>>), String> {

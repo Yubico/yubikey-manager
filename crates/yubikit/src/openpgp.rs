@@ -44,7 +44,7 @@ use std::fmt;
 
 use sha2::Digest;
 use thiserror::Error;
-use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::core::Version;
 use crate::core::{bytes2int, int2bytes, patch_version};
@@ -1371,7 +1371,7 @@ fn kdf_s2k_hash(
 // ---------------------------------------------------------------------------
 
 /// A private key to be imported into an OpenPGP key slot.
-#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone)]
 pub enum OpenPgpPrivateKey {
     /// RSA private key in standard format (e, p, q).
     Rsa {
@@ -1406,6 +1406,41 @@ pub enum OpenPgpPrivateKey {
         /// Optional uncompressed public key point.
         public_key: Option<Vec<u8>>,
     },
+}
+
+impl Drop for OpenPgpPrivateKey {
+    fn drop(&mut self) {
+        match self {
+            Self::Rsa { e, p, q } => {
+                e.zeroize();
+                p.zeroize();
+                q.zeroize();
+            }
+            Self::RsaCrt {
+                e,
+                p,
+                q,
+                iqmp,
+                dmp1,
+                dmq1,
+                n,
+            } => {
+                e.zeroize();
+                p.zeroize();
+                q.zeroize();
+                iqmp.zeroize();
+                dmp1.zeroize();
+                dmq1.zeroize();
+                n.zeroize();
+            }
+            Self::Ec { scalar, public_key } => {
+                scalar.zeroize();
+                if let Some(pk) = public_key {
+                    pk.zeroize();
+                }
+            }
+        }
+    }
 }
 
 impl fmt::Debug for OpenPgpPrivateKey {

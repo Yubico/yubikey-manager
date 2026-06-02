@@ -42,7 +42,7 @@ use std::fmt;
 use aes::Aes128;
 use cbc::Encryptor as CbcEncryptor;
 use cipher::{BlockEncryptMut, KeyIvInit};
-use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+use zeroize::Zeroize;
 
 use thiserror::Error;
 
@@ -308,7 +308,7 @@ impl fmt::Display for KeyRef {
 // ---------------------------------------------------------------------------
 
 /// SCP03 static key set.
-#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone)]
 pub struct StaticKeys {
     /// Static encryption key (S-ENC).
     pub key_enc: [u8; 16],
@@ -316,6 +316,16 @@ pub struct StaticKeys {
     pub key_mac: [u8; 16],
     /// Optional data encryption key (DEK).
     pub key_dek: Option<[u8; 16]>,
+}
+
+impl Drop for StaticKeys {
+    fn drop(&mut self) {
+        self.key_enc.zeroize();
+        self.key_mac.zeroize();
+        if let Some(ref mut dek) = self.key_dek {
+            dek.zeroize();
+        }
+    }
 }
 
 impl fmt::Debug for StaticKeys {
@@ -386,7 +396,7 @@ fn encrypt_cbc_zero_iv(key: &[u8], data: &[u8]) -> Vec<u8> {
 pub struct SecurityDomainSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
-    dek: Option<Zeroizing<[u8; 16]>>,
+    dek: Option<crate::smartcard::Dek>,
 }
 
 impl<C: SmartCardConnection> SecurityDomainSession<C> {
@@ -785,9 +795,13 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         replace_kvn: u8,
     ) -> Result<(), SecurityDomainError> {
         log::debug!("Importing static key");
-        let dek: &[u8] = self.dek.as_ref().map(|v| v.as_slice()).ok_or_else(|| {
-            SecurityDomainError::InvalidData("No DEK available (SCP session required)".into())
-        })?;
+        let dek: &[u8] = self
+            .dek
+            .as_ref()
+            .map(|v| v.as_bytes().as_slice())
+            .ok_or_else(|| {
+                SecurityDomainError::InvalidData("No DEK available (SCP session required)".into())
+            })?;
 
         let keys_dek = static_keys
             .key_dek
@@ -832,9 +846,13 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         replace_kvn: u8,
     ) -> Result<(), SecurityDomainError> {
         log::debug!("Importing EC private key");
-        let dek: &[u8] = self.dek.as_ref().map(|v| v.as_slice()).ok_or_else(|| {
-            SecurityDomainError::InvalidData("No DEK available (SCP session required)".into())
-        })?;
+        let dek: &[u8] = self
+            .dek
+            .as_ref()
+            .map(|v| v.as_bytes().as_slice())
+            .ok_or_else(|| {
+                SecurityDomainError::InvalidData("No DEK available (SCP session required)".into())
+            })?;
 
         let encrypted = encrypt_cbc_zero_iv(dek, private_key);
         let mut data = vec![key.kvn];

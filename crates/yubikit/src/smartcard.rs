@@ -270,12 +270,11 @@ impl SmartCardError {
 // ---------------------------------------------------------------------------
 
 /// SCP key parameters for establishing a secure channel when opening a session.
-#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone)]
 pub enum ScpKeyParams {
     /// SCP03 with static keys.
     Scp03 {
         /// Key version number.
-        #[zeroize(skip)]
         kvn: u8,
         /// Static encryption key (16 bytes).
         key_enc: [u8; 16],
@@ -287,35 +286,74 @@ pub enum ScpKeyParams {
     /// SCP11b — needs card key reference + public key from SD.
     Scp11b {
         /// Key ID.
-        #[zeroize(skip)]
         kid: u8,
         /// Key version number.
-        #[zeroize(skip)]
         kvn: u8,
         /// Security Domain ECKA public key.
-        #[zeroize(skip)]
         pk_sd_ecka: Vec<u8>,
     },
     /// SCP11a or SCP11c — needs OCE private key + cert chain.
     Scp11ac {
         /// Key ID.
-        #[zeroize(skip)]
         kid: u8,
         /// Key version number.
-        #[zeroize(skip)]
         kvn: u8,
         /// Security Domain ECKA public key.
-        #[zeroize(skip)]
         pk_sd_ecka: Vec<u8>,
         /// OCE ECKA private key (32 bytes).
         sk_oce_ecka: [u8; 32],
         /// OCE certificate chain.
-        #[zeroize(skip)]
         certificates: Vec<Vec<u8>>,
         /// Optional OCE key reference (KID, KVN).
-        #[zeroize(skip)]
         oce_ref: Option<(u8, u8)>,
     },
+}
+
+impl Drop for ScpKeyParams {
+    fn drop(&mut self) {
+        match self {
+            Self::Scp03 {
+                key_enc,
+                key_mac,
+                key_dek,
+                ..
+            } => {
+                key_enc.zeroize();
+                key_mac.zeroize();
+                if let Some(dek) = key_dek {
+                    dek.zeroize();
+                }
+            }
+            Self::Scp11b { .. } => {}
+            Self::Scp11ac { sk_oce_ecka, .. } => {
+                sk_oce_ecka.zeroize();
+            }
+        }
+    }
+}
+
+/// A Data Encryption Key returned from SCP session initialization.
+///
+/// Wraps a 16-byte key and zeroizes it on drop.
+pub struct Dek([u8; 16]);
+
+impl Dek {
+    /// Access the DEK bytes.
+    pub fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
+    }
+}
+
+impl Drop for Dek {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+impl fmt::Debug for Dek {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Dek(<redacted>)")
+    }
 }
 
 impl fmt::Debug for ScpKeyParams {
@@ -970,7 +1008,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         key_enc: &[u8],
         key_mac: &[u8],
         key_dek: Option<&[u8]>,
-    ) -> Result<Option<Zeroizing<[u8; 16]>>, SmartCardError> {
+    ) -> Result<Option<Dek>, SmartCardError> {
         // 1. Generate host challenge
         let mut host_challenge = [0u8; 8];
         getrandom::fill(&mut host_challenge)
@@ -1028,7 +1066,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         Ok(key_dek.map(|d| {
             let mut arr = [0u8; 16];
             arr.copy_from_slice(d);
-            Zeroizing::new(arr)
+            Dek(arr)
         }))
     }
 
@@ -1052,7 +1090,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         sk_oce_ecka: Option<&[u8]>,
         certificates: &[&[u8]],
         oce_ref: Option<(u8, u8)>,
-    ) -> Result<Option<Zeroizing<[u8; 16]>>, SmartCardError> {
+    ) -> Result<Option<Dek>, SmartCardError> {
         use crate::tlv::tlv_encode;
         use elliptic_curve::sec1::FromEncodedPoint;
         use p256::{
@@ -1205,14 +1243,11 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         let state = ScpState::new(key_senc, key_smac, key_srmac, Some(receipt), Some(1));
         self.set_scp_state(state);
 
-        Ok(Some(Zeroizing::new(key_dek)))
+        Ok(Some(Dek(key_dek)))
     }
 
     /// Initialize SCP using key parameters. Returns the DEK if available.
-    pub fn init_scp(
-        &mut self,
-        params: &ScpKeyParams,
-    ) -> Result<Option<Zeroizing<[u8; 16]>>, SmartCardError> {
+    pub fn init_scp(&mut self, params: &ScpKeyParams) -> Result<Option<Dek>, SmartCardError> {
         match params {
             ScpKeyParams::Scp03 {
                 kvn,

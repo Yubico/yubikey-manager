@@ -40,7 +40,7 @@
 use std::fmt;
 
 use thiserror::Error;
-use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::core::Version;
 use crate::core::patch_version;
@@ -248,7 +248,7 @@ pub struct Credential {
 // ---------------------------------------------------------------------------
 
 /// A set of SCP03 session keys derived from an HSM Auth calculation.
-#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SessionKeys {
     /// The session encryption key (S-ENC).
     pub key_senc: [u8; 16],
@@ -256,6 +256,14 @@ pub struct SessionKeys {
     pub key_smac: [u8; 16],
     /// The session response MAC key (S-RMAC).
     pub key_srmac: [u8; 16],
+}
+
+impl Drop for SessionKeys {
+    fn drop(&mut self) {
+        self.key_senc.zeroize();
+        self.key_smac.zeroize();
+        self.key_srmac.zeroize();
+    }
 }
 
 impl fmt::Debug for SessionKeys {
