@@ -45,6 +45,7 @@ from yubikit.management import CAPABILITY, DeviceInfo
 from yubikit.oath import parse_b32_key
 from yubikit.securitydomain import SecurityDomainSession
 
+from ..piv import parse_rfc4514_string
 from ..util import parse_certificates
 
 logger = logging.getLogger(__name__)
@@ -158,6 +159,21 @@ class HexIntParamType(click.ParamType):
             return int(value)
         except ValueError:
             self.fail(f"{value!r} is not a valid integer", param, ctx)
+
+
+class RFC4514StringParamType(click.ParamType):
+    name = "text"
+
+    def convert(self, value, param, ctx) -> x509.Name:
+        if isinstance(value, x509.Name):
+            return value
+        if "=" not in value:
+            # Old style, common name only.
+            value = "CN=" + value
+        try:
+            return parse_rfc4514_string(value)
+        except ValueError as e:
+            self.fail(f"{e}: '{value}'", param, ctx)
 
 
 def click_callback(invoke_on_missing=False):
