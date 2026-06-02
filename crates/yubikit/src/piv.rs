@@ -344,7 +344,9 @@ impl KeyType {
     /// For RSA, returns the PKCS#1 RSAPrivateKey.
     /// For EC, returns the raw secret key scalar bytes.
     /// For Ed25519/X25519/ML-DSA/ML-KEM, returns the raw private key bytes.
-    pub fn extract_private_key_from_pkcs8(pkcs8_der: &[u8]) -> Result<Vec<u8>, PivError> {
+    pub fn extract_private_key_from_pkcs8(
+        pkcs8_der: &[u8],
+    ) -> Result<Zeroizing<Vec<u8>>, PivError> {
         // Parse outer SEQUENCE
         let (_, seq_off, seq_len, _) =
             tlv_parse(pkcs8_der, 0).map_err(|_| PivError::InvalidData("Invalid DER".into()))?;
@@ -374,7 +376,7 @@ impl KeyType {
 
         if oid == RSA_OID {
             // RSA: OCTET STRING contains PKCS#1 RSAPrivateKey SEQUENCE
-            Ok(private_key_data.to_vec())
+            Ok(Zeroizing::new(private_key_data.to_vec()))
         } else if oid == EC_OID {
             // EC: OCTET STRING contains ECPrivateKey SEQUENCE { version, privateKey, ... }
             // Parse SEQUENCE
@@ -387,12 +389,14 @@ impl KeyType {
             // Parse privateKey OCTET STRING
             let (_, key_off, key_len, _) = tlv_parse(inner, ver_end)
                 .map_err(|_| PivError::InvalidData("Invalid EC private key".into()))?;
-            Ok(inner[key_off..key_off + key_len].to_vec())
+            Ok(Zeroizing::new(inner[key_off..key_off + key_len].to_vec()))
         } else {
             // Ed25519/X25519/ML-DSA/ML-KEM: OCTET STRING contains another OCTET STRING with key
             let (_, key_off, key_len, _) = tlv_parse(private_key_data, 0)
                 .map_err(|_| PivError::InvalidData("Invalid key OCTET STRING".into()))?;
-            Ok(private_key_data[key_off..key_off + key_len].to_vec())
+            Ok(Zeroizing::new(
+                private_key_data[key_off..key_off + key_len].to_vec(),
+            ))
         }
     }
 }
@@ -2232,7 +2236,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 /// private scalar bytes (32 or 48 bytes).
 /// For Ed25519: raw 32-byte secret.
 /// For X25519: raw 32-byte secret.
-fn build_put_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivError> {
+fn build_put_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Zeroizing<Vec<u8>>, PivError> {
     match key_type {
         KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
             build_rsa_key_data(key_type, key_der)
@@ -2244,7 +2248,7 @@ fn build_put_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivE
                     "Ed25519 secret key must be 32 bytes".into(),
                 ));
             }
-            Ok(tlv_encode(0x07, key_der))
+            Ok(Zeroizing::new(tlv_encode(0x07, key_der)))
         }
         KeyType::X25519 => {
             if key_der.len() != 32 {
@@ -2252,15 +2256,19 @@ fn build_put_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivE
                     "X25519 secret key must be 32 bytes".into(),
                 ));
             }
-            Ok(tlv_encode(0x08, key_der))
+            Ok(Zeroizing::new(tlv_encode(0x08, key_der)))
         }
-        KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => Ok(tlv_encode(0x09, key_der)),
-        KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => Ok(tlv_encode(0x0A, key_der)),
+        KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => {
+            Ok(Zeroizing::new(tlv_encode(0x09, key_der)))
+        }
+        KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
+            Ok(Zeroizing::new(tlv_encode(0x0A, key_der)))
+        }
     }
 }
 
 /// Parse PKCS#1 RSAPrivateKey DER and build TLV import data.
-fn build_rsa_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivError> {
+fn build_rsa_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Zeroizing<Vec<u8>>, PivError> {
     let ln = (key_type.bit_len() / 16) as usize; // half-prime length in bytes
 
     // Parse PKCS#1 RSAPrivateKey SEQUENCE
@@ -2292,13 +2300,13 @@ fn build_rsa_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivE
         return Err(PivError::NotSupported("RSA exponent must be 65537".into()));
     }
 
-    let p = bigint_to_bytes(fields[4], ln);
-    let q = bigint_to_bytes(fields[5], ln);
-    let dp = bigint_to_bytes(fields[6], ln);
-    let dq = bigint_to_bytes(fields[7], ln);
-    let qinv = bigint_to_bytes(fields[8], ln);
+    let p = Zeroizing::new(bigint_to_bytes(fields[4], ln));
+    let q = Zeroizing::new(bigint_to_bytes(fields[5], ln));
+    let dp = Zeroizing::new(bigint_to_bytes(fields[6], ln));
+    let dq = Zeroizing::new(bigint_to_bytes(fields[7], ln));
+    let qinv = Zeroizing::new(bigint_to_bytes(fields[8], ln));
 
-    let mut data = tlv_encode(0x01, &p);
+    let mut data = Zeroizing::new(tlv_encode(0x01, &p));
     data.extend_from_slice(&tlv_encode(0x02, &q));
     data.extend_from_slice(&tlv_encode(0x03, &dp));
     data.extend_from_slice(&tlv_encode(0x04, &dq));
@@ -2308,12 +2316,12 @@ fn build_rsa_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivE
 }
 
 /// Parse SEC1 ECPrivateKey DER or raw scalar and build TLV import data.
-fn build_ec_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivError> {
+fn build_ec_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Zeroizing<Vec<u8>>, PivError> {
     let scalar_len = (key_type.bit_len() / 8) as usize;
 
     // If the data is exactly the scalar length, treat it as raw
     if key_der.len() == scalar_len {
-        return Ok(tlv_encode(0x06, key_der));
+        return Ok(Zeroizing::new(tlv_encode(0x06, key_der)));
     }
 
     // Otherwise, parse SEC1 ECPrivateKey DER
@@ -2338,8 +2346,8 @@ fn build_ec_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Vec<u8>, PivEr
     }
 
     // fields[1] is the privateKey OCTET STRING value
-    let scalar = bigint_to_bytes(fields[1], scalar_len);
-    Ok(tlv_encode(0x06, &scalar))
+    let scalar = Zeroizing::new(bigint_to_bytes(fields[1], scalar_len));
+    Ok(Zeroizing::new(tlv_encode(0x06, &scalar)))
 }
 
 // ---------------------------------------------------------------------------
@@ -3148,8 +3156,10 @@ mod tests {
             KeyType::MlDsa65
         );
         assert_eq!(
-            KeyType::extract_private_key_from_pkcs8(&ml_dsa_pkcs8).expect("extract ML-DSA key"),
-            ml_dsa_key
+            KeyType::extract_private_key_from_pkcs8(&ml_dsa_pkcs8)
+                .expect("extract ML-DSA key")
+                .as_slice(),
+            &ml_dsa_key[..]
         );
 
         let ml_kem_key = vec![0x22; 48];
@@ -3159,8 +3169,10 @@ mod tests {
             KeyType::MlKem1024
         );
         assert_eq!(
-            KeyType::extract_private_key_from_pkcs8(&ml_kem_pkcs8).expect("extract ML-KEM key"),
-            ml_kem_key
+            KeyType::extract_private_key_from_pkcs8(&ml_kem_pkcs8)
+                .expect("extract ML-KEM key")
+                .as_slice(),
+            &ml_kem_key[..]
         );
     }
 }

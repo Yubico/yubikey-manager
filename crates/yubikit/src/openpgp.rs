@@ -1419,7 +1419,10 @@ impl fmt::Debug for OpenPgpPrivateKey {
 }
 
 /// Build the private key template for PUT_DATA_ODD (tag 0x4D).
-fn build_private_key_template(key_ref: KeyRef, private_key: &OpenPgpPrivateKey) -> Vec<u8> {
+fn build_private_key_template(
+    key_ref: KeyRef,
+    private_key: &OpenPgpPrivateKey,
+) -> Zeroizing<Vec<u8>> {
     let component_tlvs: Vec<(u32, &[u8])> = match private_key {
         OpenPgpPrivateKey::Rsa { e, p, q } => {
             vec![
@@ -1456,8 +1459,8 @@ fn build_private_key_template(key_ref: KeyRef, private_key: &OpenPgpPrivateKey) 
 
     // 0x7F48: concatenated tag+length headers (no values)
     let mut headers = Vec::new();
-    // 0x5F48: concatenated values
-    let mut values = Vec::new();
+    // 0x5F48: concatenated values (contains secret key material)
+    let mut values = Zeroizing::new(Vec::new());
     for (tag, value) in &component_tlvs {
         let encoded = tlv_encode(*tag, value);
         // Header = everything before the value = tag + length bytes
@@ -1466,11 +1469,11 @@ fn build_private_key_template(key_ref: KeyRef, private_key: &OpenPgpPrivateKey) 
         values.extend_from_slice(value);
     }
 
-    let mut inner = key_ref.crt();
+    let mut inner = Zeroizing::new(key_ref.crt());
     inner.extend_from_slice(&tlv_encode(0x7F48, &headers));
     inner.extend_from_slice(&tlv_encode(0x5F48, &values));
 
-    tlv_encode(0x4D, &inner)
+    Zeroizing::new(tlv_encode(0x4D, &inner))
 }
 
 // ---------------------------------------------------------------------------
