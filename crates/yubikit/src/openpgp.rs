@@ -1305,9 +1305,9 @@ impl Kdf {
     ///
     /// When KDF is [`Kdf::None`], the raw PIN bytes are returned.
     /// Otherwise the PIN is hashed with the appropriate salt.
-    pub fn process(&self, pw: Pw, pin: &str) -> Vec<u8> {
+    fn process(&self, pw: Pw, pin: &str) -> Zeroizing<Vec<u8>> {
         match self {
-            Kdf::None => pin.as_bytes().to_vec(),
+            Kdf::None => Zeroizing::new(pin.as_bytes().to_vec()),
             Kdf::IterSaltedS2k {
                 hash_algorithm,
                 iteration_count,
@@ -1321,7 +1321,7 @@ impl Kdf {
                     Pw::Reset => salt_reset.as_deref().unwrap_or(salt_user.as_slice()),
                     Pw::Admin => salt_admin.as_deref().unwrap_or(salt_user.as_slice()),
                 };
-                kdf_s2k_hash(*hash_algorithm, *iteration_count, salt, pin)
+                Zeroizing::new(kdf_s2k_hash(*hash_algorithm, *iteration_count, salt, pin))
             }
         }
     }
@@ -1798,7 +1798,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
                 )));
             }
         }
-        Ok(Zeroizing::new(kdf.process(pw, pin)))
+        Ok(kdf.process(pw, pin))
     }
 
     fn verify_inner(&mut self, pw: Pw, pin: &OpenPgpPin, mode: u8) -> Result<(), OpenPgpError> {
@@ -2658,7 +2658,7 @@ mod tests {
     #[test]
     fn test_kdf_none_process() {
         let kdf = Kdf::None;
-        assert_eq!(kdf.process(Pw::User, "123456"), b"123456");
+        assert_eq!(kdf.process(Pw::User, "123456").as_slice(), b"123456");
     }
 
     #[test]
