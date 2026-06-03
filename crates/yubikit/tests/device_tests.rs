@@ -1489,7 +1489,7 @@ mod yubiotp {
 
 mod fido {
     use super::*;
-    use crate::controller::{Controller, NfcController, PrintController};
+    use crate::controller::Controller;
     use std::sync::Arc;
     use yubikit::ctap::CtapSession;
     use yubikit::ctap2::{
@@ -1506,18 +1506,22 @@ mod fido {
     }
 
     /// Get the appropriate controller for the current device transport.
-    fn get_controller() -> Arc<dyn Controller> {
+    /// Returns None if USB and no CONTROLLER env var is set (test should skip).
+    fn get_controller() -> Option<Arc<dyn Controller>> {
         let dev = get_device();
-        match dev.transport() {
-            Transport::Nfc => {
-                let reader_name = dev
-                    .reader_name
-                    .as_deref()
-                    .expect("NFC device must have a reader name");
-                Arc::new(NfcController::new(reader_name))
+        controller::get_controller(dev.transport(), dev.reader_name.as_deref()).map(Arc::from)
+    }
+
+    /// Get the controller, skipping the test if unavailable.
+    macro_rules! require_controller {
+        () => {
+            match get_controller() {
+                Some(c) => c,
+                None => {
+                    skip!("no controller available (set CONTROLLER env var for USB)");
+                }
             }
-            Transport::Usb => Arc::new(PrintController),
-        }
+        };
     }
 
     /// Reset the UP budget before an operation that requires user presence.
@@ -1527,144 +1531,178 @@ mod fido {
     /// `prompt_up` callback.
     fn reset_up_budget() {
         if get_device().transport() == Transport::Nfc {
-            get_controller().reinsert();
+            get_controller().unwrap().reinsert();
+        }
+    }
+
+    /// Check PIN state and determine if a reset is needed.
+    /// Returns `Ok(true)` if PIN is already TEST_PIN (no action needed),
+    /// `Ok(false)` if reset is needed,
+    /// or `Err(false)` if reset is not allowed on this transport.
+    fn check_pin_state<C: yubikit::core::Connection + 'static>(
+        mut session: Ctap2Session<C>,
+    ) -> Result<bool, bool> {
+        let info = session
+            .get_info()
+            .unwrap_or_else(|e| panic!("FIDO setup: get_info: {e}"));
+        let pin_set = info.options.get("clientPin").copied().unwrap_or(false);
+        if !pin_set {
+            return Ok(false);
+        }
+        // PIN is set — try to verify it's already TEST_PIN.
+        let mut cp = ClientPin::new(session)
+            .map_err(|(e, _)| panic!("FIDO setup: ClientPin::new failed: {e}"))
+            .unwrap();
+        match cp.get_pin_token(&ctap2_pin(TEST_PIN), None, None) {
+            Ok(_) => Ok(true),
+            Err(Ctap2Error::StatusError(CtapStatus::PinInvalid))
+            | Err(Ctap2Error::StatusError(CtapStatus::PinAuthBlocked))
+            | Err(Ctap2Error::StatusError(CtapStatus::PinBlocked)) => {
+                // Wrong PIN or blocked — reset required.
+                if !info.transports_for_reset.is_empty() {
+                    let current = match get_device().transport() {
+                        Transport::Usb => "usb",
+                        Transport::Nfc => "nfc",
+                    };
+                    if !info
+                        .transports_for_reset
+                        .iter()
+                        .any(|t| t.eq_ignore_ascii_case(current))
+                    {
+                        eprintln!(
+                            "FIDO setup: reset not allowed over {current} \
+                             (transports_for_reset={:?}); skipping PIN tests",
+                            info.transports_for_reset
+                        );
+                        return Err(false);
+                    }
+                }
+                Ok(false)
+            }
+            Err(e) => {
+                panic!("FIDO setup: unexpected error checking PIN: {e}");
+            }
         }
     }
 
     /// One-time setup: ensure the FIDO PIN is in a known state.
-    ///
-    /// If a PIN is already set on the device and it matches TEST_PIN, nothing
-    /// extra is done.  If the PIN is set but doesn't match (or is blocked),
-    /// the FIDO applet is reset first (which on NFC requires a recent power-up),
-    /// then TEST_PIN is set.  Runs at most once per test-process invocation.
     fn setup_fido_pin() -> bool {
+        use yubikit::platform::hidapi::HidFidoConnection;
+
         eprintln!("FIDO setup: initializing PIN state...");
 
-        let open_session = || -> Result<Ctap2Session<PcscSmartCardConnection>, String> {
+        let dev = get_device();
+        let is_usb = dev.transport() == Transport::Usb;
+
+        // Helper closures for opening sessions on the appropriate transport.
+        let open_hid = || -> Result<Ctap2Session<HidFidoConnection>, String> {
+            let conn = get_device().open_fido().map_err(|e| e.to_string())?;
+            let ctap = CtapSession::new_fido(conn).map_err(|(e, _)| e.to_string())?;
+            Ctap2Session::new(ctap).map_err(|(e, _)| e.to_string())
+        };
+        let open_nfc = || -> Result<Ctap2Session<PcscSmartCardConnection>, String> {
             let conn = open_smartcard_connection(&TestConnection::SmartCard);
             let ctap = CtapSession::new(conn).map_err(|(e, _)| e.to_string())?;
             Ctap2Session::new(ctap).map_err(|(e, _)| e.to_string())
         };
 
         // Check current PIN state.
-        let needs_reset = {
-            let mut session = match open_session() {
-                Ok(s) => s,
-                Err(e) => {
-                    panic!("FIDO setup: open session failed: {e}");
+        let needs_reset = if is_usb {
+            let session = open_hid().unwrap_or_else(|e| panic!("FIDO setup: open failed: {e}"));
+            match check_pin_state(session) {
+                Ok(true) => {
+                    eprintln!("FIDO setup: PIN already set to TEST_PIN, no reset needed");
+                    return true;
                 }
-            };
-            let info = match session.get_info() {
-                Ok(i) => i,
-                Err(e) => {
-                    panic!("FIDO setup: get_info failed: {e}");
+                Ok(false) => true,
+                Err(_) => return false,
+            }
+        } else {
+            let session = open_nfc().unwrap_or_else(|e| panic!("FIDO setup: open failed: {e}"));
+            match check_pin_state(session) {
+                Ok(true) => {
+                    eprintln!("FIDO setup: PIN already set to TEST_PIN, no reset needed");
+                    return true;
                 }
-            };
-
-            let pin_set = info.options.get("clientPin").copied().unwrap_or(false);
-            if !pin_set {
-                // No PIN set; proceed straight to set_pin below — no reset needed.
-                false
-            } else {
-                // PIN is set — try to verify it's already TEST_PIN.
-                let mut cp = match ClientPin::new(session).map_err(|(e, _)| e.to_string()) {
-                    Ok(cp) => cp,
-                    Err(e) => {
-                        panic!("FIDO setup: ClientPin::new failed: {e}");
-                    }
-                };
-                match cp.get_pin_token(&ctap2_pin(TEST_PIN), None, None) {
-                    Ok(_) => {
-                        // PIN is already TEST_PIN — no reset required.
-                        eprintln!("FIDO setup: PIN already set to TEST_PIN, no reset needed");
-                        return true;
-                    }
-                    Err(Ctap2Error::StatusError(CtapStatus::PinInvalid))
-                    | Err(Ctap2Error::StatusError(CtapStatus::PinAuthBlocked))
-                    | Err(Ctap2Error::StatusError(CtapStatus::PinBlocked)) => {
-                        // Wrong PIN or blocked — reset required.
-                        // Check that this transport allows reset before proceeding.
-                        if !info.transports_for_reset.is_empty() {
-                            let current = match get_device().transport() {
-                                Transport::Usb => "usb",
-                                Transport::Nfc => "nfc",
-                            };
-                            if !info
-                                .transports_for_reset
-                                .iter()
-                                .any(|t| t.eq_ignore_ascii_case(current))
-                            {
-                                eprintln!(
-                                    "FIDO setup: reset not allowed over {current} \
-                                     (transports_for_reset={:?}); skipping PIN tests",
-                                    info.transports_for_reset
-                                );
-                                return false;
-                            }
-                        }
-                        true
-                    }
-                    Err(e) => {
-                        panic!("FIDO setup: unexpected error checking PIN: {e}");
-                    }
-                }
+                Ok(false) => true,
+                Err(_) => return false,
             }
         };
 
         if needs_reset {
             eprintln!("FIDO setup: PIN mismatch or blocked, resetting applet...");
-            let ctrl = get_controller();
+            let ctrl = get_controller()
+                .expect("FIDO reset requires a controller (set CONTROLLER for USB)");
             // Reinsert to satisfy the "recently powered up" window for FIDO reset.
             ctrl.reinsert();
-            let mut session = match open_session() {
-                Ok(s) => s,
-                Err(e) => {
-                    panic!("FIDO setup: open session (post-reinsert) failed: {e}");
+
+            if is_usb {
+                let mut session =
+                    open_hid().unwrap_or_else(|e| panic!("FIDO setup: open (post-reinsert): {e}"));
+                let info = session.get_info().ok();
+                let long_touch = info
+                    .as_ref()
+                    .map(|i| i.long_touch_for_reset)
+                    .unwrap_or(false);
+                if long_touch {
+                    ctrl.touch();
                 }
-            };
-            // For reset, UP may be required (long touch on some devices).
-            let info = session.get_info().ok();
-            let long_touch = info
-                .as_ref()
-                .map(|i| i.long_touch_for_reset)
-                .unwrap_or(false);
-            if long_touch {
-                ctrl.touch();
-            }
-            let result = session.reset(
-                Some(&mut |status: u8| {
-                    if status == 0x02 && !long_touch {
-                        ctrl.touch();
-                    }
-                }),
-                None,
-            );
-            if long_touch {
-                ctrl.release();
-            }
-            if let Err(e) = result {
-                panic!(
-                    "FIDO setup: reset failed: {e}\n  NOTE: Ensure the device was recently inserted/tapped."
+                let result = session.reset(
+                    Some(&mut |status: u8| {
+                        if status == 0x02 && !long_touch {
+                            ctrl.touch();
+                        }
+                    }),
+                    None,
                 );
+                if long_touch {
+                    ctrl.release();
+                }
+                result.unwrap_or_else(|e| panic!("FIDO setup: reset failed: {e}"));
+            } else {
+                let mut session =
+                    open_nfc().unwrap_or_else(|e| panic!("FIDO setup: open (post-reinsert): {e}"));
+                let info = session.get_info().ok();
+                let long_touch = info
+                    .as_ref()
+                    .map(|i| i.long_touch_for_reset)
+                    .unwrap_or(false);
+                if long_touch {
+                    ctrl.touch();
+                }
+                let result = session.reset(
+                    Some(&mut |status: u8| {
+                        if status == 0x02 && !long_touch {
+                            ctrl.touch();
+                        }
+                    }),
+                    None,
+                );
+                if long_touch {
+                    ctrl.release();
+                }
+                result.unwrap_or_else(|e| panic!("FIDO setup: reset failed: {e}"));
             }
             eprintln!("FIDO setup: reset done");
         }
 
         // Set the PIN on a fresh connection (avoids stale cached state after reset).
-        let session = match open_session() {
-            Ok(s) => s,
-            Err(e) => {
-                panic!("FIDO setup: re-open after reset failed: {e}");
-            }
-        };
-        let mut cp = match ClientPin::new(session).map_err(|(e, _)| e.to_string()) {
-            Ok(cp) => cp,
-            Err(e) => {
-                panic!("FIDO setup: ClientPin::new failed: {e}");
-            }
-        };
-        if let Err(e) = cp.set_pin(&ctap2_pin(TEST_PIN)) {
-            panic!("FIDO setup: set_pin failed: {e}");
+        if is_usb {
+            let session =
+                open_hid().unwrap_or_else(|e| panic!("FIDO setup: re-open after reset: {e}"));
+            let mut cp = ClientPin::new(session)
+                .map_err(|(e, _)| e)
+                .unwrap_or_else(|e| panic!("FIDO setup: ClientPin::new failed: {e}"));
+            cp.set_pin(&ctap2_pin(TEST_PIN))
+                .unwrap_or_else(|e| panic!("FIDO setup: set_pin failed: {e}"));
+        } else {
+            let session =
+                open_nfc().unwrap_or_else(|e| panic!("FIDO setup: re-open after reset: {e}"));
+            let mut cp = ClientPin::new(session)
+                .map_err(|(e, _)| e)
+                .unwrap_or_else(|e| panic!("FIDO setup: ClientPin::new failed: {e}"));
+            cp.set_pin(&ctap2_pin(TEST_PIN))
+                .unwrap_or_else(|e| panic!("FIDO setup: set_pin failed: {e}"));
         }
         eprintln!("FIDO setup: PIN set to TEST_PIN");
         true
@@ -1799,7 +1837,8 @@ mod fido {
     impl TestInteraction {
         fn new() -> Self {
             Self {
-                controller: get_controller(),
+                controller: get_controller()
+                    .expect("TestInteraction requires a controller (set CONTROLLER for USB)"),
             }
         }
     }
@@ -1975,7 +2014,7 @@ mod fido {
             }
 
             reset_up_budget();
-            let ctrl = get_controller();
+            let ctrl = require_controller!();
             let mut session = open();
             match session.selection(
                 Some(&mut |status: u8| {

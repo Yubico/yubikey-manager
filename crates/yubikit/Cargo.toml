@@ -70,6 +70,7 @@ pcsc.workspace = true
 rsa.workspace = true
 rstest.workspace = true
 sha2 = { workspace = true, features = ["oid"] }
+ureq = "3"
 
 [[example]]
 name = "ctap2_selection"
