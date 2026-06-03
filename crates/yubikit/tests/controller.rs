@@ -109,12 +109,18 @@ impl PicoController {
 
 impl Controller for PicoController {
     fn touch(&self) {
-        // Ensure touch is off first so the authenticator sees a fresh press
-        self.get(&format!("/usb{}/touch/off", self.port));
-        std::thread::sleep(Duration::from_millis(200));
-        self.get(&format!("/usb{}/touch/on", self.port));
-        // Give the authenticator time to register the touch
-        std::thread::sleep(Duration::from_millis(300));
+        // Turn touch off first then back on in a background thread so that
+        // the NFCCTAP keepalive polling loop isn't starved. The authenticator
+        // needs to see a fresh off→on transition to register user presence.
+        let url_off = format!("{}/usb{}/touch/off", self.base_url, self.port);
+        let url_on = format!("{}/usb{}/touch/on", self.base_url, self.port);
+        std::thread::spawn(move || {
+            eprintln!("PicoController: GET {url_off}");
+            let _ = ureq::get(&url_off).call();
+            std::thread::sleep(Duration::from_millis(200));
+            eprintln!("PicoController: GET {url_on}");
+            let _ = ureq::get(&url_on).call();
+        });
     }
 
     fn release(&self) {

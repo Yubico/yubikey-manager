@@ -345,8 +345,13 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
             require_transport!(Transport::Usb);
             let conn = get_device().open_otp().expect("open OTP");
             let mut session = ManagementSession::new_otp(conn).expect("ManagementSession::new_otp");
-            let info = session.read_device_info().expect("read_device_info");
-            assert_eq!(info.serial, required_serial());
+            match session.read_device_info() {
+                Ok(info) => assert_eq!(info.serial, required_serial()),
+                Err(e) if e.to_string().contains("No data") => {
+                    skip!("Management read_device_info not supported over OTP HID on this key");
+                }
+                Err(e) => panic!("read_device_info: {e}"),
+            }
         }
         _ => {
             let conn = open_smartcard_connection(&tc);
@@ -1467,6 +1472,9 @@ mod yubiotp {
 
         assert!(result.is_err(), "Expected error from cancelled operation");
         let err_msg = result.unwrap_err().to_string();
+        if err_msg.contains("No data") {
+            skip!("HMAC challenge-response not supported over OTP HID on this key");
+        }
         assert!(
             err_msg.contains("cancelled") || err_msg.contains("Timeout"),
             "Expected cancel/timeout error, got: {err_msg}"
@@ -1526,9 +1534,9 @@ mod fido {
 
     /// Reset the UP budget before an operation that requires user presence.
     ///
-    /// On NFC this power-cycles the card (reinsert). On USB this is a no-op
-    /// because UP is satisfied by physical touch via the controller's
-    /// `prompt_up` callback.
+    /// On NFC this power-cycles the card (reinsert) so the "recently powered
+    /// up" window is refreshed. On USB this is a no-op because UP is satisfied
+    /// by physical touch via the controller's keepalive callback on HID.
     fn reset_up_budget() {
         if get_device().transport() == Transport::Nfc {
             get_controller().unwrap().reinsert();
@@ -1693,16 +1701,34 @@ mod fido {
             let mut cp = ClientPin::new(session)
                 .map_err(|(e, _)| e)
                 .unwrap_or_else(|e| panic!("FIDO setup: ClientPin::new failed: {e}"));
-            cp.set_pin(&ctap2_pin(TEST_PIN))
-                .unwrap_or_else(|e| panic!("FIDO setup: set_pin failed: {e}"));
+            match cp.set_pin(&ctap2_pin(TEST_PIN)) {
+                Ok(()) => {}
+                Err(Ctap2Error::StatusError(CtapStatus::PinPolicyViolation)) => {
+                    eprintln!(
+                        "FIDO setup: TEST_PIN rejected by PIN complexity policy; \
+                         skipping PIN-dependent tests"
+                    );
+                    return false;
+                }
+                Err(e) => panic!("FIDO setup: set_pin failed: {e}"),
+            }
         } else {
             let session =
                 open_nfc().unwrap_or_else(|e| panic!("FIDO setup: re-open after reset: {e}"));
             let mut cp = ClientPin::new(session)
                 .map_err(|(e, _)| e)
                 .unwrap_or_else(|e| panic!("FIDO setup: ClientPin::new failed: {e}"));
-            cp.set_pin(&ctap2_pin(TEST_PIN))
-                .unwrap_or_else(|e| panic!("FIDO setup: set_pin failed: {e}"));
+            match cp.set_pin(&ctap2_pin(TEST_PIN)) {
+                Ok(()) => {}
+                Err(Ctap2Error::StatusError(CtapStatus::PinPolicyViolation)) => {
+                    eprintln!(
+                        "FIDO setup: TEST_PIN rejected by PIN complexity policy; \
+                         skipping PIN-dependent tests"
+                    );
+                    return false;
+                }
+                Err(e) => panic!("FIDO setup: set_pin failed: {e}"),
+            }
         }
         eprintln!("FIDO setup: PIN set to TEST_PIN");
         true
@@ -1958,8 +1984,13 @@ mod fido {
 
             // ── Change PIN ───────────────────────────────────────────────────
             const TEMP_PIN: &str = "99887766";
-            cp.change_pin(&ctap2_pin(TEST_PIN), &ctap2_pin(TEMP_PIN))
-                .expect("change_pin to TEMP_PIN");
+            match cp.change_pin(&ctap2_pin(TEST_PIN), &ctap2_pin(TEMP_PIN)) {
+                Ok(()) => {}
+                Err(Ctap2Error::StatusError(CtapStatus::PinPolicyViolation)) => {
+                    skip!("PIN complexity policy rejected TEMP_PIN");
+                }
+                Err(e) => panic!("change_pin to TEMP_PIN: {e}"),
+            }
 
             // Verify new PIN works
             let token3 = cp
@@ -3066,6 +3097,7 @@ mod fido {
                 transports: None,
             }];
 
+            let ctrl = require_controller!();
             let resp = session2
                 .get_assertion(
                     TEST_RP_ID,
@@ -3075,7 +3107,11 @@ mod fido {
                     None,
                     Some(&pin_auth),
                     Some(2),
-                    None,
+                    Some(&mut |status: u8| {
+                        if status == 0x02 {
+                            ctrl.touch();
+                        }
+                    }),
                     None,
                 )
                 .expect("get_assertion with previewSign");
