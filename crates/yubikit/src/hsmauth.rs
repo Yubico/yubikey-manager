@@ -604,11 +604,12 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
             &key_mac,
             credential_password,
             touch_required,
-        )?;
+        );
         key_enc.zeroize();
         key_mac.zeroize();
+        let credential = result?;
         log::info!("Derived credential stored");
-        Ok(result)
+        Ok(credential)
     }
 
     /// Store an EC P-256 asymmetric credential from an existing private key.

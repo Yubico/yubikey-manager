@@ -1032,15 +1032,15 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         context.extend_from_slice(&host_challenge);
         context.extend_from_slice(card_challenge);
 
-        let key_senc: [u8; 16] = scp03_derive(key_enc, 0x04, &context, 0x80)?
+        let mut key_senc: [u8; 16] = scp03_derive(key_enc, 0x04, &context, 0x80)?
             .as_slice()
             .try_into()
             .map_err(|_| SmartCardError::InvalidData("bad derive length".into()))?;
-        let key_smac: [u8; 16] = scp03_derive(key_mac, 0x06, &context, 0x80)?
+        let mut key_smac: [u8; 16] = scp03_derive(key_mac, 0x06, &context, 0x80)?
             .as_slice()
             .try_into()
             .map_err(|_| SmartCardError::InvalidData("bad derive length".into()))?;
-        let key_srmac: [u8; 16] = scp03_derive(key_mac, 0x07, &context, 0x80)?
+        let mut key_srmac: [u8; 16] = scp03_derive(key_mac, 0x07, &context, 0x80)?
             .as_slice()
             .try_into()
             .map_err(|_| SmartCardError::InvalidData("bad derive length".into()))?;
@@ -1048,6 +1048,9 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         // 5. Verify card cryptogram
         let gen_card_crypto = scp03_derive(&key_smac, 0x00, &context, 0x40)?;
         if !bool::from(gen_card_crypto.ct_eq(card_cryptogram)) {
+            key_senc.zeroize();
+            key_smac.zeroize();
+            key_srmac.zeroize();
             return Err(SmartCardError::InvalidState(
                 "Card cryptogram verification failed".into(),
             ));
@@ -1056,8 +1059,11 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         // 6. Compute host cryptogram
         let host_cryptogram = scp03_derive(&key_smac, 0x01, &context, 0x40)?;
 
-        // 7. Set SCP state
+        // 7. Set SCP state (copies keys into ScpState which has ZeroizeOnDrop)
         let state = ScpState::new(key_senc, key_smac, key_srmac, None, None);
+        key_senc.zeroize();
+        key_smac.zeroize();
+        key_srmac.zeroize();
         self.set_scp_state(state);
 
         // 8. EXTERNAL AUTHENTICATE (MAC but no encryption)
@@ -1234,13 +1240,16 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         }
 
         // Session keys (keys[1..4]) + DEK (keys[4])
-        let key_senc: [u8; 16] = keybytes[16..32].try_into().unwrap();
-        let key_smac: [u8; 16] = keybytes[32..48].try_into().unwrap();
-        let key_srmac: [u8; 16] = keybytes[48..64].try_into().unwrap();
+        let mut key_senc: [u8; 16] = keybytes[16..32].try_into().unwrap();
+        let mut key_smac: [u8; 16] = keybytes[32..48].try_into().unwrap();
+        let mut key_srmac: [u8; 16] = keybytes[48..64].try_into().unwrap();
         let key_dek: [u8; 16] = keybytes[64..80].try_into().unwrap();
 
         // For SCP11 the MAC chain starts with the receipt
         let state = ScpState::new(key_senc, key_smac, key_srmac, Some(receipt), Some(1));
+        key_senc.zeroize();
+        key_smac.zeroize();
+        key_srmac.zeroize();
         self.set_scp_state(state);
 
         Ok(Some(Dek(key_dek)))
