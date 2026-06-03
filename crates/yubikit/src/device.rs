@@ -113,7 +113,7 @@ impl From<crate::fido::FidoError> for DeviceError {
 /// Abstract interface to a YubiKey device.
 ///
 /// Provides access to device metadata and the ability to open connections.
-/// Implemented by [`LocalYubiKeyDevice`] for local devices and can be implemented
+/// Implemented by [`crate::platform::device::LocalYubiKeyDevice`] for local devices and can be implemented
 /// by RPC proxy types for remote access.
 pub trait YubiKeyDevice {
     /// Returns the [`DeviceInfo`] for this device.

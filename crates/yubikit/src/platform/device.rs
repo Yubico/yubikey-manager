@@ -1,6 +1,6 @@
 //! Local device enumeration and connection management.
 //!
-//! Contains [`LocalYubiKeyDevice`] and related functions for discovering
+//! Contains [`LocalYubiKeyDevice`](crate::platform::device::LocalYubiKeyDevice) and related functions for discovering
 //! YubiKeys over USB HID and PC/SC.
 
 use std::collections::HashMap;

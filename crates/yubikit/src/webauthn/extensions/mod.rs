@@ -21,8 +21,8 @@
 //!
 //! ## Extension Processing Architecture
 //!
-//! Extensions are pluggable via the [`Ctap2Extension`] trait. Each extension
-//! optionally produces a [`RegistrationProcessor`] or [`AuthenticationProcessor`]
+//! Extensions are pluggable via the [`Ctap2Extension`](crate::webauthn::extensions::Ctap2Extension) trait. Each extension
+//! optionally produces a [`RegistrationProcessor`](crate::webauthn::extensions::RegistrationProcessor) or [`AuthenticationProcessor`](crate::webauthn::extensions::AuthenticationProcessor)
 //! for a given ceremony, which handles building authenticator inputs and parsing
 //! outputs.
 

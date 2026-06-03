@@ -16,9 +16,9 @@
 //!
 //! This module provides two HID-based transports:
 //!
-//! - **CTAP HID** ([`HidFidoConnection`]) — FIDO2/U2F protocol using CTAP HID framing
+//! - **CTAP HID** ([`HidFidoConnection`](crate::platform::hidapi::HidFidoConnection)) — FIDO2/U2F protocol using CTAP HID framing
 //!   (64-byte packets with channel multiplexing, keepalive, etc.)
-//! - **OTP HID** ([`HidOtpConnection`]) — YubiKey OTP protocol using USB HID feature reports
+//! - **OTP HID** ([`HidOtpConnection`](crate::platform::hidapi::HidOtpConnection)) — YubiKey OTP protocol using USB HID feature reports
 //!   (8-byte frames for slot configuration and challenge-response)
 
 use hidapi::HidApi;

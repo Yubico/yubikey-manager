@@ -22,7 +22,7 @@
 //! - [`device`] — Local device enumeration and connection management
 //!
 //! Most users don't need to interact with these directly — use
-//! [`device::list_devices`] to discover YubiKeys and open connections through
+//! [`device::list_devices()`](crate::platform::device::list_devices) to discover YubiKeys and open connections through
 //! the device handle.
 
 /// Local device enumeration and connection management.
