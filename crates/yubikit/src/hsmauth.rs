@@ -345,11 +345,10 @@ fn parse_label(label: &str) -> Result<Vec<u8>, HsmAuthError> {
 }
 
 fn password_to_key(password: &str) -> ([u8; 16], [u8; 16]) {
-    let mut key = [0u8; 32];
-    pbkdf2::pbkdf2_hmac::<sha2::Sha256>(password.as_bytes(), b"Yubico", 10000, &mut key);
+    let mut key = Zeroizing::new([0u8; 32]);
+    pbkdf2::pbkdf2_hmac::<sha2::Sha256>(password.as_bytes(), b"Yubico", 10000, &mut *key);
     let key_enc: [u8; 16] = key[..16].try_into().unwrap();
     let key_mac: [u8; 16] = key[16..].try_into().unwrap();
-    key.zeroize();
     (key_enc, key_mac)
 }
 

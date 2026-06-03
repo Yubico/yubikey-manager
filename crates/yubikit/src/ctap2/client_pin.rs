@@ -15,7 +15,7 @@
 //! CTAP2 ClientPIN operations — PIN management and user verification.
 
 use sha2::{Digest, Sha256};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::cbor::Value;
 use crate::core::Connection;
@@ -317,9 +317,8 @@ impl<C: Connection + 'static> ClientPin<C> {
         log::debug!("Changing PIN");
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
-        let mut pin_hash_full = Sha256::digest(old_pin.as_bytes());
+        let pin_hash_full = Zeroizing::new(Sha256::digest(old_pin.as_bytes()));
         let pin_hash_enc = self.protocol.encrypt(&shared_secret, &pin_hash_full[..16]);
-        pin_hash_full.zeroize();
         let new_pin_padded = pad_pin(new_pin);
         let new_pin_enc = self.protocol.encrypt(&shared_secret, &new_pin_padded);
 
@@ -357,9 +356,8 @@ impl<C: Connection + 'static> ClientPin<C> {
         log::debug!("Getting PIN token");
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
-        let mut pin_hash_full = Sha256::digest(pin.as_bytes());
+        let pin_hash_full = Zeroizing::new(Sha256::digest(pin.as_bytes()));
         let pin_hash_enc = self.protocol.encrypt(&shared_secret, &pin_hash_full[..16]);
-        pin_hash_full.zeroize();
 
         let (sub_cmd, perms, rpid) =
             if Self::is_token_supported(&self.session.cached_info) && permissions.is_some() {

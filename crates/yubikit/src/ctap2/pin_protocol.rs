@@ -24,7 +24,7 @@ use p256::elliptic_curve::rand_core::OsRng;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::{EncodedPoint, PublicKey, SecretKey};
 use sha2::{Digest, Sha256};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::cbor::Value;
 
@@ -207,17 +207,15 @@ impl PinProtocol {
             Self::V2 => {
                 let salt = [0u8; 32];
                 let hk = Hkdf::<Sha256>::new(Some(&salt), z);
-                let mut hmac_key = [0u8; 32];
-                hk.expand(b"CTAP2 HMAC key", &mut hmac_key)
+                let mut hmac_key = Zeroizing::new([0u8; 32]);
+                hk.expand(b"CTAP2 HMAC key", &mut *hmac_key)
                     .expect("HKDF expand");
                 let hk = Hkdf::<Sha256>::new(Some(&salt), z);
-                let mut aes_key = [0u8; 32];
-                hk.expand(b"CTAP2 AES key", &mut aes_key)
+                let mut aes_key = Zeroizing::new([0u8; 32]);
+                hk.expand(b"CTAP2 AES key", &mut *aes_key)
                     .expect("HKDF expand");
                 let mut result = Zeroizing::new(hmac_key.to_vec());
-                result.extend_from_slice(&aes_key);
-                hmac_key.zeroize();
-                aes_key.zeroize();
+                result.extend_from_slice(&*aes_key);
                 result
             }
         }
