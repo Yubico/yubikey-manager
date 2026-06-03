@@ -487,6 +487,139 @@ mod oath {
         let (_, code) = &results[0];
         assert!(code.is_some(), "Expected a TOTP code");
     }
+
+    #[rstest]
+    #[case::smart_card(TestConnection::SmartCard)]
+    fn test_oath_access_key_lifecycle(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::OATH);
+        let mut session = open_oath_session(&tc);
+        session.reset().expect("reset");
+
+        // Initially no key set
+        assert!(!session.has_key());
+        assert!(!session.locked());
+
+        // Set an access key
+        let key = session.derive_key("test_password");
+        session.set_key(&key).expect("set_key");
+
+        // Re-open session — should now be locked
+        drop(session);
+        let mut session = open_oath_session(&tc);
+        assert!(session.has_key());
+        assert!(session.locked());
+
+        // Validate with correct key
+        let key = session.derive_key("test_password");
+        session.validate(&key).expect("validate");
+
+        // Should now be unlocked - can list credentials
+        session.list_credentials().expect("list after validate");
+
+        // Remove the key
+        session.unset_key().expect("unset_key");
+
+        // Re-open — should be unlocked again
+        drop(session);
+        let mut session = open_oath_session(&tc);
+        assert!(!session.has_key());
+        assert!(!session.locked());
+
+        // Clean up
+        session.reset().expect("reset");
+    }
+
+    #[rstest]
+    #[case::smart_card(TestConnection::SmartCard)]
+    fn test_oath_rename_credential(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::OATH);
+        let mut session = open_oath_session(&tc);
+        session.reset().expect("reset");
+
+        let cred_data = CredentialData {
+            name: "original@test.com".into(),
+            oath_type: OathType::Totp,
+            hash_algorithm: HashAlgorithm::Sha1,
+            secret: b"12345678901234567890".to_vec(),
+            digits: 6,
+            period: 30,
+            counter: 0,
+            issuer: Some("OldIssuer".into()),
+        };
+        session
+            .put_credential(&cred_data, false)
+            .expect("put_credential");
+
+        session
+            .rename_credential(&cred_data.get_id(), "renamed@test.com", Some("NewIssuer"))
+            .expect("rename_credential");
+
+        let creds = session.list_credentials().expect("list");
+        assert_eq!(creds.len(), 1);
+        assert_eq!(creds[0].issuer.as_deref(), Some("NewIssuer"));
+        assert_eq!(creds[0].name, "renamed@test.com");
+
+        session.reset().expect("reset");
+    }
+
+    #[rstest]
+    #[case::smart_card(TestConnection::SmartCard)]
+    fn test_oath_calculate_single(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::OATH);
+        let mut session = open_oath_session(&tc);
+        session.reset().expect("reset");
+
+        // Add HOTP credential
+        let hotp_data = CredentialData {
+            name: "hotp@test.com".into(),
+            oath_type: OathType::Hotp,
+            hash_algorithm: HashAlgorithm::Sha1,
+            secret: b"12345678901234567890".to_vec(),
+            digits: 6,
+            period: 0,
+            counter: 0,
+            issuer: None,
+        };
+        let hotp_cred = session.put_credential(&hotp_data, false).expect("put hotp");
+
+        // Calculate HOTP — should give different codes on successive calls
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let code1 = session
+            .calculate_code(&hotp_cred, now)
+            .expect("calculate hotp 1");
+        let code2 = session
+            .calculate_code(&hotp_cred, now)
+            .expect("calculate hotp 2");
+        assert_ne!(code1.value, code2.value, "HOTP counter should advance");
+
+        // Add TOTP with SHA-256
+        let totp_sha256 = CredentialData {
+            name: "totp256@test.com".into(),
+            oath_type: OathType::Totp,
+            hash_algorithm: HashAlgorithm::Sha256,
+            secret: b"12345678901234567890123456789012".to_vec(),
+            digits: 8,
+            period: 30,
+            counter: 0,
+            issuer: None,
+        };
+        let totp_cred = session
+            .put_credential(&totp_sha256, false)
+            .expect("put totp256");
+
+        let code = session
+            .calculate_code(&totp_cred, now)
+            .expect("calculate totp256");
+        assert_eq!(code.value.len(), 8, "Expected 8-digit code");
+
+        session.reset().expect("reset");
+    }
 }
 
 // ───────────────────────── PIV ─────────────────────────
@@ -1116,9 +1249,206 @@ mod piv {
             "Shared secrets must match"
         );
     }
-}
 
-// ───────────────────────── OpenPGP ─────────────────────────
+    /// Test PIV PIN change, wrong PIN rejection, and PUK unblock.
+    #[rstest]
+    #[case::smart_card(TestConnection::SmartCard)]
+    fn test_piv_pin_management(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+
+        let default_pin = default_piv_pin();
+        let default_puk = PivPin::new("12345678").unwrap();
+        let new_pin = PivPin::new("974632").unwrap();
+
+        // Change PIN
+        match session.change_pin(&default_pin, &new_pin) {
+            Ok(()) => {}
+            Err(e) if e.to_string().contains("policy") || e.to_string().contains("6985") => {
+                skip!("PIN complexity rejected new PIN");
+            }
+            Err(e) => panic!("change_pin: {e}"),
+        }
+
+        // Old PIN should fail
+        assert!(session.verify_pin(&default_pin).is_err());
+
+        // New PIN should work
+        session.verify_pin(&new_pin).expect("verify new PIN");
+
+        // Wrong PIN should decrement attempts
+        let wrong = PivPin::new("999999").unwrap();
+        assert!(session.verify_pin(&wrong).is_err());
+        let attempts = session.get_pin_attempts().expect("get_pin_attempts");
+        assert!(attempts < 3, "attempts should have decreased from 3");
+
+        // Block PIN by exhausting retries
+        for _ in 0..attempts {
+            let _ = session.verify_pin(&wrong);
+        }
+        assert!(
+            session.verify_pin(&new_pin).is_err(),
+            "PIN should be blocked"
+        );
+
+        // Unblock with PUK
+        let unblocked_pin = PivPin::new("837261").unwrap();
+        match session.unblock_pin(&default_puk, &unblocked_pin) {
+            Ok(()) => {}
+            Err(e) if e.to_string().contains("policy") => {
+                skip!("PIN complexity rejected unblocked PIN");
+            }
+            Err(e) => panic!("unblock_pin: {e}"),
+        }
+        session
+            .verify_pin(&unblocked_pin)
+            .expect("verify unblocked PIN");
+    }
+
+    /// Test PIV key attestation and slot metadata.
+    #[rstest]
+    #[case::smart_card(TestConnection::SmartCard)]
+    fn test_piv_attest_and_metadata(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_version!(Version(5, 3, 0));
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(&default_management_key_for(&session))
+            .expect("authenticate");
+
+        // Generate a key
+        session
+            .generate_key(
+                Slot::Retired2,
+                KeyType::EccP256,
+                PinPolicy::Default,
+                TouchPolicy::Never,
+            )
+            .expect("generate_key");
+
+        // Attest key
+        let cert_der = session.attest_key(Slot::Retired2).expect("attest_key");
+        assert!(!cert_der.is_empty(), "attestation cert should not be empty");
+        // Attestation cert is DER-encoded X.509
+        assert_eq!(cert_der[0], 0x30, "should start with SEQUENCE tag");
+
+        // Get slot metadata
+        let meta = session
+            .get_slot_metadata(Slot::Retired2)
+            .expect("get_slot_metadata");
+        assert_eq!(meta.key_type, KeyType::EccP256);
+    }
+
+    /// Test PIV management key change and PIN/PUK metadata.
+    #[rstest]
+    #[case::smart_card(TestConnection::SmartCard)]
+    fn test_piv_management_key_and_metadata(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_version!(Version(5, 3, 0));
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(&default_management_key_for(&session))
+            .expect("authenticate");
+
+        // Get metadata - should show default key
+        let mk_meta = session
+            .get_management_key_metadata()
+            .expect("get_management_key_metadata");
+        assert!(mk_meta.default_value, "should be default after reset");
+
+        // Get PIN metadata
+        let pin_meta = session.get_pin_metadata().expect("get_pin_metadata");
+        assert!(pin_meta.attempts_remaining > 0);
+
+        // Get PUK metadata
+        let puk_meta = session.get_puk_metadata().expect("get_puk_metadata");
+        assert!(puk_meta.attempts_remaining > 0);
+
+        // Change management key
+        let new_key_bytes: [u8; 24] = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+            0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+        ];
+        let key_type = session.management_key_type();
+        let new_key = ManagementKey::new(key_type, &new_key_bytes).unwrap();
+        session
+            .set_management_key(&new_key, false)
+            .expect("set_management_key");
+
+        // Old key should fail
+        let old_key = default_management_key_for(&session);
+        assert!(
+            session.authenticate(&old_key).is_err(),
+            "old key should fail"
+        );
+
+        // New key should work
+        session.authenticate(&new_key).expect("auth with new key");
+
+        // Metadata should no longer show default
+        let mk_meta2 = session
+            .get_management_key_metadata()
+            .expect("get_management_key_metadata");
+        assert!(
+            !mk_meta2.default_value,
+            "should not be default after change"
+        );
+    }
+
+    /// Test PIV key move and delete operations.
+    #[rstest]
+    #[case::smart_card(TestConnection::SmartCard)]
+    fn test_piv_move_and_delete_key(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_version!(Version(5, 7, 0));
+        require_capability!(Capability::PIV);
+        let mut session = open_piv_session(&tc);
+        session.reset().expect("reset");
+        session
+            .authenticate(&default_management_key_for(&session))
+            .expect("authenticate");
+
+        // Generate key in Retired3
+        session
+            .generate_key(
+                Slot::Retired3,
+                KeyType::EccP256,
+                PinPolicy::Default,
+                TouchPolicy::Never,
+            )
+            .expect("generate_key");
+
+        // Move to Retired4
+        session
+            .move_key(Slot::Retired3, Slot::Retired4)
+            .expect("move_key");
+
+        // Retired3 should be empty now
+        assert!(
+            session.get_slot_metadata(Slot::Retired3).is_err(),
+            "source slot should be empty after move"
+        );
+
+        // Retired4 should have the key
+        let meta = session
+            .get_slot_metadata(Slot::Retired4)
+            .expect("get_slot_metadata Retired4");
+        assert_eq!(meta.key_type, KeyType::EccP256);
+
+        // Delete key
+        session.delete_key(Slot::Retired4).expect("delete_key");
+        assert!(
+            session.get_slot_metadata(Slot::Retired4).is_err(),
+            "slot should be empty after delete"
+        );
+    }
+}
 
 mod openpgp {
     use super::*;
@@ -1392,6 +1722,101 @@ mod openpgp {
             "ECDH shared secrets should match"
         );
     }
+
+    #[rstest]
+    #[case::smart_card(TestConnection::SmartCard)]
+    fn test_openpgp_pin_management(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::OPENPGP);
+        let mut session = open_openpgp_session(&tc);
+
+        // Reset to known state
+        session.reset().expect("reset");
+
+        // Verify default user PIN
+        session
+            .verify_pin(&default_user_pin(), false)
+            .expect("verify default pin");
+
+        // Verify default admin PIN
+        session
+            .verify_admin(&default_admin_pin())
+            .expect("verify default admin");
+
+        // Get PIN status
+        let status = session.get_pin_status().expect("get_pin_status");
+        assert!(status.attempts_user > 0);
+
+        // Change user PIN
+        let new_pin = OpenPgpPin::new("974632");
+        match session.change_pin(&default_user_pin(), &new_pin) {
+            Ok(()) => {
+                // Verify new PIN works
+                session.verify_pin(&new_pin, false).expect("verify new pin");
+            }
+            Err(e) if e.to_string().contains("6985") || e.to_string().contains("policy") => {
+                skip!("PIN complexity rejected new PIN");
+            }
+            Err(e) => panic!("change_pin: {e}"),
+        }
+
+        // Reset to restore defaults
+        session.reset().expect("reset after pin change");
+
+        // Change admin PIN
+        session
+            .verify_admin(&default_admin_pin())
+            .expect("verify default admin after reset");
+        let new_admin = OpenPgpPin::new("83726145");
+        match session.change_admin(&default_admin_pin(), &new_admin) {
+            Ok(()) => {
+                session.verify_admin(&new_admin).expect("verify new admin");
+            }
+            Err(e) if e.to_string().contains("6985") || e.to_string().contains("policy") => {
+                skip!("PIN complexity rejected new admin PIN");
+            }
+            Err(e) => panic!("change_admin: {e}"),
+        }
+
+        // Reset again to restore defaults for reset code test
+        session.reset().expect("reset after admin change");
+
+        // Set reset code and use it to reset PIN
+        session
+            .verify_admin(&default_admin_pin())
+            .expect("verify admin for reset code");
+        let reset_code = OpenPgpPin::new("83726145");
+        match session.set_reset_code(&reset_code) {
+            Ok(()) => {
+                // Use wrong PIN 3 times to lock it
+                let wrong = OpenPgpPin::new("000000");
+                for _ in 0..3 {
+                    let _ = session.verify_pin(&wrong, false);
+                }
+                // Now reset PIN using reset code
+                match session.reset_pin(&default_user_pin(), Some(&reset_code)) {
+                    Ok(()) => {
+                        session
+                            .verify_pin(&default_user_pin(), false)
+                            .expect("verify after reset");
+                    }
+                    Err(e)
+                        if e.to_string().contains("6985") || e.to_string().contains("policy") =>
+                    {
+                        // Can't reset to weak default PIN, just reset applet
+                    }
+                    Err(e) => panic!("reset_pin: {e}"),
+                }
+            }
+            Err(e) if e.to_string().contains("6985") || e.to_string().contains("policy") => {
+                skip!("PIN complexity rejected reset code");
+            }
+            Err(e) => panic!("set_reset_code: {e}"),
+        }
+
+        // Final reset to clean up
+        session.reset().expect("final reset");
+    }
 }
 
 // ───────────────────────── YubiOTP ─────────────────────────
@@ -1425,6 +1850,59 @@ mod yubiotp {
                 let _v = session.version();
             }
         }
+    }
+
+    #[rstest]
+    #[case::smart_card(TestConnection::SmartCard)]
+    fn test_yubiotp_slot_configuration(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::OTP);
+
+        let conn = open_smartcard_connection(&tc);
+        let mut session = YubiOtpSession::new(conn).expect("YubiOtpSession");
+
+        // Check initial state
+        let state = session.get_config_state();
+        let _slot2_was_configured = state.is_configured(Slot::Two).unwrap_or(false);
+
+        // Program slot 2 with HMAC-SHA1 (no touch)
+        let hmac_key = HmacKey::new(&[0x42; 20]).unwrap();
+        let config = SlotConfiguration::hmac_sha1(&hmac_key)
+            .expect("hmac config")
+            .require_touch(false);
+        session
+            .put_configuration(Slot::Two, &config, None, None)
+            .expect("put hmac config");
+
+        // Verify slot 2 is now configured
+        let state = session.get_config_state();
+        assert!(
+            state.is_configured(Slot::Two).unwrap_or(false),
+            "Slot 2 should be configured"
+        );
+
+        // Swap slots
+        session.swap_slots().expect("swap_slots");
+
+        // Slot 1 should now be configured (was slot 2)
+        let state = session.get_config_state();
+        assert!(
+            state.is_configured(Slot::One).unwrap_or(false),
+            "Slot 1 should be configured after swap"
+        );
+
+        // Swap back
+        session.swap_slots().expect("swap_slots back");
+
+        // Delete slot 2
+        session.delete_slot(Slot::Two, None).expect("delete slot 2");
+
+        // Verify slot 2 is no longer configured
+        let state = session.get_config_state();
+        assert!(
+            !state.is_configured(Slot::Two).unwrap_or(true),
+            "Slot 2 should be empty after delete"
+        );
     }
 
     /// Test that cancelling an OTP HMAC challenge-response with touch works.
@@ -3145,7 +3623,9 @@ mod fido {
 
 mod hsmauth {
     use super::*;
-    use yubikit::hsmauth::HsmAuthSession;
+    use yubikit::hsmauth::{
+        CredentialPassword, DEFAULT_MANAGEMENT_KEY, HsmAuthManagementKey, HsmAuthSession,
+    };
 
     fn open_hsmauth_session(tc: &TestConnection) -> HsmAuthSession<PcscSmartCardConnection> {
         let conn = open_smartcard_connection(tc);
@@ -3178,6 +3658,99 @@ mod hsmauth {
 
         let creds = session.list_credentials().expect("list_credentials");
         assert!(creds.is_empty(), "Expected no credentials after reset");
+    }
+
+    #[rstest]
+    #[case::smart_card(TestConnection::SmartCard)]
+    fn test_hsmauth_credential_lifecycle(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::HSMAUTH);
+        let mut session = open_hsmauth_session(&tc);
+        session.reset().expect("reset");
+
+        let mgmt_key = HsmAuthManagementKey::new(DEFAULT_MANAGEMENT_KEY).expect("default mgmt key");
+        let cred_pw = CredentialPassword::from_password("test-password");
+
+        // Put symmetric credential with explicit keys
+        let key_enc = [0x11u8; 16];
+        let key_mac = [0x22u8; 16];
+        let cred = session
+            .put_credential_symmetric(&mgmt_key, "sym-test", &key_enc, &key_mac, &cred_pw, false)
+            .expect("put_credential_symmetric");
+        assert_eq!(cred.label, "sym-test");
+
+        // Put derived credential
+        let cred2 = session
+            .put_credential_derived(
+                &mgmt_key,
+                "derived-test",
+                "my-derivation-pw",
+                &cred_pw,
+                false,
+            )
+            .expect("put_credential_derived");
+        assert_eq!(cred2.label, "derived-test");
+
+        // List — should have 2
+        let creds = session.list_credentials().expect("list");
+        assert_eq!(creds.len(), 2);
+
+        // Delete one
+        session
+            .delete_credential(&mgmt_key, "sym-test")
+            .expect("delete_credential");
+        let creds = session.list_credentials().expect("list after delete");
+        assert_eq!(creds.len(), 1);
+        assert_eq!(creds[0].label, "derived-test");
+
+        // Calculate session keys with the derived credential
+        let context = [0u8; 16];
+        let keys = session
+            .calculate_session_keys_symmetric("derived-test", &context, &cred_pw, None)
+            .expect("calculate_session_keys_symmetric");
+        // SessionKeys should have non-zero fields
+        assert_ne!(keys.key_senc, [0u8; 16]);
+        assert_ne!(keys.key_smac, [0u8; 16]);
+        assert_ne!(keys.key_srmac, [0u8; 16]);
+
+        // Clean up
+        session.reset().expect("reset");
+    }
+
+    #[rstest]
+    #[case::smart_card(TestConnection::SmartCard)]
+    fn test_hsmauth_management_key(#[case] tc: TestConnection) {
+        skip_if_needed!(tc);
+        require_capability!(Capability::HSMAUTH);
+        let mut session = open_hsmauth_session(&tc);
+        session.reset().expect("reset");
+
+        // Check retries
+        let retries = session
+            .get_management_key_retries()
+            .expect("get_management_key_retries");
+        assert!(retries > 0);
+
+        // Change management key
+        let old_key = HsmAuthManagementKey::new(DEFAULT_MANAGEMENT_KEY).expect("default mgmt key");
+        let new_key_bytes = [0xAAu8; 16];
+        let new_key = HsmAuthManagementKey::new(&new_key_bytes).expect("new mgmt key");
+        match session.put_management_key(&old_key, &new_key) {
+            Ok(()) => {
+                // Verify new key works by using it for a put
+                let cred_pw = CredentialPassword::from_password("test");
+                session
+                    .put_credential_derived(&new_key, "key-test", "pw123", &cred_pw, false)
+                    .expect("put with new key");
+            }
+            Err(e) if e.to_string().contains("6985") || e.to_string().contains("policy") => {
+                skip!("Management key change not allowed on this device");
+            }
+            Err(e) => panic!("put_management_key: {e}"),
+        }
+
+        // Clean up
+        session.reset().expect("reset");
     }
 }
 
