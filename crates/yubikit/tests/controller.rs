@@ -22,17 +22,22 @@ pub trait Controller: Send + Sync {
     /// is never needed, so calling this on [`NfcController`] will panic.
     fn release(&self);
 
-    /// Disconnect and re-connect the YubiKey (power cycle).
+    /// Remove/disconnect the YubiKey (first half of a power cycle).
     ///
-    /// On NFC this is done via PCSC. On USB this requires physical
-    /// disconnection and reconnection.
-    fn reinsert(&self);
+    /// On USB this powers off the port. On NFC this disconnects via PCSC.
+    fn remove(&self);
+
+    /// Insert/reconnect the YubiKey (second half of a power cycle).
+    ///
+    /// On USB this powers on the port and waits for enumeration.
+    /// On NFC this reconnects via PCSC and resets the card.
+    fn insert(&self);
 }
 
 /// Controller for NFC-attached YubiKeys.
 ///
 /// User presence is implicit (card on reader), so `touch`/`release` are
-/// invalid operations. `reinsert` performs an NFC power cycle via PCSC.
+/// invalid operations. `remove`/`insert` perform an NFC power cycle via PCSC.
 pub struct NfcController {
     reader_name: String,
 }
@@ -54,8 +59,43 @@ impl Controller for NfcController {
         panic!("NfcController::release() called — UP is implicit over NFC, this should not happen");
     }
 
-    fn reinsert(&self) {
-        power_cycle_nfc(&self.reader_name).expect("NFC power cycle failed");
+    fn remove(&self) {
+        use pcsc::{Context, Disposition, Protocols, Scope, ShareMode};
+        use std::ffi::CString;
+
+        let c_reader = CString::new(self.reader_name.as_str()).expect("invalid reader name");
+        let ctx = Context::establish(Scope::User).expect("PCSC context failed");
+
+        eprintln!("NfcController: removing card (UnpowerCard)...");
+        let card = ctx
+            .connect(&c_reader, ShareMode::Shared, Protocols::ANY)
+            .expect("NFC remove: connect failed");
+        if let Err((_, e)) = card.disconnect(Disposition::UnpowerCard) {
+            panic!("NFC remove: disconnect failed: {e}");
+        }
+
+        std::thread::sleep(Duration::from_millis(1000));
+    }
+
+    fn insert(&self) {
+        use pcsc::{Context, Disposition, Protocols, Scope, ShareMode};
+        use std::ffi::CString;
+
+        let c_reader = CString::new(self.reader_name.as_str()).expect("invalid reader name");
+        let ctx = Context::establish(Scope::User).expect("PCSC context failed");
+
+        eprintln!("NfcController: inserting card (ResetCard)...");
+        let mut card = ctx
+            .connect(&c_reader, ShareMode::Shared, Protocols::ANY)
+            .expect("NFC insert: connect failed");
+        card.reconnect(ShareMode::Shared, Protocols::ANY, Disposition::ResetCard)
+            .expect("NFC insert: reconnect failed");
+        if let Err((_, e)) = card.disconnect(Disposition::LeaveCard) {
+            panic!("NFC insert: disconnect failed: {e}");
+        }
+
+        std::thread::sleep(Duration::from_millis(200));
+        eprintln!("NfcController: card power-cycled");
     }
 }
 
@@ -74,10 +114,12 @@ impl Controller for PrintController {
         eprintln!("\n\x1b[1;36m>>> Release the YubiKey sensor now.\x1b[0m");
     }
 
-    fn reinsert(&self) {
-        eprintln!("\x1b[1;36m>>> Disconnect and reconnect the YubiKey, then press Enter.\x1b[0m");
-        let mut buf = String::new();
-        io::stdin().read_line(&mut buf).ok();
+    fn remove(&self) {
+        eprintln!("\x1b[1;36m>>> Disconnect the YubiKey now.\x1b[0m");
+    }
+
+    fn insert(&self) {
+        eprintln!("\x1b[1;36m>>> Reconnect the YubiKey now.\x1b[0m");
     }
 }
 
@@ -127,11 +169,12 @@ impl Controller for PicoController {
         self.get(&format!("/usb{}/touch/off", self.port));
     }
 
-    fn reinsert(&self) {
-        // Release touch before power cycling
+    fn remove(&self) {
         self.get(&format!("/usb{}/touch/off", self.port));
         self.get(&format!("/usb{}/power/off", self.port));
-        std::thread::sleep(Duration::from_millis(500));
+    }
+
+    fn insert(&self) {
         self.get(&format!("/usb{}/power/on", self.port));
         // Wait for the YubiKey to enumerate on the USB bus
         std::thread::sleep(Duration::from_millis(2000));
@@ -170,42 +213,4 @@ pub fn get_controller(
             }
         }
     }
-}
-
-/// Power-cycle the NFC card using PCSC so the "recently powered up"
-/// window is reset for commands like FIDO reset.
-pub fn power_cycle_nfc(reader_name: &str) -> Result<(), String> {
-    use pcsc::{Context, Disposition, Protocols, Scope, ShareMode};
-    use std::ffi::CString;
-
-    let c_reader = CString::new(reader_name).map_err(|e| e.to_string())?;
-    let ctx = Context::establish(Scope::User).map_err(|e| e.to_string())?;
-
-    eprintln!("FIDO setup: power-cycling NFC card via PCSC...");
-
-    // Try UnpowerCard (cold reset / field off) first.
-    {
-        let card = ctx
-            .connect(&c_reader, ShareMode::Shared, Protocols::ANY)
-            .map_err(|e| e.to_string())?;
-        card.disconnect(Disposition::UnpowerCard)
-            .map_err(|(_, e)| e.to_string())?;
-    }
-    std::thread::sleep(Duration::from_millis(1000));
-
-    // Reconnect to confirm the card came back; use ResetCard to also
-    // ensure the card goes through its ATR sequence (warm reset).
-    {
-        let mut card = ctx
-            .connect(&c_reader, ShareMode::Shared, Protocols::ANY)
-            .map_err(|e| e.to_string())?;
-        card.reconnect(ShareMode::Shared, Protocols::ANY, Disposition::ResetCard)
-            .map_err(|e| e.to_string())?;
-        card.disconnect(Disposition::LeaveCard)
-            .map_err(|(_, e)| e.to_string())?;
-    }
-    std::thread::sleep(Duration::from_millis(200));
-
-    eprintln!("FIDO setup: NFC card power-cycled");
-    Ok(())
 }

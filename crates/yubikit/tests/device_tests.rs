@@ -18,9 +18,10 @@ mod arkg_p256;
 mod controller;
 
 use rstest::{fixture, rstest};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, RwLock, RwLockReadGuard};
 use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
+use yubikit::device::ReinsertStatus;
 use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType, UsbInterface};
 use yubikit::platform::device::{LocalYubiKeyDevice, list_devices};
 use yubikit::platform::pcsc::PcscSmartCardConnection;
@@ -57,7 +58,8 @@ macro_rules! skip {
 // ───────────────────────── Device ─────────────────────────
 
 /// Cached device — resolved once and reused across all tests.
-static DEVICE: OnceLock<LocalYubiKeyDevice> = OnceLock::new();
+/// Uses RwLock to allow `reinsert` to update device state after power cycling.
+static DEVICE: OnceLock<RwLock<LocalYubiKeyDevice>> = OnceLock::new();
 
 /// Whether the device supports SCP11b (version >= 5.7.2).
 static SCP11B_SUPPORTED: OnceLock<bool> = OnceLock::new();
@@ -77,37 +79,42 @@ fn required_serial() -> Option<u32> {
     Some(s.parse().expect("YUBIKEY_SERIAL must be a valid integer"))
 }
 
-fn get_device() -> &'static LocalYubiKeyDevice {
-    DEVICE.get_or_init(|| {
-        let serial = required_serial();
-        let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
-            .expect("Failed to enumerate YubiKeys");
+fn get_device() -> RwLockReadGuard<'static, LocalYubiKeyDevice> {
+    DEVICE
+        .get_or_init(|| {
+            let serial = required_serial();
+            let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
+                .expect("Failed to enumerate YubiKeys");
 
-        let dev = match serial {
-            Some(s) => devices
-                .into_iter()
-                .find(|d| d.info().serial == Some(s))
-                .unwrap_or_else(|| panic!("No YubiKey found with serial {s}")),
-            None => {
-                let mut devs: Vec<_> = devices
+            let dev = match serial {
+                Some(s) => devices
                     .into_iter()
-                    .filter(|d| d.info().serial.is_none())
-                    .collect();
-                match devs.len() {
-                    0 => panic!("No YubiKey without serial found"),
-                    1 => devs.remove(0),
-                    n => {
-                        panic!("Multiple YubiKeys without serial found ({n}), cannot disambiguate")
+                    .find(|d| d.info().serial == Some(s))
+                    .unwrap_or_else(|| panic!("No YubiKey found with serial {s}")),
+                None => {
+                    let mut devs: Vec<_> = devices
+                        .into_iter()
+                        .filter(|d| d.info().serial.is_none())
+                        .collect();
+                    match devs.len() {
+                        0 => panic!("No YubiKey without serial found"),
+                        1 => devs.remove(0),
+                        n => {
+                            panic!(
+                                "Multiple YubiKeys without serial found ({n}), cannot disambiguate"
+                            )
+                        }
                     }
                 }
-            }
-        };
+            };
 
-        if dev.info().version_qualifier.release_type != ReleaseType::Final {
-            set_override_version(dev.info().version);
-        }
-        dev
-    })
+            if dev.info().version_qualifier.release_type != ReleaseType::Final {
+                set_override_version(dev.info().version);
+            }
+            RwLock::new(dev)
+        })
+        .read()
+        .unwrap()
 }
 
 /// Extract an uncompressed P-256 public key (65 bytes) from a DER-encoded certificate.
@@ -252,7 +259,8 @@ fn device_transport() -> Transport {
 /// Fixture providing the device info (cached via OnceLock).
 #[fixture]
 fn device_info() -> &'static DeviceInfo {
-    get_device().info()
+    static INFO: OnceLock<DeviceInfo> = OnceLock::new();
+    INFO.get_or_init(|| get_device().info().clone())
 }
 
 /// Fixture providing device capabilities for the active transport.
@@ -2246,6 +2254,43 @@ mod fido {
         controller::get_controller(dev.transport(), dev.reader_name.as_deref()).map(Arc::from)
     }
 
+    /// Reinsert (power-cycle) the device using `YubiKeyDevice::reinsert`,
+    /// delegating the physical remove/insert to the Controller.
+    ///
+    /// For USB, uses the library's polling-based reinsert (detects device
+    /// removal/reinsertion on the bus) with the Controller triggering the
+    /// physical power cycle. For NFC, calls remove+insert directly since
+    /// the card stays physically on the reader (no removal to detect).
+    fn reinsert_device() {
+        let transport = get_device().transport();
+        let ctrl = {
+            let dev = get_device();
+            controller::get_controller(dev.transport(), dev.reader_name.as_deref())
+                .expect("reinsert_device requires a controller")
+        };
+
+        match transport {
+            Transport::Nfc => {
+                // NFC: card is physically on reader; controller handles the
+                // full power cycle (unpower field + reset). No bus-level
+                // removal to detect.
+                ctrl.remove();
+                ctrl.insert();
+            }
+            Transport::Usb => {
+                let mut dev = DEVICE.get().unwrap().write().unwrap();
+                dev.reinsert(
+                    &|status| match status {
+                        ReinsertStatus::Remove => ctrl.remove(),
+                        ReinsertStatus::Reinsert => ctrl.insert(),
+                    },
+                    &|| false,
+                )
+                .expect("reinsert failed");
+            }
+        }
+    }
+
     /// Get the controller, skipping the test if unavailable.
     macro_rules! require_controller {
         () => {
@@ -2265,7 +2310,7 @@ mod fido {
     /// by physical touch via the controller's keepalive callback on HID.
     fn reset_up_budget() {
         if get_device().transport() == Transport::Nfc {
-            get_controller().unwrap().reinsert();
+            reinsert_device();
         }
     }
 
@@ -2325,8 +2370,7 @@ mod fido {
 
         eprintln!("FIDO setup: initializing PIN state...");
 
-        let dev = get_device();
-        let is_usb = dev.transport() == Transport::Usb;
+        let is_usb = get_device().transport() == Transport::Usb;
 
         // Helper closures for opening sessions on the appropriate transport.
         let open_hid = || -> Result<Ctap2Session<HidFidoConnection>, String> {
@@ -2370,7 +2414,7 @@ mod fido {
                 return false;
             };
             // Reinsert to satisfy the "recently powered up" window for FIDO reset.
-            ctrl.reinsert();
+            reinsert_device();
 
             if is_usb {
                 let mut session =
