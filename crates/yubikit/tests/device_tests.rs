@@ -1556,9 +1556,16 @@ mod piv {
         // Change management key
         let key_type = session.management_key_type();
         let new_key_bytes: Vec<u8> = match key_type {
-            yubikit::piv::ManagementKeyType::Tdes => vec![
+            yubikit::piv::ManagementKeyType::Tdes | yubikit::piv::ManagementKeyType::Aes192 => {
+                vec![
+                    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+                    0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+                ]
+            }
+            yubikit::piv::ManagementKeyType::Aes256 => vec![
                 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
-                0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+                0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
+                0x1d, 0x1e, 0x1f, 0x20,
             ],
             _ => vec![
                 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e,
@@ -2358,8 +2365,10 @@ mod fido {
 
         if needs_reset {
             eprintln!("FIDO setup: PIN mismatch or blocked, resetting applet...");
-            let ctrl = get_controller()
-                .expect("FIDO reset requires a controller (set CONTROLLER for USB)");
+            let Some(ctrl) = get_controller() else {
+                eprintln!("FIDO setup: no controller available, cannot reset");
+                return false;
+            };
             // Reinsert to satisfy the "recently powered up" window for FIDO reset.
             ctrl.reinsert();
 
@@ -2802,6 +2811,7 @@ mod fido {
             UserVerificationRequirement, WebAuthnClient,
         };
         require_fido_pin!();
+        require_controller!();
         with_fido_session!(tc, |open, _info| {
             reset_up_budget();
 
@@ -3039,6 +3049,7 @@ mod fido {
         };
 
         require_fido_pin!();
+        require_controller!();
         with_fido_session!(tc, |open, info| {
             if !info.extensions.iter().any(|e| e == "credProtect") {
                 skip!("credProtect extension not supported");
@@ -3126,6 +3137,7 @@ mod fido {
         };
 
         require_fido_pin!();
+        require_controller!();
         with_fido_session!(tc, |open, info| {
             if !info.extensions.iter().any(|e| e == "credBlob") {
                 skip!("credBlob extension not supported");
@@ -3243,6 +3255,7 @@ mod fido {
         };
 
         require_fido_pin!();
+        require_controller!();
         with_fido_session!(tc, |open, info| {
             if !info.extensions.iter().any(|e| e == "hmac-secret") {
                 skip!("hmac-secret (PRF) extension not supported");
@@ -3410,6 +3423,7 @@ mod fido {
         };
 
         require_fido_pin!();
+        require_controller!();
         with_fido_session!(tc, |open, info| {
             if info.options.get("largeBlobs") != Some(&true) {
                 skip!("largeBlobs not supported");
@@ -3567,6 +3581,7 @@ mod fido {
         };
 
         require_fido_pin!();
+        require_controller!();
         with_fido_session!(tc, |open, info| {
             let _ = &info; // available if needed for feature checks
 
@@ -3694,6 +3709,7 @@ mod fido {
         };
 
         require_fido_pin!();
+        require_controller!();
         with_fido_session!(tc, |open, info| {
             if !info.extensions.iter().any(|e| e == "previewSign") {
                 skip!("previewSign extension not supported");
