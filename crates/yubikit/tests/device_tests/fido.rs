@@ -702,6 +702,145 @@ fn test_ctap2_make_and_get_credential(#[case] tc: TestConnection) {
     });
 }
 
+/// Verify attestation: make a credential with direct attestation, parse the
+/// attestation object, extract the x5c certificate and signature, then verify
+/// the signature over `authData || SHA-256(clientDataJSON)`.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+#[case::usb_hid(TestConnection::UsbHid)]
+fn test_ctap2_attestation(#[case] tc: TestConnection) {
+    use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+    use sha2::{Digest, Sha256};
+    use yubikit::cbor;
+    use yubikit::webauthn::{
+        AttestationConveyancePreference, AuthenticatorSelectionCriteria,
+        DefaultClientDataCollector, PublicKeyCredentialCreationOptions,
+        PublicKeyCredentialRpEntity, PublicKeyCredentialType, ResidentKeyRequirement,
+        UserVerificationRequirement, WebAuthnClient,
+    };
+
+    require_fido_pin!();
+    require_controller!();
+    with_fido_session!(tc, |open, _info| {
+        reset_up_budget();
+
+        let session = open();
+        let collector = DefaultClientDataCollector::new(format!("https://{TEST_RP_ID}"));
+        let mut client = WebAuthnClient::new(session, TestInteraction::new(), collector);
+
+        let create_options = PublicKeyCredentialCreationOptions {
+            rp: PublicKeyCredentialRpEntity {
+                name: "Rust Attestation Test".to_string(),
+                id: Some(TEST_RP_ID.to_string()),
+            },
+            user: PublicKeyCredentialUserEntity {
+                id: b"attest-user-01".to_vec(),
+                name: Some("attest@rs.example".to_string()),
+                display_name: Some("Attestation User".to_string()),
+            },
+            challenge: vec![0xCA; 32],
+            pub_key_cred_params: vec![PublicKeyCredentialParameters {
+                type_: PublicKeyCredentialType::PublicKey,
+                alg: -7, // ES256
+            }],
+            timeout: None,
+            exclude_credentials: None,
+            authenticator_selection: Some(AuthenticatorSelectionCriteria {
+                resident_key: Some(ResidentKeyRequirement::Discouraged),
+                user_verification: Some(UserVerificationRequirement::Preferred),
+                ..Default::default()
+            }),
+            hints: None,
+            attestation: Some(AttestationConveyancePreference::Direct),
+            attestation_formats: None,
+            extensions: None,
+        };
+
+        let reg = client
+            .make_credential(&create_options, None)
+            .expect("make_credential");
+
+        // Parse the attestation object (CBOR map: "fmt", "authData", "attStmt")
+        let att_obj =
+            cbor::decode(&reg.response.attestation_object).expect("decode attestation_object");
+        let att_map = match &att_obj {
+            cbor::Value::Map(m) => m,
+            _ => panic!("attestation_object is not a CBOR map"),
+        };
+
+        let fmt = att_map
+            .iter()
+            .find_map(|(k, v)| match (k, v) {
+                (cbor::Value::Text(k), cbor::Value::Text(v)) if k == "fmt" => Some(v.as_str()),
+                _ => None,
+            })
+            .expect("missing 'fmt' in attestation object");
+        eprintln!("attestation format: {fmt}");
+        assert_eq!(fmt, "packed", "expected packed attestation from YubiKey");
+
+        let auth_data = att_map
+            .iter()
+            .find_map(|(k, v)| match (k, v) {
+                (cbor::Value::Text(k), cbor::Value::Bytes(b)) if k == "authData" => Some(b),
+                _ => None,
+            })
+            .expect("missing 'authData' in attestation object");
+
+        let att_stmt = att_map
+            .iter()
+            .find_map(|(k, v)| match (k, v) {
+                (cbor::Value::Text(k), cbor::Value::Map(m)) if k == "attStmt" => Some(m),
+                _ => None,
+            })
+            .expect("missing 'attStmt' in attestation object");
+
+        // Extract x5c (array of DER certificates) and sig from attStmt
+        let x5c = att_stmt
+            .iter()
+            .find_map(|(k, v)| match (k, v) {
+                (cbor::Value::Text(k), cbor::Value::Array(arr)) if k == "x5c" => Some(arr),
+                _ => None,
+            })
+            .expect("missing 'x5c' in attStmt");
+        assert!(!x5c.is_empty(), "x5c array should not be empty");
+
+        let cert_der = match &x5c[0] {
+            cbor::Value::Bytes(b) => b,
+            _ => panic!("x5c[0] is not bytes"),
+        };
+
+        let sig_bytes = att_stmt
+            .iter()
+            .find_map(|(k, v)| match (k, v) {
+                (cbor::Value::Text(k), cbor::Value::Bytes(b)) if k == "sig" => Some(b),
+                _ => None,
+            })
+            .expect("missing 'sig' in attStmt");
+
+        // Parse the attestation certificate and extract the public key
+        use x509_cert::der::Decode;
+        let cert = x509_cert::Certificate::from_der(cert_der).expect("parse x5c certificate");
+        let spki = cert.tbs_certificate.subject_public_key_info;
+        let pub_key_bytes = spki.subject_public_key.as_bytes().expect("public key bits");
+        let verifying_key =
+            VerifyingKey::from_sec1_bytes(pub_key_bytes).expect("parse P-256 public key");
+
+        // The signed message is: authData || SHA-256(clientDataJSON)
+        let client_data_hash = Sha256::digest(&reg.response.client_data_json);
+        let mut signed_data = auth_data.clone();
+        signed_data.extend_from_slice(&client_data_hash);
+
+        // Verify the signature
+        let signature = Signature::from_der(sig_bytes).expect("parse DER signature");
+        verifying_key
+            .verify(&signed_data, &signature)
+            .expect("attestation signature verification failed");
+
+        eprintln!("attestation signature verified successfully");
+    });
+}
+
 /// Read credential storage metadata via CredentialManagement.
 #[rstest]
 #[case::smart_card(TestConnection::SmartCard)]
