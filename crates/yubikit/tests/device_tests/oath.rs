@@ -297,3 +297,136 @@ fn test_oath_calculate_single(#[case] tc: TestConnection) {
         skip!("OATH blocked on FIPS+NFC");
     }
 }
+
+/// Test HOTP with RFC 4226 test vectors.
+/// Secret: "12345678901234567890" (ASCII), counter starts at 0.
+/// Expected codes for counters 0-4: 755224, 287082, 359152, 969429, 338314
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_oath_hotp_rfc4226_vectors(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OATH);
+    let mut session = open_oath_session(&tc);
+    if !reset_oath(&mut session) {
+        skip!("OATH blocked on FIPS+NFC");
+    }
+
+    let expected = ["755224", "287082", "359152", "969429", "338314"];
+
+    let cred_data = CredentialData {
+        name: "rfc4226@test".into(),
+        oath_type: OathType::Hotp,
+        hash_algorithm: HashAlgorithm::Sha1,
+        secret: b"12345678901234567890".to_vec(),
+        digits: 6,
+        period: 0,
+        counter: 0,
+        issuer: None,
+    };
+    let cred = session
+        .put_credential(&cred_data, false)
+        .expect("put_credential");
+
+    for (i, exp) in expected.iter().enumerate() {
+        let code = session.calculate_code(&cred, 0).expect("calculate_code");
+        assert_eq!(
+            &code.value, exp,
+            "HOTP counter {i}: expected {exp}, got {}",
+            code.value
+        );
+    }
+
+    if !reset_oath(&mut session) {
+        skip!("OATH cleanup blocked");
+    }
+}
+
+/// Test TOTP with SHA-256, verifying consistency: same timestamp → same code.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_oath_totp_sha256_consistency(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OATH);
+    let mut session = open_oath_session(&tc);
+    if !reset_oath(&mut session) {
+        skip!("OATH blocked on FIPS+NFC");
+    }
+
+    let cred_data = CredentialData {
+        name: "sha256-totp@test".into(),
+        oath_type: OathType::Totp,
+        hash_algorithm: HashAlgorithm::Sha256,
+        secret: b"12345678901234567890123456789012".to_vec(),
+        digits: 8,
+        period: 30,
+        counter: 0,
+        issuer: None,
+    };
+    let cred = session
+        .put_credential(&cred_data, false)
+        .expect("put_credential");
+
+    // Use a fixed timestamp for reproducibility
+    let timestamp = 59;
+    let code1 = session
+        .calculate_code(&cred, timestamp)
+        .expect("calculate 1");
+    let code2 = session
+        .calculate_code(&cred, timestamp)
+        .expect("calculate 2");
+
+    assert_eq!(code1.value.len(), 8, "Expected 8-digit code");
+    assert_eq!(
+        code1.value, code2.value,
+        "Same timestamp should give same code"
+    );
+
+    // Verify a different time step gives a different code
+    let code3 = session
+        .calculate_code(&cred, timestamp + 30)
+        .expect("calculate next step");
+    assert_ne!(
+        code1.value, code3.value,
+        "Different time step should give different code"
+    );
+
+    if !reset_oath(&mut session) {
+        skip!("OATH cleanup blocked");
+    }
+}
+
+/// Test OATH with SHA-512 algorithm (covers all hash algorithm variants).
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_oath_totp_sha512(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OATH);
+    let mut session = open_oath_session(&tc);
+    if !reset_oath(&mut session) {
+        skip!("OATH blocked on FIPS+NFC");
+    }
+
+    let cred_data = CredentialData {
+        name: "sha512@test".into(),
+        oath_type: OathType::Totp,
+        hash_algorithm: HashAlgorithm::Sha512,
+        secret: vec![0x31; 64], // 64-byte key for SHA-512
+        digits: 8,
+        period: 30,
+        counter: 0,
+        issuer: None,
+    };
+    let cred = session
+        .put_credential(&cred_data, false)
+        .expect("put_credential");
+
+    let code = session.calculate_code(&cred, 59).expect("calculate");
+    assert_eq!(code.value.len(), 8);
+
+    if !reset_oath(&mut session) {
+        skip!("OATH cleanup blocked");
+    }
+}

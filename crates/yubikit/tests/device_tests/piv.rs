@@ -944,3 +944,348 @@ fn test_piv_move_and_delete_key(#[case] tc: TestConnection) {
         "slot should be empty after delete"
     );
 }
+
+/// Test P-384 key generation and ECDSA signing.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_piv_generate_and_sign_ec_p384(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::PIV);
+    require_version!(Version(4, 0, 0));
+
+    let mut session = open_piv_session(&tc);
+    reset_piv(&mut session);
+
+    let mgmt_key = effective_management_key(&session);
+    session.authenticate(&mgmt_key).expect("authenticate");
+
+    let pub_key_der = session
+        .generate_key(
+            Slot::Retired1,
+            KeyType::EccP384,
+            PinPolicy::Default,
+            TouchPolicy::Never,
+        )
+        .expect("generate P-384 key");
+    assert!(!pub_key_der.is_empty(), "Expected public key data");
+
+    // Sign with P-384
+    session
+        .verify_pin(&effective_piv_pin())
+        .expect("verify_pin");
+    let message = b"P-384 test message";
+    let hash = {
+        use sha2::Digest;
+        sha2::Sha384::digest(message)
+    };
+    let signature = session
+        .sign(Slot::Retired1, KeyType::EccP384, &hash)
+        .expect("sign P-384");
+    assert!(!signature.is_empty(), "Expected signature data");
+
+    // Verify the signature
+    use p384::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+    let raw_key = x509_cert::spki::SubjectPublicKeyInfoOwned::from_der(&pub_key_der)
+        .unwrap()
+        .subject_public_key
+        .as_bytes()
+        .unwrap()
+        .to_vec();
+    let vk = VerifyingKey::from_sec1_bytes(&raw_key).expect("parse P-384 public key");
+    let sig = Signature::from_der(&signature).expect("parse P-384 signature");
+    vk.verify(message.as_slice(), &sig)
+        .expect("P-384 signature verification");
+}
+
+/// Test Ed25519 key generation and signing.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_piv_generate_and_sign_ed25519(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::PIV);
+    require_version!(Version(5, 7, 0));
+
+    let mut session = open_piv_session(&tc);
+    reset_piv(&mut session);
+
+    let mgmt_key = effective_management_key(&session);
+    session.authenticate(&mgmt_key).expect("authenticate");
+
+    let pub_key_der = session
+        .generate_key(
+            Slot::Retired2,
+            KeyType::Ed25519,
+            PinPolicy::Default,
+            TouchPolicy::Never,
+        )
+        .expect("generate Ed25519 key");
+    assert!(!pub_key_der.is_empty(), "Expected public key data");
+
+    // Sign with Ed25519
+    session
+        .verify_pin(&effective_piv_pin())
+        .expect("verify_pin");
+    let message = b"Ed25519 test message";
+    let signature = session
+        .sign(Slot::Retired2, KeyType::Ed25519, message)
+        .expect("sign Ed25519");
+    assert!(!signature.is_empty(), "Expected signature data");
+
+    // Verify the signature
+    use ed25519_dalek::Verifier as _;
+    use ed25519_dalek::{Signature as Ed25519Sig, VerifyingKey as Ed25519Vk};
+    let raw_key = x509_cert::spki::SubjectPublicKeyInfoOwned::from_der(&pub_key_der)
+        .unwrap()
+        .subject_public_key
+        .as_bytes()
+        .unwrap()
+        .to_vec();
+    let vk_bytes: [u8; 32] = raw_key
+        .try_into()
+        .expect("Ed25519 public key should be 32 bytes");
+    let vk = Ed25519Vk::from_bytes(&vk_bytes).expect("parse Ed25519 public key");
+    let sig = Ed25519Sig::from_slice(&signature).expect("parse Ed25519 signature");
+    vk.verify(message, &sig)
+        .expect("Ed25519 signature verification");
+}
+
+/// Test X25519 key generation and ECDH key agreement.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_piv_x25519_key_agreement(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::PIV);
+    require_version!(Version(5, 7, 0));
+
+    let mut session = open_piv_session(&tc);
+    reset_piv(&mut session);
+
+    let mgmt_key = effective_management_key(&session);
+    session.authenticate(&mgmt_key).expect("authenticate");
+
+    let spki_der = session
+        .generate_key(
+            Slot::Retired3,
+            KeyType::X25519,
+            PinPolicy::Default,
+            TouchPolicy::Never,
+        )
+        .expect("generate X25519 key");
+    let pub_key_bytes = x509_cert::spki::SubjectPublicKeyInfoOwned::from_der(&spki_der)
+        .unwrap()
+        .subject_public_key
+        .as_bytes()
+        .unwrap()
+        .to_vec();
+    assert_eq!(
+        pub_key_bytes.len(),
+        32,
+        "X25519 public key should be 32 bytes"
+    );
+
+    // Generate an ephemeral client key and perform key agreement
+    use x25519_dalek::{EphemeralSecret, PublicKey};
+    let client_secret = EphemeralSecret::random_from_rng(p256::elliptic_curve::rand_core::OsRng);
+    let client_public = PublicKey::from(&client_secret);
+
+    session
+        .verify_pin(&effective_piv_pin())
+        .expect("verify_pin");
+    let shared_from_device = session
+        .calculate_secret(Slot::Retired3, KeyType::X25519, client_public.as_bytes())
+        .expect("X25519 key agreement");
+    assert_eq!(
+        shared_from_device.len(),
+        32,
+        "X25519 shared secret should be 32 bytes"
+    );
+
+    // Compute expected shared secret from the other side
+    let device_pub: [u8; 32] = pub_key_bytes.try_into().unwrap();
+    let device_public = PublicKey::from(device_pub);
+    let shared_from_client = client_secret.diffie_hellman(&device_public);
+    assert_eq!(
+        shared_from_device,
+        shared_from_client.as_bytes(),
+        "X25519 shared secret mismatch"
+    );
+}
+
+/// Test PIV PIN policy enforcement: PinPolicy::Always requires PIN for every operation.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_piv_pin_policy_always(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::PIV);
+    require_version!(Version(4, 0, 0));
+
+    let mut session = open_piv_session(&tc);
+    reset_piv(&mut session);
+
+    let mgmt_key = effective_management_key(&session);
+    session.authenticate(&mgmt_key).expect("authenticate");
+
+    // Generate key with PinPolicy::Always
+    match session.generate_key(
+        Slot::Retired1,
+        KeyType::EccP256,
+        PinPolicy::Always,
+        TouchPolicy::Never,
+    ) {
+        Ok(_) => {}
+        Err(e) if is_conditions_not_satisfied(&e) => {
+            skip!("PinPolicy::Always not supported: {e}");
+        }
+        Err(e) => panic!("generate_key: {e}"),
+    }
+
+    // Attempt signing without PIN — should fail
+    let hash = <sha2::Sha256 as sha2::Digest>::digest(b"test");
+    let result = session.sign(Slot::Retired1, KeyType::EccP256, &hash);
+    assert!(
+        result.is_err(),
+        "Sign without PIN should fail with Always policy"
+    );
+
+    // Verify PIN and sign — should succeed
+    session
+        .verify_pin(&effective_piv_pin())
+        .expect("verify_pin");
+    session
+        .sign(Slot::Retired1, KeyType::EccP256, &hash)
+        .expect("sign after PIN");
+}
+
+/// Test PIV PIN policy: PinPolicy::Never allows signing without PIN.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_piv_pin_policy_never(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::PIV);
+    require_version!(Version(4, 0, 0));
+
+    let mut session = open_piv_session(&tc);
+    reset_piv(&mut session);
+
+    let mgmt_key = effective_management_key(&session);
+    session.authenticate(&mgmt_key).expect("authenticate");
+
+    // Generate key with PinPolicy::Never
+    match session.generate_key(
+        Slot::Retired1,
+        KeyType::EccP256,
+        PinPolicy::Never,
+        TouchPolicy::Never,
+    ) {
+        Ok(_) => {}
+        Err(e) if is_conditions_not_satisfied(&e) => {
+            skip!("PinPolicy::Never not supported on this key: {e}");
+        }
+        Err(e) => panic!("generate_key: {e}"),
+    }
+
+    // Sign without verifying PIN — should succeed with Never policy
+    let hash = <sha2::Sha256 as sha2::Digest>::digest(b"test no pin");
+    session
+        .sign(Slot::Retired1, KeyType::EccP256, &hash)
+        .expect("sign without PIN (Never policy)");
+}
+
+/// Test that PIV operations requiring authentication fail without it.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_piv_auth_required(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::PIV);
+
+    let mut session = open_piv_session(&tc);
+    // Don't authenticate — operations should fail
+
+    // generate_key requires management authentication
+    let result = session.generate_key(
+        Slot::Retired1,
+        KeyType::EccP256,
+        PinPolicy::Default,
+        TouchPolicy::Never,
+    );
+    assert!(result.is_err(), "generate_key without auth should fail");
+    assert!(
+        has_sw(&result.unwrap_err(), 0x6982),
+        "Expected security status not satisfied (0x6982)"
+    );
+}
+
+/// Test PIV certificate compression (storing a cert with compression flag).
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_piv_compressed_cert(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::PIV);
+    require_version!(Version(5, 3, 0));
+
+    let mut session = open_piv_session(&tc);
+    reset_piv(&mut session);
+
+    let mgmt_key = effective_management_key(&session);
+    session.authenticate(&mgmt_key).expect("authenticate");
+
+    // Generate a key and create a self-signed cert
+    let pub_key = session
+        .generate_key(
+            Slot::Retired1,
+            KeyType::EccP256,
+            PinPolicy::Default,
+            TouchPolicy::Never,
+        )
+        .expect("generate_key");
+
+    session
+        .verify_pin(&effective_piv_pin())
+        .expect("verify_pin");
+
+    // Create a minimal self-signed cert
+    let spki_der = pub_key;
+    let spki = x509_cert::spki::SubjectPublicKeyInfoOwned::from_der(&spki_der).expect("parse SPKI");
+    let signer = PivSigner::new(
+        &mut session,
+        Slot::Retired1,
+        KeyType::EccP256,
+        HashAlgorithm::Sha256,
+        &spki_der,
+    );
+    use x509_cert::builder::{Builder, CertificateBuilder, Profile};
+    use x509_cert::name::Name;
+    use x509_cert::serial_number::SerialNumber;
+    use x509_cert::time::Validity;
+
+    let subject: Name = "CN=Compress Test".parse().unwrap();
+    let serial = SerialNumber::new(&[0x01]).unwrap();
+    let validity = Validity::from_now(core::time::Duration::new(365 * 86400, 0)).unwrap();
+
+    let cert = CertificateBuilder::new(Profile::Root, serial, validity, subject, spki, &signer)
+        .expect("CertificateBuilder")
+        .build::<PivSignature>()
+        .expect("build cert");
+    let cert_der = cert.to_der().expect("cert to DER");
+
+    // Store with compression enabled
+    session
+        .put_certificate(Slot::Retired1, &cert_der, true)
+        .expect("put_certificate compressed");
+
+    // Retrieve and verify it decompresses correctly
+    let retrieved = session
+        .get_certificate(Slot::Retired1)
+        .expect("get_certificate");
+    assert_eq!(
+        retrieved, cert_der,
+        "Retrieved cert should match original after decompression"
+    );
+}

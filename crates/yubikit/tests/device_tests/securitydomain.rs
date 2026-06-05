@@ -683,3 +683,48 @@ fn test_scp11c_ok(#[case] tc: TestConnection) {
     session.reset().expect("reset");
     invalidate_scp11b_params();
 }
+
+/// Test SCP03 session with store/retrieve data to verify APDU encryption.
+/// This exercises the full encrypt→transmit→decrypt pipeline with real data.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+fn test_scp03_apdu_echo(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_version!(Version(5, 7, 2));
+    let conn = open_smartcard_connection(&tc);
+    let mut session = match SecurityDomainSession::new(conn) {
+        Ok(s) => s,
+        Err(_) => {
+            skip!("{tc:?}: SecurityDomain not available");
+        }
+    };
+    ensure_default_keys(&mut session);
+    let conn = session.into_connection();
+
+    let params = default_scp03_params();
+    let mut session = SecurityDomainSession::new_with_scp(conn, &params)
+        .map_err(|(e, _)| e)
+        .expect("SCP03 auth");
+
+    // After SCP03 authentication, all APDUs are encrypted.
+    // Verify by performing operations that require correct encrypt/decrypt:
+
+    // 1. Get key information (response must be decrypted correctly)
+    let key_info = session.get_key_information().expect("get_key_information");
+    assert!(!key_info.is_empty(), "Should have at least one key");
+
+    // 2. Get card recognition data (tests larger response decryption)
+    let crd = session
+        .get_card_recognition_data()
+        .expect("get_card_recognition_data");
+    assert!(!crd.is_empty(), "Card recognition data should not be empty");
+
+    // 3. Generate and delete a key (tests command encryption with varying sizes)
+    let temp_ref = KeyRef::new(0x13, 0x7E);
+    session
+        .generate_ec_key(temp_ref, Curve::Secp256r1, 0)
+        .expect("generate key through SCP03");
+    session
+        .delete_key(temp_ref.kid, temp_ref.kvn, false)
+        .expect("delete key through SCP03");
+}

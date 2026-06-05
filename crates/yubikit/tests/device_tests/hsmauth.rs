@@ -159,3 +159,97 @@ fn test_hsmauth_management_key(#[case] tc: TestConnection) {
     // Clean up
     session.reset().expect("reset");
 }
+
+/// Test HSMAuth error handling: wrong credential password.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_hsmauth_wrong_credential_password(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::HSMAUTH);
+    let mut session = open_hsmauth_session(&tc);
+    reset_hsmauth(&mut session);
+
+    let mgmt_key = effective_hsmauth_mgmt_key();
+    let cred_pw = CredentialPassword::from_password("correct-password");
+
+    match session.put_credential_derived(&mgmt_key, "pw-test", "derivation-secret", &cred_pw, false)
+    {
+        Ok(_) => {}
+        Err(e) if is_conditions_not_satisfied(&e) => {
+            skip!("HSMAuth credential operations not available");
+        }
+        Err(e) => panic!("put_credential_derived: {e}"),
+    }
+
+    // Try calculating session keys with wrong password
+    let wrong_pw = CredentialPassword::from_password("wrong-password");
+    let context = [0u8; 16];
+    let result = session.calculate_session_keys_symmetric("pw-test", &context, &wrong_pw, None);
+    assert!(result.is_err(), "Wrong password should fail");
+
+    session.reset().expect("reset");
+}
+
+/// Test HSMAuth error handling: wrong management key.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_hsmauth_wrong_management_key(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::HSMAUTH);
+    let mut session = open_hsmauth_session(&tc);
+    session.reset().expect("reset");
+
+    // Try using wrong management key to store a credential
+    let wrong_key = HsmAuthManagementKey::new(&[0xFFu8; 16]).expect("wrong key");
+    let cred_pw = CredentialPassword::from_password("test");
+    let result = session.put_credential_derived(&wrong_key, "fail-test", "pw", &cred_pw, false);
+    assert!(result.is_err(), "Wrong management key should fail");
+
+    session.reset().expect("reset");
+}
+
+/// Test HSMAuth asymmetric credential: generate, get public key, calculate session keys.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_hsmauth_asymmetric_credential(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::HSMAUTH);
+    require_version!(Version(5, 6, 0));
+
+    let mut session = open_hsmauth_session(&tc);
+    reset_hsmauth(&mut session);
+
+    let mgmt_key = effective_hsmauth_mgmt_key();
+    let cred_pw = CredentialPassword::from_password("asym-password");
+
+    // Generate an asymmetric credential on-device
+    match session.generate_credential_asymmetric(&mgmt_key, "asym-test", &cred_pw, false) {
+        Ok(cred) => {
+            assert_eq!(cred.label, "asym-test");
+        }
+        Err(e) if is_conditions_not_satisfied(&e) => {
+            skip!("HSMAuth asymmetric not available: {e}");
+        }
+        Err(e) => panic!("generate_credential_asymmetric: {e}"),
+    }
+
+    // Get the public key
+    let public_key = session.get_public_key("asym-test").expect("get_public_key");
+
+    // Verify it's a valid P-256 point (uncompressed, 65 bytes encoded)
+    let encoded = p256::EncodedPoint::from(&public_key);
+    assert!(
+        !encoded.is_identity(),
+        "Public key should not be identity point"
+    );
+
+    // List credentials — should include the asymmetric one
+    let creds = session.list_credentials().expect("list");
+    assert_eq!(creds.len(), 1);
+    assert_eq!(creds[0].label, "asym-test");
+
+    session.reset().expect("reset");
+}
