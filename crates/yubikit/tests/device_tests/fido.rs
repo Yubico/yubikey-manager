@@ -889,13 +889,29 @@ fn test_ctap2_attestation(#[case] tc: TestConnection) {
     });
 }
 
-/// Read credential storage metadata via CredentialManagement.
+/// Full credential management lifecycle: create, enumerate, update, delete.
+///
+/// Mirrors python-fido2's `test_list_and_delete` + `test_update`:
+/// 1. Record initial metadata (cred count, remaining)
+/// 2. Create a discoverable credential (resident key)
+/// 3. Verify metadata count increased
+/// 4. Enumerate RPs and credentials, validate returned data
+/// 5. Update user info and verify the change
+/// 6. Delete the credential
+/// 7. Verify metadata count back to original
 #[rstest]
 #[case::smart_card(TestConnection::SmartCard)]
 #[case::scp11b(TestConnection::SmartCardScp11b)]
 #[case::usb_hid(TestConnection::UsbHid)]
 fn test_ctap2_credential_management(#[case] tc: TestConnection) {
+    use yubikit::webauthn::{
+        AuthenticatorSelectionCriteria, DefaultClientDataCollector,
+        PublicKeyCredentialCreationOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialType,
+        ResidentKeyRequirement, UserVerificationRequirement, WebAuthnClient,
+    };
+
     require_fido_pin!();
+    require_controller!();
     with_fido_session!(tc, |open, info| {
         if info.options.get("credMgmt") != Some(&true)
             && !(info.versions.contains(&"FIDO_2_1_PRE".to_string())
@@ -904,13 +920,12 @@ fn test_ctap2_credential_management(#[case] tc: TestConnection) {
             skip!("CredentialManagement not supported");
         }
 
-        // Credential management operations require UP on NFC; ensure
-        // the budget is fresh after any preceding test that consumed it.
+        // ── Step 1: Get initial metadata ─────────────────────────────────
         reset_up_budget();
         let session = open();
         let mut cp = ClientPin::new(session)
             .map_err(|(e, _)| e)
-            .expect("ClientPin for credmgmt");
+            .expect("ClientPin");
         let token = get_pin_token_or_skip!(
             cp,
             &ctap2_pin(TEST_PIN),
@@ -923,37 +938,217 @@ fn test_ctap2_credential_management(#[case] tc: TestConnection) {
             .map_err(|(e, _)| e)
             .expect("CredentialManagement::new");
 
-        let (existing, max_remaining) = match credmgmt.get_metadata() {
+        let (initial_existing, initial_remaining) = match credmgmt.get_metadata() {
             Ok(v) => v,
             Err(e) => {
-                // FIPS+NFC+SCP: PIN auth tokens may not work for credential mgmt
                 if device_is_fips() && get_device().transport() == Transport::Nfc {
                     skip!("CredentialManagement blocked on FIPS+NFC: {e:?}");
                 }
                 panic!("get_metadata: {e:?}");
             }
         };
-        eprintln!("credentials: existing={existing}, max_remaining={max_remaining}");
+        eprintln!("initial: existing={initial_existing}, remaining={initial_remaining}");
+        assert!(initial_remaining > 0, "no remaining credential slots");
+        drop(credmgmt);
+
+        // ── Step 2: Create a discoverable credential ─────────────────────
+        reset_up_budget();
+        let session = open();
+        let rp_id = "credmgmt-test.rs.example";
+        let collector = DefaultClientDataCollector::new(format!("https://{rp_id}"));
+        let mut client = WebAuthnClient::new(session, TestInteraction::new(), collector);
+
+        let user_id = b"credmgmt-user-01".to_vec();
+        let create_options = PublicKeyCredentialCreationOptions {
+            rp: PublicKeyCredentialRpEntity {
+                name: "CredMgmt Test RP".to_string(),
+                id: Some(rp_id.to_string()),
+            },
+            user: PublicKeyCredentialUserEntity {
+                id: user_id.clone(),
+                name: Some("testuser@example.com".to_string()),
+                display_name: Some("Test User".to_string()),
+            },
+            challenge: vec![0xDD; 32],
+            pub_key_cred_params: vec![PublicKeyCredentialParameters {
+                type_: PublicKeyCredentialType::PublicKey,
+                alg: -7, // ES256
+            }],
+            timeout: None,
+            exclude_credentials: None,
+            authenticator_selection: Some(AuthenticatorSelectionCriteria {
+                resident_key: Some(ResidentKeyRequirement::Required),
+                user_verification: Some(UserVerificationRequirement::Preferred),
+                ..Default::default()
+            }),
+            hints: None,
+            attestation: None,
+            attestation_formats: None,
+            extensions: None,
+        };
+
+        let reg = client
+            .make_credential(&create_options, None)
+            .expect("make_credential (discoverable)");
+        let cred_id = reg.id.clone();
+        assert!(!cred_id.is_empty());
+        drop(client);
+
+        // ── Step 3: Verify metadata count increased ──────────────────────
+        reset_up_budget();
+        let session = open();
+        let mut cp = ClientPin::new(session)
+            .map_err(|(e, _)| e)
+            .expect("ClientPin");
+        let token = get_pin_token_or_skip!(
+            cp,
+            &ctap2_pin(TEST_PIN),
+            Some(Permissions::CREDENTIAL_MGMT),
+            None
+        );
+        let protocol = cp.protocol();
+        let session = cp.into_session();
+        let mut credmgmt = CredentialManagement::new(session, protocol, token)
+            .map_err(|(e, _)| e)
+            .expect("CredentialManagement::new");
+
+        let (existing_after_create, remaining_after_create) =
+            credmgmt.get_metadata().expect("get_metadata after create");
+        eprintln!(
+            "after create: existing={existing_after_create}, remaining={remaining_after_create}"
+        );
+        assert_eq!(
+            existing_after_create,
+            initial_existing + 1,
+            "existing count should increase by 1"
+        );
         assert!(
-            existing + max_remaining > 0,
-            "total credential capacity should be > 0"
+            remaining_after_create < initial_remaining,
+            "remaining should decrease"
         );
 
-        if existing > 0 {
-            let rps = credmgmt.enumerate_rps().expect("enumerate_rps");
-            eprintln!("RPs: {}", rps.len());
-            assert!(
-                !rps.is_empty(),
-                "enumerate_rps returned empty for existing credentials"
-            );
-            for rp in &rps {
-                eprintln!("  rp_id={}", rp.rp.id);
-                let creds = credmgmt
-                    .enumerate_creds(&rp.rp_id_hash)
-                    .expect("enumerate_creds");
-                eprintln!("  creds: {}", creds.len());
+        // ── Step 4: Enumerate RPs and credentials ────────────────────────
+        let rps = credmgmt.enumerate_rps().expect("enumerate_rps");
+        let our_rp = rps
+            .iter()
+            .find(|r| r.rp.id == rp_id)
+            .expect("our RP should be in the list");
+        eprintln!("found RP: {}", our_rp.rp.id);
+
+        let creds = credmgmt
+            .enumerate_creds(&our_rp.rp_id_hash)
+            .expect("enumerate_creds");
+        let our_cred = creds
+            .iter()
+            .find(|c| c.credential_id.id == cred_id)
+            .expect("our credential should be listed");
+        assert_eq!(our_cred.user.id, user_id);
+        eprintln!("credential user.id matches");
+        // third_party_payment should not be set
+        assert_ne!(our_cred.third_party_payment, Some(true));
+
+        // ── Step 5: Update user info (if supported) ──────────────────────
+        if credmgmt.is_update_supported() {
+            let updated_user = PublicKeyCredentialUserEntity {
+                id: user_id.clone(),
+                name: Some("updated@example.com".to_string()),
+                display_name: Some("Updated User".to_string()),
+            };
+            credmgmt
+                .update_user_info(&our_cred.credential_id, &updated_user)
+                .expect("update_user_info");
+
+            // Re-enumerate to verify
+            let creds = credmgmt
+                .enumerate_creds(&our_rp.rp_id_hash)
+                .expect("enumerate_creds after update");
+            let updated_cred = creds
+                .iter()
+                .find(|c| c.credential_id.id == cred_id)
+                .expect("credential after update");
+            if updated_cred.user.name.is_some() {
+                assert_eq!(
+                    updated_cred.user.name.as_deref(),
+                    Some("updated@example.com")
+                );
             }
+            if updated_cred.user.display_name.is_some() {
+                assert_eq!(
+                    updated_cred.user.display_name.as_deref(),
+                    Some("Updated User")
+                );
+            }
+            eprintln!("user info updated successfully");
+        } else {
+            eprintln!("update_user_info not supported, skipping");
         }
+
+        // ── Step 6: Delete the credential ────────────────────────────────
+        credmgmt
+            .delete_cred(&our_cred.credential_id)
+            .expect("delete_cred");
+        eprintln!("credential deleted");
+
+        // ── Step 7: Verify metadata count back to original ───────────────
+        let (final_existing, final_remaining) =
+            credmgmt.get_metadata().expect("get_metadata after delete");
+        eprintln!("after delete: existing={final_existing}, remaining={final_remaining}");
+        assert_eq!(
+            final_existing, initial_existing,
+            "existing count should return to initial"
+        );
+        assert_eq!(
+            final_remaining, initial_remaining,
+            "remaining count should return to initial"
+        );
+    });
+}
+
+/// Verify that wrong permissions cause PIN_AUTH_INVALID error.
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+#[case::usb_hid(TestConnection::UsbHid)]
+fn test_ctap2_credential_management_wrong_permissions(#[case] tc: TestConnection) {
+    require_fido_pin!();
+    with_fido_session!(tc, |open, info| {
+        if info.options.get("credMgmt") != Some(&true)
+            && !(info.versions.contains(&"FIDO_2_1_PRE".to_string())
+                && info.options.get("credentialMgmtPreview") == Some(&true))
+        {
+            skip!("CredentialManagement not supported");
+        }
+
+        // Get a token with LARGE_BLOB_WRITE permission (wrong for credmgmt)
+        reset_up_budget();
+        let session = open();
+        let mut cp = ClientPin::new(session)
+            .map_err(|(e, _)| e)
+            .expect("ClientPin");
+        let token = get_pin_token_or_skip!(
+            cp,
+            &ctap2_pin(TEST_PIN),
+            Some(Permissions::LARGE_BLOB_WRITE),
+            None
+        );
+        let protocol = cp.protocol();
+        let session = cp.into_session();
+        let mut credmgmt = CredentialManagement::new(session, protocol, token)
+            .map_err(|(e, _)| e)
+            .expect("CredentialManagement::new");
+
+        let result = credmgmt.get_metadata();
+        assert!(
+            result.is_err(),
+            "get_metadata should fail with wrong permissions"
+        );
+        let err = result.unwrap_err();
+        let err_str = err.to_string();
+        assert!(
+            err_str.contains("PinAuthInvalid") || err_str.contains("0x33"),
+            "expected PIN_AUTH_INVALID, got: {err}"
+        );
+        eprintln!("correctly rejected with wrong permissions");
     });
 }
 
