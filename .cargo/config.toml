@@ -1,0 +1,7 @@
+[env]
+# Force tests to run one at a time (needed for device tests)
+RUST_TEST_THREADS = "1"
+
+# Force tests to stream println! and logs immediately to the terminal
+# This shows which tests are skipped
+RUST_TEST_NOCAPTURE = "1"
