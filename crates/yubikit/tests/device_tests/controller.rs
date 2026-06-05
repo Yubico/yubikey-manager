@@ -140,8 +140,12 @@ impl PicoController {
         }
     }
 
+    fn format_url(&self, action: &str) -> String {
+        format!("{}/usb{}/{}", self.base_url, self.port, action)
+    }
+
     fn get(&self, path: &str) {
-        let url = format!("{}{}", self.base_url, path);
+        let url = self.format_url(path);
         eprintln!("PicoController: GET {url}");
         ureq::get(&url)
             .call()
@@ -154,8 +158,8 @@ impl Controller for PicoController {
         // Turn touch off first then back on in a background thread so that
         // the NFCCTAP keepalive polling loop isn't starved. The authenticator
         // needs to see a fresh off→on transition to register user presence.
-        let url_off = format!("{}/usb{}/touch/off", self.base_url, self.port);
-        let url_on = format!("{}/usb{}/touch/on", self.base_url, self.port);
+        let url_off = self.format_url("touch/off");
+        let url_on = self.format_url("touch/on");
         std::thread::spawn(move || {
             eprintln!("PicoController: GET {url_off}");
             let _ = ureq::get(&url_off).call();
@@ -166,16 +170,16 @@ impl Controller for PicoController {
     }
 
     fn release(&self) {
-        self.get(&format!("/usb{}/touch/off", self.port));
+        self.get("touch/off");
     }
 
     fn remove(&self) {
-        self.get(&format!("/usb{}/touch/off", self.port));
-        self.get(&format!("/usb{}/power/off", self.port));
+        self.get("touch/off");
+        self.get("power/off");
     }
 
     fn insert(&self) {
-        self.get(&format!("/usb{}/power/on", self.port));
+        self.get("power/on");
         // Wait for the YubiKey to enumerate on the USB bus
         std::thread::sleep(Duration::from_millis(2000));
     }
