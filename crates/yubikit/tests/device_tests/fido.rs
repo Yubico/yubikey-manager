@@ -1152,6 +1152,204 @@ fn test_ctap2_credential_management_wrong_permissions(#[case] tc: TestConnection
     });
 }
 
+/// Verify read-only credential management with persistent PIN token.
+///
+/// Mirrors python-fido2's `test_read_only_management`:
+/// 1. Get persistent CREDENTIAL_MGMT token
+/// 2. Record cred_store_state
+/// 3. Create a credential (consumes UP)
+/// 4. Verify cred_store_state changed
+/// 5. Use persistent token to enumerate (works)
+/// 6. Verify update/delete fail with persistent token
+/// 7. Clean up with normal token
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
+#[case::usb_hid(TestConnection::UsbHid)]
+fn test_ctap2_credential_management_readonly(#[case] tc: TestConnection) {
+    use yubikit::webauthn::{
+        AuthenticatorSelectionCriteria, DefaultClientDataCollector,
+        PublicKeyCredentialCreationOptions, PublicKeyCredentialRpEntity, PublicKeyCredentialType,
+        ResidentKeyRequirement, UserVerificationRequirement, WebAuthnClient,
+    };
+
+    require_fido_pin!();
+    require_controller!();
+    with_fido_session!(tc, |open, info| {
+        if info.options.get("perCredMgmtRO") != Some(&true) {
+            skip!("persistent credential management (perCredMgmtRO) not supported");
+        }
+        if info.options.get("credMgmt") != Some(&true) {
+            skip!("CredentialManagement not supported");
+        }
+
+        // ── Get persistent token ─────────────────────────────────────────
+        reset_up_budget();
+        let session = open();
+        let mut cp = ClientPin::new(session)
+            .map_err(|(e, _)| e)
+            .expect("ClientPin");
+        let persistent_token = get_pin_token_or_skip!(
+            cp,
+            &ctap2_pin(TEST_PIN),
+            Some(Permissions::PERSISTENT_CREDENTIAL_MGMT),
+            None
+        );
+        let protocol = cp.protocol();
+        drop(cp);
+
+        // ── Record initial cred_store_state ──────────────────────────────
+        let mut session = open();
+        let info_before = session.get_info().expect("get_info");
+        let state_before = info_before.get_cred_store_state(&persistent_token);
+        let ident_before = info_before.get_identifier(&persistent_token);
+        eprintln!(
+            "cred_store_state before: {:?}",
+            state_before.as_ref().map(|s| s.len())
+        );
+        eprintln!(
+            "identifier before: {:?}",
+            ident_before.as_ref().map(|s| s.len())
+        );
+        drop(session);
+
+        // ── Create a discoverable credential ─────────────────────────────
+        reset_up_budget();
+        let session = open();
+        let rp_id = "readonly-test.rs.example";
+        let collector = DefaultClientDataCollector::new(format!("https://{rp_id}"));
+        let mut client = WebAuthnClient::new(session, TestInteraction::new(), collector);
+
+        let create_options = PublicKeyCredentialCreationOptions {
+            rp: PublicKeyCredentialRpEntity {
+                name: "ReadOnly Test RP".to_string(),
+                id: Some(rp_id.to_string()),
+            },
+            user: PublicKeyCredentialUserEntity {
+                id: b"readonly-user-01".to_vec(),
+                name: Some("readonly@example.com".to_string()),
+                display_name: Some("ReadOnly User".to_string()),
+            },
+            challenge: vec![0xEE; 32],
+            pub_key_cred_params: vec![PublicKeyCredentialParameters {
+                type_: PublicKeyCredentialType::PublicKey,
+                alg: -7,
+            }],
+            timeout: None,
+            exclude_credentials: None,
+            authenticator_selection: Some(AuthenticatorSelectionCriteria {
+                resident_key: Some(ResidentKeyRequirement::Required),
+                user_verification: Some(UserVerificationRequirement::Preferred),
+                ..Default::default()
+            }),
+            hints: None,
+            attestation: None,
+            attestation_formats: None,
+            extensions: None,
+        };
+
+        let reg = client
+            .make_credential(&create_options, None)
+            .expect("make_credential (discoverable)");
+        let cred_id = reg.id.clone();
+        drop(client);
+
+        // ── Power-cycle to prove persistent token survives reconnect ─────
+        reinsert_device();
+
+        // ── Verify cred_store_state changed ──────────────────────────────
+        let mut session = open();
+        let info_after = session.get_info().expect("get_info after create");
+        let state_after = info_after.get_cred_store_state(&persistent_token);
+        if state_before.is_some() {
+            assert_ne!(
+                state_before, state_after,
+                "cred_store_state should change after credential creation"
+            );
+            eprintln!("cred_store_state changed after create");
+        }
+        // Identifier should remain stable
+        let ident_after = info_after.get_identifier(&persistent_token);
+        if ident_before.is_some() {
+            assert_eq!(ident_before, ident_after, "identifier should remain stable");
+            eprintln!("identifier stable across reconnect");
+        }
+        drop(session);
+
+        // ── Use persistent token to enumerate (read-only) ────────────────
+        reset_up_budget();
+        let session = open();
+        let mut credmgmt = CredentialManagement::new(session, protocol, persistent_token.clone())
+            .map_err(|(e, _)| e)
+            .expect("CredentialManagement with persistent token");
+
+        let (existing, _) = credmgmt
+            .get_metadata()
+            .expect("get_metadata with persistent token");
+        assert!(existing > 0, "should have at least 1 credential");
+
+        let rps = credmgmt.enumerate_rps().expect("enumerate_rps (read-only)");
+        let our_rp = rps
+            .iter()
+            .find(|r| r.rp.id == rp_id)
+            .expect("our RP in enumeration");
+        let creds = credmgmt
+            .enumerate_creds(&our_rp.rp_id_hash)
+            .expect("enumerate_creds (read-only)");
+        assert!(!creds.is_empty());
+        let our_cred = creds
+            .iter()
+            .find(|c| c.credential_id.id == cred_id)
+            .expect("our credential");
+        eprintln!("persistent token: enumeration works");
+
+        // ── Verify update/delete fail with persistent token ──────────────
+        let updated_user = PublicKeyCredentialUserEntity {
+            id: b"readonly-user-01".to_vec(),
+            name: Some("hacked@example.com".to_string()),
+            display_name: None,
+        };
+        if credmgmt.is_update_supported() {
+            let update_result = credmgmt.update_user_info(&our_cred.credential_id, &updated_user);
+            assert!(
+                update_result.is_err(),
+                "update should fail with persistent token"
+            );
+            eprintln!("persistent token: update correctly rejected");
+        }
+
+        let delete_result = credmgmt.delete_cred(&our_cred.credential_id);
+        assert!(
+            delete_result.is_err(),
+            "delete should fail with persistent token"
+        );
+        eprintln!("persistent token: delete correctly rejected");
+
+        // ── Clean up with normal token ───────────────────────────────────
+        drop(credmgmt);
+        reset_up_budget();
+        let session = open();
+        let mut cp = ClientPin::new(session)
+            .map_err(|(e, _)| e)
+            .expect("ClientPin");
+        let normal_token = get_pin_token_or_skip!(
+            cp,
+            &ctap2_pin(TEST_PIN),
+            Some(Permissions::CREDENTIAL_MGMT),
+            None
+        );
+        let protocol = cp.protocol();
+        let session = cp.into_session();
+        let mut credmgmt = CredentialManagement::new(session, protocol, normal_token)
+            .map_err(|(e, _)| e)
+            .expect("CredentialManagement (cleanup)");
+        credmgmt
+            .delete_cred(&our_cred.credential_id)
+            .expect("delete_cred (cleanup)");
+        eprintln!("cleanup: credential deleted with normal token");
+    });
+}
+
 /// Verify that the large-blob array can be read (no UP required).
 #[rstest]
 #[case::smart_card(TestConnection::SmartCard)]
