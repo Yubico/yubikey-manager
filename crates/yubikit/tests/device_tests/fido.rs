@@ -710,8 +710,8 @@ fn test_ctap2_make_and_get_credential(#[case] tc: TestConnection) {
 #[case::scp11b(TestConnection::SmartCardScp11b)]
 #[case::usb_hid(TestConnection::UsbHid)]
 fn test_ctap2_attestation(#[case] tc: TestConnection) {
-    use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
     use sha2::{Digest, Sha256};
+    use x509_cert::der::Decode;
     use yubikit::cbor;
     use yubikit::webauthn::{
         AttestationConveyancePreference, AuthenticatorSelectionCriteria,
@@ -819,23 +819,69 @@ fn test_ctap2_attestation(#[case] tc: TestConnection) {
             .expect("missing 'sig' in attStmt");
 
         // Parse the attestation certificate and extract the public key
-        use x509_cert::der::Decode;
         let cert = x509_cert::Certificate::from_der(cert_der).expect("parse x5c certificate");
-        let spki = cert.tbs_certificate.subject_public_key_info;
+        let spki = &cert.tbs_certificate.subject_public_key_info;
         let pub_key_bytes = spki.subject_public_key.as_bytes().expect("public key bits");
-        let verifying_key =
-            VerifyingKey::from_sec1_bytes(pub_key_bytes).expect("parse P-256 public key");
+        let alg_oid = spki.algorithm.oid;
+        eprintln!("attestation cert algorithm OID: {alg_oid}");
 
         // The signed message is: authData || SHA-256(clientDataJSON)
         let client_data_hash = Sha256::digest(&reg.response.client_data_json);
         let mut signed_data = auth_data.clone();
         signed_data.extend_from_slice(&client_data_hash);
 
-        // Verify the signature
-        let signature = Signature::from_der(sig_bytes).expect("parse DER signature");
-        verifying_key
-            .verify(&signed_data, &signature)
-            .expect("attestation signature verification failed");
+        // Verify the signature based on the certificate's key algorithm
+        use x509_cert::der::oid::ObjectIdentifier;
+        const OID_EC_PUBLIC_KEY: ObjectIdentifier =
+            ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
+        const OID_ML_DSA_44: ObjectIdentifier =
+            ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.17");
+        const OID_ML_DSA_65: ObjectIdentifier =
+            ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.18");
+        const OID_ML_DSA_87: ObjectIdentifier =
+            ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.19");
+
+        if alg_oid == OID_EC_PUBLIC_KEY {
+            use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+            let verifying_key =
+                VerifyingKey::from_sec1_bytes(pub_key_bytes).expect("parse P-256 public key");
+            let signature = Signature::from_der(sig_bytes).expect("parse DER signature");
+            verifying_key
+                .verify(&signed_data, &signature)
+                .expect("P-256 attestation signature verification failed");
+        } else if alg_oid == OID_ML_DSA_44 {
+            use ml_dsa::{MlDsa44, Signature, VerifyingKey, common::KeyInit, signature::Verifier};
+            let vk_bytes: &[u8; 1312] = pub_key_bytes
+                .try_into()
+                .expect("ML-DSA-44 public key must be 1312 bytes");
+            let vk = VerifyingKey::<MlDsa44>::new(vk_bytes.into());
+            let sig =
+                Signature::<MlDsa44>::try_from(sig_bytes.as_slice()).expect("parse ML-DSA-44 sig");
+            vk.verify(&signed_data, &sig)
+                .expect("ML-DSA-44 attestation signature verification failed");
+        } else if alg_oid == OID_ML_DSA_65 {
+            use ml_dsa::{MlDsa65, Signature, VerifyingKey, common::KeyInit, signature::Verifier};
+            let vk_bytes: &[u8; 1952] = pub_key_bytes
+                .try_into()
+                .expect("ML-DSA-65 public key must be 1952 bytes");
+            let vk = VerifyingKey::<MlDsa65>::new(vk_bytes.into());
+            let sig =
+                Signature::<MlDsa65>::try_from(sig_bytes.as_slice()).expect("parse ML-DSA-65 sig");
+            vk.verify(&signed_data, &sig)
+                .expect("ML-DSA-65 attestation signature verification failed");
+        } else if alg_oid == OID_ML_DSA_87 {
+            use ml_dsa::{MlDsa87, Signature, VerifyingKey, common::KeyInit, signature::Verifier};
+            let vk_bytes: &[u8; 2592] = pub_key_bytes
+                .try_into()
+                .expect("ML-DSA-87 public key must be 2592 bytes");
+            let vk = VerifyingKey::<MlDsa87>::new(vk_bytes.into());
+            let sig =
+                Signature::<MlDsa87>::try_from(sig_bytes.as_slice()).expect("parse ML-DSA-87 sig");
+            vk.verify(&signed_data, &sig)
+                .expect("ML-DSA-87 attestation signature verification failed");
+        } else {
+            panic!("unsupported attestation certificate algorithm OID: {alg_oid}");
+        }
 
         eprintln!("attestation signature verified successfully");
     });
