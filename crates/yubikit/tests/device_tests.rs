@@ -28,6 +28,7 @@ use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType
 use yubikit::platform::device::{LocalYubiKeyDevice, list_devices};
 use yubikit::platform::pcsc::PcscSmartCardConnection;
 use yubikit::securitydomain::SecurityDomainSession;
+use yubikit::smartcard::Aid;
 
 /// Check if an error's Display contains an APDU status word.
 /// Works across error wrappers (PivError, OathError, etc.) since they all
@@ -126,10 +127,34 @@ fn get_device() -> RwLockReadGuard<'static, LocalYubiKeyDevice> {
             if dev.info().version_qualifier.release_type != ReleaseType::Final {
                 set_override_version(dev.info().version);
             }
+
+            set_touch_threshold(&dev);
+
             RwLock::new(dev)
         })
         .read()
         .unwrap()
+}
+
+fn set_touch_threshold(dev: &LocalYubiKeyDevice) {
+    if let Ok(hex_str) = std::env::var("TOUCH") {
+        match u8::from_str_radix(&hex_str, 16) {
+            Ok(hex_val) => {
+                let conn = dev.open_smartcard().expect("TOUCH needs CCID");
+                let mut proto = yubikit::smartcard::SmartCardProtocol::new(conn);
+                proto
+                    .select(Aid::MANAGEMENT)
+                    .expect("select management for TOUCH");
+                proto
+                    .send_apdu(0, 0x1c, 0, 0, &[0x03, 0x085, 0x01, hex_val])
+                    .expect("send TOUCH APDU");
+                eprintln!("Set touch level to: 0x{:02X}", hex_val);
+            }
+            Err(_) => {
+                eprintln!("Error: '{}' is not a valid hex string.", hex_str);
+            }
+        }
+    }
 }
 
 /// Extract an uncompressed P-256 public key (65 bytes) from a DER-encoded certificate.

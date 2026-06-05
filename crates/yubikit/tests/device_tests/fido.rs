@@ -55,6 +55,8 @@ fn reinsert_device() {
                 &|| false,
             )
             .expect("reinsert failed");
+
+            set_touch_threshold(&dev);
         }
     }
 }
