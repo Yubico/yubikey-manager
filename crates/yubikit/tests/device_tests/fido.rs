@@ -717,6 +717,9 @@ fn test_ctap2_credential_management(#[case] tc: TestConnection) {
             skip!("CredentialManagement not supported");
         }
 
+        // Credential management operations require UP on NFC; ensure
+        // the budget is fresh after any preceding test that consumed it.
+        reset_up_budget();
         let session = open();
         let mut cp = ClientPin::new(session)
             .map_err(|(e, _)| e)
