@@ -50,7 +50,10 @@ signature.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 hidapi = { workspace = true, default-features = false, features = ["linux-static-hidraw"], optional = true }
 
-[target.'cfg(not(target_os = "linux"))'.dependencies]
+[target.'cfg(target_os = "macos")'.dependencies]
+hidapi = { workspace = true, default-features = true, features = ["macos-shared-device"], optional = true }
+
+[target.'cfg(not(any(target_os = "linux", target_os = "macos")))'.dependencies]
 hidapi = { workspace = true, default-features = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
