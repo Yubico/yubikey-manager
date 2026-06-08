@@ -77,6 +77,21 @@ sha2 = { workspace = true, features = ["oid"] }
 ureq = "3"
 
 [[example]]
+name = "smartcard_serial"
+path = "examples/smartcard_serial.rs"
+required-features = ["pcsc"]
+
+[[example]]
+name = "fido_serial"
+path = "examples/fido_serial.rs"
+required-features = ["hid"]
+
+[[example]]
+name = "otp_serial"
+path = "examples/otp_serial.rs"
+required-features = ["hid"]
+
+[[example]]
 name = "ctap2_selection"
 path = "examples/ctap2_selection.rs"
 
