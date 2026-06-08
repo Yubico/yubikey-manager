@@ -26,10 +26,15 @@
 //! the device handle.
 
 /// Local device enumeration and connection management.
+///
+/// Requires both the `pcsc` and `hid` features.
+#[cfg(all(feature = "pcsc", feature = "hid"))]
 pub mod device;
 /// HID transport for FIDO (CTAP HID) and OTP (feature reports).
+#[cfg(feature = "hid")]
 pub mod hidapi;
 /// PC/SC smart card transport.
+#[cfg(feature = "pcsc")]
 pub mod pcsc;
 #[cfg(windows)]
 /// Windows SetupDI device enumeration.

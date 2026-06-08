@@ -12,8 +12,9 @@ categories = ["authentication", "cryptography", "hardware-support"]
 autoexamples = false
 
 [features]
-default = ["hardware"]
-hardware = ["dep:hidapi", "dep:pcsc"]
+default = ["pcsc", "hid"]
+pcsc = ["dep:pcsc"]
+hid = ["dep:hidapi"]
 
 [dependencies]
 aes.workspace = true

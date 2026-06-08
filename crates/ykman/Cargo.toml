@@ -16,7 +16,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["hardware"]
-hardware = ["yubikit/hardware"]
+hardware = ["yubikit/pcsc", "yubikit/hid"]
 
 [dependencies]
 yubikit.workspace = true

@@ -118,8 +118,8 @@ pub mod otp;
 pub mod piv;
 /// Platform-specific transport implementations (HID, PC/SC).
 ///
-/// This module is only available when the `direct` feature is enabled (default).
-#[cfg(feature = "hardware")]
+/// This module is available when the `pcsc` and/or `hid` features are enabled.
+#[cfg(any(feature = "pcsc", feature = "hid"))]
 pub mod platform;
 /// Internal secret value wrapper — not part of the public API.
 pub(crate) mod secret;

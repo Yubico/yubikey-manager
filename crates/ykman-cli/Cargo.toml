@@ -20,7 +20,7 @@ path = "examples/fido_selection.rs"
 
 [features]
 default = ["hardware"]
-hardware = ["ykman/hardware", "yubikit/hardware"]
+hardware = ["ykman/hardware", "yubikit/pcsc", "yubikit/hid"]
 
 [dependencies]
 ykman.workspace = true
