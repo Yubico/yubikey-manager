@@ -104,6 +104,8 @@ pub mod device;
 pub mod fido;
 /// YubiHSM Auth application for symmetric key storage and derivation.
 pub mod hsmauth;
+/// Private key parsing utilities (PKCS#8, PKCS#1).
+pub(crate) mod keys;
 /// Logging utilities for diagnostic output.
 pub mod logging;
 /// Device management — reading info, configuring interfaces, and settings.

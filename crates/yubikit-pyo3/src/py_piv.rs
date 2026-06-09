@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 use yubikit::piv::{
-    self, KeyType, ManagementKey, ManagementKeyType, PinPolicy, PivPin,
+    self, KeyType, ManagementKey, ManagementKeyType, PinPolicy, PivPin, PivPrivateKey,
     PivSession as RustPivSession, Slot, TouchPolicy,
 };
 
@@ -357,8 +357,9 @@ impl PivSession {
         let kt = parse_key_type(key_type)?;
         let pp = parse_pin_policy(pin_policy)?;
         let tp = parse_touch_policy(touch_policy)?;
+        let private_key = PivPrivateKey::new(kt, key_der);
         self.session_mut()?
-            .put_key(s, kt, key_der, pp, tp)
+            .put_key(s, &private_key, pp, tp)
             .map_err(piv_err)
     }
 

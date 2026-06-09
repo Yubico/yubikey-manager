@@ -58,7 +58,7 @@ use x509_cert::spki::{
     self, AlgorithmIdentifierOwned, DynSignatureAlgorithmIdentifier, EncodePublicKey,
     ObjectIdentifier, SignatureBitStringEncoding, SubjectPublicKeyInfoOwned,
 };
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::core::{Version, int2bytes, patch_version};
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
@@ -230,72 +230,13 @@ impl KeyType {
     }
 
     fn detect_algorithm_from_der(der: &[u8], is_private: bool) -> Result<Self, PivError> {
-        // Parse outer SEQUENCE
-        let (_, seq_off, seq_len, _) =
-            tlv_parse(der, 0).map_err(|_| PivError::InvalidData("Invalid DER".into()))?;
-        let seq_data = &der[seq_off..seq_off + seq_len];
+        use crate::keys::{KeyAlgorithmInfo, detect_key_algorithm};
 
-        // For PKCS#8 PrivateKeyInfo, skip the version INTEGER
-        let algo_start = if is_private {
-            let (_, _, _, ver_end) = tlv_parse(seq_data, 0)
-                .map_err(|_| PivError::InvalidData("Invalid version INTEGER".into()))?;
-            ver_end
-        } else {
-            0
-        };
+        let info = detect_key_algorithm(der, is_private)
+            .map_err(|e| PivError::InvalidData(e.to_string()))?;
 
-        // Parse AlgorithmIdentifier SEQUENCE
-        let (_, algo_off, algo_len, algo_end) = tlv_parse(seq_data, algo_start)
-            .map_err(|_| PivError::InvalidData("Invalid AlgorithmIdentifier".into()))?;
-        let algo_data = &seq_data[algo_off..algo_off + algo_len];
-
-        // Parse OID
-        let (_, oid_off, oid_len, _) =
-            tlv_parse(algo_data, 0).map_err(|_| PivError::InvalidData("Invalid OID".into()))?;
-        let oid_bytes = &algo_data[oid_off..oid_off + oid_len];
-        let oid = ObjectIdentifier::from_bytes(oid_bytes)
-            .map_err(|_| PivError::InvalidData("Invalid OID encoding".into()))?;
-
-        if oid == OID_RSA_ENCRYPTION {
-            // For public keys: BIT STRING containing SEQUENCE { modulus, exponent }
-            // For private keys: OCTET STRING containing SEQUENCE { version, modulus, ... }
-            let (tag, data_off, data_len, _) = tlv_parse(seq_data, algo_end)
-                .map_err(|_| PivError::InvalidData("Invalid key data".into()))?;
-            let key_data = if tag == 0x03 {
-                // BIT STRING: skip unused-bits prefix byte
-                &seq_data[data_off + 1..data_off + data_len]
-            } else if tag == 0x04 {
-                // OCTET STRING: content is RSAPrivateKey directly
-                &seq_data[data_off..data_off + data_len]
-            } else {
-                return Err(PivError::InvalidData(
-                    "Expected BIT STRING or OCTET STRING".into(),
-                ));
-            };
-            // Parse inner SEQUENCE
-            let (_, inner_off, inner_len, _) = tlv_parse(key_data, 0)
-                .map_err(|_| PivError::InvalidData("Invalid RSA inner SEQUENCE".into()))?;
-            let inner = &key_data[inner_off..inner_off + inner_len];
-            // For private keys, skip version INTEGER first
-            let mod_start = if is_private {
-                let (_, _, _, ver_end) = tlv_parse(inner, 0)
-                    .map_err(|_| PivError::InvalidData("Invalid RSA version".into()))?;
-                ver_end
-            } else {
-                0
-            };
-            // Parse modulus INTEGER
-            let (_, mod_off, mod_len, _) = tlv_parse(inner, mod_start)
-                .map_err(|_| PivError::InvalidData("Invalid RSA modulus".into()))?;
-            let modulus = &inner[mod_off..mod_off + mod_len];
-            // Strip leading zero if present
-            let mod_bytes = if !modulus.is_empty() && modulus[0] == 0 {
-                modulus.len() - 1
-            } else {
-                modulus.len()
-            };
-            let bit_len = mod_bytes * 8;
-            match bit_len {
+        match info {
+            KeyAlgorithmInfo::Rsa { bit_len } => match bit_len {
                 1024 => Ok(Self::Rsa1024),
                 2048 => Ok(Self::Rsa2048),
                 3072 => Ok(Self::Rsa3072),
@@ -303,100 +244,41 @@ impl KeyType {
                 _ => Err(PivError::InvalidData(format!(
                     "Unsupported RSA key size: {bit_len}"
                 ))),
-            }
-        } else if oid == OID_EC_PUBLIC_KEY {
-            // Parse curve OID parameter
-            let (_, curve_off, curve_len, _) = tlv_parse(algo_data, oid_off + oid_len)
-                .map_err(|_| PivError::InvalidData("Invalid EC curve OID".into()))?;
-            let curve_oid =
-                ObjectIdentifier::from_bytes(&algo_data[curve_off..curve_off + curve_len])
+            },
+            KeyAlgorithmInfo::Ec { curve_oid } => {
+                let oid = ObjectIdentifier::from_bytes(&curve_oid)
                     .map_err(|_| PivError::InvalidData("Invalid EC curve OID encoding".into()))?;
-            if curve_oid == OID_CURVE_P256 {
-                Ok(Self::EccP256)
-            } else if curve_oid == OID_CURVE_P384 {
-                Ok(Self::EccP384)
-            } else {
-                Err(PivError::InvalidData("Unsupported EC curve".into()))
+                if oid == OID_CURVE_P256 {
+                    Ok(Self::EccP256)
+                } else if oid == OID_CURVE_P384 {
+                    Ok(Self::EccP384)
+                } else {
+                    Err(PivError::InvalidData("Unsupported EC curve".into()))
+                }
             }
-        } else if oid == OID_ED25519_KEY {
-            Ok(Self::Ed25519)
-        } else if oid == OID_X25519_KEY {
-            Ok(Self::X25519)
-        } else if oid == OID_ML_DSA_44 {
-            Ok(Self::MlDsa44)
-        } else if oid == OID_ML_DSA_65 {
-            Ok(Self::MlDsa65)
-        } else if oid == OID_ML_DSA_87 {
-            Ok(Self::MlDsa87)
-        } else if oid == OID_ML_KEM_512 {
-            Ok(Self::MlKem512)
-        } else if oid == OID_ML_KEM_768 {
-            Ok(Self::MlKem768)
-        } else if oid == OID_ML_KEM_1024 {
-            Ok(Self::MlKem1024)
-        } else {
-            Err(PivError::InvalidData("Unknown key algorithm OID".into()))
-        }
-    }
-
-    /// Extract the inner private key data from a PKCS#8 PrivateKeyInfo DER.
-    ///
-    /// For RSA, returns the PKCS#1 RSAPrivateKey.
-    /// For EC, returns the raw secret key scalar bytes.
-    /// For Ed25519/X25519/ML-DSA/ML-KEM, returns the raw private key bytes.
-    pub fn extract_private_key_from_pkcs8(
-        pkcs8_der: &[u8],
-    ) -> Result<Zeroizing<Vec<u8>>, PivError> {
-        // Parse outer SEQUENCE
-        let (_, seq_off, seq_len, _) =
-            tlv_parse(pkcs8_der, 0).map_err(|_| PivError::InvalidData("Invalid DER".into()))?;
-        let seq_data = &pkcs8_der[seq_off..seq_off + seq_len];
-
-        // Skip version INTEGER
-        let (_, _, _, ver_end) =
-            tlv_parse(seq_data, 0).map_err(|_| PivError::InvalidData("Invalid version".into()))?;
-
-        // Parse AlgorithmIdentifier SEQUENCE
-        let (_, algo_off, algo_len, algo_end) = tlv_parse(seq_data, ver_end)
-            .map_err(|_| PivError::InvalidData("Invalid AlgorithmIdentifier".into()))?;
-        let algo_data = &seq_data[algo_off..algo_off + algo_len];
-
-        // Parse OID
-        let (_, oid_off, oid_len, _) =
-            tlv_parse(algo_data, 0).map_err(|_| PivError::InvalidData("Invalid OID".into()))?;
-        let oid = &algo_data[oid_off..oid_off + oid_len];
-
-        const RSA_OID: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
-        const EC_OID: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
-
-        // Parse OCTET STRING containing the private key
-        let (_, oct_off, oct_len, _) = tlv_parse(seq_data, algo_end)
-            .map_err(|_| PivError::InvalidData("Invalid OCTET STRING".into()))?;
-        let private_key_data = &seq_data[oct_off..oct_off + oct_len];
-
-        if oid == RSA_OID {
-            // RSA: OCTET STRING contains PKCS#1 RSAPrivateKey SEQUENCE
-            Ok(Zeroizing::new(private_key_data.to_vec()))
-        } else if oid == EC_OID {
-            // EC: OCTET STRING contains ECPrivateKey SEQUENCE { version, privateKey, ... }
-            // Parse SEQUENCE
-            let (_, inner_off, inner_len, _) = tlv_parse(private_key_data, 0)
-                .map_err(|_| PivError::InvalidData("Invalid ECPrivateKey".into()))?;
-            let inner = &private_key_data[inner_off..inner_off + inner_len];
-            // Skip version INTEGER
-            let (_, _, _, ver_end) = tlv_parse(inner, 0)
-                .map_err(|_| PivError::InvalidData("Invalid EC version".into()))?;
-            // Parse privateKey OCTET STRING
-            let (_, key_off, key_len, _) = tlv_parse(inner, ver_end)
-                .map_err(|_| PivError::InvalidData("Invalid EC private key".into()))?;
-            Ok(Zeroizing::new(inner[key_off..key_off + key_len].to_vec()))
-        } else {
-            // Ed25519/X25519/ML-DSA/ML-KEM: OCTET STRING contains another OCTET STRING with key
-            let (_, key_off, key_len, _) = tlv_parse(private_key_data, 0)
-                .map_err(|_| PivError::InvalidData("Invalid key OCTET STRING".into()))?;
-            Ok(Zeroizing::new(
-                private_key_data[key_off..key_off + key_len].to_vec(),
-            ))
+            KeyAlgorithmInfo::Oid { oid } => {
+                let oid = ObjectIdentifier::from_bytes(&oid)
+                    .map_err(|_| PivError::InvalidData("Invalid OID encoding".into()))?;
+                if oid == OID_ED25519_KEY {
+                    Ok(Self::Ed25519)
+                } else if oid == OID_X25519_KEY {
+                    Ok(Self::X25519)
+                } else if oid == OID_ML_DSA_44 {
+                    Ok(Self::MlDsa44)
+                } else if oid == OID_ML_DSA_65 {
+                    Ok(Self::MlDsa65)
+                } else if oid == OID_ML_DSA_87 {
+                    Ok(Self::MlDsa87)
+                } else if oid == OID_ML_KEM_512 {
+                    Ok(Self::MlKem512)
+                } else if oid == OID_ML_KEM_768 {
+                    Ok(Self::MlKem768)
+                } else if oid == OID_ML_KEM_1024 {
+                    Ok(Self::MlKem1024)
+                } else {
+                    Err(PivError::InvalidData("Unknown key algorithm OID".into()))
+                }
+            }
         }
     }
 }
@@ -423,8 +305,74 @@ impl fmt::Display for KeyType {
 }
 
 // ---------------------------------------------------------------------------
-// ManagementKeyType
+// PivPrivateKey
 // ---------------------------------------------------------------------------
+
+/// A private key for import into a PIV slot.
+///
+/// This type encapsulates both the algorithm and the raw key material.
+/// Construct via [`PivPrivateKey::from_pkcs8`] to parse a PKCS#8-encoded key,
+/// or via [`PivPrivateKey::new`] for pre-extracted key data.
+///
+/// The key material is automatically zeroized when dropped.
+pub struct PivPrivateKey {
+    key_type: KeyType,
+    /// Inner key data: PKCS#1 RSAPrivateKey for RSA, raw scalar for EC/Ed25519/X25519,
+    /// raw seed bytes for ML-DSA/ML-KEM.
+    key_data: Zeroizing<Vec<u8>>,
+}
+
+impl PivPrivateKey {
+    /// Create a `PivPrivateKey` from pre-extracted inner key bytes.
+    ///
+    /// `key_data` should be the inner private key material:
+    /// - RSA: PKCS#1 RSAPrivateKey DER
+    /// - EC (P-256/P-384): raw scalar bytes or SEC1 ECPrivateKey DER
+    /// - Ed25519/X25519: 32-byte secret key
+    /// - ML-DSA/ML-KEM: raw private key bytes
+    pub fn new(key_type: KeyType, key_data: impl Into<Vec<u8>>) -> Self {
+        Self {
+            key_type,
+            key_data: Zeroizing::new(key_data.into()),
+        }
+    }
+
+    /// Parse a PKCS#8 PrivateKeyInfo DER encoding and extract the private key.
+    ///
+    /// This auto-detects the algorithm from the AlgorithmIdentifier and extracts
+    /// the inner key material suitable for import.
+    pub fn from_pkcs8(pkcs8_der: &[u8]) -> Result<Self, PivError> {
+        let key_type = KeyType::from_private_key_der(pkcs8_der)?;
+        let parsed = crate::keys::parse_pkcs8(pkcs8_der)
+            .map_err(|e| PivError::InvalidData(e.to_string()))?;
+        Ok(Self {
+            key_type,
+            key_data: parsed.key_data,
+        })
+    }
+
+    /// Returns the algorithm type of this key.
+    pub fn key_type(&self) -> KeyType {
+        self.key_type
+    }
+
+    /// Access the raw key bytes (for building APDU data).
+    fn key_data(&self) -> &[u8] {
+        &self.key_data
+    }
+}
+
+impl fmt::Debug for PivPrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "PivPrivateKey({:?})", self.key_type)
+    }
+}
+
+impl Drop for PivPrivateKey {
+    fn drop(&mut self) {
+        self.key_data.zeroize();
+    }
+}
 
 /// Algorithm used for the PIV management key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -2007,11 +1955,11 @@ impl<C: SmartCardConnection> PivSession<C> {
     pub fn put_key(
         &mut self,
         slot: Slot,
-        key_type: KeyType,
-        key_der: &[u8],
+        private_key: &PivPrivateKey,
         pin_policy: PinPolicy,
         touch_policy: TouchPolicy,
     ) -> Result<(), PivError> {
+        let key_type = private_key.key_type();
         log::debug!("Importing key to slot {:?}", slot);
         check_key_support(
             self.version,
@@ -2022,7 +1970,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             false,
         )?;
 
-        let mut data = build_put_key_data(key_type, key_der)?;
+        let mut data = build_put_key_data(key_type, private_key.key_data())?;
 
         if pin_policy != PinPolicy::Default {
             data.extend_from_slice(&tlv_encode(
@@ -3157,12 +3105,9 @@ mod tests {
             KeyType::from_private_key_der(&ml_dsa_pkcs8).expect("detect ML-DSA private key"),
             KeyType::MlDsa65
         );
-        assert_eq!(
-            KeyType::extract_private_key_from_pkcs8(&ml_dsa_pkcs8)
-                .expect("extract ML-DSA key")
-                .as_slice(),
-            &ml_dsa_key[..]
-        );
+        let ml_dsa_priv = PivPrivateKey::from_pkcs8(&ml_dsa_pkcs8).expect("parse ML-DSA key");
+        assert_eq!(ml_dsa_priv.key_type(), KeyType::MlDsa65);
+        assert_eq!(ml_dsa_priv.key_data(), &ml_dsa_key[..]);
 
         let ml_kem_key = vec![0x22; 48];
         let ml_kem_pkcs8 = pkcs8_der(OID_ML_KEM_1024.as_bytes(), &ml_kem_key);
@@ -3170,11 +3115,8 @@ mod tests {
             KeyType::from_private_key_der(&ml_kem_pkcs8).expect("detect ML-KEM private key"),
             KeyType::MlKem1024
         );
-        assert_eq!(
-            KeyType::extract_private_key_from_pkcs8(&ml_kem_pkcs8)
-                .expect("extract ML-KEM key")
-                .as_slice(),
-            &ml_kem_key[..]
-        );
+        let ml_kem_priv = PivPrivateKey::from_pkcs8(&ml_kem_pkcs8).expect("parse ML-KEM key");
+        assert_eq!(ml_kem_priv.key_type(), KeyType::MlKem1024);
+        assert_eq!(ml_kem_priv.key_data(), &ml_kem_key[..]);
     }
 }

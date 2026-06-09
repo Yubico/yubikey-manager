@@ -1453,6 +1453,40 @@ impl fmt::Debug for OpenPgpPrivateKey {
     }
 }
 
+impl OpenPgpPrivateKey {
+    /// Parse a PKCS#8 PrivateKeyInfo DER encoding into an `OpenPgpPrivateKey`.
+    ///
+    /// Supports RSA (returned as `RsaCrt`) and EC keys including Ed25519/X25519
+    /// (returned as `Ec`). The algorithm is auto-detected from the
+    /// AlgorithmIdentifier.
+    pub fn from_pkcs8(pkcs8_der: &[u8]) -> Result<Self, OpenPgpError> {
+        use crate::keys::{Pkcs8Algorithm, parse_pkcs1_rsa, parse_pkcs8};
+
+        let parsed =
+            parse_pkcs8(pkcs8_der).map_err(|e| OpenPgpError::InvalidData(e.to_string()))?;
+
+        match parsed.algorithm {
+            Pkcs8Algorithm::Rsa => {
+                let rsa = parse_pkcs1_rsa(&parsed.key_data)
+                    .map_err(|e| OpenPgpError::InvalidData(e.to_string()))?;
+                Ok(Self::RsaCrt {
+                    e: rsa.e,
+                    p: rsa.p,
+                    q: rsa.q,
+                    dmp1: rsa.dp,
+                    dmq1: rsa.dq,
+                    iqmp: rsa.qinv,
+                    n: rsa.n,
+                })
+            }
+            Pkcs8Algorithm::Ec | Pkcs8Algorithm::Other => Ok(Self::Ec {
+                scalar: parsed.key_data.to_vec(),
+                public_key: None,
+            }),
+        }
+    }
+}
+
 /// Build the private key template for PUT_DATA_ODD (tag 0x4D).
 fn build_private_key_template(
     key_ref: KeyRef,
