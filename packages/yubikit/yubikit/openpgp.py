@@ -936,7 +936,6 @@ def _prepare_private_key_for_native(
         return (3, [raw], None)
     elif isinstance(private_key, x25519.X25519PrivateKey):
         raw = private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
-        raw = raw[::-1]  # X25519 byte order needs to be reversed for the card
         return (4, [raw], None)
     else:
         raise ValueError(f"Unsupported key type: {type(private_key)}")

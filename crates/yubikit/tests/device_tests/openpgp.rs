@@ -648,7 +648,12 @@ fn test_import_x25519(#[case] tc: TestConnection) {
     require_version!(Version(5, 2, 0));
     let mut session = setup_for_import(&tc);
 
-    let key = generate_x25519_private_key();
+    use x25519_dalek::StaticSecret;
+    let secret = StaticSecret::random_from_rng(rsa::rand_core::OsRng);
+    let key = PrivateKey::X25519 {
+        secret: secret.to_bytes().to_vec(),
+    };
+
     session.put_key(KeyRef::Dec, &key).expect("put_key X25519");
 
     // Verify we can do ECDH with the imported key
@@ -663,6 +668,13 @@ fn test_import_x25519(#[case] tc: TestConnection) {
     let device_shared = session
         .decrypt(host_public.as_bytes())
         .expect("X25519 ECDH via decrypt");
+
+    let device_public = X25519PublicKey::from(&secret);
+    let host_shared = host_secret.diffie_hellman(&device_public).to_bytes();
+    assert_eq!(
+        host_shared, *device_shared,
+        "X25519 shared secrets should match"
+    );
     assert_eq!(
         device_shared.len(),
         32,
@@ -796,13 +808,4 @@ fn generate_ed25519_private_key() -> (PrivateKey, ed25519_dalek::VerifyingKey) {
         secret: secret.to_vec(),
     };
     (key, verifying_key)
-}
-
-fn generate_x25519_private_key() -> PrivateKey {
-    use x25519_dalek::StaticSecret;
-    let secret = StaticSecret::random_from_rng(rsa::rand_core::OsRng);
-    // X25519 bytes need to be reversed for the OpenPGP card
-    let mut bytes = secret.to_bytes().to_vec();
-    bytes.reverse();
-    PrivateKey::X25519 { secret: bytes }
 }

@@ -1493,6 +1493,7 @@ fn build_private_key_template(
     key_ref: KeyRef,
     private_key: &PrivateKey,
 ) -> Result<Zeroizing<Vec<u8>>, OpenPgpError> {
+    let mut temp = Zeroizing::new(Vec::new());
     let component_tlvs: Vec<(u32, &[u8])> = match private_key {
         PrivateKey::Rsa(RsaPrivateKey {
             e,
@@ -1535,7 +1536,10 @@ fn build_private_key_template(
             vec![(0x92, secret.as_slice())]
         }
         PrivateKey::X25519 { secret } => {
-            vec![(0x92, secret.as_slice())]
+            // X25519 uses little-endian; OpenPGP card expects big-endian
+            temp.extend(secret);
+            temp.reverse();
+            vec![(0x92, temp.as_slice())]
         }
         _ => {
             return Err(OpenPgpError::NotSupported(
