@@ -27,9 +27,10 @@ jobs:
       - name: Build Rust CLI
         shell: bash
         run: |
-          cargo build --release -p ykman-cli
+          cargo build --release -p ykman-cli -p ykman-svc
           mkdir -p dist/ykman
           cp target/release/ykman.exe dist/ykman/
+          cp target/release/ykman-svc.exe dist/ykman/
           dist/ykman/ykman.exe --version
 
       - name: Copy scripts
@@ -39,7 +40,7 @@ jobs:
       - name: Build installer
         if: matrix.os == 'windows-latest'
         working-directory: ./dist
-        run: .\scripts\make_msi.ps1
+        run: .\scripts\make_msi.ps1 -SourceDir .\ykman
 
       - name: Upload build
         uses: actions/upload-artifact@v6
@@ -107,6 +108,7 @@ jobs:
           rm 1.zip
           cd ..
           cp signed/ykman.exe ykman-builds-windows/ykman/ykman.exe
+          cp signed/ykman-svc.exe ykman-builds-windows/ykman/ykman-svc.exe
 
       - name: upload signed artifacts
         uses: actions/upload-artifact@v4
@@ -128,7 +130,7 @@ jobs:
 
       - name: Build installer
         working-directory: .\ykman-builds-windows
-        run: .\scripts\make_msi.ps1
+        run: .\scripts\make_msi.ps1 -SourceDir .\ykman
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
