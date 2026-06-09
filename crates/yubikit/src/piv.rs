@@ -344,8 +344,7 @@ impl KeyType {
     /// For RSA, returns the PKCS#1 RSAPrivateKey.
     /// For EC, returns the raw secret key scalar bytes.
     /// For Ed25519/X25519/ML-DSA/ML-KEM, returns the raw private key bytes.
-    #[cfg(test)]
-    pub(crate) fn extract_private_key_from_pkcs8(
+    pub fn extract_private_key_from_pkcs8(
         pkcs8_der: &[u8],
     ) -> Result<Zeroizing<Vec<u8>>, PivError> {
         // Parse outer SEQUENCE
