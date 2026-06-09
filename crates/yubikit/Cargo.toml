@@ -67,14 +67,18 @@ windows = { workspace = true, features = [
 ecdsa.workspace = true
 elliptic-curve = { workspace = true, features = ["pkcs8", "sec1"] }
 getrandom.workspace = true
+k256.workspace = true
 ml-dsa.workspace = true
 ml-kem.workspace = true
 p256 = { workspace = true, features = ["ecdsa", "hash2curve", "pkcs8"] }
+p384.workspace = true
 pcsc.workspace = true
 rsa.workspace = true
 rstest.workspace = true
 sha2 = { workspace = true, features = ["oid"] }
 ureq = "3"
+ed25519-dalek.workspace = true
+x25519-dalek.workspace = true
 
 [[example]]
 name = "smartcard_serial"
