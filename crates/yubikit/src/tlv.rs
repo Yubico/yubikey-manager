@@ -169,59 +169,6 @@ pub fn tlv_append(buf: &mut Vec<u8>, tag: u32, value: &[u8]) {
     buf.extend_from_slice(value);
 }
 
-/// Decode OID bytes to dotted string notation.
-pub fn oid_to_string(data: &[u8]) -> Result<String, TlvError> {
-    if data.is_empty() {
-        return Err(TlvError::InvalidEncoding);
-    }
-    let mut parts = vec![(data[0] / 40) as u32, (data[0] % 40) as u32];
-    let mut num: u32 = 0;
-    for &x in &data[1..] {
-        num = (num << 7) | (x & 0x7F) as u32;
-        if x & 0x80 == 0 {
-            parts.push(num);
-            num = 0;
-        }
-    }
-    Ok(parts
-        .iter()
-        .map(|x| x.to_string())
-        .collect::<Vec<_>>()
-        .join("."))
-}
-
-/// Encode a dotted string OID into bytes.
-pub fn oid_from_string(data: &str) -> Result<Vec<u8>, TlvError> {
-    let parts: Vec<u32> = data
-        .split('.')
-        .map(|s| s.parse::<u32>().map_err(|_| TlvError::InvalidEncoding))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    if parts.len() < 2 {
-        return Err(TlvError::InvalidEncoding);
-    }
-
-    let mut buf = vec![(parts[0] * 40 + parts[1]) as u8];
-
-    for &part in &parts[2..] {
-        let mut part = part;
-        let mut part_buf = Vec::new();
-        while part > 0x7F {
-            part_buf.push((part & 0x7F) as u8);
-            part >>= 7;
-        }
-        part_buf.push(part as u8);
-        part_buf.reverse();
-        let last = part_buf.len() - 1;
-        for b in &mut part_buf[..last] {
-            *b |= 0x80;
-        }
-        buf.extend_from_slice(&part_buf);
-    }
-
-    Ok(buf)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,14 +180,6 @@ mod tests {
         assert_eq!(tag, 0x71);
         assert_eq!(&encoded[offset..offset + ln], b"hello");
         assert_eq!(end, encoded.len());
-    }
-
-    #[test]
-    fn test_oid_roundtrip() {
-        let oid_str = "1.2.840.113549.1.1.1";
-        let encoded = oid_from_string(oid_str).unwrap();
-        let decoded = oid_to_string(&encoded).unwrap();
-        assert_eq!(decoded, oid_str);
     }
 
     #[test]

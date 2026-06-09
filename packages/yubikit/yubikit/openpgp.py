@@ -39,6 +39,7 @@ from typing import (
     Sequence,
     SupportsBytes,
     TypeAlias,
+    cast,
 )
 
 from cryptography import x509
@@ -54,12 +55,12 @@ from cryptography.hazmat.primitives.serialization import (
     NoEncryption,
     PrivateFormat,
     PublicFormat,
+    load_der_public_key,
 )
 
 from _yubikit_native.sessions import OpenPgpSession as _NativeOpenPgpSession
 
 from .core import (
-    NotSupportedError,
     Oid,
     Session,
     Tlv,
@@ -875,39 +876,6 @@ class EcKeyTemplate(PrivateKeyTemplate):
         return tlvs
 
 
-def _get_key_attributes(
-    private_key: PrivateKey, key_ref: KEY_REF, version: Version
-) -> AlgorithmAttributes:
-    if isinstance(private_key, rsa.RSAPrivateKeyWithSerialization):
-        if private_key.private_numbers().public_numbers.e != 65537:
-            raise ValueError("RSA keys with e != 65537 are not supported!")
-        return RsaAttributes.create(
-            RSA_SIZE(private_key.key_size),
-            (
-                RSA_IMPORT_FORMAT.CRT_W_MOD
-                if 0 < version[0] < 4
-                else RSA_IMPORT_FORMAT.STANDARD
-            ),
-        )
-    return EcAttributes.create(key_ref, OID._from_key(private_key))
-
-
-def _parse_rsa_key(data: Mapping[int, bytes]) -> rsa.RSAPublicKey:
-    numbers = rsa.RSAPublicNumbers(bytes2int(data[0x82]), bytes2int(data[0x81]))
-    return numbers.public_key(default_backend())
-
-
-def _parse_ec_key(oid: CurveOid, data: Mapping[int, bytes]) -> EcPublicKey:
-    pubkey_enc = data[0x86]
-    if oid == OID.X25519:
-        return x25519.X25519PublicKey.from_public_bytes(pubkey_enc)
-    if oid == OID.Ed25519:
-        return ed25519.Ed25519PublicKey.from_public_bytes(pubkey_enc)
-
-    curve = getattr(ec, oid._get_name())
-    return ec.EllipticCurvePublicKey.from_encoded_point(curve(), pubkey_enc)
-
-
 # Map cryptography hash algorithm to Rust SignHashAlgorithm int value
 _HASH_ALGORITHM_MAP: dict[type, int] = {
     type(None): 0,  # SignHashAlgorithm::None
@@ -937,10 +905,11 @@ def _hash_algorithm_to_int(
 def _prepare_private_key_for_native(
     private_key: PrivateKey,
     use_crt: bool = False,
-) -> tuple[int, list[bytes]]:
-    """Convert a private key to (key_type, components) for the native put_key.
+) -> tuple[int, list[bytes], str | None]:
+    """Convert a private key to (key_type, components, curve_oid) for native put_key.
 
-    key_type: 0=RSA, 1=RSA-CRT, 2=EC
+    key_type: 0=RSA, 1=RSA-CRT, 2=EC, 3=Ed25519, 4=X25519
+    curve_oid: dotted-string OID for EC keys, None otherwise.
     """
     if isinstance(private_key, rsa.RSAPrivateKeyWithSerialization):
         pn = private_key.private_numbers()
@@ -952,24 +921,23 @@ def _prepare_private_key_for_native(
             dmp1 = int2bytes(pn.dmp1)
             dmq1 = int2bytes(pn.dmq1)
             n = int2bytes(pn.public_numbers.n)
-            return (1, [e, p, q, iqmp, dmp1, dmq1, n])
-        return (0, [e, p, q])
+            return (1, [e, p, q, iqmp, dmp1, dmq1, n], None)
+        return (0, [e, p, q], None)
     elif isinstance(private_key, ec.EllipticCurvePrivateKeyWithSerialization):
         pn = private_key.private_numbers()
         scalar = int2bytes(pn.private_value)
         pub_bytes = private_key.public_key().public_bytes(
             Encoding.X962, PublicFormat.UncompressedPoint
         )
-        return (2, [scalar, pub_bytes])
+        curve_oid = OID._from_key(private_key).dotted_string
+        return (2, [scalar, pub_bytes], curve_oid)
     elif isinstance(private_key, ed25519.Ed25519PrivateKey):
         raw = private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
-        pub = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-        return (2, [raw, pub])
+        return (3, [raw], None)
     elif isinstance(private_key, x25519.X25519PrivateKey):
         raw = private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
         raw = raw[::-1]  # X25519 byte order needs to be reversed for the card
-        pub = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-        return (2, [raw, pub])
+        return (4, [raw], None)
     else:
         raise ValueError(f"Unsupported key type: {type(private_key)}")
 
@@ -1273,12 +1241,7 @@ class OpenPgpSession(Session):
         :param key_ref: The key slot.
         """
         raw = self._native.get_public_key(key_ref)
-        data = Tlv.parse_dict(raw)
-        attributes = self.get_algorithm_attributes(key_ref)
-        if isinstance(attributes, EcAttributes):
-            return _parse_ec_key(attributes.oid, data)
-        else:
-            return _parse_rsa_key(data)
+        return cast(PublicKey, load_der_public_key(raw))
 
     def generate_rsa_key(
         self, key_ref: KEY_REF, key_size: RSA_SIZE
@@ -1291,8 +1254,7 @@ class OpenPgpSession(Session):
         :param key_size: The size of the RSA key.
         """
         raw = self._native.generate_rsa_key(key_ref, key_size)
-        data = Tlv.parse_dict(raw)
-        return _parse_rsa_key(data)
+        return cast(rsa.RSAPublicKey, load_der_public_key(raw))
 
     def generate_ec_key(self, key_ref: KEY_REF, curve_oid: CurveOid) -> EcPublicKey:
         """Generate an EC key in the given slot.
@@ -1303,8 +1265,7 @@ class OpenPgpSession(Session):
         :param curve_oid: The curve OID.
         """
         raw = self._native.generate_ec_key(key_ref, curve_oid.dotted_string)
-        data = Tlv.parse_dict(raw)
-        return _parse_ec_key(curve_oid, data)
+        return cast(EcPublicKey, load_der_public_key(raw))
 
     def put_key(self, key_ref: KEY_REF, private_key: PrivateKey) -> None:
         """Import a private key into the given slot.
@@ -1314,23 +1275,11 @@ class OpenPgpSession(Session):
         :param key_ref: The key slot.
         :param private_key: The private key to import.
         """
-
-        attributes = _get_key_attributes(private_key, key_ref, self.version)
-        if (
-            EXTENDED_CAPABILITY_FLAGS.ALGORITHM_ATTRIBUTES_CHANGEABLE
-            in self.extended_capabilities.flags
-        ):
-            self.set_algorithm_attributes(key_ref, attributes)
-        else:
-            if not (
-                isinstance(attributes, RsaAttributes)
-                and attributes.n_len == RSA_SIZE.RSA2048
-            ):
-                raise NotSupportedError("This YubiKey only supports RSA 2048 keys")
-
         use_crt = 0 < self.version[0] < 4
-        key_type, components = _prepare_private_key_for_native(private_key, use_crt)
-        self._native.put_key(key_ref, key_type, components)
+        key_type, components, curve_oid = _prepare_private_key_for_native(
+            private_key, use_crt
+        )
+        self._native.put_key(key_ref, key_type, components, curve_oid)
 
     def delete_key(self, key_ref: KEY_REF) -> None:
         """Delete the contents of a key slot.

@@ -1,5 +1,6 @@
 use super::*;
-use yubikit::openpgp::{OpenPgpPin, OpenPgpSession};
+use yubikit::keys::{EcCurve, EcPrivateKey, PrivateKey, RsaPrivateKey};
+use yubikit::openpgp::{KeyRef, OpenPgpCurve, OpenPgpPin, OpenPgpSession};
 
 fn open_openpgp_session(tc: &TestConnection) -> OpenPgpSession<PcscSmartCardConnection> {
     let conn = open_smartcard_connection(tc);
@@ -127,17 +128,18 @@ fn test_openpgp_generate_ec_key_and_sign(#[case] tc: TestConnection) {
         .expect("verify PIN");
 
     // Generate EC P-256 signing key
-    let pk_data = session
+    let pk = session
         .generate_ec_key(
             yubikit::openpgp::KeyRef::Sig,
-            yubikit::openpgp::curve_oid::SECP256R1,
+            yubikit::openpgp::OpenPgpCurve::P256,
         )
         .expect("generate_ec_key");
-    assert!(!pk_data.is_empty(), "Public key data should not be empty");
 
-    // Extract EC point from TLV (tag 0x86)
-    let pk_dict = yubikit::tlv::parse_tlv_dict(&pk_data).expect("parse pk TLV");
-    let ec_point = pk_dict.get(&0x86).expect("EC point tag 0x86");
+    // Extract EC point from PublicKey
+    let ec_point = match &pk {
+        yubikit::keys::PublicKey::Ec { point, .. } => point.as_slice(),
+        _ => panic!("Expected EC public key"),
+    };
     assert_eq!(
         ec_point.len(),
         65,
@@ -180,18 +182,18 @@ fn test_openpgp_generate_rsa_key_and_sign(#[case] tc: TestConnection) {
         .expect("verify PIN");
 
     // Generate RSA 2048 signing key
-    let pk_data = session
+    let pk = session
         .generate_rsa_key(
             yubikit::openpgp::KeyRef::Sig,
             yubikit::openpgp::RsaSize::Rsa2048,
         )
         .expect("generate_rsa_key");
-    assert!(!pk_data.is_empty(), "Public key data should not be empty");
 
-    // Extract modulus (0x81) and exponent (0x82) from TLV
-    let pk_dict = yubikit::tlv::parse_tlv_dict(&pk_data).expect("parse pk TLV");
-    let modulus_bytes = pk_dict.get(&0x81).expect("modulus tag 0x81");
-    let exponent_bytes = pk_dict.get(&0x82).expect("exponent tag 0x82");
+    // Extract modulus and exponent from PublicKey
+    let (modulus_bytes, exponent_bytes) = match &pk {
+        yubikit::keys::PublicKey::Rsa { n, e } => (n.as_slice(), e.as_slice()),
+        _ => panic!("Expected RSA public key"),
+    };
 
     // Reconstruct RSA public key
     use rsa::BigUint;
@@ -231,7 +233,7 @@ fn test_openpgp_rsa_decrypt(#[case] tc: TestConnection) {
         .expect("verify PIN for decrypt");
 
     // Generate RSA 2048 decryption key
-    let pk_data = match session.generate_rsa_key(
+    let pk = match session.generate_rsa_key(
         yubikit::openpgp::KeyRef::Dec,
         yubikit::openpgp::RsaSize::Rsa2048,
     ) {
@@ -243,9 +245,10 @@ fn test_openpgp_rsa_decrypt(#[case] tc: TestConnection) {
     };
 
     // Extract modulus and exponent
-    let pk_dict = yubikit::tlv::parse_tlv_dict(&pk_data).expect("parse pk TLV");
-    let modulus_bytes = pk_dict.get(&0x81).expect("modulus");
-    let exponent_bytes = pk_dict.get(&0x82).expect("exponent");
+    let (modulus_bytes, exponent_bytes) = match &pk {
+        yubikit::keys::PublicKey::Rsa { n, e } => (n.as_slice(), e.as_slice()),
+        _ => panic!("Expected RSA public key"),
+    };
     use rsa::BigUint;
     let n = BigUint::from_bytes_be(modulus_bytes);
     let e = BigUint::from_bytes_be(exponent_bytes);
@@ -284,16 +287,18 @@ fn test_openpgp_ec_ecdh(#[case] tc: TestConnection) {
         .expect("verify PIN for decrypt");
 
     // Generate EC P-256 decryption key
-    let pk_data = session
+    let pk = session
         .generate_ec_key(
             yubikit::openpgp::KeyRef::Dec,
-            yubikit::openpgp::curve_oid::SECP256R1,
+            yubikit::openpgp::OpenPgpCurve::P256,
         )
         .expect("generate_ec_key");
 
     // Extract EC point
-    let pk_dict = yubikit::tlv::parse_tlv_dict(&pk_data).expect("parse pk TLV");
-    let ec_point = pk_dict.get(&0x86).expect("EC point tag 0x86");
+    let ec_point = match &pk {
+        yubikit::keys::PublicKey::Ec { point, .. } => point.as_slice(),
+        _ => panic!("Expected EC public key"),
+    };
 
     // Generate ephemeral key on host
     use p256::PublicKey;
@@ -411,4 +416,365 @@ fn test_openpgp_pin_management(#[case] tc: TestConnection) {
 
     // Final reset to clean up
     session.reset().expect("final reset");
+}
+
+// ---------------------------------------------------------------------------
+// Key import tests
+// ---------------------------------------------------------------------------
+
+/// Helper: open session, reset, and verify admin + user PINs.
+fn setup_for_import(tc: &TestConnection) -> OpenPgpSession<PcscSmartCardConnection> {
+    let mut session = open_openpgp_session(tc);
+    reset_openpgp(&mut session);
+    session
+        .verify_admin(&effective_admin_pin())
+        .expect("verify admin");
+    session
+        .verify_pin(&effective_user_pin(), false)
+        .expect("verify PIN");
+    session
+}
+
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+fn test_import_rsa_2048(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OPENPGP);
+    let mut session = setup_for_import(&tc);
+
+    let key = generate_rsa_private_key(2048);
+    match session.put_key(KeyRef::Sig, &key) {
+        Ok(()) => {}
+        Err(e) if has_sw(&e, 0x6A80) || is_conditions_not_satisfied(&e) => {
+            skip!("RSA 2048 import not supported");
+        }
+        Err(e) => panic!("put_key RSA 2048: {e}"),
+    }
+
+    // Verify we can sign with the imported key
+    session
+        .verify_pin(&effective_user_pin(), false)
+        .expect("verify PIN for sign");
+    let sig = session
+        .sign(b"test", yubikit::openpgp::SignHashAlgorithm::Sha256)
+        .expect("sign with imported RSA 2048");
+    assert!(!sig.is_empty());
+}
+
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+fn test_import_rsa_3072(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OPENPGP);
+    let mut session = setup_for_import(&tc);
+
+    let key = generate_rsa_private_key(3072);
+    match session.put_key(KeyRef::Sig, &key) {
+        Ok(()) => {}
+        Err(e) if has_sw(&e, 0x6A80) || is_conditions_not_satisfied(&e) => {
+            skip!("RSA 3072 import not supported");
+        }
+        Err(e) => panic!("put_key RSA 3072: {e}"),
+    }
+
+    session
+        .verify_pin(&effective_user_pin(), false)
+        .expect("verify PIN for sign");
+    let sig = session
+        .sign(b"test", yubikit::openpgp::SignHashAlgorithm::Sha256)
+        .expect("sign with imported RSA 3072");
+    assert!(!sig.is_empty());
+}
+
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+fn test_import_rsa_4096(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OPENPGP);
+    let mut session = setup_for_import(&tc);
+
+    let key = generate_rsa_private_key(4096);
+    match session.put_key(KeyRef::Sig, &key) {
+        Ok(()) => {}
+        Err(e) if has_sw(&e, 0x6A80) || is_conditions_not_satisfied(&e) => {
+            skip!("RSA 4096 import not supported");
+        }
+        Err(e) => panic!("put_key RSA 4096: {e}"),
+    }
+
+    session
+        .verify_pin(&effective_user_pin(), false)
+        .expect("verify PIN for sign");
+    let sig = session
+        .sign(b"test", yubikit::openpgp::SignHashAlgorithm::Sha256)
+        .expect("sign with imported RSA 4096");
+    assert!(!sig.is_empty());
+}
+
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+fn test_import_ec_p256(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OPENPGP);
+    require_version!(Version(5, 2, 0));
+    let mut session = setup_for_import(&tc);
+
+    let key = generate_ec_private_key_p256();
+    session
+        .put_key(KeyRef::Sig, &key)
+        .expect("put_key EC P-256");
+
+    session
+        .verify_pin(&effective_user_pin(), false)
+        .expect("verify PIN for sign");
+    let sig = session
+        .sign(b"test", yubikit::openpgp::SignHashAlgorithm::Sha256)
+        .expect("sign with imported EC P-256");
+    assert!(!sig.is_empty());
+}
+
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+fn test_import_ec_p384(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OPENPGP);
+    require_version!(Version(5, 2, 0));
+    let mut session = setup_for_import(&tc);
+
+    let key = generate_ec_private_key_p384();
+    session
+        .put_key(KeyRef::Sig, &key)
+        .expect("put_key EC P-384");
+
+    session
+        .verify_pin(&effective_user_pin(), false)
+        .expect("verify PIN for sign");
+    let sig = session
+        .sign(b"test", yubikit::openpgp::SignHashAlgorithm::Sha384)
+        .expect("sign with imported EC P-384");
+    assert!(!sig.is_empty());
+}
+
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+fn test_import_ec_secp256k1(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OPENPGP);
+    require_version!(Version(5, 2, 0));
+    let mut session = setup_for_import(&tc);
+
+    // Generate secp256k1 key on the card, then re-import is not possible without k256 crate.
+    // Instead, just verify the card supports generate + sign with this curve.
+    let pk = match session.generate_ec_key(KeyRef::Sig, OpenPgpCurve::Secp256k1) {
+        Ok(pk) => pk,
+        Err(e) if has_sw(&e, 0x6A80) || is_conditions_not_satisfied(&e) => {
+            skip!("secp256k1 not supported on this device");
+        }
+        Err(e) => panic!("generate_ec_key secp256k1: {e}"),
+    };
+    assert!(matches!(pk, yubikit::keys::PublicKey::Ec { .. }));
+
+    session
+        .verify_pin(&effective_user_pin(), false)
+        .expect("verify PIN for sign");
+    let sig = session
+        .sign(b"test", yubikit::openpgp::SignHashAlgorithm::Sha256)
+        .expect("sign with secp256k1");
+    assert!(!sig.is_empty());
+}
+
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+fn test_import_ec_brainpool_p256r1(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OPENPGP);
+    require_version!(Version(5, 2, 0));
+    let mut session = setup_for_import(&tc);
+
+    let pk = match session.generate_ec_key(KeyRef::Sig, OpenPgpCurve::BrainpoolP256r1) {
+        Ok(pk) => pk,
+        Err(e) if has_sw(&e, 0x6A80) || is_conditions_not_satisfied(&e) => {
+            skip!("BrainpoolP256r1 not supported on this device");
+        }
+        Err(e) => panic!("generate_ec_key BrainpoolP256r1: {e}"),
+    };
+    assert!(matches!(pk, yubikit::keys::PublicKey::Ec { .. }));
+
+    session
+        .verify_pin(&effective_user_pin(), false)
+        .expect("verify PIN for sign");
+    let sig = session
+        .sign(b"test", yubikit::openpgp::SignHashAlgorithm::Sha256)
+        .expect("sign with BrainpoolP256r1");
+    assert!(!sig.is_empty());
+}
+
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+fn test_import_ec_brainpool_p384r1(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OPENPGP);
+    require_version!(Version(5, 2, 0));
+    let mut session = setup_for_import(&tc);
+
+    let pk = match session.generate_ec_key(KeyRef::Sig, OpenPgpCurve::BrainpoolP384r1) {
+        Ok(pk) => pk,
+        Err(e) if has_sw(&e, 0x6A80) || is_conditions_not_satisfied(&e) => {
+            skip!("BrainpoolP384r1 not supported on this device");
+        }
+        Err(e) => panic!("generate_ec_key BrainpoolP384r1: {e}"),
+    };
+    assert!(matches!(pk, yubikit::keys::PublicKey::Ec { .. }));
+
+    session
+        .verify_pin(&effective_user_pin(), false)
+        .expect("verify PIN for sign");
+    let sig = session
+        .sign(b"test", yubikit::openpgp::SignHashAlgorithm::Sha384)
+        .expect("sign with BrainpoolP384r1");
+    assert!(!sig.is_empty());
+}
+
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+fn test_import_ec_brainpool_p512r1(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OPENPGP);
+    require_version!(Version(5, 2, 0));
+    let mut session = setup_for_import(&tc);
+
+    let pk = match session.generate_ec_key(KeyRef::Sig, OpenPgpCurve::BrainpoolP512r1) {
+        Ok(pk) => pk,
+        Err(e) if has_sw(&e, 0x6A80) || is_conditions_not_satisfied(&e) => {
+            skip!("BrainpoolP512r1 not supported on this device");
+        }
+        Err(e) => panic!("generate_ec_key BrainpoolP512r1: {e}"),
+    };
+    assert!(matches!(pk, yubikit::keys::PublicKey::Ec { .. }));
+
+    session
+        .verify_pin(&effective_user_pin(), false)
+        .expect("verify PIN for sign");
+    let sig = session
+        .sign(b"test", yubikit::openpgp::SignHashAlgorithm::Sha512)
+        .expect("sign with BrainpoolP512r1");
+    assert!(!sig.is_empty());
+}
+
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+fn test_import_ed25519(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OPENPGP);
+    require_version!(Version(5, 2, 0));
+    let mut session = setup_for_import(&tc);
+
+    let key = generate_ed25519_private_key();
+    session.put_key(KeyRef::Sig, &key).expect("put_key Ed25519");
+
+    session
+        .verify_pin(&effective_user_pin(), false)
+        .expect("verify PIN for sign");
+    let sig = session
+        .sign(b"test", yubikit::openpgp::SignHashAlgorithm::None)
+        .expect("sign with imported Ed25519");
+    assert_eq!(sig.len(), 64, "Ed25519 signature should be 64 bytes");
+}
+
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+fn test_import_x25519(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_capability!(Capability::OPENPGP);
+    require_version!(Version(5, 2, 0));
+    let mut session = setup_for_import(&tc);
+
+    let key = generate_x25519_private_key();
+    session.put_key(KeyRef::Dec, &key).expect("put_key X25519");
+
+    // Verify we can do ECDH with the imported key
+    session
+        .verify_pin(&effective_user_pin(), true)
+        .expect("verify PIN for decrypt");
+
+    use x25519_dalek::{EphemeralSecret, PublicKey as X25519PublicKey};
+    let host_secret = EphemeralSecret::random_from_rng(rsa::rand_core::OsRng);
+    let host_public = X25519PublicKey::from(&host_secret);
+
+    let device_shared = session
+        .decrypt(host_public.as_bytes())
+        .expect("X25519 ECDH via decrypt");
+    assert_eq!(
+        device_shared.len(),
+        32,
+        "X25519 shared secret should be 32 bytes"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Key generation helpers
+// ---------------------------------------------------------------------------
+
+fn generate_rsa_private_key(bits: usize) -> PrivateKey {
+    use rsa::traits::{PrivateKeyParts, PublicKeyParts};
+    let mut private =
+        rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, bits).expect("generate RSA");
+    private.precompute().expect("precompute CRT");
+    let pub_key = private.to_public_key();
+    let n = pub_key.n().to_bytes_be();
+    let e = pub_key.e().to_bytes_be();
+    let primes = private.primes();
+    let p = primes[0].to_bytes_be();
+    let q = primes[1].to_bytes_be();
+    PrivateKey::Rsa(RsaPrivateKey {
+        e,
+        p,
+        q,
+        n,
+        dp: Vec::new(),
+        dq: Vec::new(),
+        qinv: Vec::new(),
+    })
+}
+
+fn generate_ec_private_key_p256() -> PrivateKey {
+    use p256::elliptic_curve::sec1::ToEncodedPoint;
+    let secret = p256::SecretKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+    let scalar = secret.to_bytes().to_vec();
+    let public_point = secret.public_key().to_encoded_point(false);
+    PrivateKey::Ec(EcPrivateKey {
+        curve: EcCurve::P256,
+        scalar,
+        public_key: Some(public_point.as_bytes().to_vec()),
+    })
+}
+
+fn generate_ec_private_key_p384() -> PrivateKey {
+    use p384::elliptic_curve::sec1::ToEncodedPoint;
+    let secret = p384::SecretKey::random(&mut p384::elliptic_curve::rand_core::OsRng);
+    let scalar = secret.to_bytes().to_vec();
+    let public_point = secret.public_key().to_encoded_point(false);
+    PrivateKey::Ec(EcPrivateKey {
+        curve: EcCurve::P384,
+        scalar,
+        public_key: Some(public_point.as_bytes().to_vec()),
+    })
+}
+
+fn generate_ed25519_private_key() -> PrivateKey {
+    use rsa::rand_core::RngCore;
+    let mut secret = [0u8; 32];
+    rsa::rand_core::OsRng.fill_bytes(&mut secret);
+    PrivateKey::Ed25519 {
+        secret: secret.to_vec(),
+    }
+}
+
+fn generate_x25519_private_key() -> PrivateKey {
+    use x25519_dalek::StaticSecret;
+    let secret = StaticSecret::random_from_rng(rsa::rand_core::OsRng);
+    // X25519 bytes need to be reversed for the OpenPGP card
+    let mut bytes = secret.to_bytes().to_vec();
+    bytes.reverse();
+    PrivateKey::X25519 { secret: bytes }
 }

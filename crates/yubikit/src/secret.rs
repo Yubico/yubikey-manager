@@ -18,6 +18,8 @@
 //! contents are zeroized on drop and cannot be accidentally logged or displayed.
 //! It is not part of the public API — public newtypes in each application module
 //! wrap this type to provide domain-specific secret handling.
+//! It is not part of the public API — public newtypes in each application module
+//! wrap this type to provide domain-specific secret handling.
 
 use std::fmt;
 

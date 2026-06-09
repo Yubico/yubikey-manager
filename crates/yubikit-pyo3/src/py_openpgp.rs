@@ -481,27 +481,40 @@ impl OpenPgpSession {
             .map_err(openpgp_err)
     }
 
-    /// Generate an RSA key. Returns public key bytes.
+    /// Generate an RSA key. Returns SPKI DER bytes.
     fn generate_rsa_key(&mut self, key_ref: u8, key_size: u16) -> PyResult<Vec<u8>> {
         let kr = parse_key_ref(key_ref)?;
         let rs = parse_rsa_size(key_size)?;
-        self.session_mut()?
+        let pk = self
+            .session_mut()?
             .generate_rsa_key(kr, rs)
-            .map_err(openpgp_err)
+            .map_err(openpgp_err)?;
+        pk.to_spki()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
     }
 
     /// Generate an EC key. `curve_oid` is the OID as a dotted string (e.g. "1.2.840.10045.3.1.7").
-    /// Returns public key bytes.
+    /// Returns SPKI DER bytes.
     fn generate_ec_key(&mut self, key_ref: u8, curve_oid: &str) -> PyResult<Vec<u8>> {
         let kr = parse_key_ref(key_ref)?;
-        self.session_mut()?
-            .generate_ec_key(kr, curve_oid)
-            .map_err(openpgp_err)
+        let curve = yubikit::openpgp::OpenPgpCurve::from_oid(curve_oid).map_err(openpgp_err)?;
+        let pk = self
+            .session_mut()?
+            .generate_ec_key(kr, curve)
+            .map_err(openpgp_err)?;
+        pk.to_spki()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
     }
 
+    /// Returns SPKI DER bytes.
     fn get_public_key(&mut self, key_ref: u8) -> PyResult<Vec<u8>> {
         let kr = parse_key_ref(key_ref)?;
-        self.session_mut()?.get_public_key(kr).map_err(openpgp_err)
+        let pk = self
+            .session_mut()?
+            .get_public_key(kr)
+            .map_err(openpgp_err)?;
+        pk.to_spki()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
     }
 
     /// Import a private key.
@@ -509,25 +522,38 @@ impl OpenPgpSession {
     /// `key_type` selects the variant:
     ///   0 = RSA (e, p, q)
     ///   1 = RSA-CRT (e, p, q, iqmp, dmp1, dmq1, n)
-    ///   2 = EC (scalar, optional public_key)
+    ///   2 = EC (scalar, optional public_key) — requires `curve_oid`
+    ///   3 = Ed25519 (secret)
+    ///   4 = X25519 (secret)
     ///
-    /// For RSA: `components` is [e, p, q].
-    /// For RSA-CRT: `components` is [e, p, q, iqmp, dmp1, dmq1, n].
-    /// For EC: `components` is [scalar] or [scalar, public_key].
-    fn put_key(&mut self, key_ref: u8, key_type: u8, components: Vec<Vec<u8>>) -> PyResult<()> {
+    /// `curve_oid`: Required for key_type 2. Dotted-string curve OID (e.g. "1.2.840.10045.3.1.7").
+    fn put_key(
+        &mut self,
+        key_ref: u8,
+        key_type: u8,
+        components: Vec<Vec<u8>>,
+        curve_oid: Option<&str>,
+    ) -> PyResult<()> {
+        use yubikit::keys::{EcCurve, EcPrivateKey, PrivateKey, RsaPrivateKey};
+
         let kr = parse_key_ref(key_ref)?;
         let private_key = match key_type {
             0 => {
+                // RSA standard (e, p, q)
                 if components.len() != 3 {
                     return Err(pyo3::exceptions::PyValueError::new_err(
-                        "RSA key requires [e, p, q]",
+                        "RSA standard key requires [e, p, q]",
                     ));
                 }
-                openpgp::OpenPgpPrivateKey::Rsa {
+                PrivateKey::Rsa(RsaPrivateKey {
                     e: components[0].clone(),
                     p: components[1].clone(),
                     q: components[2].clone(),
-                }
+                    qinv: Vec::new(),
+                    dp: Vec::new(),
+                    dq: Vec::new(),
+                    n: Vec::new(),
+                })
             }
             1 => {
                 if components.len() != 7 {
@@ -535,15 +561,15 @@ impl OpenPgpSession {
                         "RSA-CRT key requires [e, p, q, iqmp, dmp1, dmq1, n]",
                     ));
                 }
-                openpgp::OpenPgpPrivateKey::RsaCrt {
+                PrivateKey::Rsa(RsaPrivateKey {
                     e: components[0].clone(),
                     p: components[1].clone(),
                     q: components[2].clone(),
-                    iqmp: components[3].clone(),
-                    dmp1: components[4].clone(),
-                    dmq1: components[5].clone(),
+                    qinv: components[3].clone(),
+                    dp: components[4].clone(),
+                    dq: components[5].clone(),
                     n: components[6].clone(),
-                }
+                })
             }
             2 => {
                 if components.is_empty() || components.len() > 2 {
@@ -551,14 +577,48 @@ impl OpenPgpSession {
                         "EC key requires [scalar] or [scalar, public_key]",
                     ));
                 }
-                openpgp::OpenPgpPrivateKey::Ec {
+                let oid_str = curve_oid.ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(
+                        "curve_oid is required for EC key import",
+                    )
+                })?;
+                let curve = EcCurve::from_oid_str(oid_str).ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(format!(
+                        "Unsupported EC curve OID: {}",
+                        oid_str
+                    ))
+                })?;
+                PrivateKey::Ec(EcPrivateKey {
+                    curve,
                     scalar: components[0].clone(),
                     public_key: components.get(1).cloned(),
+                })
+            }
+            3 => {
+                // Ed25519
+                if components.len() != 1 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "Ed25519 key requires [secret]",
+                    ));
+                }
+                PrivateKey::Ed25519 {
+                    secret: components[0].clone(),
+                }
+            }
+            4 => {
+                // X25519
+                if components.len() != 1 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "X25519 key requires [secret]",
+                    ));
+                }
+                PrivateKey::X25519 {
+                    secret: components[0].clone(),
                 }
             }
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid key type: {} (expected 0=RSA, 1=RSA-CRT, 2=EC)",
+                    "Invalid key type: {} (expected 0=RSA, 1=RSA-CRT, 2=EC, 3=Ed25519, 4=X25519)",
                     key_type
                 )));
             }

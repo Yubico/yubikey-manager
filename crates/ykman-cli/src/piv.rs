@@ -10,10 +10,11 @@ use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
 use x509_cert::time::Validity;
 use yubikit::device::YubiKeyDevice;
+use yubikit::keys::{PrivateKey, PublicKey};
 use yubikit::management::Capability;
 use yubikit::piv::{
     DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, ManagementKey, ManagementKeyType, ObjectId,
-    PinPolicy, PivPin, PivPrivateKey, PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
+    PinPolicy, PivPin, PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
 };
 
 use yubikit::smartcard::SmartCardConnection;
@@ -491,10 +492,11 @@ fn parse_cert_info(cert_der: &[u8]) -> Option<CertInfo> {
     let not_before = tbs.validity.not_before.to_string();
     let not_after = tbs.validity.not_after.to_string();
 
-    let key_type =
-        KeyType::from_public_key_der(&tbs.subject_public_key_info.to_der().unwrap_or_default())
-            .map(|kt| format!("{kt}"))
-            .unwrap_or_else(|_| "Unknown".to_string());
+    let key_type = PublicKey::from_spki(&tbs.subject_public_key_info.to_der().unwrap_or_default())
+        .ok()
+        .and_then(|pk| KeyType::from_public_key(&pk).ok())
+        .map(|kt| format!("{kt}"))
+        .unwrap_or_else(|| "Unknown".to_string());
 
     Some(CertInfo {
         key_type,
@@ -730,9 +732,13 @@ pub fn run_keys_generate(
         ensure_pin(&mut session, pin)?;
     }
 
-    let spki_der = session
+    let public_key = session
         .generate_key(slot, key_type, pp, tp)
         .map_err(|e| CliError(format!("Failed to generate key: {e}")))?;
+
+    let spki_der = public_key
+        .to_spki()
+        .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
 
     match format {
         CliFormat::Der => {
@@ -772,7 +778,7 @@ pub fn run_keys_import(
     let der = decrypt_private_key_data(&data, password)?;
 
     // Parse the private key (auto-detects algorithm from PKCS#8)
-    let private_key = PivPrivateKey::from_pkcs8(&der)
+    let private_key = PrivateKey::from_pkcs8(&der)
         .map_err(|_| CliError("Could not parse private key from file.".into()))?;
 
     let mut session = open_session(dev, scp_params)?;
@@ -846,10 +852,12 @@ pub fn run_keys_export(
     let mut session = open_session(dev, scp_params)?;
 
     // Try metadata first (5.3.0+)
-    let (spki_der, from_cert) = if let Ok(meta) = session.get_slot_metadata(slot)
-        && !meta.public_key_der.is_empty()
-    {
-        (meta.public_key_der, false)
+    let (spki_der, from_cert) = if let Ok(meta) = session.get_slot_metadata(slot) {
+        let der = meta
+            .public_key
+            .to_spki()
+            .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
+        (der, false)
     } else {
         // Fall back to reading public key from stored certificate
         let cert_der = session
@@ -1311,7 +1319,9 @@ fn resolve_public_key(
         } else {
             data
         };
-        let kt = KeyType::from_public_key_der(&der)
+        let pk = PublicKey::from_spki(&der)
+            .map_err(|_| CliError("Could not determine key type from public key file.".into()))?;
+        let kt = KeyType::from_public_key(&pk)
             .map_err(|_| CliError("Could not determine key type from public key file.".into()))?;
         Ok((kt, der))
     } else {
@@ -1321,7 +1331,11 @@ fn resolve_public_key(
             ))
         })?;
         let kt = metadata.key_type;
-        Ok((kt, metadata.public_key_der))
+        let der = metadata
+            .public_key
+            .to_spki()
+            .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
+        Ok((kt, der))
     }
 }
 

@@ -48,16 +48,6 @@ fn bytes2int<'py>(py: Python<'py>, data: &[u8]) -> PyResult<Bound<'py, PyAny>> {
 }
 
 #[pyfunction]
-fn oid_to_string(data: &[u8]) -> PyResult<String> {
-    tlv::oid_to_string(data).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-}
-
-#[pyfunction]
-fn oid_from_string(data: &str) -> PyResult<Vec<u8>> {
-    tlv::oid_from_string(data).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-}
-
-#[pyfunction]
 fn set_override_version(major: u8, minor: u8, patch: u8) {
     core::set_override_version(core::Version(major, minor, patch));
 }
@@ -72,8 +62,6 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(tlv_encode, &m)?)?;
     m.add_function(wrap_pyfunction!(int2bytes, &m)?)?;
     m.add_function(wrap_pyfunction!(bytes2int, &m)?)?;
-    m.add_function(wrap_pyfunction!(oid_to_string, &m)?)?;
-    m.add_function(wrap_pyfunction!(oid_from_string, &m)?)?;
     m.add_function(wrap_pyfunction!(set_override_version, &m)?)?;
     m.add_class::<crate::py_smartcard::SmartCardProtocol>()?;
     m.add_class::<crate::py_otp::OtpProtocol>()?;

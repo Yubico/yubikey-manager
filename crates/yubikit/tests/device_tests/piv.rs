@@ -147,7 +147,9 @@ fn test_piv_generate_key_ec_p256(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate_key");
+        .expect("generate_key")
+        .to_spki()
+        .unwrap();
     assert!(!spki_der.is_empty());
     assert!(spki_der.len() > 50, "SPKI should be substantial");
 }
@@ -171,7 +173,8 @@ fn test_piv_generate_key_rsa2048(#[case] tc: TestConnection) {
         PinPolicy::Default,
         TouchPolicy::Never,
     ) {
-        Ok(spki_der) => {
+        Ok(pub_key) => {
+            let spki_der = pub_key.to_spki().unwrap();
             assert!(!spki_der.is_empty());
             assert!(spki_der.len() > 256, "RSA SPKI should be large");
         }
@@ -205,7 +208,9 @@ fn test_piv_sign_ec_p256(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate_key");
+        .expect("generate_key")
+        .to_spki()
+        .unwrap();
 
     let message = b"test data to sign";
     let hash = <sha2::Sha256 as sha2::Digest>::digest(message);
@@ -252,7 +257,9 @@ fn test_piv_self_signed_cert_ec(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate_key");
+        .expect("generate_key")
+        .to_spki()
+        .unwrap();
 
     use x509_cert::builder::{Builder, CertificateBuilder, Profile};
     use x509_cert::name::Name;
@@ -340,7 +347,9 @@ fn test_piv_generate_csr(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate_key");
+        .expect("generate_key")
+        .to_spki()
+        .unwrap();
 
     use x509_cert::builder::{Builder, RequestBuilder};
     use x509_cert::name::Name;
@@ -404,7 +413,9 @@ fn test_piv_self_signed_cert_rsa(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate_key");
+        .expect("generate_key")
+        .to_spki()
+        .unwrap();
 
     use x509_cert::builder::{Builder, CertificateBuilder, Profile};
     use x509_cert::name::Name;
@@ -467,7 +478,9 @@ fn test_piv_decrypt_rsa(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate_key");
+        .expect("generate_key")
+        .to_spki()
+        .unwrap();
 
     // Encrypt a message with the public key
     use rsa::pkcs8::DecodePublicKey;
@@ -513,7 +526,9 @@ fn test_piv_ecdh_p256(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate_key");
+        .expect("generate_key")
+        .to_spki()
+        .unwrap();
 
     // Generate an ephemeral key pair on the host
     use p256::PublicKey;
@@ -570,10 +585,15 @@ fn test_piv_generate_mldsa44(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Default,
         )
-        .expect("generate_key MlDsa44");
+        .expect("generate_key MlDsa44")
+        .to_spki()
+        .unwrap();
     assert!(!spki_der.is_empty());
     assert_eq!(
-        KeyType::from_public_key_der(&spki_der).expect("detect ML-DSA key type"),
+        KeyType::from_public_key(
+            &yubikit::keys::PublicKey::from_spki(&spki_der).expect("parse SPKI")
+        )
+        .expect("detect ML-DSA key type"),
         KeyType::MlDsa44
     );
 
@@ -606,10 +626,15 @@ fn test_piv_generate_mlkem768(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Default,
         )
-        .expect("generate_key MlKem768");
+        .expect("generate_key MlKem768")
+        .to_spki()
+        .unwrap();
     assert!(!spki_der.is_empty());
     assert_eq!(
-        KeyType::from_public_key_der(&spki_der).expect("detect ML-KEM key type"),
+        KeyType::from_public_key(
+            &yubikit::keys::PublicKey::from_spki(&spki_der).expect("parse SPKI")
+        )
+        .expect("detect ML-KEM key type"),
         KeyType::MlKem768
     );
 }
@@ -639,7 +664,9 @@ fn test_piv_mldsa44_verify(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Default,
         )
-        .expect("generate_key MlDsa44");
+        .expect("generate_key MlDsa44")
+        .to_spki()
+        .unwrap();
 
     let msg = b"test message for ml-dsa44 verification";
     session
@@ -687,7 +714,9 @@ fn test_piv_mlkem768_decapsulate(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Default,
         )
-        .expect("generate_key MlKem768");
+        .expect("generate_key MlKem768")
+        .to_spki()
+        .unwrap();
 
     // Extract raw encapsulation key bytes from SPKI
     let spki = SubjectPublicKeyInfoRef::from_der(&spki_der).expect("parse SPKI");
@@ -805,7 +834,9 @@ fn test_piv_attest_and_metadata(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate_key");
+        .expect("generate_key")
+        .to_spki()
+        .unwrap();
 
     // Attest key
     let cert_der = session.attest_key(Slot::Retired2).expect("attest_key");
@@ -918,7 +949,9 @@ fn test_piv_move_and_delete_key(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate_key");
+        .expect("generate_key")
+        .to_spki()
+        .unwrap();
 
     // Move to Retired4
     session
@@ -967,7 +1000,9 @@ fn test_piv_generate_and_sign_ec_p384(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate P-384 key");
+        .expect("generate P-384 key")
+        .to_spki()
+        .unwrap();
     assert!(!pub_key_der.is_empty(), "Expected public key data");
 
     // Sign with P-384
@@ -1020,7 +1055,9 @@ fn test_piv_generate_and_sign_ed25519(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate Ed25519 key");
+        .expect("generate Ed25519 key")
+        .to_spki()
+        .unwrap();
     assert!(!pub_key_der.is_empty(), "Expected public key data");
 
     // Sign with Ed25519
@@ -1073,7 +1110,9 @@ fn test_piv_x25519_key_agreement(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate X25519 key");
+        .expect("generate X25519 key")
+        .to_spki()
+        .unwrap();
     let pub_key_bytes = x509_cert::spki::SubjectPublicKeyInfoOwned::from_der(&spki_der)
         .unwrap()
         .subject_public_key
@@ -1244,7 +1283,9 @@ fn test_piv_compressed_cert(#[case] tc: TestConnection) {
             PinPolicy::Default,
             TouchPolicy::Never,
         )
-        .expect("generate_key");
+        .expect("generate_key")
+        .to_spki()
+        .unwrap();
 
     session
         .verify_pin(&effective_piv_pin())

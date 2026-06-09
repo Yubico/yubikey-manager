@@ -1,6 +1,9 @@
 use pyo3::prelude::*;
+use yubikit::keys::{
+    EcCurve, EcPrivateKey, MlDsaParameterSet, MlKemParameterSet, PrivateKey, RsaPrivateKey,
+};
 use yubikit::piv::{
-    self, KeyType, ManagementKey, ManagementKeyType, PinPolicy, PivPin, PivPrivateKey,
+    self, KeyType, ManagementKey, ManagementKeyType, PinPolicy, PivPin,
     PivSession as RustPivSession, Slot, TouchPolicy,
 };
 
@@ -94,6 +97,63 @@ fn parse_piv_pin(pin: &str) -> PyResult<PivPin> {
 fn parse_management_key(key_type: ManagementKeyType, key: &[u8]) -> PyResult<ManagementKey> {
     ManagementKey::new(key_type, key)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+}
+
+/// Construct a PrivateKey from a KeyType and raw key bytes.
+///
+/// For RSA: raw bytes are PKCS#1 RSAPrivateKey DER.
+/// For EC: raw bytes are the scalar.
+/// For Ed25519/X25519: raw 32-byte secret.
+/// For ML-DSA/ML-KEM: raw private key bytes.
+fn private_key_from_raw(kt: KeyType, raw: &[u8]) -> PyResult<PrivateKey> {
+    let err = |msg: &str| pyo3::exceptions::PyValueError::new_err(msg.to_string());
+
+    match kt {
+        KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
+            let rsa = RsaPrivateKey::from_pkcs1(raw).map_err(|e| err(&e.to_string()))?;
+            Ok(PrivateKey::Rsa(rsa))
+        }
+        KeyType::EccP256 => Ok(PrivateKey::Ec(EcPrivateKey {
+            curve: EcCurve::P256,
+            scalar: raw.to_vec(),
+            public_key: None,
+        })),
+        KeyType::EccP384 => Ok(PrivateKey::Ec(EcPrivateKey {
+            curve: EcCurve::P384,
+            scalar: raw.to_vec(),
+            public_key: None,
+        })),
+        KeyType::Ed25519 => Ok(PrivateKey::Ed25519 {
+            secret: raw.to_vec(),
+        }),
+        KeyType::X25519 => Ok(PrivateKey::X25519 {
+            secret: raw.to_vec(),
+        }),
+        KeyType::MlDsa44 => Ok(PrivateKey::MlDsa {
+            parameter_set: MlDsaParameterSet::MlDsa44,
+            private_key: raw.to_vec(),
+        }),
+        KeyType::MlDsa65 => Ok(PrivateKey::MlDsa {
+            parameter_set: MlDsaParameterSet::MlDsa65,
+            private_key: raw.to_vec(),
+        }),
+        KeyType::MlDsa87 => Ok(PrivateKey::MlDsa {
+            parameter_set: MlDsaParameterSet::MlDsa87,
+            private_key: raw.to_vec(),
+        }),
+        KeyType::MlKem512 => Ok(PrivateKey::MlKem {
+            parameter_set: MlKemParameterSet::MlKem512,
+            private_key: raw.to_vec(),
+        }),
+        KeyType::MlKem768 => Ok(PrivateKey::MlKem {
+            parameter_set: MlKemParameterSet::MlKem768,
+            private_key: raw.to_vec(),
+        }),
+        KeyType::MlKem1024 => Ok(PrivateKey::MlKem {
+            parameter_set: MlKemParameterSet::MlKem1024,
+            private_key: raw.to_vec(),
+        }),
+    }
 }
 
 #[pyclass]
@@ -273,12 +333,16 @@ impl PivSession {
     fn get_slot_metadata(&mut self, slot: u8) -> PyResult<(u8, u8, u8, bool, Vec<u8>)> {
         let s = parse_slot(slot)?;
         let m = self.session_mut()?.get_slot_metadata(s).map_err(piv_err)?;
+        let pk_der = m
+            .public_key
+            .to_spki()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         Ok((
             m.key_type as u8,
             m.pin_policy as u8,
             m.touch_policy as u8,
             m.generated,
-            m.public_key_der,
+            pk_der,
         ))
     }
 
@@ -344,7 +408,7 @@ impl PivSession {
         self.session_mut()?.delete_certificate(s).map_err(piv_err)
     }
 
-    /// Import a private key. `key_der` is the raw key material.
+    /// Import a private key. `key_der` is the raw key material (PKCS#1 for RSA, scalar for EC, etc.).
     fn put_key(
         &mut self,
         slot: u8,
@@ -357,13 +421,13 @@ impl PivSession {
         let kt = parse_key_type(key_type)?;
         let pp = parse_pin_policy(pin_policy)?;
         let tp = parse_touch_policy(touch_policy)?;
-        let private_key = PivPrivateKey::new(kt, key_der);
+        let private_key = private_key_from_raw(kt, key_der)?;
         self.session_mut()?
             .put_key(s, &private_key, pp, tp)
             .map_err(piv_err)
     }
 
-    /// Generate a key pair. Returns public key bytes.
+    /// Generate a key pair. Returns public key SPKI DER bytes.
     fn generate_key(
         &mut self,
         slot: u8,
@@ -375,9 +439,13 @@ impl PivSession {
         let kt = parse_key_type(key_type)?;
         let pp = parse_pin_policy(pin_policy)?;
         let tp = parse_touch_policy(touch_policy)?;
-        self.session_mut()?
+        let public_key = self
+            .session_mut()?
             .generate_key(s, kt, pp, tp)
-            .map_err(piv_err)
+            .map_err(piv_err)?;
+        public_key
+            .to_spki()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
     }
 
     /// Attest a key in a slot. Returns DER certificate.

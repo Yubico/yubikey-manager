@@ -397,7 +397,7 @@ fn format_algorithm(attrs: &yubikit::openpgp::AlgorithmAttributes) -> String {
     match attrs {
         yubikit::openpgp::AlgorithmAttributes::Rsa(rsa) => format!("RSA{}", rsa.n_len),
         yubikit::openpgp::AlgorithmAttributes::Ec(ec) => {
-            ec.oid_string().unwrap_or_else(|_| "Unknown EC".to_string())
+            ec.oid_str().unwrap_or_else(|_| "Unknown EC".to_string())
         }
     }
 }

@@ -52,17 +52,20 @@ use sha2::Digest;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 use x509_cert::der;
+use x509_cert::der::Decode;
 use x509_cert::der::asn1::BitString;
-use x509_cert::der::{Decode, Encode};
 use x509_cert::spki::{
     self, AlgorithmIdentifierOwned, DynSignatureAlgorithmIdentifier, EncodePublicKey,
-    ObjectIdentifier, SignatureBitStringEncoding, SubjectPublicKeyInfoOwned,
+    ObjectIdentifier, SignatureBitStringEncoding,
 };
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::core::{Version, int2bytes, patch_version};
+use crate::keys::{
+    EcCurve, KeyAlgorithm, KeyError, MlDsaParameterSet, MlKemParameterSet, PrivateKey, PublicKey,
+};
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
-use crate::tlv::{parse_tlv_dict, tlv_append, tlv_encode, tlv_parse, tlv_unpack};
+use crate::tlv::{parse_tlv_dict, tlv_append, tlv_encode, tlv_unpack};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -219,67 +222,9 @@ impl KeyType {
         }
     }
 
-    /// Detect key type from a SubjectPublicKeyInfo DER encoding.
-    pub fn from_public_key_der(der: &[u8]) -> Result<Self, PivError> {
-        Self::detect_algorithm_from_der(der, false)
-    }
-
-    /// Detect key type from a PKCS#8 PrivateKeyInfo DER encoding.
-    pub fn from_private_key_der(der: &[u8]) -> Result<Self, PivError> {
-        Self::detect_algorithm_from_der(der, true)
-    }
-
-    fn detect_algorithm_from_der(der: &[u8], is_private: bool) -> Result<Self, PivError> {
-        use crate::keys::{KeyAlgorithmInfo, detect_key_algorithm};
-
-        let info = detect_key_algorithm(der, is_private)
-            .map_err(|e| PivError::InvalidData(e.to_string()))?;
-
-        match info {
-            KeyAlgorithmInfo::Rsa { bit_len } => match bit_len {
-                1024 => Ok(Self::Rsa1024),
-                2048 => Ok(Self::Rsa2048),
-                3072 => Ok(Self::Rsa3072),
-                4096 => Ok(Self::Rsa4096),
-                _ => Err(PivError::InvalidData(format!(
-                    "Unsupported RSA key size: {bit_len}"
-                ))),
-            },
-            KeyAlgorithmInfo::Ec { curve_oid } => {
-                let oid = ObjectIdentifier::from_bytes(&curve_oid)
-                    .map_err(|_| PivError::InvalidData("Invalid EC curve OID encoding".into()))?;
-                if oid == OID_CURVE_P256 {
-                    Ok(Self::EccP256)
-                } else if oid == OID_CURVE_P384 {
-                    Ok(Self::EccP384)
-                } else {
-                    Err(PivError::InvalidData("Unsupported EC curve".into()))
-                }
-            }
-            KeyAlgorithmInfo::Oid { oid } => {
-                let oid = ObjectIdentifier::from_bytes(&oid)
-                    .map_err(|_| PivError::InvalidData("Invalid OID encoding".into()))?;
-                if oid == OID_ED25519_KEY {
-                    Ok(Self::Ed25519)
-                } else if oid == OID_X25519_KEY {
-                    Ok(Self::X25519)
-                } else if oid == OID_ML_DSA_44 {
-                    Ok(Self::MlDsa44)
-                } else if oid == OID_ML_DSA_65 {
-                    Ok(Self::MlDsa65)
-                } else if oid == OID_ML_DSA_87 {
-                    Ok(Self::MlDsa87)
-                } else if oid == OID_ML_KEM_512 {
-                    Ok(Self::MlKem512)
-                } else if oid == OID_ML_KEM_768 {
-                    Ok(Self::MlKem768)
-                } else if oid == OID_ML_KEM_1024 {
-                    Ok(Self::MlKem1024)
-                } else {
-                    Err(PivError::InvalidData("Unknown key algorithm OID".into()))
-                }
-            }
-        }
+    /// Determine the key type from a [`PublicKey`].
+    pub fn from_public_key(public_key: &PublicKey) -> Result<Self, PivError> {
+        Self::try_from(&public_key.algorithm())
     }
 }
 
@@ -304,73 +249,38 @@ impl fmt::Display for KeyType {
     }
 }
 
-// ---------------------------------------------------------------------------
-// PivPrivateKey
-// ---------------------------------------------------------------------------
+impl TryFrom<&KeyAlgorithm> for KeyType {
+    type Error = PivError;
 
-/// A private key for import into a PIV slot.
-///
-/// This type encapsulates both the algorithm and the raw key material.
-/// Construct via [`PivPrivateKey::from_pkcs8`] to parse a PKCS#8-encoded key,
-/// or via [`PivPrivateKey::new`] for pre-extracted key data.
-///
-/// The key material is automatically zeroized when dropped.
-pub struct PivPrivateKey {
-    key_type: KeyType,
-    /// Inner key data: PKCS#1 RSAPrivateKey for RSA, raw scalar for EC/Ed25519/X25519,
-    /// raw seed bytes for ML-DSA/ML-KEM.
-    key_data: Zeroizing<Vec<u8>>,
-}
-
-impl PivPrivateKey {
-    /// Create a `PivPrivateKey` from pre-extracted inner key bytes.
-    ///
-    /// `key_data` should be the inner private key material:
-    /// - RSA: PKCS#1 RSAPrivateKey DER
-    /// - EC (P-256/P-384): raw scalar bytes or SEC1 ECPrivateKey DER
-    /// - Ed25519/X25519: 32-byte secret key
-    /// - ML-DSA/ML-KEM: raw private key bytes
-    pub fn new(key_type: KeyType, key_data: impl Into<Vec<u8>>) -> Self {
-        Self {
-            key_type,
-            key_data: Zeroizing::new(key_data.into()),
+    fn try_from(algo: &KeyAlgorithm) -> Result<Self, Self::Error> {
+        match algo {
+            KeyAlgorithm::Rsa(1024) => Ok(Self::Rsa1024),
+            KeyAlgorithm::Rsa(2048) => Ok(Self::Rsa2048),
+            KeyAlgorithm::Rsa(3072) => Ok(Self::Rsa3072),
+            KeyAlgorithm::Rsa(4096) => Ok(Self::Rsa4096),
+            KeyAlgorithm::Rsa(bits) => Err(PivError::NotSupported(format!(
+                "Unsupported RSA key size: {bits}"
+            ))),
+            KeyAlgorithm::Ec(EcCurve::P256) => Ok(Self::EccP256),
+            KeyAlgorithm::Ec(EcCurve::P384) => Ok(Self::EccP384),
+            KeyAlgorithm::Ec(curve) => Err(PivError::NotSupported(format!(
+                "Unsupported EC curve for PIV: {curve:?}"
+            ))),
+            KeyAlgorithm::Ed25519 => Ok(Self::Ed25519),
+            KeyAlgorithm::X25519 => Ok(Self::X25519),
+            KeyAlgorithm::MlDsa(MlDsaParameterSet::MlDsa44) => Ok(Self::MlDsa44),
+            KeyAlgorithm::MlDsa(MlDsaParameterSet::MlDsa65) => Ok(Self::MlDsa65),
+            KeyAlgorithm::MlDsa(MlDsaParameterSet::MlDsa87) => Ok(Self::MlDsa87),
+            KeyAlgorithm::MlKem(MlKemParameterSet::MlKem512) => Ok(Self::MlKem512),
+            KeyAlgorithm::MlKem(MlKemParameterSet::MlKem768) => Ok(Self::MlKem768),
+            KeyAlgorithm::MlKem(MlKemParameterSet::MlKem1024) => Ok(Self::MlKem1024),
         }
     }
-
-    /// Parse a PKCS#8 PrivateKeyInfo DER encoding and extract the private key.
-    ///
-    /// This auto-detects the algorithm from the AlgorithmIdentifier and extracts
-    /// the inner key material suitable for import.
-    pub fn from_pkcs8(pkcs8_der: &[u8]) -> Result<Self, PivError> {
-        let key_type = KeyType::from_private_key_der(pkcs8_der)?;
-        let parsed = crate::keys::parse_pkcs8(pkcs8_der)
-            .map_err(|e| PivError::InvalidData(e.to_string()))?;
-        Ok(Self {
-            key_type,
-            key_data: parsed.key_data,
-        })
-    }
-
-    /// Returns the algorithm type of this key.
-    pub fn key_type(&self) -> KeyType {
-        self.key_type
-    }
-
-    /// Access the raw key bytes (for building APDU data).
-    fn key_data(&self) -> &[u8] {
-        &self.key_data
-    }
 }
 
-impl fmt::Debug for PivPrivateKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PivPrivateKey({:?})", self.key_type)
-    }
-}
-
-impl Drop for PivPrivateKey {
-    fn drop(&mut self) {
-        self.key_data.zeroize();
+impl From<&KeyError> for PivError {
+    fn from(e: &KeyError) -> Self {
+        PivError::InvalidData(e.to_string())
     }
 }
 
@@ -742,8 +652,8 @@ pub struct SlotMetadata {
     pub touch_policy: TouchPolicy,
     /// Whether the key was generated on-device (vs. imported).
     pub generated: bool,
-    /// DER-encoded SubjectPublicKeyInfo of the key's public component.
-    pub public_key_der: Vec<u8>,
+    /// The public key stored in the slot.
+    pub public_key: PublicKey,
 }
 
 /// Metadata about biometric (on-card comparison) verification.
@@ -1712,14 +1622,14 @@ impl<C: SmartCardConnection> PivSession<C> {
             .get(&TAG_METADATA_PUBLIC_KEY)
             .ok_or_else(|| PivError::InvalidData("Missing public key in metadata".into()))?;
 
-        let public_key_der = device_pubkey_to_spki(key_type, device_bytes)?;
+        let public_key = device_pubkey_to_public_key(key_type, device_bytes)?;
 
         Ok(SlotMetadata {
             key_type,
             pin_policy,
             touch_policy,
             generated: origin == ORIGIN_GENERATED,
-            public_key_der,
+            public_key,
         })
     }
 
@@ -1942,24 +1852,19 @@ impl<C: SmartCardConnection> PivSession<C> {
     // Key management
     // -----------------------------------------------------------------------
 
-    /// Import a private key (DER encoded) into a slot.
+    /// Import a private key into a slot.
     ///
-    /// For RSA keys, the DER should be PKCS#1 RSAPrivateKey.
-    /// For EC keys, the DER should be SEC1 ECPrivateKey or raw private key bytes.
-    /// For Ed25519/X25519, provide raw 32-byte secret key.
-    ///
-    /// `key_der` contains the raw key material as TLV-encoded components:
-    /// - RSA: p, q, dp, dq, qinv as big-endian integers
-    /// - EC: private scalar bytes
-    /// - Ed25519/X25519: raw 32-byte secret
+    /// The key algorithm is determined from the [`PrivateKey`] variant.
+    /// Only algorithms supported by PIV are accepted (RSA 1024–4096, P-256/P-384,
+    /// Ed25519, X25519, ML-DSA, ML-KEM).
     pub fn put_key(
         &mut self,
         slot: Slot,
-        private_key: &PivPrivateKey,
+        private_key: &PrivateKey,
         pin_policy: PinPolicy,
         touch_policy: TouchPolicy,
     ) -> Result<(), PivError> {
-        let key_type = private_key.key_type();
+        let key_type = KeyType::try_from(&private_key.algorithm())?;
         log::debug!("Importing key to slot {:?}", slot);
         check_key_support(
             self.version,
@@ -1970,7 +1875,7 @@ impl<C: SmartCardConnection> PivSession<C> {
             false,
         )?;
 
-        let mut data = build_put_key_data(key_type, private_key.key_data())?;
+        let mut data = build_put_key_data(key_type, private_key)?;
 
         if pin_policy != PinPolicy::Default {
             data.extend_from_slice(&tlv_encode(
@@ -1991,15 +1896,14 @@ impl<C: SmartCardConnection> PivSession<C> {
         Ok(())
     }
 
-    /// Generate a key pair in a slot. Returns the public key as DER-encoded
-    /// SubjectPublicKeyInfo.
+    /// Generate a key pair in a slot. Returns the public key.
     pub fn generate_key(
         &mut self,
         slot: Slot,
         key_type: KeyType,
         pin_policy: PinPolicy,
         touch_policy: TouchPolicy,
-    ) -> Result<Vec<u8>, PivError> {
+    ) -> Result<PublicKey, PivError> {
         log::debug!("Generating {:?} key in slot {:?}", key_type, slot);
         check_key_support(
             self.version,
@@ -2029,9 +1933,9 @@ impl<C: SmartCardConnection> PivSession<C> {
             self.protocol
                 .send_apdu(0, INS_GENERATE_ASYMMETRIC, 0, slot as u8, &request)?;
 
-        // Convert device encoding to SPKI DER
+        // Convert device encoding to PublicKey
         let device_bytes = tlv_unpack(0x7F49, &response)?;
-        let result = device_pubkey_to_spki(key_type, &device_bytes)?;
+        let result = device_pubkey_to_public_key(key_type, &device_bytes)?;
         log::info!("Key generated in slot {:?}", slot);
         Ok(result)
     }
@@ -2178,126 +2082,59 @@ impl<C: SmartCardConnection> PivSession<C> {
 // Key import helper
 // ---------------------------------------------------------------------------
 
-/// Build the TLV data payload for INS_IMPORT_KEY from raw key material.
-///
-/// For RSA: `key_der` should be a PKCS#1 DER-encoded RSAPrivateKey.
-/// For EC (P-256/P-384): `key_der` should be a SEC1 DER-encoded ECPrivateKey, or just the raw
-/// private scalar bytes (32 or 48 bytes).
-/// For Ed25519: raw 32-byte secret.
-/// For X25519: raw 32-byte secret.
-fn build_put_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Zeroizing<Vec<u8>>, PivError> {
-    match key_type {
-        KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
-            build_rsa_key_data(key_type, key_der)
+/// Build the TLV data payload for INS_IMPORT_KEY from a PrivateKey.
+fn build_put_key_data(
+    key_type: KeyType,
+    private_key: &PrivateKey,
+) -> Result<Zeroizing<Vec<u8>>, PivError> {
+    match private_key {
+        PrivateKey::Rsa(rsa) => {
+            let ln = (key_type.bit_len() / 16) as usize; // half-prime length in bytes
+
+            // Verify exponent is 65537
+            let e_val = bytes_to_u32(strip_leading_zeros(&rsa.e));
+            if e_val != 65537 {
+                return Err(PivError::NotSupported("RSA exponent must be 65537".into()));
+            }
+
+            let p = Zeroizing::new(bigint_to_bytes(&rsa.p, ln));
+            let q = Zeroizing::new(bigint_to_bytes(&rsa.q, ln));
+            let dp = Zeroizing::new(bigint_to_bytes(&rsa.dp, ln));
+            let dq = Zeroizing::new(bigint_to_bytes(&rsa.dq, ln));
+            let qinv = Zeroizing::new(bigint_to_bytes(&rsa.qinv, ln));
+
+            let mut data = Zeroizing::new(Vec::new());
+            tlv_append(&mut data, 0x01, &p);
+            tlv_append(&mut data, 0x02, &q);
+            tlv_append(&mut data, 0x03, &dp);
+            tlv_append(&mut data, 0x04, &dq);
+            tlv_append(&mut data, 0x05, &qinv);
+            Ok(data)
         }
-        KeyType::EccP256 | KeyType::EccP384 => build_ec_key_data(key_type, key_der),
-        KeyType::Ed25519 => {
-            if key_der.len() != 32 {
+        PrivateKey::Ec(ec) => {
+            let scalar_len = ec.curve.scalar_len();
+            let scalar = Zeroizing::new(bigint_to_bytes(&ec.scalar, scalar_len));
+            Ok(Zeroizing::new(tlv_encode(0x06, &scalar)))
+        }
+        PrivateKey::Ed25519 { secret } => {
+            if secret.len() != 32 {
                 return Err(PivError::InvalidData(
                     "Ed25519 secret key must be 32 bytes".into(),
                 ));
             }
-            Ok(Zeroizing::new(tlv_encode(0x07, key_der)))
+            Ok(Zeroizing::new(tlv_encode(0x07, secret)))
         }
-        KeyType::X25519 => {
-            if key_der.len() != 32 {
+        PrivateKey::X25519 { secret } => {
+            if secret.len() != 32 {
                 return Err(PivError::InvalidData(
                     "X25519 secret key must be 32 bytes".into(),
                 ));
             }
-            Ok(Zeroizing::new(tlv_encode(0x08, key_der)))
+            Ok(Zeroizing::new(tlv_encode(0x08, secret)))
         }
-        KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => {
-            Ok(Zeroizing::new(tlv_encode(0x09, key_der)))
-        }
-        KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
-            Ok(Zeroizing::new(tlv_encode(0x0A, key_der)))
-        }
+        PrivateKey::MlDsa { private_key, .. } => Ok(Zeroizing::new(tlv_encode(0x09, private_key))),
+        PrivateKey::MlKem { private_key, .. } => Ok(Zeroizing::new(tlv_encode(0x0A, private_key))),
     }
-}
-
-/// Parse PKCS#1 RSAPrivateKey DER and build TLV import data.
-fn build_rsa_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Zeroizing<Vec<u8>>, PivError> {
-    let ln = (key_type.bit_len() / 16) as usize; // half-prime length in bytes
-
-    // Parse PKCS#1 RSAPrivateKey SEQUENCE
-    let (_, seq_off, seq_len, _) =
-        tlv_parse(key_der, 0).map_err(|_| PivError::InvalidData("Invalid RSA DER".into()))?;
-    let seq_data = &key_der[seq_off..seq_off + seq_len];
-
-    // Parse fields: version, n, e, d, p, q, dp, dq, qinv
-    let mut offset = 0;
-    let mut fields = Vec::new();
-    while offset < seq_data.len() {
-        let (_, val_off, val_len, end) = tlv_parse(seq_data, offset)
-            .map_err(|_| PivError::InvalidData("Invalid RSA key field".into()))?;
-        fields.push(&seq_data[val_off..val_off + val_len]);
-        offset = end;
-    }
-
-    if fields.len() < 9 {
-        return Err(PivError::InvalidData(
-            "RSA key missing required fields".into(),
-        ));
-    }
-
-    // fields: [version, n, e, d, p, q, dp, dq, qinv]
-    let e = fields[2];
-    // Verify exponent is 65537
-    let e_val = bytes_to_u32(strip_leading_zeros(e));
-    if e_val != 65537 {
-        return Err(PivError::NotSupported("RSA exponent must be 65537".into()));
-    }
-
-    let p = Zeroizing::new(bigint_to_bytes(fields[4], ln));
-    let q = Zeroizing::new(bigint_to_bytes(fields[5], ln));
-    let dp = Zeroizing::new(bigint_to_bytes(fields[6], ln));
-    let dq = Zeroizing::new(bigint_to_bytes(fields[7], ln));
-    let qinv = Zeroizing::new(bigint_to_bytes(fields[8], ln));
-
-    let mut data = Zeroizing::new(Vec::new());
-    tlv_append(&mut data, 0x01, &p);
-    tlv_append(&mut data, 0x02, &q);
-    tlv_append(&mut data, 0x03, &dp);
-    tlv_append(&mut data, 0x04, &dq);
-    tlv_append(&mut data, 0x05, &qinv);
-
-    Ok(data)
-}
-
-/// Parse SEC1 ECPrivateKey DER or raw scalar and build TLV import data.
-fn build_ec_key_data(key_type: KeyType, key_der: &[u8]) -> Result<Zeroizing<Vec<u8>>, PivError> {
-    let scalar_len = (key_type.bit_len() / 8) as usize;
-
-    // If the data is exactly the scalar length, treat it as raw
-    if key_der.len() == scalar_len {
-        return Ok(Zeroizing::new(tlv_encode(0x06, key_der)));
-    }
-
-    // Otherwise, parse SEC1 ECPrivateKey DER
-    let (_, seq_off, seq_len, _) =
-        tlv_parse(key_der, 0).map_err(|_| PivError::InvalidData("Invalid EC DER".into()))?;
-    let seq_data = &key_der[seq_off..seq_off + seq_len];
-
-    // Parse fields: version, privateKey, [parameters], [publicKey]
-    let mut offset = 0;
-    let mut fields = Vec::new();
-    while offset < seq_data.len() {
-        let (_, val_off, val_len, end) = tlv_parse(seq_data, offset)
-            .map_err(|_| PivError::InvalidData("Invalid EC key field".into()))?;
-        fields.push(&seq_data[val_off..val_off + val_len]);
-        offset = end;
-    }
-
-    if fields.len() < 2 {
-        return Err(PivError::InvalidData(
-            "EC key missing required fields".into(),
-        ));
-    }
-
-    // fields[1] is the privateKey OCTET STRING value
-    let scalar = Zeroizing::new(bigint_to_bytes(fields[1], scalar_len));
-    Ok(Zeroizing::new(tlv_encode(0x06, &scalar)))
 }
 
 // ---------------------------------------------------------------------------
@@ -2361,21 +2198,14 @@ fn pkcs1v15_pad(hash_alg: HashAlgorithm, hash: &[u8], key_byte_len: usize) -> Ve
 }
 
 // ---------------------------------------------------------------------------
-// Device public key → SPKI conversion
+// Device public key → PublicKey conversion
 // ---------------------------------------------------------------------------
 
-// Well-known OIDs
-const OID_EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
-const OID_CURVE_P256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
-const OID_CURVE_P384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34");
-const OID_RSA_ENCRYPTION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1");
-const OID_ED25519_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
-const OID_X25519_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.110");
+// Well-known OIDs (used by PivSigner)
 const OID_ML_DSA_44: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.17");
 const OID_ML_DSA_65: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.18");
 const OID_ML_DSA_87: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.19");
-const OID_ML_KEM_512: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.4.1");
-const OID_ML_KEM_768: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.4.2");
+#[cfg(test)]
 const OID_ML_KEM_1024: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.4.3");
 
 /// Parse a single TLV from PIV device-encoded public key data.
@@ -2415,7 +2245,7 @@ fn parse_device_tlv(data: &[u8], offset: usize) -> Result<(u8, Vec<u8>, usize), 
     Ok((tag, data[pos..pos + len].to_vec(), pos + len))
 }
 
-/// Convert PIV device-encoded public key bytes to SubjectPublicKeyInfo DER.
+/// Convert PIV device-encoded public key bytes to a [`PublicKey`].
 ///
 /// PIV device encoding (from `generate_key`/`get_slot_metadata`):
 /// - EC keys: `86 <len> <uncompressed_point>`
@@ -2423,8 +2253,11 @@ fn parse_device_tlv(data: &[u8], offset: usize) -> Result<(u8, Vec<u8>, usize), 
 /// - Ed25519/X25519: `86 <len> <32_bytes>`
 /// - ML-DSA: `87 <len> <raw_public_key>`
 /// - ML-KEM: `88 <len> <raw_public_key>`
-fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u8>, PivError> {
-    let spki = match key_type {
+fn device_pubkey_to_public_key(
+    key_type: KeyType,
+    device_bytes: &[u8],
+) -> Result<PublicKey, PivError> {
+    match key_type {
         KeyType::EccP256 | KeyType::EccP384 => {
             let (tag, ec_point, _) = parse_device_tlv(device_bytes, 0)?;
             if tag != 0x86 {
@@ -2432,21 +2265,15 @@ fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u
                     "Expected tag 0x86 for EC point, got 0x{tag:02X}"
                 )));
             }
-            let curve_oid = if key_type == KeyType::EccP256 {
-                OID_CURVE_P256
+            let curve = if key_type == KeyType::EccP256 {
+                EcCurve::P256
             } else {
-                OID_CURVE_P384
+                EcCurve::P384
             };
-            let algo = AlgorithmIdentifierOwned {
-                oid: OID_EC_PUBLIC_KEY,
-                parameters: Some(der::Any::from(&curve_oid)),
-            };
-            SubjectPublicKeyInfoOwned {
-                algorithm: algo,
-                subject_public_key: BitString::from_bytes(&ec_point).map_err(|e| {
-                    PivError::InvalidData(format!("Failed to encode EC point: {e}"))
-                })?,
-            }
+            Ok(PublicKey::Ec {
+                curve,
+                point: ec_point,
+            })
         }
         KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
             let (tag1, modulus, end1) = parse_device_tlv(device_bytes, 0)?;
@@ -2461,37 +2288,10 @@ fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u
                     "Expected tag 0x82 for RSA exponent, got 0x{tag2:02X}"
                 )));
             }
-            // Build RSAPublicKey DER: SEQUENCE { INTEGER modulus, INTEGER exponent }
-            let mod_int = der::asn1::UintRef::new(&modulus)
-                .map_err(|e| PivError::InvalidData(format!("Invalid RSA modulus: {e}")))?;
-            let exp_int = der::asn1::UintRef::new(&exponent)
-                .map_err(|e| PivError::InvalidData(format!("Invalid RSA exponent: {e}")))?;
-            let mut rsa_body = Vec::new();
-            mod_int
-                .encode_to_vec(&mut rsa_body)
-                .map_err(|e| PivError::InvalidData(format!("Failed to encode modulus: {e}")))?;
-            exp_int
-                .encode_to_vec(&mut rsa_body)
-                .map_err(|e| PivError::InvalidData(format!("Failed to encode exponent: {e}")))?;
-            // Wrap in SEQUENCE
-            let mut rsa_pub_key = Vec::new();
-            // Tag 0x30 = SEQUENCE
-            rsa_pub_key.push(0x30);
-            let len_bytes = der::Length::new(rsa_body.len() as u16);
-            len_bytes
-                .encode_to_vec(&mut rsa_pub_key)
-                .map_err(|e| PivError::InvalidData(format!("Failed to encode length: {e}")))?;
-            rsa_pub_key.extend_from_slice(&rsa_body);
-
-            let algo = AlgorithmIdentifierOwned {
-                oid: OID_RSA_ENCRYPTION,
-                parameters: Some(der::Any::from(der::asn1::Null)),
-            };
-            SubjectPublicKeyInfoOwned {
-                algorithm: algo,
-                subject_public_key: BitString::from_bytes(&rsa_pub_key)
-                    .map_err(|e| PivError::InvalidData(format!("Failed to encode RSA key: {e}")))?,
-            }
+            Ok(PublicKey::Rsa {
+                n: modulus,
+                e: exponent,
+            })
         }
         KeyType::Ed25519 => {
             let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
@@ -2500,16 +2300,7 @@ fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u
                     "Expected tag 0x86 for Ed25519 key, got 0x{tag:02X}"
                 )));
             }
-            let algo = AlgorithmIdentifierOwned {
-                oid: OID_ED25519_KEY,
-                parameters: None,
-            };
-            SubjectPublicKeyInfoOwned {
-                algorithm: algo,
-                subject_public_key: BitString::from_bytes(&raw_key).map_err(|e| {
-                    PivError::InvalidData(format!("Failed to encode Ed25519 key: {e}"))
-                })?,
-            }
+            Ok(PublicKey::Ed25519 { key: raw_key })
         }
         KeyType::X25519 => {
             let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
@@ -2518,16 +2309,7 @@ fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u
                     "Expected tag 0x86 for X25519 key, got 0x{tag:02X}"
                 )));
             }
-            let algo = AlgorithmIdentifierOwned {
-                oid: OID_X25519_KEY,
-                parameters: None,
-            };
-            SubjectPublicKeyInfoOwned {
-                algorithm: algo,
-                subject_public_key: BitString::from_bytes(&raw_key).map_err(|e| {
-                    PivError::InvalidData(format!("Failed to encode X25519 key: {e}"))
-                })?,
-            }
+            Ok(PublicKey::X25519 { key: raw_key })
         }
         KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => {
             let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
@@ -2536,21 +2318,16 @@ fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u
                     "Expected tag 0x87 for ML-DSA key, got 0x{tag:02X}"
                 )));
             }
-            let algo = AlgorithmIdentifierOwned {
-                oid: match key_type {
-                    KeyType::MlDsa44 => OID_ML_DSA_44,
-                    KeyType::MlDsa65 => OID_ML_DSA_65,
-                    KeyType::MlDsa87 => OID_ML_DSA_87,
-                    _ => unreachable!(),
-                },
-                parameters: None,
+            let parameter_set = match key_type {
+                KeyType::MlDsa44 => MlDsaParameterSet::MlDsa44,
+                KeyType::MlDsa65 => MlDsaParameterSet::MlDsa65,
+                KeyType::MlDsa87 => MlDsaParameterSet::MlDsa87,
+                _ => unreachable!(),
             };
-            SubjectPublicKeyInfoOwned {
-                algorithm: algo,
-                subject_public_key: BitString::from_bytes(&raw_key).map_err(|e| {
-                    PivError::InvalidData(format!("Failed to encode ML-DSA key: {e}"))
-                })?,
-            }
+            Ok(PublicKey::MlDsa {
+                parameter_set,
+                key: raw_key,
+            })
         }
         KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
             let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
@@ -2559,26 +2336,18 @@ fn device_pubkey_to_spki(key_type: KeyType, device_bytes: &[u8]) -> Result<Vec<u
                     "Expected tag 0x88 for ML-KEM key, got 0x{tag:02X}"
                 )));
             }
-            let algo = AlgorithmIdentifierOwned {
-                oid: match key_type {
-                    KeyType::MlKem512 => OID_ML_KEM_512,
-                    KeyType::MlKem768 => OID_ML_KEM_768,
-                    KeyType::MlKem1024 => OID_ML_KEM_1024,
-                    _ => unreachable!(),
-                },
-                parameters: None,
+            let parameter_set = match key_type {
+                KeyType::MlKem512 => MlKemParameterSet::MlKem512,
+                KeyType::MlKem768 => MlKemParameterSet::MlKem768,
+                KeyType::MlKem1024 => MlKemParameterSet::MlKem1024,
+                _ => unreachable!(),
             };
-            SubjectPublicKeyInfoOwned {
-                algorithm: algo,
-                subject_public_key: BitString::from_bytes(&raw_key).map_err(|e| {
-                    PivError::InvalidData(format!("Failed to encode ML-KEM key: {e}"))
-                })?,
-            }
+            Ok(PublicKey::MlKem {
+                parameter_set,
+                key: raw_key,
+            })
         }
-    };
-
-    spki.to_der()
-        .map_err(|e| PivError::InvalidData(format!("Failed to encode SPKI: {e}")))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3067,17 +2836,23 @@ mod tests {
 
     #[test]
     fn test_ml_public_key_der_detection_and_spki() {
-        let ml_dsa_spki = device_pubkey_to_spki(KeyType::MlDsa44, &tlv_encode(0x87, &[0xAA; 16]))
-            .expect("encode ML-DSA SPKI");
+        let ml_dsa_pk =
+            device_pubkey_to_public_key(KeyType::MlDsa44, &tlv_encode(0x87, &[0xAA; 16]))
+                .expect("parse ML-DSA public key");
+        let ml_dsa_spki = ml_dsa_pk.to_spki().expect("encode ML-DSA SPKI");
+        let parsed = PublicKey::from_spki(&ml_dsa_spki).expect("parse ML-DSA SPKI");
         assert_eq!(
-            KeyType::from_public_key_der(&ml_dsa_spki).expect("detect ML-DSA public key"),
+            KeyType::from_public_key(&parsed).expect("detect ML-DSA public key"),
             KeyType::MlDsa44
         );
 
-        let ml_kem_spki = device_pubkey_to_spki(KeyType::MlKem768, &tlv_encode(0x88, &[0xBB; 24]))
-            .expect("encode ML-KEM SPKI");
+        let ml_kem_pk =
+            device_pubkey_to_public_key(KeyType::MlKem768, &tlv_encode(0x88, &[0xBB; 24]))
+                .expect("parse ML-KEM public key");
+        let ml_kem_spki = ml_kem_pk.to_spki().expect("encode ML-KEM SPKI");
+        let parsed = PublicKey::from_spki(&ml_kem_spki).expect("parse ML-KEM SPKI");
         assert_eq!(
-            KeyType::from_public_key_der(&ml_kem_spki).expect("detect ML-KEM public key"),
+            KeyType::from_public_key(&parsed).expect("detect ML-KEM public key"),
             KeyType::MlKem768
         );
     }
@@ -3101,22 +2876,26 @@ mod tests {
 
         let ml_dsa_key = vec![0x11; 32];
         let ml_dsa_pkcs8 = pkcs8_der(OID_ML_DSA_65.as_bytes(), &ml_dsa_key);
+        let ml_dsa_priv = PrivateKey::from_pkcs8(&ml_dsa_pkcs8).expect("parse ML-DSA key");
         assert_eq!(
-            KeyType::from_private_key_der(&ml_dsa_pkcs8).expect("detect ML-DSA private key"),
+            KeyType::try_from(&ml_dsa_priv.algorithm()).expect("convert algorithm"),
             KeyType::MlDsa65
         );
-        let ml_dsa_priv = PivPrivateKey::from_pkcs8(&ml_dsa_pkcs8).expect("parse ML-DSA key");
-        assert_eq!(ml_dsa_priv.key_type(), KeyType::MlDsa65);
-        assert_eq!(ml_dsa_priv.key_data(), &ml_dsa_key[..]);
+        match &ml_dsa_priv {
+            PrivateKey::MlDsa { private_key, .. } => assert_eq!(&private_key[..], &ml_dsa_key[..]),
+            _ => panic!("Expected MlDsa variant"),
+        }
 
         let ml_kem_key = vec![0x22; 48];
         let ml_kem_pkcs8 = pkcs8_der(OID_ML_KEM_1024.as_bytes(), &ml_kem_key);
+        let ml_kem_priv = PrivateKey::from_pkcs8(&ml_kem_pkcs8).expect("parse ML-KEM key");
         assert_eq!(
-            KeyType::from_private_key_der(&ml_kem_pkcs8).expect("detect ML-KEM private key"),
+            KeyType::try_from(&ml_kem_priv.algorithm()).expect("convert algorithm"),
             KeyType::MlKem1024
         );
-        let ml_kem_priv = PivPrivateKey::from_pkcs8(&ml_kem_pkcs8).expect("parse ML-KEM key");
-        assert_eq!(ml_kem_priv.key_type(), KeyType::MlKem1024);
-        assert_eq!(ml_kem_priv.key_data(), &ml_kem_key[..]);
+        match &ml_kem_priv {
+            PrivateKey::MlKem { private_key, .. } => assert_eq!(&private_key[..], &ml_kem_key[..]),
+            _ => panic!("Expected MlKem variant"),
+        }
     }
 }

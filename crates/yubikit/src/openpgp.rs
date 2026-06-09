@@ -44,15 +44,18 @@ use std::fmt;
 
 use sha2::Digest;
 use thiserror::Error;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::core::Version;
 use crate::core::{bytes2int, int2bytes, patch_version};
-use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
-use crate::tlv::{
-    TlvError, oid_from_string, oid_to_string, parse_tlv_dict, parse_tlv_list, tlv_append,
-    tlv_encode, tlv_unpack,
+use crate::keys::{EcCurve, EcPrivateKey, PrivateKey, PublicKey, RsaPrivateKey};
+use crate::keys::{
+    OID_BRAINPOOL_P256R1, OID_BRAINPOOL_P384R1, OID_BRAINPOOL_P512R1, OID_SECP256K1, OID_SECP256R1,
+    OID_SECP384R1, OID_SECP521R1,
 };
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
+use crate::tlv::{TlvError, parse_tlv_dict, parse_tlv_list, tlv_append, tlv_encode, tlv_unpack};
+use x509_cert::spki::ObjectIdentifier;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -540,27 +543,10 @@ pub mod extended_capability_flags {
     pub const SECURE_MESSAGING: u8 = 1 << 7;
 }
 
-/// Well-known elliptic curve OIDs as dotted-decimal strings.
-pub mod curve_oid {
-    /// NIST P-256 (secp256r1 / prime256v1).
-    pub const SECP256R1: &str = "1.2.840.10045.3.1.7";
-    /// secp256k1 (used in Bitcoin / Ethereum).
-    pub const SECP256K1: &str = "1.3.132.0.10";
-    /// NIST P-384 (secp384r1).
-    pub const SECP384R1: &str = "1.3.132.0.34";
-    /// NIST P-521 (secp521r1).
-    pub const SECP521R1: &str = "1.3.132.0.35";
-    /// Brainpool P-256r1.
-    pub const BRAINPOOL_P256R1: &str = "1.3.36.3.3.2.8.1.1.7";
-    /// Brainpool P-384r1.
-    pub const BRAINPOOL_P384R1: &str = "1.3.36.3.3.2.8.1.1.11";
-    /// Brainpool P-512r1.
-    pub const BRAINPOOL_P512R1: &str = "1.3.36.3.3.2.8.1.1.13";
-    /// Curve25519 for ECDH (X25519).
-    pub const X25519: &str = "1.3.6.1.4.1.3029.1.5.1";
-    /// Curve25519 for EdDSA signatures (Ed25519).
-    pub const ED25519: &str = "1.3.6.1.4.1.11591.15.1";
-}
+/// Curve25519 for ECDH (X25519) — OpenPGP card OID.
+const OID_X25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.3029.1.5.1");
+/// Curve25519 for EdDSA signatures (Ed25519) — OpenPGP card OID.
+const OID_ED25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.11591.15.1");
 
 // EC algorithm IDs
 const EC_ALG_ECDH: u8 = 0x12;
@@ -731,6 +717,66 @@ impl RsaAttributes {
     }
 }
 
+/// Elliptic curve OIDs supported by the OpenPGP card.
+pub enum OpenPgpCurve {
+    /// NIST P-256 (secp256r1).
+    P256,
+    /// NIST P-384 (secp384r1).
+    P384,
+    /// NIST P-521 (secp521r1).
+    P521,
+    /// secp256k1.
+    Secp256k1,
+    /// Brainpool P-256r1.
+    BrainpoolP256r1,
+    /// Brainpool P-384r1.
+    BrainpoolP384r1,
+    /// Brainpool P-512r1.
+    BrainpoolP512r1,
+    /// Curve25519 for EdDSA signatures (Ed25519).
+    Ed25519,
+    /// Curve25519 for ECDH (X25519).
+    X25519,
+}
+
+impl OpenPgpCurve {
+    /// Returns the OID for this curve as a byte vector.
+    fn oid(&self) -> ObjectIdentifier {
+        match self {
+            Self::P256 => OID_SECP256R1,
+            Self::P384 => OID_SECP384R1,
+            Self::P521 => OID_SECP521R1,
+            Self::Secp256k1 => OID_SECP256K1,
+            Self::BrainpoolP256r1 => OID_BRAINPOOL_P256R1,
+            Self::BrainpoolP384r1 => OID_BRAINPOOL_P384R1,
+            Self::BrainpoolP512r1 => OID_BRAINPOOL_P512R1,
+            Self::Ed25519 => OID_ED25519,
+            Self::X25519 => OID_X25519,
+        }
+    }
+
+    /// Convert an OID string to an `OpenPgpCurve`, if it matches a supported curve.
+    pub fn from_oid(oid_str: &str) -> Result<Self, OpenPgpError> {
+        let oid = ObjectIdentifier::new(oid_str)
+            .map_err(|_| OpenPgpError::InvalidData(format!("Invalid OID string: {}", oid_str)))?;
+        match oid {
+            OID_SECP256R1 => Ok(Self::P256),
+            OID_SECP384R1 => Ok(Self::P384),
+            OID_SECP521R1 => Ok(Self::P521),
+            OID_SECP256K1 => Ok(Self::Secp256k1),
+            OID_BRAINPOOL_P256R1 => Ok(Self::BrainpoolP256r1),
+            OID_BRAINPOOL_P384R1 => Ok(Self::BrainpoolP384r1),
+            OID_BRAINPOOL_P512R1 => Ok(Self::BrainpoolP512r1),
+            OID_ED25519 => Ok(Self::Ed25519),
+            OID_X25519 => Ok(Self::X25519),
+            _ => Err(OpenPgpError::InvalidData(format!(
+                "Unsupported OID: {}",
+                oid_str
+            ))),
+        }
+    }
+}
+
 /// Elliptic curve algorithm attributes stored on the OpenPGP card.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EcAttributes {
@@ -747,10 +793,9 @@ impl EcAttributes {
     ///
     /// The algorithm ID is inferred automatically: EdDSA for Ed25519,
     /// ECDH for the decryption slot, and ECDSA otherwise.
-    pub fn create(key_ref: KeyRef, oid_str: &str) -> Result<Self, OpenPgpError> {
-        let oid_bytes = oid_from_string(oid_str)
-            .map_err(|e| OpenPgpError::InvalidData(format!("Invalid OID: {e}")))?;
-        let algorithm_id = if oid_str == curve_oid::ED25519 {
+    pub fn create(key_ref: KeyRef, curve: &OpenPgpCurve) -> Result<Self, OpenPgpError> {
+        let oid = curve.oid();
+        let algorithm_id = if oid == OID_ED25519 {
             EC_ALG_EDDSA
         } else if key_ref == KeyRef::Dec {
             EC_ALG_ECDH
@@ -759,7 +804,7 @@ impl EcAttributes {
         };
         Ok(Self {
             algorithm_id,
-            oid: oid_bytes,
+            oid: oid.as_bytes().to_vec(),
             import_format: EcImportFormat::Standard,
         })
     }
@@ -789,9 +834,16 @@ impl EcAttributes {
         buf
     }
 
-    /// Returns the curve OID as a dotted-decimal string (e.g. `"1.2.840.10045.3.1.7"`).
-    pub fn oid_string(&self) -> Result<String, TlvError> {
-        oid_to_string(&self.oid)
+    /// Returns the curve OID as a dotted-decimal string.
+    pub fn oid_str(&self) -> Result<String, OpenPgpError> {
+        ObjectIdentifier::from_bytes(&self.oid)
+            .map(|o| o.to_string())
+            .map_err(|e| OpenPgpError::InvalidData(format!("Invalid curve OID: {e}")))
+    }
+
+    fn oid(&self) -> Result<ObjectIdentifier, OpenPgpError> {
+        ObjectIdentifier::from_bytes(&self.oid)
+            .map_err(|e| OpenPgpError::InvalidData(format!("Invalid curve OID: {e}")))
     }
 }
 
@@ -1370,159 +1422,125 @@ fn kdf_s2k_hash(
 // Private Key Template (for import)
 // ---------------------------------------------------------------------------
 
-/// A private key to be imported into an OpenPGP key slot.
-#[derive(Clone)]
-pub enum OpenPgpPrivateKey {
-    /// RSA private key in standard format (e, p, q).
-    Rsa {
-        /// Public exponent.
-        e: Vec<u8>,
-        /// First prime factor.
-        p: Vec<u8>,
-        /// Second prime factor.
-        q: Vec<u8>,
-    },
-    /// RSA private key in CRT (Chinese Remainder Theorem) format.
-    RsaCrt {
-        /// Public exponent.
-        e: Vec<u8>,
-        /// First prime factor.
-        p: Vec<u8>,
-        /// Second prime factor.
-        q: Vec<u8>,
-        /// CRT coefficient: q^{-1} mod p.
-        iqmp: Vec<u8>,
-        /// CRT exponent: d mod (p-1).
-        dmp1: Vec<u8>,
-        /// CRT exponent: d mod (q-1).
-        dmq1: Vec<u8>,
-        /// Public modulus n = p * q.
-        n: Vec<u8>,
-    },
-    /// Elliptic curve private key.
-    Ec {
-        /// Private scalar value.
-        scalar: Vec<u8>,
-        /// Optional uncompressed public key point.
-        public_key: Option<Vec<u8>>,
-    },
-}
-
-impl Drop for OpenPgpPrivateKey {
-    fn drop(&mut self) {
-        match self {
-            Self::Rsa { e, p, q } => {
-                e.zeroize();
-                p.zeroize();
-                q.zeroize();
-            }
-            Self::RsaCrt {
-                e,
-                p,
-                q,
-                iqmp,
-                dmp1,
-                dmq1,
-                n,
-            } => {
-                e.zeroize();
-                p.zeroize();
-                q.zeroize();
-                iqmp.zeroize();
-                dmp1.zeroize();
-                dmq1.zeroize();
-                n.zeroize();
-            }
-            Self::Ec { scalar, public_key } => {
-                scalar.zeroize();
-                if let Some(pk) = public_key {
-                    pk.zeroize();
+/// Derive algorithm attributes from a private key and key slot.
+fn algorithm_attributes_for_key(
+    key_ref: KeyRef,
+    private_key: &PrivateKey,
+) -> Result<AlgorithmAttributes, OpenPgpError> {
+    match private_key {
+        PrivateKey::Rsa(rsa) => {
+            let key_bits = if !rsa.n.is_empty() {
+                rsa.n.len() * 8
+            } else {
+                // Standard format without n: derive from p (n = p * q, each is half)
+                rsa.p.len() * 2 * 8
+            };
+            let n_len = match key_bits {
+                2048 => RsaSize::Rsa2048,
+                3072 => RsaSize::Rsa3072,
+                4096 => RsaSize::Rsa4096,
+                _ => {
+                    return Err(OpenPgpError::InvalidData(format!(
+                        "Unsupported RSA key size: {}",
+                        key_bits
+                    )));
                 }
-            }
+            };
+            let import_format = if !rsa.dp.is_empty() && !rsa.n.is_empty() {
+                RsaImportFormat::CrtWMod
+            } else if !rsa.dp.is_empty() {
+                RsaImportFormat::Crt
+            } else if !rsa.n.is_empty() {
+                RsaImportFormat::StandardWMod
+            } else {
+                RsaImportFormat::Standard
+            };
+            Ok(AlgorithmAttributes::Rsa(RsaAttributes::create(
+                n_len,
+                import_format,
+            )))
         }
-    }
-}
-
-impl fmt::Debug for OpenPgpPrivateKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            OpenPgpPrivateKey::Rsa { .. } => write!(f, "OpenPgpPrivateKey::Rsa(..)"),
-            OpenPgpPrivateKey::RsaCrt { .. } => write!(f, "OpenPgpPrivateKey::RsaCrt(..)"),
-            OpenPgpPrivateKey::Ec { .. } => write!(f, "OpenPgpPrivateKey::Ec(..)"),
+        PrivateKey::Ec(ec) => {
+            let curve = match ec.curve {
+                EcCurve::P256 => OpenPgpCurve::P256,
+                EcCurve::P384 => OpenPgpCurve::P384,
+                EcCurve::P521 => OpenPgpCurve::P521,
+                EcCurve::Secp256k1 => OpenPgpCurve::Secp256k1,
+                EcCurve::BrainpoolP256r1 => OpenPgpCurve::BrainpoolP256r1,
+                EcCurve::BrainpoolP384r1 => OpenPgpCurve::BrainpoolP384r1,
+                EcCurve::BrainpoolP512r1 => OpenPgpCurve::BrainpoolP512r1,
+            };
+            Ok(AlgorithmAttributes::Ec(EcAttributes::create(
+                key_ref, &curve,
+            )?))
         }
-    }
-}
-
-impl OpenPgpPrivateKey {
-    /// Parse a PKCS#8 PrivateKeyInfo DER encoding into an `OpenPgpPrivateKey`.
-    ///
-    /// Supports RSA (returned as `RsaCrt`) and EC keys including Ed25519/X25519
-    /// (returned as `Ec`). The algorithm is auto-detected from the
-    /// AlgorithmIdentifier.
-    pub fn from_pkcs8(pkcs8_der: &[u8]) -> Result<Self, OpenPgpError> {
-        use crate::keys::{Pkcs8Algorithm, parse_pkcs1_rsa, parse_pkcs8};
-
-        let parsed =
-            parse_pkcs8(pkcs8_der).map_err(|e| OpenPgpError::InvalidData(e.to_string()))?;
-
-        match parsed.algorithm {
-            Pkcs8Algorithm::Rsa => {
-                let rsa = parse_pkcs1_rsa(&parsed.key_data)
-                    .map_err(|e| OpenPgpError::InvalidData(e.to_string()))?;
-                Ok(Self::RsaCrt {
-                    e: rsa.e,
-                    p: rsa.p,
-                    q: rsa.q,
-                    dmp1: rsa.dp,
-                    dmq1: rsa.dq,
-                    iqmp: rsa.qinv,
-                    n: rsa.n,
-                })
-            }
-            Pkcs8Algorithm::Ec | Pkcs8Algorithm::Other => Ok(Self::Ec {
-                scalar: parsed.key_data.to_vec(),
-                public_key: None,
-            }),
-        }
+        PrivateKey::Ed25519 { .. } => Ok(AlgorithmAttributes::Ec(EcAttributes::create(
+            key_ref,
+            &OpenPgpCurve::Ed25519,
+        )?)),
+        PrivateKey::X25519 { .. } => Ok(AlgorithmAttributes::Ec(EcAttributes::create(
+            key_ref,
+            &OpenPgpCurve::X25519,
+        )?)),
+        _ => Err(OpenPgpError::NotSupported(
+            "Key type not supported for OpenPGP import".into(),
+        )),
     }
 }
 
 /// Build the private key template for PUT_DATA_ODD (tag 0x4D).
 fn build_private_key_template(
     key_ref: KeyRef,
-    private_key: &OpenPgpPrivateKey,
-) -> Zeroizing<Vec<u8>> {
+    private_key: &PrivateKey,
+) -> Result<Zeroizing<Vec<u8>>, OpenPgpError> {
     let component_tlvs: Vec<(u32, &[u8])> = match private_key {
-        OpenPgpPrivateKey::Rsa { e, p, q } => {
-            vec![
-                (0x91, e.as_slice()),
-                (0x92, p.as_slice()),
-                (0x93, q.as_slice()),
-            ]
-        }
-        OpenPgpPrivateKey::RsaCrt {
+        PrivateKey::Rsa(RsaPrivateKey {
             e,
             p,
             q,
-            iqmp,
-            dmp1,
-            dmq1,
+            dp,
+            dq,
+            qinv,
             n,
-        } => vec![
-            (0x91, e.as_slice()),
-            (0x92, p.as_slice()),
-            (0x93, q.as_slice()),
-            (0x94, iqmp.as_slice()),
-            (0x95, dmp1.as_slice()),
-            (0x96, dmq1.as_slice()),
-            (0x97, n.as_slice()),
-        ],
-        OpenPgpPrivateKey::Ec { scalar, public_key } => {
+        }) => {
+            let mut v = vec![
+                (0x91, e.as_slice()),
+                (0x92, p.as_slice()),
+                (0x93, q.as_slice()),
+            ];
+            if !qinv.is_empty() {
+                v.push((0x94, qinv.as_slice()));
+            }
+            if !dp.is_empty() {
+                v.push((0x95, dp.as_slice()));
+            }
+            if !dq.is_empty() {
+                v.push((0x96, dq.as_slice()));
+            }
+            if !n.is_empty() {
+                v.push((0x97, n.as_slice()));
+            }
+            v
+        }
+        PrivateKey::Ec(EcPrivateKey {
+            scalar, public_key, ..
+        }) => {
             let mut v = vec![(0x92, scalar.as_slice())];
             if let Some(pk) = public_key {
                 v.push((0x99, pk.as_slice()));
             }
             v
+        }
+        PrivateKey::Ed25519 { secret } => {
+            vec![(0x92, secret.as_slice())]
+        }
+        PrivateKey::X25519 { secret } => {
+            vec![(0x92, secret.as_slice())]
+        }
+        _ => {
+            return Err(OpenPgpError::NotSupported(
+                "Key type not supported for OpenPGP import".into(),
+            ));
         }
     };
 
@@ -1541,7 +1559,41 @@ fn build_private_key_template(
     tlv_append(&mut inner, 0x7F48, &headers);
     tlv_append(&mut inner, 0x5F48, &values);
 
-    Zeroizing::new(tlv_encode(0x4D, &inner))
+    Ok(Zeroizing::new(tlv_encode(0x4D, &inner)))
+}
+
+// ---------------------------------------------------------------------------
+// Public key parsing from OpenPGP card response
+// ---------------------------------------------------------------------------
+
+/// Parse the raw public key TLV data (contents of 0x7F49) returned by the OpenPGP
+/// card into a [`PublicKey`].
+fn parse_rsa_public_key(pk_data: &[u8]) -> Result<PublicKey, OpenPgpError> {
+    let tlvs = parse_tlv_list(pk_data)?;
+    let n = crate::tlv::tlv_get(&tlvs, 0x81)
+        .ok_or_else(|| OpenPgpError::InvalidData("Missing RSA modulus (tag 0x81)".into()))?;
+    let e = crate::tlv::tlv_get(&tlvs, 0x82)
+        .ok_or_else(|| OpenPgpError::InvalidData("Missing RSA exponent (tag 0x82)".into()))?;
+    // Strip leading zero byte from modulus if present
+    let n = if !n.is_empty() && n[0] == 0 {
+        n[1..].to_vec()
+    } else {
+        n.to_vec()
+    };
+    Ok(PublicKey::Rsa { n, e: e.to_vec() })
+}
+
+fn parse_ec_public_key(pk_data: &[u8], oid: &ObjectIdentifier) -> Result<PublicKey, OpenPgpError> {
+    let point = tlv_unpack(0x86, pk_data)?;
+    if *oid == OID_ED25519 {
+        Ok(PublicKey::Ed25519 { key: point })
+    } else if *oid == OID_X25519 {
+        Ok(PublicKey::X25519 { key: point })
+    } else {
+        let curve = EcCurve::from_oid(oid)
+            .ok_or_else(|| OpenPgpError::InvalidData("Unsupported EC curve".into()))?;
+        Ok(PublicKey::Ec { curve, point })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2266,7 +2318,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         &mut self,
         key_ref: KeyRef,
         key_size: RsaSize,
-    ) -> Result<Vec<u8>, OpenPgpError> {
+    ) -> Result<PublicKey, OpenPgpError> {
         log::debug!("Generating RSA key for {:?}", key_ref);
         if self.version >= Version(4, 2, 0) && self.version < Version(4, 3, 5) {
             return Err(OpenPgpError::NotSupported(
@@ -2300,19 +2352,19 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             .send_apdu(0, INS_GENERATE_ASYM, 0x80, 0x00, &crt)?;
         let pk_data = tlv_unpack(TAG_PUBLIC_KEY, &resp)?;
         log::info!("RSA key generated");
-        Ok(pk_data)
+        parse_rsa_public_key(&pk_data)
     }
 
-    /// Generate an EC key pair on-card for the given curve and return the raw public key data.
+    /// Generate an EC key pair on-card for the given curve and return the public key.
     pub fn generate_ec_key(
         &mut self,
         key_ref: KeyRef,
-        curve_oid: &str,
-    ) -> Result<Vec<u8>, OpenPgpError> {
+        curve: OpenPgpCurve,
+    ) -> Result<PublicKey, OpenPgpError> {
         log::debug!("Generating EC key for {:?}", key_ref);
         require_version(self.version, Version(5, 2, 0), "generate_ec_key")?;
 
-        let attributes = AlgorithmAttributes::Ec(EcAttributes::create(key_ref, curve_oid)?);
+        let attributes = AlgorithmAttributes::Ec(EcAttributes::create(key_ref, &curve)?);
         self.set_algorithm_attributes(key_ref, &attributes)?;
 
         let crt = key_ref.crt();
@@ -2321,29 +2373,40 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             .send_apdu(0, INS_GENERATE_ASYM, 0x80, 0x00, &crt)?;
         let pk_data = tlv_unpack(TAG_PUBLIC_KEY, &resp)?;
         log::info!("EC key generated");
-        Ok(pk_data)
+        parse_ec_public_key(&pk_data, &curve.oid())
     }
 
     /// Read the public key from a key slot without generating a new one.
-    pub fn get_public_key(&mut self, key_ref: KeyRef) -> Result<Vec<u8>, OpenPgpError> {
+    pub fn get_public_key(&mut self, key_ref: KeyRef) -> Result<PublicKey, OpenPgpError> {
+        let attributes = self.get_algorithm_attributes(key_ref)?;
         let crt = key_ref.crt();
         let resp = self
             .protocol
             .send_apdu(0, INS_GENERATE_ASYM, 0x81, 0x00, &crt)?;
         let pk_data = tlv_unpack(TAG_PUBLIC_KEY, &resp)?;
-        Ok(pk_data)
+        match &attributes {
+            AlgorithmAttributes::Rsa(_) => parse_rsa_public_key(&pk_data),
+            AlgorithmAttributes::Ec(ec) => {
+                let oid = ec.oid()?;
+                parse_ec_public_key(&pk_data, &oid)
+            }
+        }
     }
 
     // -- Key Import / Delete --
 
     /// Import a private key into a key slot.
+    ///
+    /// Automatically sets the algorithm attributes on the card before importing.
     pub fn put_key(
         &mut self,
         key_ref: KeyRef,
-        private_key: &OpenPgpPrivateKey,
+        private_key: &PrivateKey,
     ) -> Result<(), OpenPgpError> {
         log::debug!("Importing key for {:?}", key_ref);
-        let template = build_private_key_template(key_ref, private_key);
+        let attributes = algorithm_attributes_for_key(key_ref, private_key)?;
+        self.set_algorithm_attributes(key_ref, &attributes)?;
+        let template = build_private_key_template(key_ref, private_key)?;
         self.protocol
             .send_apdu(0, INS_PUT_DATA_ODD, 0x3F, 0xFF, &template)?;
         log::info!("Key imported");
@@ -2652,7 +2715,7 @@ mod tests {
 
     #[test]
     fn test_ec_attributes_roundtrip() {
-        let attrs = EcAttributes::create(KeyRef::Sig, curve_oid::ED25519).unwrap();
+        let attrs = EcAttributes::create(KeyRef::Sig, &OpenPgpCurve::Ed25519).unwrap();
         assert_eq!(attrs.algorithm_id, EC_ALG_EDDSA);
         let bytes = attrs.to_bytes();
         let parsed = AlgorithmAttributes::parse(&bytes).unwrap();
@@ -2660,7 +2723,7 @@ mod tests {
             AlgorithmAttributes::Ec(e) => {
                 assert_eq!(e.algorithm_id, EC_ALG_EDDSA);
                 assert_eq!(e.import_format, EcImportFormat::Standard);
-                assert_eq!(e.oid_string().unwrap(), curve_oid::ED25519);
+                assert_eq!(e.oid().unwrap(), OID_ED25519);
             }
             _ => panic!("Expected EC"),
         }
@@ -2668,13 +2731,13 @@ mod tests {
 
     #[test]
     fn test_ec_attributes_ecdh_for_dec() {
-        let attrs = EcAttributes::create(KeyRef::Dec, curve_oid::SECP256R1).unwrap();
+        let attrs = EcAttributes::create(KeyRef::Dec, &OpenPgpCurve::P256).unwrap();
         assert_eq!(attrs.algorithm_id, EC_ALG_ECDH);
     }
 
     #[test]
     fn test_ec_attributes_ecdsa_for_sig() {
-        let attrs = EcAttributes::create(KeyRef::Sig, curve_oid::SECP256R1).unwrap();
+        let attrs = EcAttributes::create(KeyRef::Sig, &OpenPgpCurve::P256).unwrap();
         assert_eq!(attrs.algorithm_id, EC_ALG_ECDSA);
     }
 
@@ -2793,38 +2856,46 @@ mod tests {
 
     #[test]
     fn test_build_private_key_template_ec() {
-        let key = OpenPgpPrivateKey::Ec {
+        use crate::keys::{EcCurve, EcPrivateKey};
+        let key = PrivateKey::Ec(EcPrivateKey {
+            curve: EcCurve::P256,
             scalar: vec![0x01, 0x02, 0x03],
             public_key: None,
-        };
-        let template = build_private_key_template(KeyRef::Sig, &key);
+        });
+        let template = build_private_key_template(KeyRef::Sig, &key).unwrap();
         // Should start with 0x4D tag
         assert_eq!(template[0], 0x4D);
     }
 
     #[test]
     fn test_build_private_key_template_rsa() {
-        let key = OpenPgpPrivateKey::Rsa {
+        use crate::keys::RsaPrivateKey;
+        let key = PrivateKey::Rsa(RsaPrivateKey {
             e: vec![0x01, 0x00, 0x01],
+            n: vec![0xFF; 256],
             p: vec![0xAA; 128],
             q: vec![0xBB; 128],
-        };
-        let template = build_private_key_template(KeyRef::Sig, &key);
+            dp: vec![0xDD; 128],
+            dq: vec![0xEE; 128],
+            qinv: vec![0xCC; 128],
+        });
+        let template = build_private_key_template(KeyRef::Sig, &key).unwrap();
         assert_eq!(template[0], 0x4D);
     }
 
     #[test]
     fn test_build_private_key_template_rsa_crt() {
-        let key = OpenPgpPrivateKey::RsaCrt {
+        use crate::keys::RsaPrivateKey;
+        let key = PrivateKey::Rsa(RsaPrivateKey {
             e: vec![0x01, 0x00, 0x01],
+            n: vec![0xFF; 256],
             p: vec![0xAA; 128],
             q: vec![0xBB; 128],
-            iqmp: vec![0xCC; 128],
-            dmp1: vec![0xDD; 128],
-            dmq1: vec![0xEE; 128],
-            n: vec![0xFF; 256],
-        };
-        let template = build_private_key_template(KeyRef::Sig, &key);
+            dp: vec![0xDD; 128],
+            dq: vec![0xEE; 128],
+            qinv: vec![0xCC; 128],
+        });
+        let template = build_private_key_template(KeyRef::Sig, &key).unwrap();
         assert_eq!(template[0], 0x4D);
         // Parse outer TLV to verify structure
         let (tag, val_off, val_len, _) = tlv_parse(&template, 0).unwrap();
@@ -2838,7 +2909,7 @@ mod tests {
     fn test_pad_message_eddsa_no_hash() {
         let attrs = AlgorithmAttributes::Ec(EcAttributes {
             algorithm_id: EC_ALG_EDDSA,
-            oid: oid_from_string(curve_oid::ED25519).unwrap(),
+            oid: OpenPgpCurve::Ed25519.oid().as_bytes().to_vec(),
             import_format: EcImportFormat::Standard,
         });
         let msg = b"hello world";
@@ -2863,7 +2934,7 @@ mod tests {
     fn test_pad_message_ec_sha256() {
         let attrs = AlgorithmAttributes::Ec(EcAttributes {
             algorithm_id: EC_ALG_ECDSA,
-            oid: oid_from_string(curve_oid::SECP256R1).unwrap(),
+            oid: OpenPgpCurve::Ed25519.oid().as_bytes().to_vec(), // any valid OID; test only checks hash output
             import_format: EcImportFormat::Standard,
         });
         let msg = b"test message";
