@@ -2104,11 +2104,11 @@ fn build_put_key_data(
                 return Err(PivError::NotSupported("RSA exponent must be 65537".into()));
             }
 
-            let p = Zeroizing::new(bigint_to_bytes(&rsa.p, ln));
-            let q = Zeroizing::new(bigint_to_bytes(&rsa.q, ln));
-            let dp = Zeroizing::new(bigint_to_bytes(&rsa.dp, ln));
-            let dq = Zeroizing::new(bigint_to_bytes(&rsa.dq, ln));
-            let qinv = Zeroizing::new(bigint_to_bytes(&rsa.qinv, ln));
+            let p = Zeroizing::new(bigint_to_bytes(rsa.p.expose_secret(), ln));
+            let q = Zeroizing::new(bigint_to_bytes(rsa.q.expose_secret(), ln));
+            let dp = Zeroizing::new(bigint_to_bytes(rsa.dp.expose_secret(), ln));
+            let dq = Zeroizing::new(bigint_to_bytes(rsa.dq.expose_secret(), ln));
+            let qinv = Zeroizing::new(bigint_to_bytes(rsa.qinv.expose_secret(), ln));
 
             let mut data = Zeroizing::new(Vec::new());
             tlv_append(&mut data, 0x01, &p);
@@ -2120,27 +2120,33 @@ fn build_put_key_data(
         }
         PrivateKey::Ec(ec) => {
             let scalar_len = ec.curve.scalar_len();
-            let scalar = Zeroizing::new(bigint_to_bytes(&ec.scalar, scalar_len));
+            let scalar = Zeroizing::new(bigint_to_bytes(ec.scalar.expose_secret(), scalar_len));
             Ok(Zeroizing::new(tlv_encode(0x06, &scalar)))
         }
         PrivateKey::Ed25519(k) => {
-            if k.secret.len() != 32 {
+            if k.secret.expose_secret().len() != 32 {
                 return Err(PivError::InvalidData(
                     "Ed25519 secret key must be 32 bytes".into(),
                 ));
             }
-            Ok(Zeroizing::new(tlv_encode(0x07, &k.secret)))
+            Ok(Zeroizing::new(tlv_encode(0x07, k.secret.expose_secret())))
         }
         PrivateKey::X25519(k) => {
-            if k.secret.len() != 32 {
+            if k.secret.expose_secret().len() != 32 {
                 return Err(PivError::InvalidData(
                     "X25519 secret key must be 32 bytes".into(),
                 ));
             }
-            Ok(Zeroizing::new(tlv_encode(0x08, &k.secret)))
+            Ok(Zeroizing::new(tlv_encode(0x08, k.secret.expose_secret())))
         }
-        PrivateKey::MlDsa(k) => Ok(Zeroizing::new(tlv_encode(0x09, &k.private_key))),
-        PrivateKey::MlKem(k) => Ok(Zeroizing::new(tlv_encode(0x0A, &k.private_key))),
+        PrivateKey::MlDsa(k) => Ok(Zeroizing::new(tlv_encode(
+            0x09,
+            k.private_key.expose_secret(),
+        ))),
+        PrivateKey::MlKem(k) => Ok(Zeroizing::new(tlv_encode(
+            0x0A,
+            k.private_key.expose_secret(),
+        ))),
     }
 }
 
@@ -2278,10 +2284,9 @@ fn device_pubkey_to_public_key(
             } else {
                 EcCurve::P384
             };
-            Ok(PublicKey::Ec(EcPublicKey {
-                curve,
-                point: ec_point,
-            }))
+            Ok(EcPublicKey::new(curve, ec_point)
+                .map_err(|e| PivError::from(&e))?
+                .into())
         }
         KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
             let (tag1, modulus, end1) = parse_device_tlv(device_bytes, 0)?;
@@ -2303,11 +2308,12 @@ fn device_pubkey_to_public_key(
                 KeyType::Rsa4096 => RsaKeySize::Rsa4096,
                 _ => unreachable!(),
             };
-            Ok(PublicKey::Rsa(RsaPublicKey {
-                key_size,
-                n: modulus,
-                e: exponent,
-            }))
+            let public_key =
+                RsaPublicKey::new(modulus, exponent).map_err(|e| PivError::from(&e))?;
+            if public_key.key_size != key_size {
+                return Err(PivError::InvalidData("RSA public key size mismatch".into()));
+            }
+            Ok(public_key.into())
         }
         KeyType::Ed25519 => {
             let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
@@ -2316,7 +2322,9 @@ fn device_pubkey_to_public_key(
                     "Expected tag 0x86 for Ed25519 key, got 0x{tag:02X}"
                 )));
             }
-            Ok(PublicKey::Ed25519(Ed25519PublicKey { key: raw_key }))
+            Ok(Ed25519PublicKey::new(raw_key)
+                .map_err(|e| PivError::from(&e))?
+                .into())
         }
         KeyType::X25519 => {
             let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
@@ -2325,7 +2333,9 @@ fn device_pubkey_to_public_key(
                     "Expected tag 0x86 for X25519 key, got 0x{tag:02X}"
                 )));
             }
-            Ok(PublicKey::X25519(X25519PublicKey { key: raw_key }))
+            Ok(X25519PublicKey::new(raw_key)
+                .map_err(|e| PivError::from(&e))?
+                .into())
         }
         KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => {
             let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
@@ -2340,10 +2350,9 @@ fn device_pubkey_to_public_key(
                 KeyType::MlDsa87 => MlDsaParameterSet::MlDsa87,
                 _ => unreachable!(),
             };
-            Ok(PublicKey::MlDsa(MlDsaPublicKey {
-                parameter_set,
-                key: raw_key,
-            }))
+            Ok(MlDsaPublicKey::new(parameter_set, raw_key)
+                .map_err(|e| PivError::from(&e))?
+                .into())
         }
         KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
             let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
@@ -2358,10 +2367,9 @@ fn device_pubkey_to_public_key(
                 KeyType::MlKem1024 => MlKemParameterSet::MlKem1024,
                 _ => unreachable!(),
             };
-            Ok(PublicKey::MlKem(MlKemPublicKey {
-                parameter_set,
-                key: raw_key,
-            }))
+            Ok(MlKemPublicKey::new(parameter_set, raw_key)
+                .map_err(|e| PivError::from(&e))?
+                .into())
         }
     }
 }
@@ -2898,7 +2906,7 @@ mod tests {
             KeyType::MlDsa65
         );
         match &ml_dsa_priv {
-            PrivateKey::MlDsa(k) => assert_eq!(&k.private_key[..], &ml_dsa_key[..]),
+            PrivateKey::MlDsa(k) => assert_eq!(k.private_key.expose_secret(), &ml_dsa_key),
             _ => panic!("Expected MlDsa variant"),
         }
 
@@ -2910,7 +2918,7 @@ mod tests {
             KeyType::MlKem1024
         );
         match &ml_kem_priv {
-            PrivateKey::MlKem(k) => assert_eq!(&k.private_key[..], &ml_kem_key[..]),
+            PrivateKey::MlKem(k) => assert_eq!(k.private_key.expose_secret(), &ml_kem_key),
             _ => panic!("Expected MlKem variant"),
         }
     }

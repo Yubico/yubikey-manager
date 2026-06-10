@@ -27,8 +27,9 @@ use x509_cert::der;
 use x509_cert::der::asn1::BitString;
 use x509_cert::der::{Decode, Encode};
 use x509_cert::spki::{AlgorithmIdentifierOwned, ObjectIdentifier, SubjectPublicKeyInfoOwned};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
+use crate::secret::SecretValue;
 use crate::tlv::tlv_parse;
 
 // ---------------------------------------------------------------------------
@@ -237,33 +238,21 @@ impl Drop for PrivateKey {
 /// RSA private key components in CRT form.
 pub struct RsaPrivateKey {
     /// Key size.
-    pub key_size: RsaKeySize,
+    pub(crate) key_size: RsaKeySize,
     /// Public modulus n = p*q.
-    pub n: Vec<u8>,
+    pub(crate) n: Vec<u8>,
     /// Public exponent (typically 65537).
-    pub e: Vec<u8>,
+    pub(crate) e: Vec<u8>,
     /// First prime factor.
-    pub p: Vec<u8>,
+    pub(crate) p: SecretValue<Vec<u8>>,
     /// Second prime factor.
-    pub q: Vec<u8>,
+    pub(crate) q: SecretValue<Vec<u8>>,
     /// d mod (p-1).
-    pub dp: Vec<u8>,
+    pub(crate) dp: SecretValue<Vec<u8>>,
     /// d mod (q-1).
-    pub dq: Vec<u8>,
+    pub(crate) dq: SecretValue<Vec<u8>>,
     /// q^{-1} mod p.
-    pub qinv: Vec<u8>,
-}
-
-impl Drop for RsaPrivateKey {
-    fn drop(&mut self) {
-        self.n.zeroize();
-        self.e.zeroize();
-        self.p.zeroize();
-        self.q.zeroize();
-        self.dp.zeroize();
-        self.dq.zeroize();
-        self.qinv.zeroize();
-    }
+    pub(crate) qinv: SecretValue<Vec<u8>>,
 }
 
 impl fmt::Debug for RsaPrivateKey {
@@ -273,6 +262,47 @@ impl fmt::Debug for RsaPrivateKey {
 }
 
 impl RsaPrivateKey {
+    /// Construct an RSA private key from integer components.
+    ///
+    /// Components are big-endian unsigned integers. `n`, `dp`, `dq`, and `qinv`
+    /// may be empty for OpenPGP import formats that omit them.
+    pub fn new(
+        key_size: RsaKeySize,
+        n: Vec<u8>,
+        e: Vec<u8>,
+        p: Vec<u8>,
+        q: Vec<u8>,
+        dp: Vec<u8>,
+        dq: Vec<u8>,
+        qinv: Vec<u8>,
+    ) -> Result<Self, KeyError> {
+        let key_len = key_size.bit_len() / 8;
+        let prime_len = key_len / 2;
+
+        validate_non_empty("RSA public exponent", &e)?;
+        validate_non_empty("RSA prime p", &p)?;
+        validate_non_empty("RSA prime q", &q)?;
+        validate_max_int_len("RSA prime p", &p, prime_len)?;
+        validate_max_int_len("RSA prime q", &q, prime_len)?;
+        validate_optional_int_len("RSA private exponent dp", &dp, prime_len)?;
+        validate_optional_int_len("RSA private exponent dq", &dq, prime_len)?;
+        validate_optional_int_len("RSA CRT coefficient qinv", &qinv, prime_len)?;
+        if !n.is_empty() {
+            validate_exact_int_len("RSA modulus", &n, key_len)?;
+        }
+
+        Ok(Self {
+            key_size,
+            n,
+            e,
+            p: SecretValue::new(p),
+            q: SecretValue::new(q),
+            dp: SecretValue::new(dp),
+            dq: SecretValue::new(dq),
+            qinv: SecretValue::new(qinv),
+        })
+    }
+
     /// Returns the algorithm of this key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         KeyAlgorithm::Rsa(self.key_size)
@@ -301,33 +331,27 @@ impl RsaPrivateKey {
         let key_size =
             RsaKeySize::from_bit_len(n.len() * 8).ok_or(KeyError("Unsupported RSA key size"))?;
 
-        Ok(Self {
+        Self::new(
             key_size,
             n,
-            e: strip_leading_zero(fields[2]).to_vec(),
-            p: strip_leading_zero(fields[4]).to_vec(),
-            q: strip_leading_zero(fields[5]).to_vec(),
-            dp: strip_leading_zero(fields[6]).to_vec(),
-            dq: strip_leading_zero(fields[7]).to_vec(),
-            qinv: strip_leading_zero(fields[8]).to_vec(),
-        })
+            strip_leading_zero(fields[2]).to_vec(),
+            strip_leading_zero(fields[4]).to_vec(),
+            strip_leading_zero(fields[5]).to_vec(),
+            strip_leading_zero(fields[6]).to_vec(),
+            strip_leading_zero(fields[7]).to_vec(),
+            strip_leading_zero(fields[8]).to_vec(),
+        )
     }
 }
 
 /// Elliptic curve private key.
 pub struct EcPrivateKey {
     /// The curve.
-    pub curve: EcCurve,
+    pub(crate) curve: EcCurve,
     /// The scalar value (big-endian, zero-padded to curve scalar length).
-    pub scalar: Vec<u8>,
+    pub(crate) scalar: SecretValue<Vec<u8>>,
     /// Optional uncompressed public key point.
-    pub public_key: Option<Vec<u8>>,
-}
-
-impl Drop for EcPrivateKey {
-    fn drop(&mut self) {
-        self.scalar.zeroize();
-    }
+    pub(crate) public_key: Option<Vec<u8>>,
 }
 
 impl fmt::Debug for EcPrivateKey {
@@ -337,6 +361,30 @@ impl fmt::Debug for EcPrivateKey {
 }
 
 impl EcPrivateKey {
+    /// Construct an EC private key.
+    ///
+    /// `scalar` is a big-endian unsigned integer and may be shorter than the
+    /// curve scalar length; import code will left-pad it for applet wire formats.
+    pub fn new(
+        curve: EcCurve,
+        scalar: Vec<u8>,
+        public_key: Option<Vec<u8>>,
+    ) -> Result<Self, KeyError> {
+        validate_non_empty("EC scalar", &scalar)?;
+        validate_max_int_len("EC scalar", &scalar, curve.scalar_len())?;
+        if strip_leading_zero(&scalar).is_empty() {
+            return Err(KeyError("EC scalar must not be zero"));
+        }
+        if let Some(point) = &public_key {
+            validate_ec_public_point(&curve, point)?;
+        }
+        Ok(Self {
+            curve,
+            scalar: SecretValue::new(scalar),
+            public_key,
+        })
+    }
+
     /// Returns the algorithm of this key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         KeyAlgorithm::Ec(self.curve.clone())
@@ -346,13 +394,7 @@ impl EcPrivateKey {
 /// Ed25519 signing private key (32-byte secret).
 pub struct Ed25519PrivateKey {
     /// The 32-byte secret.
-    pub secret: Vec<u8>,
-}
-
-impl Drop for Ed25519PrivateKey {
-    fn drop(&mut self) {
-        self.secret.zeroize();
-    }
+    pub(crate) secret: SecretValue<Vec<u8>>,
 }
 
 impl fmt::Debug for Ed25519PrivateKey {
@@ -362,6 +404,14 @@ impl fmt::Debug for Ed25519PrivateKey {
 }
 
 impl Ed25519PrivateKey {
+    /// Construct an Ed25519 private key from a 32-byte secret.
+    pub fn new(secret: Vec<u8>) -> Result<Self, KeyError> {
+        validate_exact_len("Ed25519 secret key", &secret, 32)?;
+        Ok(Self {
+            secret: SecretValue::new(secret),
+        })
+    }
+
     /// Returns the algorithm of this key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         KeyAlgorithm::Ed25519
@@ -371,13 +421,7 @@ impl Ed25519PrivateKey {
 /// X25519 key agreement private key (32-byte secret).
 pub struct X25519PrivateKey {
     /// The 32-byte secret.
-    pub secret: Vec<u8>,
-}
-
-impl Drop for X25519PrivateKey {
-    fn drop(&mut self) {
-        self.secret.zeroize();
-    }
+    pub(crate) secret: SecretValue<Vec<u8>>,
 }
 
 impl fmt::Debug for X25519PrivateKey {
@@ -387,6 +431,14 @@ impl fmt::Debug for X25519PrivateKey {
 }
 
 impl X25519PrivateKey {
+    /// Construct an X25519 private key from a 32-byte secret.
+    pub fn new(secret: Vec<u8>) -> Result<Self, KeyError> {
+        validate_exact_len("X25519 secret key", &secret, 32)?;
+        Ok(Self {
+            secret: SecretValue::new(secret),
+        })
+    }
+
     /// Returns the algorithm of this key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         KeyAlgorithm::X25519
@@ -396,15 +448,9 @@ impl X25519PrivateKey {
 /// ML-DSA (FIPS 204) private key.
 pub struct MlDsaPrivateKey {
     /// The ML-DSA parameter set.
-    pub parameter_set: MlDsaParameterSet,
+    pub(crate) parameter_set: MlDsaParameterSet,
     /// The raw private key bytes.
-    pub private_key: Vec<u8>,
-}
-
-impl Drop for MlDsaPrivateKey {
-    fn drop(&mut self) {
-        self.private_key.zeroize();
-    }
+    pub(crate) private_key: SecretValue<Vec<u8>>,
 }
 
 impl fmt::Debug for MlDsaPrivateKey {
@@ -414,6 +460,15 @@ impl fmt::Debug for MlDsaPrivateKey {
 }
 
 impl MlDsaPrivateKey {
+    /// Construct an ML-DSA private key from raw private key bytes.
+    pub fn new(parameter_set: MlDsaParameterSet, private_key: Vec<u8>) -> Result<Self, KeyError> {
+        validate_non_empty("ML-DSA private key", &private_key)?;
+        Ok(Self {
+            parameter_set,
+            private_key: SecretValue::new(private_key),
+        })
+    }
+
     /// Returns the algorithm of this key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         KeyAlgorithm::MlDsa(self.parameter_set)
@@ -423,15 +478,9 @@ impl MlDsaPrivateKey {
 /// ML-KEM (FIPS 203) private key.
 pub struct MlKemPrivateKey {
     /// The ML-KEM parameter set.
-    pub parameter_set: MlKemParameterSet,
+    pub(crate) parameter_set: MlKemParameterSet,
     /// The raw private key bytes.
-    pub private_key: Vec<u8>,
-}
-
-impl Drop for MlKemPrivateKey {
-    fn drop(&mut self) {
-        self.private_key.zeroize();
-    }
+    pub(crate) private_key: SecretValue<Vec<u8>>,
 }
 
 impl fmt::Debug for MlKemPrivateKey {
@@ -441,6 +490,15 @@ impl fmt::Debug for MlKemPrivateKey {
 }
 
 impl MlKemPrivateKey {
+    /// Construct an ML-KEM private key from raw private key bytes.
+    pub fn new(parameter_set: MlKemParameterSet, private_key: Vec<u8>) -> Result<Self, KeyError> {
+        validate_non_empty("ML-KEM private key", &private_key)?;
+        Ok(Self {
+            parameter_set,
+            private_key: SecretValue::new(private_key),
+        })
+    }
+
     /// Returns the algorithm of this key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         KeyAlgorithm::MlKem(self.parameter_set)
@@ -454,25 +512,19 @@ impl PrivateKey {
 
         match algorithm {
             KeyAlgorithm::Rsa(_) => Ok(Self::Rsa(RsaPrivateKey::from_pkcs1(&key_data)?)),
-            KeyAlgorithm::Ec(curve) => Ok(Self::Ec(EcPrivateKey {
-                curve,
-                scalar: key_data.to_vec(),
-                public_key: None,
-            })),
-            KeyAlgorithm::Ed25519 => Ok(Self::Ed25519(Ed25519PrivateKey {
-                secret: key_data.to_vec(),
-            })),
-            KeyAlgorithm::X25519 => Ok(Self::X25519(X25519PrivateKey {
-                secret: key_data.to_vec(),
-            })),
-            KeyAlgorithm::MlDsa(parameter_set) => Ok(Self::MlDsa(MlDsaPrivateKey {
+            KeyAlgorithm::Ec(curve) => {
+                Ok(Self::Ec(EcPrivateKey::new(curve, key_data.to_vec(), None)?))
+            }
+            KeyAlgorithm::Ed25519 => Ok(Self::Ed25519(Ed25519PrivateKey::new(key_data.to_vec())?)),
+            KeyAlgorithm::X25519 => Ok(Self::X25519(X25519PrivateKey::new(key_data.to_vec())?)),
+            KeyAlgorithm::MlDsa(parameter_set) => Ok(Self::MlDsa(MlDsaPrivateKey::new(
                 parameter_set,
-                private_key: key_data.to_vec(),
-            })),
-            KeyAlgorithm::MlKem(parameter_set) => Ok(Self::MlKem(MlKemPrivateKey {
+                key_data.to_vec(),
+            )?)),
+            KeyAlgorithm::MlKem(parameter_set) => Ok(Self::MlKem(MlKemPrivateKey::new(
                 parameter_set,
-                private_key: key_data.to_vec(),
-            })),
+                key_data.to_vec(),
+            )?)),
         }
     }
 
@@ -608,6 +660,16 @@ pub struct RsaPublicKey {
 }
 
 impl RsaPublicKey {
+    /// Construct an RSA public key.
+    pub fn new(n: Vec<u8>, e: Vec<u8>) -> Result<Self, KeyError> {
+        validate_non_empty("RSA modulus", &n)?;
+        validate_non_empty("RSA public exponent", &e)?;
+        let n = strip_leading_zero(&n).to_vec();
+        let key_size =
+            RsaKeySize::from_bit_len(n.len() * 8).ok_or(KeyError("Unsupported RSA key size"))?;
+        Ok(Self { key_size, n, e })
+    }
+
     /// Returns the algorithm of this key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         KeyAlgorithm::Rsa(self.key_size)
@@ -656,6 +718,12 @@ pub struct EcPublicKey {
 }
 
 impl EcPublicKey {
+    /// Construct an EC public key from an uncompressed SEC 1 point.
+    pub fn new(curve: EcCurve, point: Vec<u8>) -> Result<Self, KeyError> {
+        validate_ec_public_point(&curve, &point)?;
+        Ok(Self { curve, point })
+    }
+
     /// Returns the algorithm of this key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         KeyAlgorithm::Ec(self.curve.clone())
@@ -684,6 +752,12 @@ pub struct Ed25519PublicKey {
 }
 
 impl Ed25519PublicKey {
+    /// Construct an Ed25519 public key from 32 raw bytes.
+    pub fn new(key: Vec<u8>) -> Result<Self, KeyError> {
+        validate_exact_len("Ed25519 public key", &key, 32)?;
+        Ok(Self { key })
+    }
+
     /// Returns the algorithm of this key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         KeyAlgorithm::Ed25519
@@ -712,6 +786,12 @@ pub struct X25519PublicKey {
 }
 
 impl X25519PublicKey {
+    /// Construct an X25519 public key from 32 raw bytes.
+    pub fn new(key: Vec<u8>) -> Result<Self, KeyError> {
+        validate_exact_len("X25519 public key", &key, 32)?;
+        Ok(Self { key })
+    }
+
     /// Returns the algorithm of this key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         KeyAlgorithm::X25519
@@ -742,6 +822,12 @@ pub struct MlDsaPublicKey {
 }
 
 impl MlDsaPublicKey {
+    /// Construct an ML-DSA public key from raw public key bytes.
+    pub fn new(parameter_set: MlDsaParameterSet, key: Vec<u8>) -> Result<Self, KeyError> {
+        validate_non_empty("ML-DSA public key", &key)?;
+        Ok(Self { parameter_set, key })
+    }
+
     /// Returns the algorithm of this key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         KeyAlgorithm::MlDsa(self.parameter_set)
@@ -777,6 +863,12 @@ pub struct MlKemPublicKey {
 }
 
 impl MlKemPublicKey {
+    /// Construct an ML-KEM public key from raw public key bytes.
+    pub fn new(parameter_set: MlKemParameterSet, key: Vec<u8>) -> Result<Self, KeyError> {
+        validate_non_empty("ML-KEM public key", &key)?;
+        Ok(Self { parameter_set, key })
+    }
+
     /// Returns the algorithm of this key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         KeyAlgorithm::MlKem(self.parameter_set)
@@ -807,6 +899,59 @@ fn strip_leading_zero(b: &[u8]) -> &[u8] {
         &b[1..]
     } else {
         b
+    }
+}
+
+fn validate_non_empty(name: &'static str, value: &[u8]) -> Result<(), KeyError> {
+    if value.is_empty() {
+        Err(KeyError(name))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_exact_len(name: &'static str, value: &[u8], len: usize) -> Result<(), KeyError> {
+    if value.len() == len {
+        Ok(())
+    } else {
+        Err(KeyError(name))
+    }
+}
+
+fn validate_max_int_len(name: &'static str, value: &[u8], max_len: usize) -> Result<(), KeyError> {
+    if strip_leading_zero(value).len() <= max_len {
+        Ok(())
+    } else {
+        Err(KeyError(name))
+    }
+}
+
+fn validate_optional_int_len(
+    name: &'static str,
+    value: &[u8],
+    max_len: usize,
+) -> Result<(), KeyError> {
+    if value.is_empty() {
+        Ok(())
+    } else {
+        validate_max_int_len(name, value, max_len)
+    }
+}
+
+fn validate_exact_int_len(name: &'static str, value: &[u8], len: usize) -> Result<(), KeyError> {
+    if strip_leading_zero(value).len() == len {
+        Ok(())
+    } else {
+        Err(KeyError(name))
+    }
+}
+
+fn validate_ec_public_point(curve: &EcCurve, point: &[u8]) -> Result<(), KeyError> {
+    let coordinate_len = curve.scalar_len();
+    if point.len() == 1 + coordinate_len * 2 && point.first() == Some(&0x04) {
+        Ok(())
+    } else {
+        Err(KeyError("Invalid EC public point"))
     }
 }
 
@@ -853,11 +998,11 @@ impl PublicKey {
             let e = strip_leading_zero(&inner[e_off..e_off + e_len]);
             let key_size = RsaKeySize::from_bit_len(n.len() * 8)
                 .ok_or(KeyError("Unsupported RSA key size"))?;
-            Ok(Self::Rsa(RsaPublicKey {
-                key_size,
-                n: n.to_vec(),
-                e: e.to_vec(),
-            }))
+            let public_key = RsaPublicKey::new(n.to_vec(), e.to_vec())?;
+            if public_key.key_size != key_size {
+                return Err(KeyError("RSA public key size mismatch"));
+            }
+            Ok(Self::Rsa(public_key))
         } else if oid == SPKI_OID_EC {
             let curve_oid = spki
                 .algorithm
@@ -867,48 +1012,41 @@ impl PublicKey {
                 .ok_or(KeyError("Missing EC curve parameter"))?;
             let curve =
                 EcCurve::from_oid(&curve_oid).ok_or(KeyError("Unsupported EC curve in SPKI"))?;
-            Ok(Self::Ec(EcPublicKey {
-                curve,
-                point: key_bytes.to_vec(),
-            }))
+            Ok(Self::Ec(EcPublicKey::new(curve, key_bytes.to_vec())?))
         } else if oid == SPKI_OID_ED25519 {
-            Ok(Self::Ed25519(Ed25519PublicKey {
-                key: key_bytes.to_vec(),
-            }))
+            Ok(Self::Ed25519(Ed25519PublicKey::new(key_bytes.to_vec())?))
         } else if oid == SPKI_OID_X25519 {
-            Ok(Self::X25519(X25519PublicKey {
-                key: key_bytes.to_vec(),
-            }))
+            Ok(Self::X25519(X25519PublicKey::new(key_bytes.to_vec())?))
         } else if oid == SPKI_OID_ML_DSA_44 {
-            Ok(Self::MlDsa(MlDsaPublicKey {
-                parameter_set: MlDsaParameterSet::MlDsa44,
-                key: key_bytes.to_vec(),
-            }))
+            Ok(Self::MlDsa(MlDsaPublicKey::new(
+                MlDsaParameterSet::MlDsa44,
+                key_bytes.to_vec(),
+            )?))
         } else if oid == SPKI_OID_ML_DSA_65 {
-            Ok(Self::MlDsa(MlDsaPublicKey {
-                parameter_set: MlDsaParameterSet::MlDsa65,
-                key: key_bytes.to_vec(),
-            }))
+            Ok(Self::MlDsa(MlDsaPublicKey::new(
+                MlDsaParameterSet::MlDsa65,
+                key_bytes.to_vec(),
+            )?))
         } else if oid == SPKI_OID_ML_DSA_87 {
-            Ok(Self::MlDsa(MlDsaPublicKey {
-                parameter_set: MlDsaParameterSet::MlDsa87,
-                key: key_bytes.to_vec(),
-            }))
+            Ok(Self::MlDsa(MlDsaPublicKey::new(
+                MlDsaParameterSet::MlDsa87,
+                key_bytes.to_vec(),
+            )?))
         } else if oid == SPKI_OID_ML_KEM_512 {
-            Ok(Self::MlKem(MlKemPublicKey {
-                parameter_set: MlKemParameterSet::MlKem512,
-                key: key_bytes.to_vec(),
-            }))
+            Ok(Self::MlKem(MlKemPublicKey::new(
+                MlKemParameterSet::MlKem512,
+                key_bytes.to_vec(),
+            )?))
         } else if oid == SPKI_OID_ML_KEM_768 {
-            Ok(Self::MlKem(MlKemPublicKey {
-                parameter_set: MlKemParameterSet::MlKem768,
-                key: key_bytes.to_vec(),
-            }))
+            Ok(Self::MlKem(MlKemPublicKey::new(
+                MlKemParameterSet::MlKem768,
+                key_bytes.to_vec(),
+            )?))
         } else if oid == SPKI_OID_ML_KEM_1024 {
-            Ok(Self::MlKem(MlKemPublicKey {
-                parameter_set: MlKemParameterSet::MlKem1024,
-                key: key_bytes.to_vec(),
-            }))
+            Ok(Self::MlKem(MlKemPublicKey::new(
+                MlKemParameterSet::MlKem1024,
+                key_bytes.to_vec(),
+            )?))
         } else {
             Err(KeyError("Unsupported algorithm in SPKI"))
         }

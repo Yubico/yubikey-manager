@@ -112,48 +112,50 @@ fn private_key_from_raw(kt: KeyType, raw: &[u8]) -> PyResult<PrivateKey> {
     match kt {
         KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
             let rsa = RsaPrivateKey::from_pkcs1(raw).map_err(|e| err(&e.to_string()))?;
-            Ok(PrivateKey::Rsa(rsa))
+            Ok(rsa.into())
         }
-        KeyType::EccP256 => Ok(PrivateKey::Ec(EcPrivateKey {
-            curve: EcCurve::P256,
-            scalar: raw.to_vec(),
-            public_key: None,
-        })),
-        KeyType::EccP384 => Ok(PrivateKey::Ec(EcPrivateKey {
-            curve: EcCurve::P384,
-            scalar: raw.to_vec(),
-            public_key: None,
-        })),
-        KeyType::Ed25519 => Ok(PrivateKey::Ed25519(Ed25519PrivateKey {
-            secret: raw.to_vec(),
-        })),
-        KeyType::X25519 => Ok(PrivateKey::X25519(X25519PrivateKey {
-            secret: raw.to_vec(),
-        })),
-        KeyType::MlDsa44 => Ok(PrivateKey::MlDsa(MlDsaPrivateKey {
-            parameter_set: MlDsaParameterSet::MlDsa44,
-            private_key: raw.to_vec(),
-        })),
-        KeyType::MlDsa65 => Ok(PrivateKey::MlDsa(MlDsaPrivateKey {
-            parameter_set: MlDsaParameterSet::MlDsa65,
-            private_key: raw.to_vec(),
-        })),
-        KeyType::MlDsa87 => Ok(PrivateKey::MlDsa(MlDsaPrivateKey {
-            parameter_set: MlDsaParameterSet::MlDsa87,
-            private_key: raw.to_vec(),
-        })),
-        KeyType::MlKem512 => Ok(PrivateKey::MlKem(MlKemPrivateKey {
-            parameter_set: MlKemParameterSet::MlKem512,
-            private_key: raw.to_vec(),
-        })),
-        KeyType::MlKem768 => Ok(PrivateKey::MlKem(MlKemPrivateKey {
-            parameter_set: MlKemParameterSet::MlKem768,
-            private_key: raw.to_vec(),
-        })),
-        KeyType::MlKem1024 => Ok(PrivateKey::MlKem(MlKemPrivateKey {
-            parameter_set: MlKemParameterSet::MlKem1024,
-            private_key: raw.to_vec(),
-        })),
+        KeyType::EccP256 => Ok(EcPrivateKey::new(EcCurve::P256, raw.to_vec(), None)
+            .map_err(|e| err(&e.to_string()))?
+            .into()),
+        KeyType::EccP384 => Ok(EcPrivateKey::new(EcCurve::P384, raw.to_vec(), None)
+            .map_err(|e| err(&e.to_string()))?
+            .into()),
+        KeyType::Ed25519 => Ok(Ed25519PrivateKey::new(raw.to_vec())
+            .map_err(|e| err(&e.to_string()))?
+            .into()),
+        KeyType::X25519 => Ok(X25519PrivateKey::new(raw.to_vec())
+            .map_err(|e| err(&e.to_string()))?
+            .into()),
+        KeyType::MlDsa44 => Ok(
+            MlDsaPrivateKey::new(MlDsaParameterSet::MlDsa44, raw.to_vec())
+                .map_err(|e| err(&e.to_string()))?
+                .into(),
+        ),
+        KeyType::MlDsa65 => Ok(
+            MlDsaPrivateKey::new(MlDsaParameterSet::MlDsa65, raw.to_vec())
+                .map_err(|e| err(&e.to_string()))?
+                .into(),
+        ),
+        KeyType::MlDsa87 => Ok(
+            MlDsaPrivateKey::new(MlDsaParameterSet::MlDsa87, raw.to_vec())
+                .map_err(|e| err(&e.to_string()))?
+                .into(),
+        ),
+        KeyType::MlKem512 => Ok(
+            MlKemPrivateKey::new(MlKemParameterSet::MlKem512, raw.to_vec())
+                .map_err(|e| err(&e.to_string()))?
+                .into(),
+        ),
+        KeyType::MlKem768 => Ok(
+            MlKemPrivateKey::new(MlKemParameterSet::MlKem768, raw.to_vec())
+                .map_err(|e| err(&e.to_string()))?
+                .into(),
+        ),
+        KeyType::MlKem1024 => Ok(
+            MlKemPrivateKey::new(MlKemParameterSet::MlKem1024, raw.to_vec())
+                .map_err(|e| err(&e.to_string()))?
+                .into(),
+        ),
         _ => Err(err("Unsupported key type")),
     }
 }

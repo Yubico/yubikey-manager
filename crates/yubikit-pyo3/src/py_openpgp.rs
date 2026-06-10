@@ -529,9 +529,11 @@ impl OpenPgpSession {
         components: Vec<Vec<u8>>,
         curve_oid: Option<&str>,
     ) -> PyResult<()> {
-        use yubikit::keys::{EcCurve, EcPrivateKey, PrivateKey, RsaKeySize, RsaPrivateKey};
+        use yubikit::keys::{EcCurve, EcPrivateKey, RsaKeySize, RsaPrivateKey};
 
         let kr = parse_key_ref(key_ref)?;
+        let key_err =
+            |e: yubikit::keys::KeyError| pyo3::exceptions::PyValueError::new_err(e.to_string());
         let private_key = match key_type {
             0 => {
                 // RSA standard (e, p, q)
@@ -544,16 +546,18 @@ impl OpenPgpSession {
                     RsaKeySize::from_bit_len(components[1].len() * 2 * 8).ok_or_else(|| {
                         pyo3::exceptions::PyValueError::new_err("Unsupported RSA key size")
                     })?;
-                PrivateKey::Rsa(RsaPrivateKey {
+                RsaPrivateKey::new(
                     key_size,
-                    e: components[0].clone(),
-                    p: components[1].clone(),
-                    q: components[2].clone(),
-                    qinv: Vec::new(),
-                    dp: Vec::new(),
-                    dq: Vec::new(),
-                    n: Vec::new(),
-                })
+                    Vec::new(),
+                    components[0].clone(),
+                    components[1].clone(),
+                    components[2].clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .map_err(key_err)?
+                .into()
             }
             1 => {
                 if components.len() != 7 {
@@ -565,16 +569,18 @@ impl OpenPgpSession {
                     RsaKeySize::from_bit_len(components[6].len() * 8).ok_or_else(|| {
                         pyo3::exceptions::PyValueError::new_err("Unsupported RSA key size")
                     })?;
-                PrivateKey::Rsa(RsaPrivateKey {
+                RsaPrivateKey::new(
                     key_size,
-                    e: components[0].clone(),
-                    p: components[1].clone(),
-                    q: components[2].clone(),
-                    qinv: components[3].clone(),
-                    dp: components[4].clone(),
-                    dq: components[5].clone(),
-                    n: components[6].clone(),
-                })
+                    components[6].clone(),
+                    components[0].clone(),
+                    components[1].clone(),
+                    components[2].clone(),
+                    components[4].clone(),
+                    components[5].clone(),
+                    components[3].clone(),
+                )
+                .map_err(key_err)?
+                .into()
             }
             2 => {
                 if components.is_empty() || components.len() > 2 {
@@ -593,11 +599,9 @@ impl OpenPgpSession {
                         oid_str
                     ))
                 })?;
-                PrivateKey::Ec(EcPrivateKey {
-                    curve,
-                    scalar: components[0].clone(),
-                    public_key: components.get(1).cloned(),
-                })
+                EcPrivateKey::new(curve, components[0].clone(), components.get(1).cloned())
+                    .map_err(key_err)?
+                    .into()
             }
             3 => {
                 // Ed25519
@@ -606,9 +610,9 @@ impl OpenPgpSession {
                         "Ed25519 key requires [secret]",
                     ));
                 }
-                PrivateKey::Ed25519(yubikit::keys::Ed25519PrivateKey {
-                    secret: components[0].clone(),
-                })
+                yubikit::keys::Ed25519PrivateKey::new(components[0].clone())
+                    .map_err(key_err)?
+                    .into()
             }
             4 => {
                 // X25519
@@ -617,9 +621,9 @@ impl OpenPgpSession {
                         "X25519 key requires [secret]",
                     ));
                 }
-                PrivateKey::X25519(yubikit::keys::X25519PrivateKey {
-                    secret: components[0].clone(),
-                })
+                yubikit::keys::X25519PrivateKey::new(components[0].clone())
+                    .map_err(key_err)?
+                    .into()
             }
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(

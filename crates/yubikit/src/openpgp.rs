@@ -49,8 +49,8 @@ use zeroize::Zeroizing;
 use crate::core::Version;
 use crate::core::{bytes2int, int2bytes, patch_version};
 use crate::keys::{
-    EcCurve, EcPrivateKey, EcPublicKey, Ed25519PublicKey, PrivateKey, PublicKey, RsaKeySize,
-    RsaPrivateKey, RsaPublicKey, X25519PublicKey,
+    EcCurve, EcPublicKey, Ed25519PublicKey, PrivateKey, PublicKey, RsaKeySize, RsaPublicKey,
+    X25519PublicKey,
 };
 use crate::keys::{
     OID_BRAINPOOL_P256R1, OID_BRAINPOOL_P384R1, OID_BRAINPOOL_P512R1, OID_SECP256K1, OID_SECP256R1,
@@ -1436,9 +1436,9 @@ fn algorithm_attributes_for_key(
                     )));
                 }
             };
-            let import_format = if !rsa.dp.is_empty() && !rsa.n.is_empty() {
+            let import_format = if !rsa.dp.expose_secret().is_empty() && !rsa.n.is_empty() {
                 RsaImportFormat::CrtWMod
-            } else if !rsa.dp.is_empty() {
+            } else if !rsa.dp.expose_secret().is_empty() {
                 RsaImportFormat::Crt
             } else if !rsa.n.is_empty() {
                 RsaImportFormat::StandardWMod
@@ -1485,50 +1485,39 @@ fn build_private_key_template(
 ) -> Result<Zeroizing<Vec<u8>>, OpenPgpError> {
     let mut temp = Zeroizing::new(Vec::new());
     let component_tlvs: Vec<(u32, &[u8])> = match private_key {
-        PrivateKey::Rsa(RsaPrivateKey {
-            e,
-            p,
-            q,
-            dp,
-            dq,
-            qinv,
-            n,
-            ..
-        }) => {
+        PrivateKey::Rsa(rsa) => {
             let mut v = vec![
-                (0x91, e.as_slice()),
-                (0x92, p.as_slice()),
-                (0x93, q.as_slice()),
+                (0x91, rsa.e.as_slice()),
+                (0x92, rsa.p.expose_secret().as_slice()),
+                (0x93, rsa.q.expose_secret().as_slice()),
             ];
-            if !qinv.is_empty() {
-                v.push((0x94, qinv.as_slice()));
+            if !rsa.qinv.expose_secret().is_empty() {
+                v.push((0x94, rsa.qinv.expose_secret().as_slice()));
             }
-            if !dp.is_empty() {
-                v.push((0x95, dp.as_slice()));
+            if !rsa.dp.expose_secret().is_empty() {
+                v.push((0x95, rsa.dp.expose_secret().as_slice()));
             }
-            if !dq.is_empty() {
-                v.push((0x96, dq.as_slice()));
+            if !rsa.dq.expose_secret().is_empty() {
+                v.push((0x96, rsa.dq.expose_secret().as_slice()));
             }
-            if !n.is_empty() {
-                v.push((0x97, n.as_slice()));
+            if !rsa.n.is_empty() {
+                v.push((0x97, rsa.n.as_slice()));
             }
             v
         }
-        PrivateKey::Ec(EcPrivateKey {
-            scalar, public_key, ..
-        }) => {
-            let mut v = vec![(0x92, scalar.as_slice())];
-            if let Some(pk) = public_key {
+        PrivateKey::Ec(ec) => {
+            let mut v = vec![(0x92, ec.scalar.expose_secret().as_slice())];
+            if let Some(pk) = &ec.public_key {
                 v.push((0x99, pk.as_slice()));
             }
             v
         }
         PrivateKey::Ed25519(k) => {
-            vec![(0x92, k.secret.as_slice())]
+            vec![(0x92, k.secret.expose_secret().as_slice())]
         }
         PrivateKey::X25519(k) => {
             // X25519 uses little-endian; OpenPGP card expects big-endian
-            temp.extend(&k.secret);
+            temp.extend(k.secret.expose_secret());
             temp.reverse();
             vec![(0x92, temp.as_slice())]
         }
@@ -1578,23 +1567,32 @@ fn parse_rsa_public_key(pk_data: &[u8]) -> Result<PublicKey, OpenPgpError> {
     let key_size = RsaKeySize::from_bit_len(n.len() * 8).ok_or_else(|| {
         OpenPgpError::InvalidData(format!("Unsupported RSA key size: {} bits", n.len() * 8))
     })?;
-    Ok(PublicKey::Rsa(RsaPublicKey {
-        key_size,
-        n,
-        e: e.to_vec(),
-    }))
+    let public_key = RsaPublicKey::new(n, e.to_vec())
+        .map_err(|e| OpenPgpError::InvalidData(format!("Invalid RSA public key: {e}")))?;
+    if public_key.key_size != key_size {
+        return Err(OpenPgpError::InvalidData(
+            "RSA public key size mismatch".into(),
+        ));
+    }
+    Ok(PublicKey::Rsa(public_key))
 }
 
 fn parse_ec_public_key(pk_data: &[u8], oid: &ObjectIdentifier) -> Result<PublicKey, OpenPgpError> {
     let point = tlv_unpack(0x86, pk_data)?;
     if *oid == OID_ED25519 {
-        Ok(PublicKey::Ed25519(Ed25519PublicKey { key: point }))
+        Ok(PublicKey::Ed25519(Ed25519PublicKey::new(point).map_err(
+            |e| OpenPgpError::InvalidData(format!("Invalid Ed25519 public key: {e}")),
+        )?))
     } else if *oid == OID_X25519 {
-        Ok(PublicKey::X25519(X25519PublicKey { key: point }))
+        Ok(PublicKey::X25519(X25519PublicKey::new(point).map_err(
+            |e| OpenPgpError::InvalidData(format!("Invalid X25519 public key: {e}")),
+        )?))
     } else {
         let curve = EcCurve::from_oid(oid)
             .ok_or_else(|| OpenPgpError::InvalidData("Unsupported EC curve".into()))?;
-        Ok(PublicKey::Ec(EcPublicKey { curve, point }))
+        Ok(PublicKey::Ec(EcPublicKey::new(curve, point).map_err(
+            |e| OpenPgpError::InvalidData(format!("Invalid EC public key: {e}")),
+        )?))
     }
 }
 
@@ -2861,11 +2859,8 @@ mod tests {
     #[test]
     fn test_build_private_key_template_ec() {
         use crate::keys::{EcCurve, EcPrivateKey};
-        let key = PrivateKey::Ec(EcPrivateKey {
-            curve: EcCurve::P256,
-            scalar: vec![0x01, 0x02, 0x03],
-            public_key: None,
-        });
+        let key =
+            PrivateKey::Ec(EcPrivateKey::new(EcCurve::P256, vec![0x01, 0x02, 0x03], None).unwrap());
         let template = build_private_key_template(KeyRef::Sig, &key).unwrap();
         // Should start with 0x4D tag
         assert_eq!(template[0], 0x4D);
@@ -2874,16 +2869,19 @@ mod tests {
     #[test]
     fn test_build_private_key_template_rsa() {
         use crate::keys::{RsaKeySize, RsaPrivateKey};
-        let key = PrivateKey::Rsa(RsaPrivateKey {
-            key_size: RsaKeySize::Rsa2048,
-            e: vec![0x01, 0x00, 0x01],
-            n: vec![0xFF; 256],
-            p: vec![0xAA; 128],
-            q: vec![0xBB; 128],
-            dp: vec![0xDD; 128],
-            dq: vec![0xEE; 128],
-            qinv: vec![0xCC; 128],
-        });
+        let key = PrivateKey::Rsa(
+            RsaPrivateKey::new(
+                RsaKeySize::Rsa2048,
+                vec![0xFF; 256],
+                vec![0x01, 0x00, 0x01],
+                vec![0xAA; 128],
+                vec![0xBB; 128],
+                vec![0xDD; 128],
+                vec![0xEE; 128],
+                vec![0xCC; 128],
+            )
+            .unwrap(),
+        );
         let template = build_private_key_template(KeyRef::Sig, &key).unwrap();
         assert_eq!(template[0], 0x4D);
     }
@@ -2891,16 +2889,19 @@ mod tests {
     #[test]
     fn test_build_private_key_template_rsa_crt() {
         use crate::keys::{RsaKeySize, RsaPrivateKey};
-        let key = PrivateKey::Rsa(RsaPrivateKey {
-            key_size: RsaKeySize::Rsa2048,
-            e: vec![0x01, 0x00, 0x01],
-            n: vec![0xFF; 256],
-            p: vec![0xAA; 128],
-            q: vec![0xBB; 128],
-            dp: vec![0xDD; 128],
-            dq: vec![0xEE; 128],
-            qinv: vec![0xCC; 128],
-        });
+        let key = PrivateKey::Rsa(
+            RsaPrivateKey::new(
+                RsaKeySize::Rsa2048,
+                vec![0xFF; 256],
+                vec![0x01, 0x00, 0x01],
+                vec![0xAA; 128],
+                vec![0xBB; 128],
+                vec![0xDD; 128],
+                vec![0xEE; 128],
+                vec![0xCC; 128],
+            )
+            .unwrap(),
+        );
         let template = build_private_key_template(KeyRef::Sig, &key).unwrap();
         assert_eq!(template[0], 0x4D);
         // Parse outer TLV to verify structure
