@@ -262,7 +262,6 @@ impl TryFrom<&KeyAlgorithm> for KeyType {
             KeyAlgorithm::Rsa(RsaKeySize::Rsa2048) => Ok(Self::Rsa2048),
             KeyAlgorithm::Rsa(RsaKeySize::Rsa3072) => Ok(Self::Rsa3072),
             KeyAlgorithm::Rsa(RsaKeySize::Rsa4096) => Ok(Self::Rsa4096),
-            KeyAlgorithm::Rsa(_) => Err(PivError::NotSupported("Unsupported RSA key size".into())),
             KeyAlgorithm::Ec(EcCurve::P256) => Ok(Self::EccP256),
             KeyAlgorithm::Ec(EcCurve::P384) => Ok(Self::EccP384),
             KeyAlgorithm::Ec(curve) => Err(PivError::NotSupported(format!(
