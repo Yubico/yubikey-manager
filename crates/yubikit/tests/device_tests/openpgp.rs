@@ -137,7 +137,7 @@ fn test_openpgp_generate_ec_key_and_sign(#[case] tc: TestConnection) {
 
     // Extract EC point from PublicKey
     let ec_point = match &pk {
-        yubikit::keys::PublicKey::Ec { point, .. } => point.as_slice(),
+        yubikit::keys::PublicKey::Ec(ec) => ec.point.as_slice(),
         _ => panic!("Expected EC public key"),
     };
     assert_eq!(
@@ -191,7 +191,7 @@ fn test_openpgp_generate_rsa_key_and_sign(#[case] tc: TestConnection) {
 
     // Extract modulus and exponent from PublicKey
     let (modulus_bytes, exponent_bytes) = match &pk {
-        yubikit::keys::PublicKey::Rsa { n, e, .. } => (n.as_slice(), e.as_slice()),
+        yubikit::keys::PublicKey::Rsa(rsa) => (rsa.n.as_slice(), rsa.e.as_slice()),
         _ => panic!("Expected RSA public key"),
     };
 
@@ -246,7 +246,7 @@ fn test_openpgp_rsa_decrypt(#[case] tc: TestConnection) {
 
     // Extract modulus and exponent
     let (modulus_bytes, exponent_bytes) = match &pk {
-        yubikit::keys::PublicKey::Rsa { n, e, .. } => (n.as_slice(), e.as_slice()),
+        yubikit::keys::PublicKey::Rsa(rsa) => (rsa.n.as_slice(), rsa.e.as_slice()),
         _ => panic!("Expected RSA public key"),
     };
     use rsa::BigUint;
@@ -296,7 +296,7 @@ fn test_openpgp_ec_ecdh(#[case] tc: TestConnection) {
 
     // Extract EC point
     let ec_point = match &pk {
-        yubikit::keys::PublicKey::Ec { point, .. } => point.as_slice(),
+        yubikit::keys::PublicKey::Ec(ec) => ec.point.as_slice(),
         _ => panic!("Expected EC public key"),
     };
 
@@ -653,9 +653,9 @@ fn test_import_x25519(#[case] tc: TestConnection) {
 
     use x25519_dalek::StaticSecret;
     let secret = StaticSecret::random_from_rng(rsa::rand_core::OsRng);
-    let key = PrivateKey::X25519 {
+    let key = PrivateKey::X25519(yubikit::keys::X25519PrivateKey {
         secret: secret.to_bytes().to_vec(),
-    };
+    });
 
     session.put_key(KeyRef::Dec, &key).expect("put_key X25519");
 
@@ -809,8 +809,8 @@ fn generate_ed25519_private_key() -> (PrivateKey, ed25519_dalek::VerifyingKey) {
     rsa::rand_core::OsRng.fill_bytes(&mut secret);
     let signing_key = ed25519_dalek::SigningKey::from_bytes(&secret);
     let verifying_key = signing_key.verifying_key();
-    let key = PrivateKey::Ed25519 {
+    let key = PrivateKey::Ed25519(yubikit::keys::Ed25519PrivateKey {
         secret: secret.to_vec(),
-    };
+    });
     (key, verifying_key)
 }

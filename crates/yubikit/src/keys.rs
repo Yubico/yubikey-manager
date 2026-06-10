@@ -210,41 +210,26 @@ pub enum PrivateKey {
     Rsa(RsaPrivateKey),
     /// Elliptic curve private key (NIST/Brainpool/secp256k1).
     Ec(EcPrivateKey),
-    /// Ed25519 signing key (32-byte secret).
-    Ed25519 {
-        /// The 32-byte secret.
-        secret: Vec<u8>,
-    },
-    /// X25519 key agreement (32-byte secret).
-    X25519 {
-        /// The 32-byte secret.
-        secret: Vec<u8>,
-    },
+    /// Ed25519 signing key.
+    Ed25519(Ed25519PrivateKey),
+    /// X25519 key agreement key.
+    X25519(X25519PrivateKey),
     /// ML-DSA private key.
-    MlDsa {
-        /// The ML-DSA parameter set.
-        parameter_set: MlDsaParameterSet,
-        /// The raw private key bytes.
-        private_key: Vec<u8>,
-    },
+    MlDsa(MlDsaPrivateKey),
     /// ML-KEM private key.
-    MlKem {
-        /// The ML-KEM parameter set.
-        parameter_set: MlKemParameterSet,
-        /// The raw private key bytes.
-        private_key: Vec<u8>,
-    },
+    MlKem(MlKemPrivateKey),
 }
 
 impl Drop for PrivateKey {
     fn drop(&mut self) {
+        // Each inner struct has its own Drop implementation.
         match self {
-            Self::Rsa(_) => {} // RsaPrivateKey has its own Drop
-            Self::Ec(_) => {}  // EcPrivateKey has its own Drop
-            Self::Ed25519 { secret } => secret.zeroize(),
-            Self::X25519 { secret } => secret.zeroize(),
-            Self::MlDsa { private_key, .. } => private_key.zeroize(),
-            Self::MlKem { private_key, .. } => private_key.zeroize(),
+            Self::Rsa(_)
+            | Self::Ec(_)
+            | Self::Ed25519(_)
+            | Self::X25519(_)
+            | Self::MlDsa(_)
+            | Self::MlKem(_) => {}
         }
     }
 }
@@ -288,6 +273,11 @@ impl fmt::Debug for RsaPrivateKey {
 }
 
 impl RsaPrivateKey {
+    /// Returns the algorithm of this key.
+    pub fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::Rsa(self.key_size)
+    }
+
     /// Parse a PKCS#1 RSAPrivateKey DER encoding into an `RsaPrivateKey`.
     pub fn from_pkcs1(pkcs1_der: &[u8]) -> Result<Self, KeyError> {
         let (_, seq_off, seq_len, _) =
@@ -346,6 +336,117 @@ impl fmt::Debug for EcPrivateKey {
     }
 }
 
+impl EcPrivateKey {
+    /// Returns the algorithm of this key.
+    pub fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::Ec(self.curve.clone())
+    }
+}
+
+/// Ed25519 signing private key (32-byte secret).
+pub struct Ed25519PrivateKey {
+    /// The 32-byte secret.
+    pub secret: Vec<u8>,
+}
+
+impl Drop for Ed25519PrivateKey {
+    fn drop(&mut self) {
+        self.secret.zeroize();
+    }
+}
+
+impl fmt::Debug for Ed25519PrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Ed25519PrivateKey")
+    }
+}
+
+impl Ed25519PrivateKey {
+    /// Returns the algorithm of this key.
+    pub fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::Ed25519
+    }
+}
+
+/// X25519 key agreement private key (32-byte secret).
+pub struct X25519PrivateKey {
+    /// The 32-byte secret.
+    pub secret: Vec<u8>,
+}
+
+impl Drop for X25519PrivateKey {
+    fn drop(&mut self) {
+        self.secret.zeroize();
+    }
+}
+
+impl fmt::Debug for X25519PrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "X25519PrivateKey")
+    }
+}
+
+impl X25519PrivateKey {
+    /// Returns the algorithm of this key.
+    pub fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::X25519
+    }
+}
+
+/// ML-DSA (FIPS 204) private key.
+pub struct MlDsaPrivateKey {
+    /// The ML-DSA parameter set.
+    pub parameter_set: MlDsaParameterSet,
+    /// The raw private key bytes.
+    pub private_key: Vec<u8>,
+}
+
+impl Drop for MlDsaPrivateKey {
+    fn drop(&mut self) {
+        self.private_key.zeroize();
+    }
+}
+
+impl fmt::Debug for MlDsaPrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "MlDsaPrivateKey({:?})", self.parameter_set)
+    }
+}
+
+impl MlDsaPrivateKey {
+    /// Returns the algorithm of this key.
+    pub fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::MlDsa(self.parameter_set)
+    }
+}
+
+/// ML-KEM (FIPS 203) private key.
+pub struct MlKemPrivateKey {
+    /// The ML-KEM parameter set.
+    pub parameter_set: MlKemParameterSet,
+    /// The raw private key bytes.
+    pub private_key: Vec<u8>,
+}
+
+impl Drop for MlKemPrivateKey {
+    fn drop(&mut self) {
+        self.private_key.zeroize();
+    }
+}
+
+impl fmt::Debug for MlKemPrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "MlKemPrivateKey({:?})", self.parameter_set)
+    }
+}
+
+impl MlKemPrivateKey {
+    /// Returns the algorithm of this key.
+    pub fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::MlKem(self.parameter_set)
+    }
+}
+
 impl PrivateKey {
     /// Parse a PKCS#8 PrivateKeyInfo DER encoding.
     pub fn from_pkcs8(pkcs8_der: &[u8]) -> Result<Self, KeyError> {
@@ -358,32 +459,32 @@ impl PrivateKey {
                 scalar: key_data.to_vec(),
                 public_key: None,
             })),
-            KeyAlgorithm::Ed25519 => Ok(Self::Ed25519 {
+            KeyAlgorithm::Ed25519 => Ok(Self::Ed25519(Ed25519PrivateKey {
                 secret: key_data.to_vec(),
-            }),
-            KeyAlgorithm::X25519 => Ok(Self::X25519 {
+            })),
+            KeyAlgorithm::X25519 => Ok(Self::X25519(X25519PrivateKey {
                 secret: key_data.to_vec(),
-            }),
-            KeyAlgorithm::MlDsa(parameter_set) => Ok(Self::MlDsa {
+            })),
+            KeyAlgorithm::MlDsa(parameter_set) => Ok(Self::MlDsa(MlDsaPrivateKey {
                 parameter_set,
                 private_key: key_data.to_vec(),
-            }),
-            KeyAlgorithm::MlKem(parameter_set) => Ok(Self::MlKem {
+            })),
+            KeyAlgorithm::MlKem(parameter_set) => Ok(Self::MlKem(MlKemPrivateKey {
                 parameter_set,
                 private_key: key_data.to_vec(),
-            }),
+            })),
         }
     }
 
     /// Returns the algorithm of this private key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         match self {
-            Self::Rsa(rsa) => KeyAlgorithm::Rsa(rsa.key_size),
-            Self::Ec(ec) => KeyAlgorithm::Ec(ec.curve.clone()),
-            Self::Ed25519 { .. } => KeyAlgorithm::Ed25519,
-            Self::X25519 { .. } => KeyAlgorithm::X25519,
-            Self::MlDsa { parameter_set, .. } => KeyAlgorithm::MlDsa(*parameter_set),
-            Self::MlKem { parameter_set, .. } => KeyAlgorithm::MlKem(*parameter_set),
+            Self::Rsa(k) => k.algorithm(),
+            Self::Ec(k) => k.algorithm(),
+            Self::Ed25519(k) => k.algorithm(),
+            Self::X25519(k) => k.algorithm(),
+            Self::MlDsa(k) => k.algorithm(),
+            Self::MlKem(k) => k.algorithm(),
         }
     }
 }
@@ -391,12 +492,12 @@ impl PrivateKey {
 impl fmt::Debug for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Rsa(rsa) => write!(f, "PrivateKey::Rsa({rsa:?})"),
-            Self::Ec(ec) => write!(f, "PrivateKey::Ec({ec:?})"),
-            Self::Ed25519 { .. } => write!(f, "PrivateKey::Ed25519"),
-            Self::X25519 { .. } => write!(f, "PrivateKey::X25519"),
-            Self::MlDsa { parameter_set, .. } => write!(f, "PrivateKey::MlDsa({parameter_set:?})"),
-            Self::MlKem { parameter_set, .. } => write!(f, "PrivateKey::MlKem({parameter_set:?})"),
+            Self::Rsa(k) => write!(f, "PrivateKey::Rsa({k:?})"),
+            Self::Ec(k) => write!(f, "PrivateKey::Ec({k:?})"),
+            Self::Ed25519(k) => write!(f, "PrivateKey::{k:?}"),
+            Self::X25519(k) => write!(f, "PrivateKey::{k:?}"),
+            Self::MlDsa(k) => write!(f, "PrivateKey::{k:?}"),
+            Self::MlKem(k) => write!(f, "PrivateKey::{k:?}"),
         }
     }
 }
@@ -410,45 +511,223 @@ impl fmt::Debug for PrivateKey {
 #[non_exhaustive]
 pub enum PublicKey {
     /// RSA public key.
-    Rsa {
-        /// Key size.
-        key_size: RsaKeySize,
-        /// Modulus (big-endian, unsigned).
-        n: Vec<u8>,
-        /// Public exponent (big-endian, unsigned).
-        e: Vec<u8>,
-    },
+    Rsa(RsaPublicKey),
     /// Elliptic curve public key.
-    Ec {
-        /// The curve.
-        curve: EcCurve,
-        /// Uncompressed point (0x04 || x || y).
-        point: Vec<u8>,
-    },
+    Ec(EcPublicKey),
     /// Ed25519 public key (32 bytes).
-    Ed25519 {
-        /// The 32-byte public key.
-        key: Vec<u8>,
-    },
+    Ed25519(Ed25519PublicKey),
     /// X25519 public key (32 bytes).
-    X25519 {
-        /// The 32-byte public key.
-        key: Vec<u8>,
-    },
+    X25519(X25519PublicKey),
     /// ML-DSA public key.
-    MlDsa {
-        /// The ML-DSA parameter set.
-        parameter_set: MlDsaParameterSet,
-        /// The raw public key bytes.
-        key: Vec<u8>,
-    },
+    MlDsa(MlDsaPublicKey),
     /// ML-KEM public key.
-    MlKem {
-        /// The ML-KEM parameter set.
-        parameter_set: MlKemParameterSet,
-        /// The raw public key bytes.
-        key: Vec<u8>,
-    },
+    MlKem(MlKemPublicKey),
+}
+
+/// RSA public key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RsaPublicKey {
+    /// Key size.
+    pub key_size: RsaKeySize,
+    /// Modulus (big-endian, unsigned).
+    pub n: Vec<u8>,
+    /// Public exponent (big-endian, unsigned).
+    pub e: Vec<u8>,
+}
+
+impl RsaPublicKey {
+    /// Returns the algorithm of this key.
+    pub fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::Rsa(self.key_size)
+    }
+
+    /// Encode this public key as SubjectPublicKeyInfo (SPKI) DER.
+    pub fn to_spki(&self) -> Result<Vec<u8>, KeyError> {
+        let mod_int =
+            der::asn1::UintRef::new(&self.n).map_err(|_| KeyError("Invalid RSA modulus"))?;
+        let exp_int =
+            der::asn1::UintRef::new(&self.e).map_err(|_| KeyError("Invalid RSA exponent"))?;
+        let mut rsa_body = Vec::new();
+        mod_int
+            .encode_to_vec(&mut rsa_body)
+            .map_err(|_| KeyError("Failed to encode RSA modulus"))?;
+        exp_int
+            .encode_to_vec(&mut rsa_body)
+            .map_err(|_| KeyError("Failed to encode RSA exponent"))?;
+        let mut rsa_pub_key = Vec::new();
+        rsa_pub_key.push(0x30);
+        der::Length::new(rsa_body.len() as u16)
+            .encode_to_vec(&mut rsa_pub_key)
+            .map_err(|_| KeyError("Failed to encode RSA length"))?;
+        rsa_pub_key.extend_from_slice(&rsa_body);
+
+        let spki = SubjectPublicKeyInfoOwned {
+            algorithm: AlgorithmIdentifierOwned {
+                oid: SPKI_OID_RSA,
+                parameters: Some(der::Any::from(der::asn1::Null)),
+            },
+            subject_public_key: BitString::from_bytes(&rsa_pub_key)
+                .map_err(|_| KeyError("Failed to encode RSA BIT STRING"))?,
+        };
+        spki.to_der()
+            .map_err(|_| KeyError("Failed to encode SPKI DER"))
+    }
+}
+
+/// Elliptic curve public key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EcPublicKey {
+    /// The curve.
+    pub curve: EcCurve,
+    /// Uncompressed point (0x04 || x || y).
+    pub point: Vec<u8>,
+}
+
+impl EcPublicKey {
+    /// Returns the algorithm of this key.
+    pub fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::Ec(self.curve.clone())
+    }
+
+    /// Encode this public key as SubjectPublicKeyInfo (SPKI) DER.
+    pub fn to_spki(&self) -> Result<Vec<u8>, KeyError> {
+        let spki = SubjectPublicKeyInfoOwned {
+            algorithm: AlgorithmIdentifierOwned {
+                oid: SPKI_OID_EC,
+                parameters: Some(der::Any::from(&self.curve.oid())),
+            },
+            subject_public_key: BitString::from_bytes(&self.point)
+                .map_err(|_| KeyError("Failed to encode EC BIT STRING"))?,
+        };
+        spki.to_der()
+            .map_err(|_| KeyError("Failed to encode SPKI DER"))
+    }
+}
+
+/// Ed25519 public key (32 bytes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ed25519PublicKey {
+    /// The 32-byte public key.
+    pub key: Vec<u8>,
+}
+
+impl Ed25519PublicKey {
+    /// Returns the algorithm of this key.
+    pub fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::Ed25519
+    }
+
+    /// Encode this public key as SubjectPublicKeyInfo (SPKI) DER.
+    pub fn to_spki(&self) -> Result<Vec<u8>, KeyError> {
+        let spki = SubjectPublicKeyInfoOwned {
+            algorithm: AlgorithmIdentifierOwned {
+                oid: SPKI_OID_ED25519,
+                parameters: None,
+            },
+            subject_public_key: BitString::from_bytes(&self.key)
+                .map_err(|_| KeyError("Failed to encode Ed25519 BIT STRING"))?,
+        };
+        spki.to_der()
+            .map_err(|_| KeyError("Failed to encode SPKI DER"))
+    }
+}
+
+/// X25519 public key (32 bytes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct X25519PublicKey {
+    /// The 32-byte public key.
+    pub key: Vec<u8>,
+}
+
+impl X25519PublicKey {
+    /// Returns the algorithm of this key.
+    pub fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::X25519
+    }
+
+    /// Encode this public key as SubjectPublicKeyInfo (SPKI) DER.
+    pub fn to_spki(&self) -> Result<Vec<u8>, KeyError> {
+        let spki = SubjectPublicKeyInfoOwned {
+            algorithm: AlgorithmIdentifierOwned {
+                oid: SPKI_OID_X25519,
+                parameters: None,
+            },
+            subject_public_key: BitString::from_bytes(&self.key)
+                .map_err(|_| KeyError("Failed to encode X25519 BIT STRING"))?,
+        };
+        spki.to_der()
+            .map_err(|_| KeyError("Failed to encode SPKI DER"))
+    }
+}
+
+/// ML-DSA (FIPS 204) public key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MlDsaPublicKey {
+    /// The ML-DSA parameter set.
+    pub parameter_set: MlDsaParameterSet,
+    /// The raw public key bytes.
+    pub key: Vec<u8>,
+}
+
+impl MlDsaPublicKey {
+    /// Returns the algorithm of this key.
+    pub fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::MlDsa(self.parameter_set)
+    }
+
+    /// Encode this public key as SubjectPublicKeyInfo (SPKI) DER.
+    pub fn to_spki(&self) -> Result<Vec<u8>, KeyError> {
+        let oid = match self.parameter_set {
+            MlDsaParameterSet::MlDsa44 => SPKI_OID_ML_DSA_44,
+            MlDsaParameterSet::MlDsa65 => SPKI_OID_ML_DSA_65,
+            MlDsaParameterSet::MlDsa87 => SPKI_OID_ML_DSA_87,
+        };
+        let spki = SubjectPublicKeyInfoOwned {
+            algorithm: AlgorithmIdentifierOwned {
+                oid,
+                parameters: None,
+            },
+            subject_public_key: BitString::from_bytes(&self.key)
+                .map_err(|_| KeyError("Failed to encode ML-DSA BIT STRING"))?,
+        };
+        spki.to_der()
+            .map_err(|_| KeyError("Failed to encode SPKI DER"))
+    }
+}
+
+/// ML-KEM (FIPS 203) public key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MlKemPublicKey {
+    /// The ML-KEM parameter set.
+    pub parameter_set: MlKemParameterSet,
+    /// The raw public key bytes.
+    pub key: Vec<u8>,
+}
+
+impl MlKemPublicKey {
+    /// Returns the algorithm of this key.
+    pub fn algorithm(&self) -> KeyAlgorithm {
+        KeyAlgorithm::MlKem(self.parameter_set)
+    }
+
+    /// Encode this public key as SubjectPublicKeyInfo (SPKI) DER.
+    pub fn to_spki(&self) -> Result<Vec<u8>, KeyError> {
+        let oid = match self.parameter_set {
+            MlKemParameterSet::MlKem512 => SPKI_OID_ML_KEM_512,
+            MlKemParameterSet::MlKem768 => SPKI_OID_ML_KEM_768,
+            MlKemParameterSet::MlKem1024 => SPKI_OID_ML_KEM_1024,
+        };
+        let spki = SubjectPublicKeyInfoOwned {
+            algorithm: AlgorithmIdentifierOwned {
+                oid,
+                parameters: None,
+            },
+            subject_public_key: BitString::from_bytes(&self.key)
+                .map_err(|_| KeyError("Failed to encode ML-KEM BIT STRING"))?,
+        };
+        spki.to_der()
+            .map_err(|_| KeyError("Failed to encode SPKI DER"))
+    }
 }
 
 fn strip_leading_zero(b: &[u8]) -> &[u8] {
@@ -502,11 +781,11 @@ impl PublicKey {
             let e = strip_leading_zero(&inner[e_off..e_off + e_len]);
             let key_size = RsaKeySize::from_bit_len(n.len() * 8)
                 .ok_or(KeyError("Unsupported RSA key size"))?;
-            Ok(Self::Rsa {
+            Ok(Self::Rsa(RsaPublicKey {
                 key_size,
                 n: n.to_vec(),
                 e: e.to_vec(),
-            })
+            }))
         } else if oid == SPKI_OID_EC {
             let curve_oid = spki
                 .algorithm
@@ -516,48 +795,48 @@ impl PublicKey {
                 .ok_or(KeyError("Missing EC curve parameter"))?;
             let curve =
                 EcCurve::from_oid(&curve_oid).ok_or(KeyError("Unsupported EC curve in SPKI"))?;
-            Ok(Self::Ec {
+            Ok(Self::Ec(EcPublicKey {
                 curve,
                 point: key_bytes.to_vec(),
-            })
+            }))
         } else if oid == SPKI_OID_ED25519 {
-            Ok(Self::Ed25519 {
+            Ok(Self::Ed25519(Ed25519PublicKey {
                 key: key_bytes.to_vec(),
-            })
+            }))
         } else if oid == SPKI_OID_X25519 {
-            Ok(Self::X25519 {
+            Ok(Self::X25519(X25519PublicKey {
                 key: key_bytes.to_vec(),
-            })
+            }))
         } else if oid == SPKI_OID_ML_DSA_44 {
-            Ok(Self::MlDsa {
+            Ok(Self::MlDsa(MlDsaPublicKey {
                 parameter_set: MlDsaParameterSet::MlDsa44,
                 key: key_bytes.to_vec(),
-            })
+            }))
         } else if oid == SPKI_OID_ML_DSA_65 {
-            Ok(Self::MlDsa {
+            Ok(Self::MlDsa(MlDsaPublicKey {
                 parameter_set: MlDsaParameterSet::MlDsa65,
                 key: key_bytes.to_vec(),
-            })
+            }))
         } else if oid == SPKI_OID_ML_DSA_87 {
-            Ok(Self::MlDsa {
+            Ok(Self::MlDsa(MlDsaPublicKey {
                 parameter_set: MlDsaParameterSet::MlDsa87,
                 key: key_bytes.to_vec(),
-            })
+            }))
         } else if oid == SPKI_OID_ML_KEM_512 {
-            Ok(Self::MlKem {
+            Ok(Self::MlKem(MlKemPublicKey {
                 parameter_set: MlKemParameterSet::MlKem512,
                 key: key_bytes.to_vec(),
-            })
+            }))
         } else if oid == SPKI_OID_ML_KEM_768 {
-            Ok(Self::MlKem {
+            Ok(Self::MlKem(MlKemPublicKey {
                 parameter_set: MlKemParameterSet::MlKem768,
                 key: key_bytes.to_vec(),
-            })
+            }))
         } else if oid == SPKI_OID_ML_KEM_1024 {
-            Ok(Self::MlKem {
+            Ok(Self::MlKem(MlKemPublicKey {
                 parameter_set: MlKemParameterSet::MlKem1024,
                 key: key_bytes.to_vec(),
-            })
+            }))
         } else {
             Err(KeyError("Unsupported algorithm in SPKI"))
         }
@@ -566,104 +845,25 @@ impl PublicKey {
     /// Returns the algorithm of this public key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         match self {
-            Self::Rsa { key_size, .. } => KeyAlgorithm::Rsa(*key_size),
-            Self::Ec { curve, .. } => KeyAlgorithm::Ec(curve.clone()),
-            Self::Ed25519 { .. } => KeyAlgorithm::Ed25519,
-            Self::X25519 { .. } => KeyAlgorithm::X25519,
-            Self::MlDsa { parameter_set, .. } => KeyAlgorithm::MlDsa(*parameter_set),
-            Self::MlKem { parameter_set, .. } => KeyAlgorithm::MlKem(*parameter_set),
+            Self::Rsa(k) => k.algorithm(),
+            Self::Ec(k) => k.algorithm(),
+            Self::Ed25519(k) => k.algorithm(),
+            Self::X25519(k) => k.algorithm(),
+            Self::MlDsa(k) => k.algorithm(),
+            Self::MlKem(k) => k.algorithm(),
         }
     }
 
     /// Encode this public key as SubjectPublicKeyInfo (SPKI) DER.
     pub fn to_spki(&self) -> Result<Vec<u8>, KeyError> {
-        let spki = match self {
-            Self::Rsa { n, e, .. } => {
-                let mod_int =
-                    der::asn1::UintRef::new(n).map_err(|_| KeyError("Invalid RSA modulus"))?;
-                let exp_int =
-                    der::asn1::UintRef::new(e).map_err(|_| KeyError("Invalid RSA exponent"))?;
-                let mut rsa_body = Vec::new();
-                mod_int
-                    .encode_to_vec(&mut rsa_body)
-                    .map_err(|_| KeyError("Failed to encode RSA modulus"))?;
-                exp_int
-                    .encode_to_vec(&mut rsa_body)
-                    .map_err(|_| KeyError("Failed to encode RSA exponent"))?;
-                let mut rsa_pub_key = Vec::new();
-                rsa_pub_key.push(0x30);
-                der::Length::new(rsa_body.len() as u16)
-                    .encode_to_vec(&mut rsa_pub_key)
-                    .map_err(|_| KeyError("Failed to encode RSA length"))?;
-                rsa_pub_key.extend_from_slice(&rsa_body);
-
-                SubjectPublicKeyInfoOwned {
-                    algorithm: AlgorithmIdentifierOwned {
-                        oid: SPKI_OID_RSA,
-                        parameters: Some(der::Any::from(der::asn1::Null)),
-                    },
-                    subject_public_key: BitString::from_bytes(&rsa_pub_key)
-                        .map_err(|_| KeyError("Failed to encode RSA BIT STRING"))?,
-                }
-            }
-            Self::Ec { curve, point } => SubjectPublicKeyInfoOwned {
-                algorithm: AlgorithmIdentifierOwned {
-                    oid: SPKI_OID_EC,
-                    parameters: Some(der::Any::from(&curve.oid())),
-                },
-                subject_public_key: BitString::from_bytes(point)
-                    .map_err(|_| KeyError("Failed to encode EC BIT STRING"))?,
-            },
-            Self::Ed25519 { key } => SubjectPublicKeyInfoOwned {
-                algorithm: AlgorithmIdentifierOwned {
-                    oid: SPKI_OID_ED25519,
-                    parameters: None,
-                },
-                subject_public_key: BitString::from_bytes(key)
-                    .map_err(|_| KeyError("Failed to encode Ed25519 BIT STRING"))?,
-            },
-            Self::X25519 { key } => SubjectPublicKeyInfoOwned {
-                algorithm: AlgorithmIdentifierOwned {
-                    oid: SPKI_OID_X25519,
-                    parameters: None,
-                },
-                subject_public_key: BitString::from_bytes(key)
-                    .map_err(|_| KeyError("Failed to encode X25519 BIT STRING"))?,
-            },
-            Self::MlDsa { parameter_set, key } => {
-                let oid = match parameter_set {
-                    MlDsaParameterSet::MlDsa44 => SPKI_OID_ML_DSA_44,
-                    MlDsaParameterSet::MlDsa65 => SPKI_OID_ML_DSA_65,
-                    MlDsaParameterSet::MlDsa87 => SPKI_OID_ML_DSA_87,
-                };
-                SubjectPublicKeyInfoOwned {
-                    algorithm: AlgorithmIdentifierOwned {
-                        oid,
-                        parameters: None,
-                    },
-                    subject_public_key: BitString::from_bytes(key)
-                        .map_err(|_| KeyError("Failed to encode ML-DSA BIT STRING"))?,
-                }
-            }
-            Self::MlKem { parameter_set, key } => {
-                let oid = match parameter_set {
-                    MlKemParameterSet::MlKem512 => SPKI_OID_ML_KEM_512,
-                    MlKemParameterSet::MlKem768 => SPKI_OID_ML_KEM_768,
-                    MlKemParameterSet::MlKem1024 => SPKI_OID_ML_KEM_1024,
-                };
-                SubjectPublicKeyInfoOwned {
-                    algorithm: AlgorithmIdentifierOwned {
-                        oid,
-                        parameters: None,
-                    },
-                    subject_public_key: BitString::from_bytes(key)
-                        .map_err(|_| KeyError("Failed to encode ML-KEM BIT STRING"))?,
-                }
-            }
-        };
-
-        spki.to_der()
-            .map_err(|_| KeyError("Failed to encode SPKI DER"))
+        match self {
+            Self::Rsa(k) => k.to_spki(),
+            Self::Ec(k) => k.to_spki(),
+            Self::Ed25519(k) => k.to_spki(),
+            Self::X25519(k) => k.to_spki(),
+            Self::MlDsa(k) => k.to_spki(),
+            Self::MlKem(k) => k.to_spki(),
+        }
     }
 }
 

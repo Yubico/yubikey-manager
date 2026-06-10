@@ -48,7 +48,10 @@ use zeroize::Zeroizing;
 
 use crate::core::Version;
 use crate::core::{bytes2int, int2bytes, patch_version};
-use crate::keys::{EcCurve, EcPrivateKey, PrivateKey, PublicKey, RsaKeySize, RsaPrivateKey};
+use crate::keys::{
+    EcCurve, EcPrivateKey, EcPublicKey, Ed25519PublicKey, PrivateKey, PublicKey, RsaKeySize,
+    RsaPrivateKey, RsaPublicKey, X25519PublicKey,
+};
 use crate::keys::{
     OID_BRAINPOOL_P256R1, OID_BRAINPOOL_P384R1, OID_BRAINPOOL_P512R1, OID_SECP256K1, OID_SECP256R1,
     OID_SECP384R1, OID_SECP521R1,
@@ -1461,11 +1464,11 @@ fn algorithm_attributes_for_key(
                 key_ref, &curve,
             )?))
         }
-        PrivateKey::Ed25519 { .. } => Ok(AlgorithmAttributes::Ec(EcAttributes::create(
+        PrivateKey::Ed25519(_) => Ok(AlgorithmAttributes::Ec(EcAttributes::create(
             key_ref,
             &OpenPgpCurve::Ed25519,
         )?)),
-        PrivateKey::X25519 { .. } => Ok(AlgorithmAttributes::Ec(EcAttributes::create(
+        PrivateKey::X25519(_) => Ok(AlgorithmAttributes::Ec(EcAttributes::create(
             key_ref,
             &OpenPgpCurve::X25519,
         )?)),
@@ -1520,12 +1523,12 @@ fn build_private_key_template(
             }
             v
         }
-        PrivateKey::Ed25519 { secret } => {
-            vec![(0x92, secret.as_slice())]
+        PrivateKey::Ed25519(k) => {
+            vec![(0x92, k.secret.as_slice())]
         }
-        PrivateKey::X25519 { secret } => {
+        PrivateKey::X25519(k) => {
             // X25519 uses little-endian; OpenPGP card expects big-endian
-            temp.extend(secret);
+            temp.extend(&k.secret);
             temp.reverse();
             vec![(0x92, temp.as_slice())]
         }
@@ -1575,23 +1578,23 @@ fn parse_rsa_public_key(pk_data: &[u8]) -> Result<PublicKey, OpenPgpError> {
     let key_size = RsaKeySize::from_bit_len(n.len() * 8).ok_or_else(|| {
         OpenPgpError::InvalidData(format!("Unsupported RSA key size: {} bits", n.len() * 8))
     })?;
-    Ok(PublicKey::Rsa {
+    Ok(PublicKey::Rsa(RsaPublicKey {
         key_size,
         n,
         e: e.to_vec(),
-    })
+    }))
 }
 
 fn parse_ec_public_key(pk_data: &[u8], oid: &ObjectIdentifier) -> Result<PublicKey, OpenPgpError> {
     let point = tlv_unpack(0x86, pk_data)?;
     if *oid == OID_ED25519 {
-        Ok(PublicKey::Ed25519 { key: point })
+        Ok(PublicKey::Ed25519(Ed25519PublicKey { key: point }))
     } else if *oid == OID_X25519 {
-        Ok(PublicKey::X25519 { key: point })
+        Ok(PublicKey::X25519(X25519PublicKey { key: point }))
     } else {
         let curve = EcCurve::from_oid(oid)
             .ok_or_else(|| OpenPgpError::InvalidData("Unsupported EC curve".into()))?;
-        Ok(PublicKey::Ec { curve, point })
+        Ok(PublicKey::Ec(EcPublicKey { curve, point }))
     }
 }
 

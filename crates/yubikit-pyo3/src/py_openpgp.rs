@@ -606,9 +606,9 @@ impl OpenPgpSession {
                         "Ed25519 key requires [secret]",
                     ));
                 }
-                PrivateKey::Ed25519 {
+                PrivateKey::Ed25519(yubikit::keys::Ed25519PrivateKey {
                     secret: components[0].clone(),
-                }
+                })
             }
             4 => {
                 // X25519
@@ -617,9 +617,9 @@ impl OpenPgpSession {
                         "X25519 key requires [secret]",
                     ));
                 }
-                PrivateKey::X25519 {
+                PrivateKey::X25519(yubikit::keys::X25519PrivateKey {
                     secret: components[0].clone(),
-                }
+                })
             }
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(

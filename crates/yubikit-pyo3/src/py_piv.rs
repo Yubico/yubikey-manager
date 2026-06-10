@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use yubikit::keys::{
-    EcCurve, EcPrivateKey, MlDsaParameterSet, MlKemParameterSet, PrivateKey, RsaPrivateKey,
+    EcCurve, EcPrivateKey, Ed25519PrivateKey, MlDsaParameterSet, MlDsaPrivateKey,
+    MlKemParameterSet, MlKemPrivateKey, PrivateKey, RsaPrivateKey, X25519PrivateKey,
 };
 use yubikit::piv::{
     self, KeyType, ManagementKey, ManagementKeyType, PinPolicy, PivPin,
@@ -123,36 +124,36 @@ fn private_key_from_raw(kt: KeyType, raw: &[u8]) -> PyResult<PrivateKey> {
             scalar: raw.to_vec(),
             public_key: None,
         })),
-        KeyType::Ed25519 => Ok(PrivateKey::Ed25519 {
+        KeyType::Ed25519 => Ok(PrivateKey::Ed25519(Ed25519PrivateKey {
             secret: raw.to_vec(),
-        }),
-        KeyType::X25519 => Ok(PrivateKey::X25519 {
+        })),
+        KeyType::X25519 => Ok(PrivateKey::X25519(X25519PrivateKey {
             secret: raw.to_vec(),
-        }),
-        KeyType::MlDsa44 => Ok(PrivateKey::MlDsa {
+        })),
+        KeyType::MlDsa44 => Ok(PrivateKey::MlDsa(MlDsaPrivateKey {
             parameter_set: MlDsaParameterSet::MlDsa44,
             private_key: raw.to_vec(),
-        }),
-        KeyType::MlDsa65 => Ok(PrivateKey::MlDsa {
+        })),
+        KeyType::MlDsa65 => Ok(PrivateKey::MlDsa(MlDsaPrivateKey {
             parameter_set: MlDsaParameterSet::MlDsa65,
             private_key: raw.to_vec(),
-        }),
-        KeyType::MlDsa87 => Ok(PrivateKey::MlDsa {
+        })),
+        KeyType::MlDsa87 => Ok(PrivateKey::MlDsa(MlDsaPrivateKey {
             parameter_set: MlDsaParameterSet::MlDsa87,
             private_key: raw.to_vec(),
-        }),
-        KeyType::MlKem512 => Ok(PrivateKey::MlKem {
+        })),
+        KeyType::MlKem512 => Ok(PrivateKey::MlKem(MlKemPrivateKey {
             parameter_set: MlKemParameterSet::MlKem512,
             private_key: raw.to_vec(),
-        }),
-        KeyType::MlKem768 => Ok(PrivateKey::MlKem {
+        })),
+        KeyType::MlKem768 => Ok(PrivateKey::MlKem(MlKemPrivateKey {
             parameter_set: MlKemParameterSet::MlKem768,
             private_key: raw.to_vec(),
-        }),
-        KeyType::MlKem1024 => Ok(PrivateKey::MlKem {
+        })),
+        KeyType::MlKem1024 => Ok(PrivateKey::MlKem(MlKemPrivateKey {
             parameter_set: MlKemParameterSet::MlKem1024,
             private_key: raw.to_vec(),
-        }),
+        })),
         _ => Err(err("Unsupported key type")),
     }
 }
