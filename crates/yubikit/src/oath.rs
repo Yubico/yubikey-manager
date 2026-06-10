@@ -149,6 +149,7 @@ impl std::fmt::Debug for OathAccessKey {
 
 /// Hash algorithm used for OATH credential computation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum HashAlgorithm {
     /// SHA-1 (20-byte digest).

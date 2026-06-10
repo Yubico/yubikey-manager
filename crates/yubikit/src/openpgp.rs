@@ -48,7 +48,7 @@ use zeroize::Zeroizing;
 
 use crate::core::Version;
 use crate::core::{bytes2int, int2bytes, patch_version};
-use crate::keys::{EcCurve, EcPrivateKey, PrivateKey, PublicKey, RsaPrivateKey};
+use crate::keys::{EcCurve, EcPrivateKey, PrivateKey, PublicKey, RsaKeySize, RsaPrivateKey};
 use crate::keys::{
     OID_BRAINPOOL_P256R1, OID_BRAINPOOL_P384R1, OID_BRAINPOOL_P512R1, OID_SECP256K1, OID_SECP256R1,
     OID_SECP384R1, OID_SECP521R1,
@@ -148,6 +148,7 @@ impl From<TlvError> for OpenPgpError {
 /// Controls whether the YubiKey requires a physical touch for operations
 /// using the associated key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum Uif {
     /// Touch is not required.
@@ -198,6 +199,7 @@ impl Uif {
 
 /// PIN verification policy for the user (signature) PIN.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum PinPolicy {
     /// PIN must be verified before every signature operation.
@@ -233,6 +235,7 @@ pub enum Pw {
 /// Each variant's discriminant encodes the P1/P2 bytes of the GET DATA /
 /// PUT DATA APDU commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u16)]
 pub enum Do {
     /// Private use data object 1 (read/write with user PIN).
@@ -442,18 +445,6 @@ impl KeyStatus {
     }
 }
 
-/// Supported RSA key sizes for key generation and import.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u16)]
-pub enum RsaSize {
-    /// 2048-bit RSA key.
-    Rsa2048 = 2048,
-    /// 3072-bit RSA key.
-    Rsa3072 = 3072,
-    /// 4096-bit RSA key.
-    Rsa4096 = 4096,
-}
-
 /// RSA private key import format as indicated in the algorithm attributes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -505,6 +496,7 @@ impl EcImportFormat {
 /// Hash algorithm identifier used in KDF (Key Derivation Function) configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum HashAlgorithm {
     /// SHA-256 (OpenPGP hash algorithm ID `0x08`).
     Sha256 = 0x08,
@@ -624,6 +616,7 @@ impl fmt::Debug for OpenPgpPin {
 
 /// Algorithm attributes for an OpenPGP key slot (RSA or elliptic curve).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AlgorithmAttributes {
     /// RSA algorithm attributes.
     Rsa(RsaAttributes),
@@ -684,7 +677,7 @@ pub struct RsaAttributes {
 impl RsaAttributes {
     /// Create RSA attributes with the given key size and import format.
     /// Creates RSA attributes with the given key size and import format.
-    pub fn create(n_len: RsaSize, import_format: RsaImportFormat) -> Self {
+    pub fn create(n_len: RsaKeySize, import_format: RsaImportFormat) -> Self {
         Self {
             n_len: n_len as u16,
             e_len: 17,
@@ -718,6 +711,7 @@ impl RsaAttributes {
 }
 
 /// Elliptic curve OIDs supported by the OpenPGP card.
+#[non_exhaustive]
 pub enum OpenPgpCurve {
     /// NIST P-256 (secp256r1).
     P256,
@@ -1230,6 +1224,7 @@ impl ApplicationRelatedData {
 /// When KDF is enabled, PINs are hashed on the host before being sent to the
 /// card, improving resistance to passive eavesdropping.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Kdf {
     /// KDF is disabled; PINs are sent in plaintext.
     None,
@@ -1429,20 +1424,12 @@ fn algorithm_attributes_for_key(
 ) -> Result<AlgorithmAttributes, OpenPgpError> {
     match private_key {
         PrivateKey::Rsa(rsa) => {
-            let key_bits = if !rsa.n.is_empty() {
-                rsa.n.len() * 8
-            } else {
-                // Standard format without n: derive from p (n = p * q, each is half)
-                rsa.p.len() * 2 * 8
-            };
-            let n_len = match key_bits {
-                2048 => RsaSize::Rsa2048,
-                3072 => RsaSize::Rsa3072,
-                4096 => RsaSize::Rsa4096,
+            match rsa.key_size {
+                RsaKeySize::Rsa2048 | RsaKeySize::Rsa3072 | RsaKeySize::Rsa4096 => {}
                 _ => {
                     return Err(OpenPgpError::InvalidData(format!(
-                        "Unsupported RSA key size: {}",
-                        key_bits
+                        "Unsupported RSA key size for OpenPGP: {:?}",
+                        rsa.key_size
                     )));
                 }
             };
@@ -1456,7 +1443,7 @@ fn algorithm_attributes_for_key(
                 RsaImportFormat::Standard
             };
             Ok(AlgorithmAttributes::Rsa(RsaAttributes::create(
-                n_len,
+                rsa.key_size,
                 import_format,
             )))
         }
@@ -1503,6 +1490,7 @@ fn build_private_key_template(
             dq,
             qinv,
             n,
+            ..
         }) => {
             let mut v = vec![
                 (0x91, e.as_slice()),
@@ -1584,7 +1572,14 @@ fn parse_rsa_public_key(pk_data: &[u8]) -> Result<PublicKey, OpenPgpError> {
     } else {
         n.to_vec()
     };
-    Ok(PublicKey::Rsa { n, e: e.to_vec() })
+    let key_size = RsaKeySize::from_bit_len(n.len() * 8).ok_or_else(|| {
+        OpenPgpError::InvalidData(format!("Unsupported RSA key size: {} bits", n.len() * 8))
+    })?;
+    Ok(PublicKey::Rsa {
+        key_size,
+        n,
+        e: e.to_vec(),
+    })
 }
 
 fn parse_ec_public_key(pk_data: &[u8], oid: &ObjectIdentifier) -> Result<PublicKey, OpenPgpError> {
@@ -1606,6 +1601,7 @@ fn parse_ec_public_key(pk_data: &[u8], oid: &ObjectIdentifier) -> Result<PublicK
 
 /// Hash algorithm enum for sign/authenticate operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SignHashAlgorithm {
     /// SHA-1 hash (legacy; 160-bit digest).
     Sha1,
@@ -1623,6 +1619,7 @@ pub enum SignHashAlgorithm {
 
 /// The hash algorithm used to produce a prehashed digest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PrehashAlgorithm {
     /// SHA-1 was used to produce the digest.
     Sha1,
@@ -2195,10 +2192,10 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             } else {
                 RsaImportFormat::Standard
             };
-            let mut sizes = vec![RsaSize::Rsa2048];
+            let mut sizes = vec![RsaKeySize::Rsa2048];
             if self.version.0 >= 4 && (self.version.0, self.version.1) != (4, 4) {
-                sizes.push(RsaSize::Rsa3072);
-                sizes.push(RsaSize::Rsa4096);
+                sizes.push(RsaKeySize::Rsa3072);
+                sizes.push(RsaKeySize::Rsa4096);
             }
             let attrs: Vec<AlgorithmAttributes> = sizes
                 .iter()
@@ -2321,7 +2318,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     pub fn generate_rsa_key(
         &mut self,
         key_ref: KeyRef,
-        key_size: RsaSize,
+        key_size: RsaKeySize,
     ) -> Result<PublicKey, OpenPgpError> {
         log::debug!("Generating RSA key for {:?}", key_ref);
         if self.version >= Version(4, 2, 0) && self.version < Version(4, 3, 5) {
@@ -2344,7 +2341,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
             let attributes =
                 AlgorithmAttributes::Rsa(RsaAttributes::create(key_size, import_format));
             self.set_algorithm_attributes(key_ref, &attributes)?;
-        } else if key_size as u16 != RsaSize::Rsa2048 as u16 {
+        } else if key_size != RsaKeySize::Rsa2048 {
             return Err(OpenPgpError::NotSupported(
                 "Algorithm attributes not supported".into(),
             ));
@@ -2431,7 +2428,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         self.put_data(
             key_ref.algorithm_attributes_do(),
             &AlgorithmAttributes::Rsa(RsaAttributes::create(
-                RsaSize::Rsa4096,
+                RsaKeySize::Rsa4096,
                 RsaImportFormat::Standard,
             ))
             .to_bytes(),
@@ -2439,7 +2436,7 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         self.set_algorithm_attributes(
             key_ref,
             &AlgorithmAttributes::Rsa(RsaAttributes::create(
-                RsaSize::Rsa2048,
+                RsaKeySize::Rsa2048,
                 RsaImportFormat::Standard,
             )),
         )?;
@@ -2703,7 +2700,7 @@ mod tests {
 
     #[test]
     fn test_rsa_attributes_roundtrip() {
-        let attrs = RsaAttributes::create(RsaSize::Rsa2048, RsaImportFormat::Standard);
+        let attrs = RsaAttributes::create(RsaKeySize::Rsa2048, RsaImportFormat::Standard);
         let bytes = attrs.to_bytes();
         assert_eq!(bytes, vec![0x01, 0x08, 0x00, 0x00, 0x11, 0x00]);
         let parsed = AlgorithmAttributes::parse(&bytes).unwrap();
@@ -2873,8 +2870,9 @@ mod tests {
 
     #[test]
     fn test_build_private_key_template_rsa() {
-        use crate::keys::RsaPrivateKey;
+        use crate::keys::{RsaKeySize, RsaPrivateKey};
         let key = PrivateKey::Rsa(RsaPrivateKey {
+            key_size: RsaKeySize::Rsa2048,
             e: vec![0x01, 0x00, 0x01],
             n: vec![0xFF; 256],
             p: vec![0xAA; 128],
@@ -2889,8 +2887,9 @@ mod tests {
 
     #[test]
     fn test_build_private_key_template_rsa_crt() {
-        use crate::keys::RsaPrivateKey;
+        use crate::keys::{RsaKeySize, RsaPrivateKey};
         let key = PrivateKey::Rsa(RsaPrivateKey {
+            key_size: RsaKeySize::Rsa2048,
             e: vec![0x01, 0x00, 0x01],
             n: vec![0xFF; 256],
             p: vec![0xAA; 128],
@@ -2924,7 +2923,7 @@ mod tests {
     #[test]
     fn test_pad_message_rsa_sha256() {
         let attrs = AlgorithmAttributes::Rsa(RsaAttributes::create(
-            RsaSize::Rsa2048,
+            RsaKeySize::Rsa2048,
             RsaImportFormat::Standard,
         ));
         let msg = b"test message";

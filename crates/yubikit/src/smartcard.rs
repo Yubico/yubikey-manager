@@ -85,6 +85,7 @@ impl Aid {
 
 /// Well-known ISO 7816 status words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 #[repr(u16)]
 pub enum Sw {
     /// No input data (`0x6285`).
@@ -271,6 +272,7 @@ impl SmartCardError {
 
 /// SCP key parameters for establishing a secure channel when opening a session.
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum ScpKeyParams {
     /// SCP03 with static keys.
     Scp03 {

@@ -1,7 +1,8 @@
 use pyo3::prelude::*;
+use yubikit::keys::RsaKeySize;
 use yubikit::openpgp::{
     self, Do, KeyRef, OpenPgpPin, OpenPgpSession as RustOpenPgpSession, PrehashAlgorithm, Pw,
-    RsaSize, SignHashAlgorithm, Uif,
+    SignHashAlgorithm, Uif,
 };
 
 use crate::py_bridge::{
@@ -117,16 +118,10 @@ fn parse_do(v: u16) -> PyResult<Do> {
     }
 }
 
-fn parse_rsa_size(v: u16) -> PyResult<RsaSize> {
-    match v {
-        2048 => Ok(RsaSize::Rsa2048),
-        3072 => Ok(RsaSize::Rsa3072),
-        4096 => Ok(RsaSize::Rsa4096),
-        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid RSA size: {}",
-            v
-        ))),
-    }
+fn parse_rsa_size(v: u16) -> PyResult<RsaKeySize> {
+    RsaKeySize::from_bit_len(v as usize).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("Invalid RSA key size: {}", v))
+    })
 }
 
 fn parse_prehash_algorithm(v: u8) -> PyResult<PrehashAlgorithm> {
@@ -534,7 +529,7 @@ impl OpenPgpSession {
         components: Vec<Vec<u8>>,
         curve_oid: Option<&str>,
     ) -> PyResult<()> {
-        use yubikit::keys::{EcCurve, EcPrivateKey, PrivateKey, RsaPrivateKey};
+        use yubikit::keys::{EcCurve, EcPrivateKey, PrivateKey, RsaKeySize, RsaPrivateKey};
 
         let kr = parse_key_ref(key_ref)?;
         let private_key = match key_type {
@@ -545,7 +540,12 @@ impl OpenPgpSession {
                         "RSA standard key requires [e, p, q]",
                     ));
                 }
+                let key_size =
+                    RsaKeySize::from_bit_len(components[1].len() * 2 * 8).ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err("Unsupported RSA key size")
+                    })?;
                 PrivateKey::Rsa(RsaPrivateKey {
+                    key_size,
                     e: components[0].clone(),
                     p: components[1].clone(),
                     q: components[2].clone(),
@@ -561,7 +561,12 @@ impl OpenPgpSession {
                         "RSA-CRT key requires [e, p, q, iqmp, dmp1, dmq1, n]",
                     ));
                 }
+                let key_size =
+                    RsaKeySize::from_bit_len(components[6].len() * 8).ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err("Unsupported RSA key size")
+                    })?;
                 PrivateKey::Rsa(RsaPrivateKey {
+                    key_size,
                     e: components[0].clone(),
                     p: components[1].clone(),
                     q: components[2].clone(),

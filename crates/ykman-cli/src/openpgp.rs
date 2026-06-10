@@ -81,6 +81,7 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
         let pin_policy = match pw_status.pin_policy_user {
             PinPolicy::Once => "Once",
             PinPolicy::Always => "Always",
+            _ => "Unknown",
         };
         println!("Require PIN for signature:  {pin_policy}");
     }
@@ -160,6 +161,7 @@ fn format_uif(uif: Uif) -> String {
         Uif::Fixed => "Fixed",
         Uif::Cached => "Cached",
         Uif::CachedFixed => "Cached Fixed",
+        _ => "Unknown",
     }
     .to_string()
 }
@@ -399,6 +401,7 @@ fn format_algorithm(attrs: &yubikit::openpgp::AlgorithmAttributes) -> String {
         yubikit::openpgp::AlgorithmAttributes::Ec(ec) => {
             ec.oid_str().unwrap_or_else(|_| "Unknown EC".to_string())
         }
+        _ => "Unknown".to_string(),
     }
 }
 

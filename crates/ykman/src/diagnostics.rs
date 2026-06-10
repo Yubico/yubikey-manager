@@ -595,6 +595,7 @@ fn probe_openpgp<C: yubikit::smartcard::SmartCardConnection + 'static>(
                         let policy = match pw.pin_policy_user {
                             yubikit::openpgp::PinPolicy::Once => "Once",
                             yubikit::openpgp::PinPolicy::Always => "Always",
+                            _ => "Unknown",
                         };
                         (
                             Some(pw.attempts_user),

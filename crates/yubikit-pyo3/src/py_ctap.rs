@@ -182,6 +182,9 @@ fn cbor_value_to_py(py: Python<'_>, value: &cbor::Value) -> PyResult<Py<PyAny>> 
             }
             Ok(dict.into())
         }
+        _ => Err(pyo3::exceptions::PyValueError::new_err(
+            "Unsupported CBOR value type",
+        )),
     }
 }
 

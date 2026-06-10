@@ -153,6 +153,7 @@ fn private_key_from_raw(kt: KeyType, raw: &[u8]) -> PyResult<PrivateKey> {
             parameter_set: MlKemParameterSet::MlKem1024,
             private_key: raw.to_vec(),
         }),
+        _ => Err(err("Unsupported key type")),
     }
 }
 

@@ -63,6 +63,7 @@ use zeroize::Zeroizing;
 use crate::core::{Version, int2bytes, patch_version};
 use crate::keys::{
     EcCurve, KeyAlgorithm, KeyError, MlDsaParameterSet, MlKemParameterSet, PrivateKey, PublicKey,
+    RsaKeySize,
 };
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
 use crate::tlv::{parse_tlv_dict, tlv_append, tlv_encode, tlv_unpack};
@@ -111,6 +112,7 @@ impl From<crate::tlv::TlvError> for PivError {
 
 /// High-level cryptographic algorithm family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Algorithm {
     /// Elliptic-curve cryptography (NIST P-curves, Ed25519, X25519).
     Ec,
@@ -139,6 +141,7 @@ impl fmt::Display for Algorithm {
 
 /// Specific key algorithm and size used in a PIV slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum KeyType {
     /// RSA 1024-bit key.
@@ -253,14 +256,13 @@ impl TryFrom<&KeyAlgorithm> for KeyType {
     type Error = PivError;
 
     fn try_from(algo: &KeyAlgorithm) -> Result<Self, Self::Error> {
+        #[allow(unreachable_patterns)]
         match algo {
-            KeyAlgorithm::Rsa(1024) => Ok(Self::Rsa1024),
-            KeyAlgorithm::Rsa(2048) => Ok(Self::Rsa2048),
-            KeyAlgorithm::Rsa(3072) => Ok(Self::Rsa3072),
-            KeyAlgorithm::Rsa(4096) => Ok(Self::Rsa4096),
-            KeyAlgorithm::Rsa(bits) => Err(PivError::NotSupported(format!(
-                "Unsupported RSA key size: {bits}"
-            ))),
+            KeyAlgorithm::Rsa(RsaKeySize::Rsa1024) => Ok(Self::Rsa1024),
+            KeyAlgorithm::Rsa(RsaKeySize::Rsa2048) => Ok(Self::Rsa2048),
+            KeyAlgorithm::Rsa(RsaKeySize::Rsa3072) => Ok(Self::Rsa3072),
+            KeyAlgorithm::Rsa(RsaKeySize::Rsa4096) => Ok(Self::Rsa4096),
+            KeyAlgorithm::Rsa(_) => Err(PivError::NotSupported("Unsupported RSA key size".into())),
             KeyAlgorithm::Ec(EcCurve::P256) => Ok(Self::EccP256),
             KeyAlgorithm::Ec(EcCurve::P384) => Ok(Self::EccP384),
             KeyAlgorithm::Ec(curve) => Err(PivError::NotSupported(format!(
@@ -286,6 +288,7 @@ impl From<&KeyError> for PivError {
 
 /// Algorithm used for the PIV management key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum ManagementKeyType {
     /// Triple-DES (3DES / TDES) — 24-byte key, legacy default.
@@ -346,6 +349,7 @@ impl fmt::Display for ManagementKeyType {
 
 /// A PIV key slot on the YubiKey.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum Slot {
     /// Slot 9A — PIV Authentication.
@@ -446,6 +450,7 @@ impl fmt::Display for Slot {
 
 /// PIV data-object identifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u32)]
 pub enum ObjectId {
     /// Card Capability Container.
@@ -557,6 +562,7 @@ impl ObjectId {
 
 /// PIN verification policy for a PIV key slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum PinPolicy {
     /// Use the slot's default PIN policy.
@@ -590,6 +596,7 @@ impl PinPolicy {
 
 /// Physical touch policy for a PIV key slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum TouchPolicy {
     /// Use the slot's default touch policy.
@@ -2143,6 +2150,7 @@ fn build_put_key_data(
 
 /// Hash algorithm used for signing operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum HashAlgorithm {
     /// SHA-256 (256-bit digest).
     Sha256,
@@ -2288,7 +2296,15 @@ fn device_pubkey_to_public_key(
                     "Expected tag 0x82 for RSA exponent, got 0x{tag2:02X}"
                 )));
             }
+            let key_size = match key_type {
+                KeyType::Rsa1024 => RsaKeySize::Rsa1024,
+                KeyType::Rsa2048 => RsaKeySize::Rsa2048,
+                KeyType::Rsa3072 => RsaKeySize::Rsa3072,
+                KeyType::Rsa4096 => RsaKeySize::Rsa4096,
+                _ => unreachable!(),
+            };
             Ok(PublicKey::Rsa {
+                key_size,
                 n: modulus,
                 e: exponent,
             })

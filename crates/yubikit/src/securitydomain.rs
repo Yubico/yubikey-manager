@@ -127,6 +127,7 @@ const DEFAULT_KCV_IV: [u8; 16] = [0x01; 16];
 
 /// SCP key types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum KeyType {
     /// AES symmetric key.
@@ -158,6 +159,7 @@ impl KeyType {
 
 /// Elliptic curve identifiers for SCP11.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum Curve {
     /// NIST P-256.
@@ -229,6 +231,7 @@ impl Curve {
 
 /// SCP Key ID values identifying the SCP variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum ScpKid {
     /// SCP03 (symmetric).

@@ -24,6 +24,7 @@ use std::fmt;
 
 /// CBOR value type supporting the subset used by CTAP2.
 #[derive(Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Value {
     /// Signed or unsigned integer (CBOR major types 0 and 1).
     Int(i64),

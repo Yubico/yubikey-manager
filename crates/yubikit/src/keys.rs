@@ -58,11 +58,45 @@ pub(crate) const OID_BRAINPOOL_P512R1: ObjectIdentifier =
 // KeyAlgorithm
 // ---------------------------------------------------------------------------
 
+/// RSA modulus bit length.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u16)]
+#[non_exhaustive]
+pub enum RsaKeySize {
+    /// 1024-bit RSA key.
+    Rsa1024 = 1024,
+    /// 2048-bit RSA key.
+    Rsa2048 = 2048,
+    /// 3072-bit RSA key.
+    Rsa3072 = 3072,
+    /// 4096-bit RSA key.
+    Rsa4096 = 4096,
+}
+
+impl RsaKeySize {
+    /// Returns the bit length of this RSA key size.
+    pub fn bit_len(self) -> usize {
+        self as usize
+    }
+
+    /// Create from a bit length, if it matches a known size.
+    pub fn from_bit_len(bits: usize) -> Option<Self> {
+        match bits {
+            1024 => Some(Self::Rsa1024),
+            2048 => Some(Self::Rsa2048),
+            3072 => Some(Self::Rsa3072),
+            4096 => Some(Self::Rsa4096),
+            _ => None,
+        }
+    }
+}
+
 /// Cryptographic algorithm for an asymmetric key.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum KeyAlgorithm {
-    /// RSA with the given modulus bit length.
-    Rsa(usize),
+    /// RSA with the given key size.
+    Rsa(RsaKeySize),
     /// Elliptic curve (NIST/Brainpool/secp256k1).
     Ec(EcCurve),
     /// Ed25519 signing key.
@@ -75,8 +109,9 @@ pub enum KeyAlgorithm {
     MlKem(MlKemParameterSet),
 }
 
-/// Elliptic curve identifiers.
+/// Elliptic curve identifiers for use with ECDSA and/or ECDH.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EcCurve {
     /// NIST P-256 (secp256r1).
     P256,
@@ -139,6 +174,7 @@ impl EcCurve {
 
 /// ML-DSA parameter sets (FIPS 204).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MlDsaParameterSet {
     /// ML-DSA-44 (security category 2).
     MlDsa44,
@@ -150,6 +186,7 @@ pub enum MlDsaParameterSet {
 
 /// ML-KEM parameter sets (FIPS 203).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MlKemParameterSet {
     /// ML-KEM-512 (security category 1).
     MlKem512,
@@ -167,6 +204,7 @@ pub enum MlKemParameterSet {
 ///
 /// Key material is automatically zeroized when dropped.
 /// Construct via [`PrivateKey::from_pkcs8`] or directly from components.
+#[non_exhaustive]
 pub enum PrivateKey {
     /// RSA private key in CRT form.
     Rsa(RsaPrivateKey),
@@ -213,6 +251,8 @@ impl Drop for PrivateKey {
 
 /// RSA private key components in CRT form.
 pub struct RsaPrivateKey {
+    /// Key size.
+    pub key_size: RsaKeySize,
     /// Public modulus n = p*q.
     pub n: Vec<u8>,
     /// Public exponent (typically 65537).
@@ -243,7 +283,7 @@ impl Drop for RsaPrivateKey {
 
 impl fmt::Debug for RsaPrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "RsaPrivateKey({}bit)", self.n.len() * 8)
+        write!(f, "RsaPrivateKey({:?})", self.key_size)
     }
 }
 
@@ -267,8 +307,13 @@ impl RsaPrivateKey {
             return Err(KeyError("RSA key missing required fields"));
         }
 
+        let n = strip_leading_zero(fields[1]).to_vec();
+        let key_size =
+            RsaKeySize::from_bit_len(n.len() * 8).ok_or(KeyError("Unsupported RSA key size"))?;
+
         Ok(Self {
-            n: strip_leading_zero(fields[1]).to_vec(),
+            key_size,
+            n,
             e: strip_leading_zero(fields[2]).to_vec(),
             p: strip_leading_zero(fields[4]).to_vec(),
             q: strip_leading_zero(fields[5]).to_vec(),
@@ -333,7 +378,7 @@ impl PrivateKey {
     /// Returns the algorithm of this private key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         match self {
-            Self::Rsa(rsa) => KeyAlgorithm::Rsa(rsa.n.len() * 8),
+            Self::Rsa(rsa) => KeyAlgorithm::Rsa(rsa.key_size),
             Self::Ec(ec) => KeyAlgorithm::Ec(ec.curve.clone()),
             Self::Ed25519 { .. } => KeyAlgorithm::Ed25519,
             Self::X25519 { .. } => KeyAlgorithm::X25519,
@@ -362,9 +407,12 @@ impl fmt::Debug for PrivateKey {
 
 /// An asymmetric public key.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PublicKey {
     /// RSA public key.
     Rsa {
+        /// Key size.
+        key_size: RsaKeySize,
         /// Modulus (big-endian, unsigned).
         n: Vec<u8>,
         /// Public exponent (big-endian, unsigned).
@@ -452,7 +500,10 @@ impl PublicKey {
                 tlv_parse(inner, n_end).map_err(|_| KeyError("Invalid RSA exponent"))?;
             let n = strip_leading_zero(&inner[n_off..n_off + n_len]);
             let e = strip_leading_zero(&inner[e_off..e_off + e_len]);
+            let key_size = RsaKeySize::from_bit_len(n.len() * 8)
+                .ok_or(KeyError("Unsupported RSA key size"))?;
             Ok(Self::Rsa {
+                key_size,
                 n: n.to_vec(),
                 e: e.to_vec(),
             })
@@ -515,7 +566,7 @@ impl PublicKey {
     /// Returns the algorithm of this public key.
     pub fn algorithm(&self) -> KeyAlgorithm {
         match self {
-            Self::Rsa { n, .. } => KeyAlgorithm::Rsa(n.len() * 8),
+            Self::Rsa { key_size, .. } => KeyAlgorithm::Rsa(*key_size),
             Self::Ec { curve, .. } => KeyAlgorithm::Ec(curve.clone()),
             Self::Ed25519 { .. } => KeyAlgorithm::Ed25519,
             Self::X25519 { .. } => KeyAlgorithm::X25519,
@@ -527,7 +578,7 @@ impl PublicKey {
     /// Encode this public key as SubjectPublicKeyInfo (SPKI) DER.
     pub fn to_spki(&self) -> Result<Vec<u8>, KeyError> {
         let spki = match self {
-            Self::Rsa { n, e } => {
+            Self::Rsa { n, e, .. } => {
                 let mod_int =
                     der::asn1::UintRef::new(n).map_err(|_| KeyError("Invalid RSA modulus"))?;
                 let exp_int =
@@ -670,8 +721,11 @@ fn parse_pkcs8(pkcs8_der: &[u8]) -> Result<(KeyAlgorithm, Zeroizing<Vec<u8>>), K
         } else {
             modulus.len()
         };
+        let mod_bits = mod_bytes * 8;
+        let key_size =
+            RsaKeySize::from_bit_len(mod_bits).ok_or(KeyError("Unsupported RSA key size"))?;
         Ok((
-            KeyAlgorithm::Rsa(mod_bytes * 8),
+            KeyAlgorithm::Rsa(key_size),
             Zeroizing::new(private_key_data.to_vec()),
         ))
     } else if oid == SPKI_OID_EC.as_bytes() {

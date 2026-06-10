@@ -1,5 +1,5 @@
 use super::*;
-use yubikit::keys::{EcCurve, EcPrivateKey, PrivateKey, RsaPrivateKey};
+use yubikit::keys::{EcCurve, EcPrivateKey, PrivateKey, RsaKeySize, RsaPrivateKey};
 use yubikit::openpgp::{KeyRef, OpenPgpPin, OpenPgpSession};
 
 fn open_openpgp_session(tc: &TestConnection) -> OpenPgpSession<PcscSmartCardConnection> {
@@ -185,13 +185,13 @@ fn test_openpgp_generate_rsa_key_and_sign(#[case] tc: TestConnection) {
     let pk = session
         .generate_rsa_key(
             yubikit::openpgp::KeyRef::Sig,
-            yubikit::openpgp::RsaSize::Rsa2048,
+            yubikit::keys::RsaKeySize::Rsa2048,
         )
         .expect("generate_rsa_key");
 
     // Extract modulus and exponent from PublicKey
     let (modulus_bytes, exponent_bytes) = match &pk {
-        yubikit::keys::PublicKey::Rsa { n, e } => (n.as_slice(), e.as_slice()),
+        yubikit::keys::PublicKey::Rsa { n, e, .. } => (n.as_slice(), e.as_slice()),
         _ => panic!("Expected RSA public key"),
     };
 
@@ -235,7 +235,7 @@ fn test_openpgp_rsa_decrypt(#[case] tc: TestConnection) {
     // Generate RSA 2048 decryption key
     let pk = match session.generate_rsa_key(
         yubikit::openpgp::KeyRef::Dec,
-        yubikit::openpgp::RsaSize::Rsa2048,
+        yubikit::keys::RsaKeySize::Rsa2048,
     ) {
         Ok(data) => data,
         Err(e) if has_sw(&e, 0x6A80) || is_conditions_not_satisfied(&e) => {
@@ -246,7 +246,7 @@ fn test_openpgp_rsa_decrypt(#[case] tc: TestConnection) {
 
     // Extract modulus and exponent
     let (modulus_bytes, exponent_bytes) = match &pk {
-        yubikit::keys::PublicKey::Rsa { n, e } => (n.as_slice(), e.as_slice()),
+        yubikit::keys::PublicKey::Rsa { n, e, .. } => (n.as_slice(), e.as_slice()),
         _ => panic!("Expected RSA public key"),
     };
     use rsa::BigUint;
@@ -543,6 +543,7 @@ fn test_import_ec_secp256k1(#[case] tc: TestConnection) {
     let digest = sha2::Sha256::new_with_prefix(message);
     let ecdsa_sig =
         k256::ecdsa::Signature::from_bytes((&sig[..]).into()).expect("parse k256 signature");
+
     vk.verify_digest(digest, &ecdsa_sig)
         .expect("secp256k1 signature verification");
 }
@@ -694,7 +695,9 @@ fn generate_rsa_private_key(bits: usize) -> PrivateKey {
     let primes = private.primes();
     let p = primes[0].to_bytes_be();
     let q = primes[1].to_bytes_be();
+    let key_size = RsaKeySize::from_bit_len(bits).expect("valid RSA key size");
     PrivateKey::Rsa(RsaPrivateKey {
+        key_size,
         e,
         p,
         q,

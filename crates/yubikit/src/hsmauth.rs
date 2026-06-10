@@ -199,6 +199,7 @@ impl fmt::Debug for CredentialPassword {
 
 /// The cryptographic algorithm used by an HSM Auth credential.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum Algorithm {
     /// AES-128 Yubico authentication.

@@ -247,6 +247,7 @@ impl fmt::Display for Capability {
 
 /// YubiKey device form factor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum FormFactor {
     /// Unknown or unrecognized form factor.
