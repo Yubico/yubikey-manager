@@ -698,7 +698,7 @@ fn generate_rsa_private_key(bits: usize) -> PrivateKey {
     let p = primes[0].to_bytes_be();
     let q = primes[1].to_bytes_be();
     let key_size = RsaKeySize::from_bit_len(bits).expect("valid RSA key size");
-    PrivateKey::Rsa(RsaPrivateKey {
+    RsaPrivateKey {
         key_size,
         e,
         p,
@@ -707,7 +707,8 @@ fn generate_rsa_private_key(bits: usize) -> PrivateKey {
         dp: Vec::new(),
         dq: Vec::new(),
         qinv: Vec::new(),
-    })
+    }
+    .into()
 }
 
 fn generate_ec_private_key_p256() -> (PrivateKey, p256::ecdsa::VerifyingKey) {
@@ -717,11 +718,12 @@ fn generate_ec_private_key_p256() -> (PrivateKey, p256::ecdsa::VerifyingKey) {
     let public_point = secret.public_key().to_encoded_point(false);
     let signing_key = p256::ecdsa::SigningKey::from(&secret);
     let vk = *signing_key.verifying_key();
-    let key = PrivateKey::Ec(EcPrivateKey {
+    let key = EcPrivateKey {
         curve: EcCurve::P256,
         scalar,
         public_key: Some(public_point.as_bytes().to_vec()),
-    });
+    }
+    .into();
     (key, vk)
 }
 
@@ -732,11 +734,12 @@ fn generate_ec_private_key_p384() -> (PrivateKey, p384::ecdsa::VerifyingKey) {
     let public_point = secret.public_key().to_encoded_point(false);
     let signing_key = p384::ecdsa::SigningKey::from(&secret);
     let vk = *signing_key.verifying_key();
-    let key = PrivateKey::Ec(EcPrivateKey {
+    let key = EcPrivateKey {
         curve: EcCurve::P384,
         scalar,
         public_key: Some(public_point.as_bytes().to_vec()),
-    });
+    }
+    .into();
     (key, vk)
 }
 
@@ -747,11 +750,12 @@ fn generate_ec_private_key_secp256k1() -> (PrivateKey, k256::ecdsa::VerifyingKey
     let public_point = secret.public_key().to_encoded_point(false);
     let signing_key = k256::ecdsa::SigningKey::from(&secret);
     let vk = *signing_key.verifying_key();
-    let key = PrivateKey::Ec(EcPrivateKey {
+    let key = EcPrivateKey {
         curve: EcCurve::Secp256k1,
         scalar,
         public_key: Some(public_point.as_bytes().to_vec()),
-    });
+    }
+    .into();
     (key, vk)
 }
 
@@ -764,11 +768,12 @@ fn generate_ec_private_key_bp256() -> PrivateKey {
     rsa::rand_core::OsRng.fill_bytes(&mut scalar);
     scalar[0] &= 0x7F;
     scalar[31] |= 0x01; // ensure non-zero
-    PrivateKey::Ec(EcPrivateKey {
+    EcPrivateKey {
         curve: EcCurve::BrainpoolP256r1,
         scalar,
         public_key: None,
-    })
+    }
+    .into()
 }
 
 /// Generate BrainpoolP384r1 key — bp384 lacks CurveArithmetic so no software
@@ -780,11 +785,12 @@ fn generate_ec_private_key_bp384() -> PrivateKey {
     rsa::rand_core::OsRng.fill_bytes(&mut scalar);
     scalar[0] &= 0x7F;
     scalar[47] |= 0x01; // ensure non-zero
-    PrivateKey::Ec(EcPrivateKey {
+    EcPrivateKey {
         curve: EcCurve::BrainpoolP384r1,
         scalar,
         public_key: None,
-    })
+    }
+    .into()
 }
 
 /// Generate BrainpoolP512r1 key — no Rust crate available for verification,
@@ -796,11 +802,12 @@ fn generate_ec_private_key_bp512() -> PrivateKey {
     rsa::rand_core::OsRng.fill_bytes(&mut scalar);
     scalar[0] &= 0x7F;
     scalar[63] |= 0x01; // ensure non-zero
-    PrivateKey::Ec(EcPrivateKey {
+    EcPrivateKey {
         curve: EcCurve::BrainpoolP512r1,
         scalar,
         public_key: None,
-    })
+    }
+    .into()
 }
 
 fn generate_ed25519_private_key() -> (PrivateKey, ed25519_dalek::VerifyingKey) {
@@ -809,8 +816,9 @@ fn generate_ed25519_private_key() -> (PrivateKey, ed25519_dalek::VerifyingKey) {
     rsa::rand_core::OsRng.fill_bytes(&mut secret);
     let signing_key = ed25519_dalek::SigningKey::from_bytes(&secret);
     let verifying_key = signing_key.verifying_key();
-    let key = PrivateKey::Ed25519(yubikit::keys::Ed25519PrivateKey {
+    let key = yubikit::keys::Ed25519PrivateKey {
         secret: secret.to_vec(),
-    });
+    }
+    .into();
     (key, verifying_key)
 }

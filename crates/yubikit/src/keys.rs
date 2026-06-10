@@ -502,6 +502,42 @@ impl fmt::Debug for PrivateKey {
     }
 }
 
+impl From<RsaPrivateKey> for PrivateKey {
+    fn from(k: RsaPrivateKey) -> Self {
+        Self::Rsa(k)
+    }
+}
+
+impl From<EcPrivateKey> for PrivateKey {
+    fn from(k: EcPrivateKey) -> Self {
+        Self::Ec(k)
+    }
+}
+
+impl From<Ed25519PrivateKey> for PrivateKey {
+    fn from(k: Ed25519PrivateKey) -> Self {
+        Self::Ed25519(k)
+    }
+}
+
+impl From<X25519PrivateKey> for PrivateKey {
+    fn from(k: X25519PrivateKey) -> Self {
+        Self::X25519(k)
+    }
+}
+
+impl From<MlDsaPrivateKey> for PrivateKey {
+    fn from(k: MlDsaPrivateKey) -> Self {
+        Self::MlDsa(k)
+    }
+}
+
+impl From<MlKemPrivateKey> for PrivateKey {
+    fn from(k: MlKemPrivateKey) -> Self {
+        Self::MlKem(k)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // PublicKey
 // ---------------------------------------------------------------------------
@@ -522,6 +558,42 @@ pub enum PublicKey {
     MlDsa(MlDsaPublicKey),
     /// ML-KEM public key.
     MlKem(MlKemPublicKey),
+}
+
+impl From<RsaPublicKey> for PublicKey {
+    fn from(k: RsaPublicKey) -> Self {
+        Self::Rsa(k)
+    }
+}
+
+impl From<EcPublicKey> for PublicKey {
+    fn from(k: EcPublicKey) -> Self {
+        Self::Ec(k)
+    }
+}
+
+impl From<Ed25519PublicKey> for PublicKey {
+    fn from(k: Ed25519PublicKey) -> Self {
+        Self::Ed25519(k)
+    }
+}
+
+impl From<X25519PublicKey> for PublicKey {
+    fn from(k: X25519PublicKey) -> Self {
+        Self::X25519(k)
+    }
+}
+
+impl From<MlDsaPublicKey> for PublicKey {
+    fn from(k: MlDsaPublicKey) -> Self {
+        Self::MlDsa(k)
+    }
+}
+
+impl From<MlKemPublicKey> for PublicKey {
+    fn from(k: MlKemPublicKey) -> Self {
+        Self::MlKem(k)
+    }
 }
 
 /// RSA public key.
