@@ -543,6 +543,8 @@ fn test_import_ec_secp256k1(#[case] tc: TestConnection) {
     let digest = sha2::Sha256::new_with_prefix(message);
     let ecdsa_sig =
         k256::ecdsa::Signature::from_bytes((&sig[..]).into()).expect("parse k256 signature");
+    // The k256 crate only supports low-S signatures; normalize to low-S for verification.
+    let ecdsa_sig = ecdsa_sig.normalize_s().unwrap_or(ecdsa_sig);
 
     vk.verify_digest(digest, &ecdsa_sig)
         .expect("secp256k1 signature verification");
