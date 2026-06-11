@@ -48,6 +48,10 @@ pub fn tlv_parse(data: &[u8], offset: usize) -> Result<(u32, usize, usize, usize
 }
 
 fn tlv_parse_inner(data: &[u8], mut offset: usize) -> Result<(u32, usize, usize, usize), TlvError> {
+    fn checked_add(a: usize, b: usize) -> Result<usize, TlvError> {
+        a.checked_add(b).ok_or(TlvError::InvalidEncoding)
+    }
+
     let get = |i: usize| -> Result<u8, TlvError> {
         data.get(i).copied().ok_or(TlvError::InvalidEncoding)
     };
@@ -69,22 +73,26 @@ fn tlv_parse_inner(data: &[u8], mut offset: usize) -> Result<(u32, usize, usize,
     let (ln, end) = if ln_byte == 0x80 {
         // Indefinite length: scan for 0x0000 terminator
         let mut end = offset;
-        while get(end)? != 0 || get(end + 1)? != 0 {
+        while get(end)? != 0 || get(checked_add(end, 1)?)? != 0 {
             let (_, _, _, next_end) = tlv_parse_inner(data, end)?;
+            if next_end <= end {
+                return Err(TlvError::InvalidEncoding);
+            }
             end = next_end;
         }
-        let ln = end - offset;
-        (ln, end + 2)
+        let ln = end.checked_sub(offset).ok_or(TlvError::InvalidEncoding)?;
+        (ln, checked_add(end, 2)?)
     } else if ln_byte > 0x80 {
         let n_bytes = ln_byte - 0x80;
         let mut ln: usize = 0;
         for i in 0..n_bytes {
-            ln = (ln << 8) | get(offset + i)? as usize;
+            ln = ln.checked_mul(0x100).ok_or(TlvError::InvalidEncoding)?
+                | get(checked_add(offset, i)?)? as usize;
         }
-        offset += n_bytes;
-        (ln, offset + ln)
+        offset = checked_add(offset, n_bytes)?;
+        (ln, checked_add(offset, ln)?)
     } else {
-        (ln_byte, offset + ln_byte)
+        (ln_byte, checked_add(offset, ln_byte)?)
     };
 
     if end > data.len() {
@@ -100,7 +108,13 @@ pub fn parse_tlv_list(data: &[u8]) -> Result<Vec<(u32, Vec<u8>)>, TlvError> {
     let mut offset = 0;
     while offset < data.len() {
         let (tag, val_offset, val_len, end) = tlv_parse(data, offset)?;
-        result.push((tag, data[val_offset..val_offset + val_len].to_vec()));
+        let val_end = val_offset
+            .checked_add(val_len)
+            .ok_or(TlvError::InvalidEncoding)?;
+        let value = data
+            .get(val_offset..val_end)
+            .ok_or(TlvError::IncorrectLength)?;
+        result.push((tag, value.to_vec()));
         offset = end;
     }
     Ok(result)
@@ -121,7 +135,12 @@ pub fn tlv_unpack(expected_tag: u32, data: &[u8]) -> Result<Vec<u8>, TlvError> {
             expected: expected_tag,
         });
     }
-    Ok(data[val_offset..val_offset + val_len].to_vec())
+    let val_end = val_offset
+        .checked_add(val_len)
+        .ok_or(TlvError::InvalidEncoding)?;
+    data.get(val_offset..val_end)
+        .map(|v| v.to_vec())
+        .ok_or(TlvError::IncorrectLength)
 }
 
 /// Find the first entry with the given tag in a TLV list.
@@ -180,6 +199,25 @@ mod tests {
         assert_eq!(tag, 0x71);
         assert_eq!(&encoded[offset..offset + ln], b"hello");
         assert_eq!(end, encoded.len());
+    }
+
+    #[test]
+    fn test_tlv_rejects_oversized_length() {
+        let mut encoded = vec![0x71, 0x88];
+        encoded.extend_from_slice(&usize::MAX.to_be_bytes());
+        assert!(matches!(
+            tlv_parse(&encoded, 0),
+            Err(TlvError::InvalidEncoding)
+        ));
+    }
+
+    #[test]
+    fn test_parse_tlv_list_rejects_truncated_value() {
+        let encoded = [0x71, 0x02, 0xAA];
+        assert!(matches!(
+            parse_tlv_list(&encoded),
+            Err(TlvError::InvalidEncoding | TlvError::IncorrectLength)
+        ));
     }
 
     #[test]

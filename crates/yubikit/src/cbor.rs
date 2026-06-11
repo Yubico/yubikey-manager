@@ -119,7 +119,8 @@ fn encode_head(mt: u8, val: u64) -> Vec<u8> {
 
 /// CTAP2 canonical key ordering: sort by (first_byte, length, raw_bytes).
 fn canonical_cmp(a: &[u8], b: &[u8]) -> Ordering {
-    a[0].cmp(&b[0])
+    a.first()
+        .cmp(&b.first())
         .then_with(|| a.len().cmp(&b.len()))
         .then_with(|| a.cmp(b))
 }
@@ -139,7 +140,8 @@ impl Value {
                 if *n >= 0 {
                     buf.extend_from_slice(&encode_head(0, *n as u64));
                 } else {
-                    buf.extend_from_slice(&encode_head(1, (-1 - *n) as u64));
+                    let encoded = (-1i128 - i128::from(*n)) as u64;
+                    buf.extend_from_slice(&encode_head(1, encoded));
                 }
             }
             Value::Bytes(data) => {
@@ -471,7 +473,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_negative_int() {
-        for n in [-1i64, -24, -25, -256, -257, -65536, -65537] {
+        for n in [-1i64, -24, -25, -256, -257, -65536, -65537, i64::MIN] {
             let encoded = Value::Int(n).encode();
             let decoded = decode(&encoded).unwrap();
             assert_eq!(decoded, Value::Int(n));
@@ -537,6 +539,21 @@ mod tests {
         assert_eq!(entries[0].0, Value::Int(1));
         assert_eq!(entries[1].0, Value::Int(10));
         assert_eq!(entries[2].0, Value::Text("z".into()));
+    }
+
+    #[test]
+    fn test_canonical_key_order_empty_keys() {
+        let map = Value::Map(vec![
+            (Value::Text("a".into()), Value::Int(1)),
+            (Value::Bytes(vec![]), Value::Int(2)),
+            (Value::Text(String::new()), Value::Int(3)),
+        ]);
+        let encoded = map.encode();
+        let decoded = decode(&encoded).unwrap();
+        let entries = decoded.as_map().unwrap();
+        assert_eq!(entries[0].0, Value::Bytes(vec![]));
+        assert_eq!(entries[1].0, Value::Text(String::new()));
+        assert_eq!(entries[2].0, Value::Text("a".into()));
     }
 
     #[test]

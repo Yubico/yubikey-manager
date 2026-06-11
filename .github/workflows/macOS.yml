@@ -17,6 +17,9 @@ jobs:
         with:
           targets: x86_64-apple-darwin aarch64-apple-darwin
 
+      - name: Install cargo-about
+        run: cargo install cargo-about --locked
+
       - name: Build Rust CLI (universal)
         run: |
           cargo build --release -p ykman-cli --target aarch64-apple-darwin

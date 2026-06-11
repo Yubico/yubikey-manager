@@ -186,19 +186,34 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
 
 #[cfg(not(target_os = "windows"))]
 fn run_unix_socket_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
+    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
 
-    let socket_path = "/tmp/ykman-svc.sock";
+    let socket_path = match ykman::rpc::socket_path() {
+        Ok(path) => path,
+        Err(e) => {
+            log::error!("{e}");
+            return;
+        }
+    };
 
     // Remove stale socket
-    let _ = std::fs::remove_file(socket_path);
+    let _ = std::fs::remove_file(&socket_path);
 
-    let listener = UnixListener::bind(socket_path).expect("Failed to bind Unix socket");
+    let listener = UnixListener::bind(&socket_path).expect("Failed to bind Unix socket");
+    if let Err(e) = std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600)) {
+        log::error!(
+            "Failed to set socket permissions {}: {e}",
+            socket_path.display()
+        );
+        let _ = std::fs::remove_file(&socket_path);
+        return;
+    }
     listener
         .set_nonblocking(true)
         .expect("set_nonblocking failed");
 
-    log::info!("Listening on {socket_path}");
+    log::info!("Listening on {}", socket_path.display());
 
     while !stop.load(Ordering::Relaxed) {
         match listener.accept() {
@@ -220,6 +235,6 @@ fn run_unix_socket_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         }
     }
 
-    let _ = std::fs::remove_file(socket_path);
+    let _ = std::fs::remove_file(&socket_path);
     log::info!("Socket server stopped");
 }

@@ -50,10 +50,10 @@ fn init_keyring_store() {
     });
 }
 
-fn data_dir() -> PathBuf {
+fn data_dir() -> Result<PathBuf, String> {
     dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("ykman")
+        .map(|p| p.join("ykman"))
+        .ok_or_else(|| "No safe application data directory is available".to_string())
 }
 
 fn generate_and_store_key(entry: &Entry) -> Result<Fernet, String> {
@@ -79,28 +79,58 @@ pub struct AppData {
 impl AppData {
     /// Open (or create) an AppData store with the given name.
     /// The file is stored at `<data_dir>/<name>.json`.
-    pub fn new(name: &str) -> Self {
-        let path = data_dir().join(format!("{name}.json"));
+    pub fn new(name: &str) -> Result<Self, String> {
+        let path = data_dir()?.join(format!("{name}.json"));
         let data = fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
-        Self {
+        Ok(Self {
             name: name.to_string(),
             data,
             fernet: None,
-        }
+        })
     }
 
     /// Write the current state to disk.
     pub fn write(&self) -> Result<(), String> {
-        let dir = data_dir();
+        let dir = data_dir()?;
         fs::create_dir_all(&dir)
             .map_err(|e| format!("Failed to create data directory {}: {e}", dir.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(|e| {
+                format!(
+                    "Failed to set data directory permissions {}: {e}",
+                    dir.display()
+                )
+            })?;
+        }
         let path = dir.join(format!("{}.json", self.name));
+        let tmp_path = dir.join(format!(".{}.json.tmp.{}", self.name, std::process::id()));
         let json = serde_json::to_string_pretty(&self.data)
             .map_err(|e| format!("Failed to serialize: {e}"))?;
-        fs::write(&path, json).map_err(|e| format!("Failed to write {}: {e}", path.display()))
+        fs::write(&tmp_path, json)
+            .map_err(|e| format!("Failed to write {}: {e}", tmp_path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o600)).map_err(|e| {
+                format!(
+                    "Failed to set data file permissions {}: {e}",
+                    tmp_path.display()
+                )
+            })?;
+        }
+        fs::rename(&tmp_path, &path).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path);
+            format!(
+                "Failed to replace {} with {}: {e}",
+                path.display(),
+                tmp_path.display()
+            )
+        })
     }
 
     /// Initialize the Fernet cipher from the OS keyring, generating a new key

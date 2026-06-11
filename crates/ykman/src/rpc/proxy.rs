@@ -30,6 +30,99 @@ fn target(prefix: &[String], path: &[&str]) -> Vec<String> {
         .collect()
 }
 
+fn required_field<'a>(data: &'a Value, key: &str) -> Result<&'a Value, RpcCallError> {
+    data.get(key)
+        .ok_or_else(|| RpcCallError::Transport(format!("Malformed RPC response: missing {key}")))
+}
+
+fn required_str<'a>(data: &'a Value, key: &str) -> Result<&'a str, RpcCallError> {
+    required_field(data, key)?.as_str().ok_or_else(|| {
+        RpcCallError::Transport(format!("Malformed RPC response: {key} is not a string"))
+    })
+}
+
+fn optional_str(data: &Value, key: &str) -> Result<Option<String>, RpcCallError> {
+    match data.get(key) {
+        Some(Value::Null) | None => Ok(None),
+        Some(v) => v.as_str().map(|s| Some(s.to_string())).ok_or_else(|| {
+            RpcCallError::Transport(format!("Malformed RPC response: {key} is not a string"))
+        }),
+    }
+}
+
+fn required_u64(data: &Value, key: &str) -> Result<u64, RpcCallError> {
+    required_field(data, key)?.as_u64().ok_or_else(|| {
+        RpcCallError::Transport(format!("Malformed RPC response: {key} is not an integer"))
+    })
+}
+
+fn optional_u64(data: &Value, key: &str) -> Result<Option<u64>, RpcCallError> {
+    match data.get(key) {
+        Some(Value::Null) | None => Ok(None),
+        Some(v) => v.as_u64().map(Some).ok_or_else(|| {
+            RpcCallError::Transport(format!("Malformed RPC response: {key} is not an integer"))
+        }),
+    }
+}
+
+fn optional_bool(data: &Value, key: &str) -> Result<Option<bool>, RpcCallError> {
+    match data.get(key) {
+        Some(Value::Null) | None => Ok(None),
+        Some(v) => v.as_bool().map(Some).ok_or_else(|| {
+            RpcCallError::Transport(format!("Malformed RPC response: {key} is not a boolean"))
+        }),
+    }
+}
+
+fn as_u8(value: u64, key: &str) -> Result<u8, RpcCallError> {
+    value
+        .try_into()
+        .map_err(|_| RpcCallError::Transport(format!("Malformed RPC response: {key} exceeds u8")))
+}
+
+fn as_u16(value: u64, key: &str) -> Result<u16, RpcCallError> {
+    value
+        .try_into()
+        .map_err(|_| RpcCallError::Transport(format!("Malformed RPC response: {key} exceeds u16")))
+}
+
+fn parse_version_array(v: &Value, key: &str) -> Result<yubikit::core::Version, RpcCallError> {
+    let arr = v.as_array().ok_or_else(|| {
+        RpcCallError::Transport(format!("Malformed RPC response: {key} is not an array"))
+    })?;
+    if arr.len() != 3 {
+        return Err(RpcCallError::Transport(format!(
+            "Malformed RPC response: {key} must contain 3 elements"
+        )));
+    }
+    Ok(yubikit::core::Version(
+        as_u8(
+            arr[0].as_u64().ok_or_else(|| {
+                RpcCallError::Transport(format!(
+                    "Malformed RPC response: {key}[0] is not an integer"
+                ))
+            })?,
+            key,
+        )?,
+        as_u8(
+            arr[1].as_u64().ok_or_else(|| {
+                RpcCallError::Transport(format!(
+                    "Malformed RPC response: {key}[1] is not an integer"
+                ))
+            })?,
+            key,
+        )?,
+        as_u8(
+            arr[2].as_u64().ok_or_else(|| {
+                RpcCallError::Transport(format!(
+                    "Malformed RPC response: {key}[2] is not an integer"
+                ))
+            })?,
+            key,
+        )?,
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // RpcSmartCardConnection
 // ---------------------------------------------------------------------------
@@ -69,14 +162,16 @@ impl SmartCardConnection for RpcSmartCardConnection {
             )
             .map_err(|e| SmartCardError::Transport(Box::new(RpcTransportError(format!("{e}")))))?;
 
-        let data_hex = result
-            .body
-            .get("data")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let data_hex = required_str(&result.body, "data")
+            .map_err(|e| SmartCardError::InvalidData(e.to_string()))?;
         let data = Vec::from_hex(data_hex)
             .map_err(|e| SmartCardError::InvalidData(format!("bad hex from RPC: {e}")))?;
-        let sw = result.body.get("sw").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+        let sw = as_u16(
+            required_u64(&result.body, "sw")
+                .map_err(|e| SmartCardError::InvalidData(e.to_string()))?,
+            "sw",
+        )
+        .map_err(|e| SmartCardError::InvalidData(e.to_string()))?;
 
         yubikit::log_traffic!("<< {} {:04x}", data_hex, sw);
         Ok((data, sw))
@@ -108,26 +203,16 @@ impl RpcFidoConnection {
             .borrow_mut()
             .get(&target(&device_prefix, &["ctap"]))
             .map_err(|e| RpcCallError::Transport(format!("{e}")))?;
-        let data = info.body.get("data").cloned().unwrap_or(json!({}));
+        let data = required_field(&info.body, "data")?;
 
-        let device_version = if let Some(arr) =
-            data.get("device_version").and_then(|v| v.as_array())
-            && arr.len() == 3
-        {
-            (
-                arr[0].as_u64().unwrap_or(0) as u8,
-                arr[1].as_u64().unwrap_or(0) as u8,
-                arr[2].as_u64().unwrap_or(0) as u8,
-            )
-        } else {
-            (0, 0, 0)
-        };
+        let version =
+            parse_version_array(required_field(data, "device_version")?, "device_version")?;
+        let device_version = (version.0, version.1, version.2);
 
-        let capabilities = CtapHidCapability::from_raw(
-            data.get("capabilities")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u8,
-        );
+        let capabilities = CtapHidCapability::from_raw(as_u8(
+            required_u64(data, "capabilities")?,
+            "capabilities",
+        )?);
 
         Ok(Self {
             client,
@@ -180,11 +265,8 @@ impl FidoConnection for RpcFidoConnection {
             )
             .map_err(|e| FidoError::Other(format!("{e}")))?;
 
-        let data_hex = result
-            .body
-            .get("data")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let data_hex =
+            required_str(&result.body, "data").map_err(|e| FidoError::Other(e.to_string()))?;
         yubikit::log_traffic!("CTAP cmd={:02x} >> {}", cmd, data.encode_hex::<String>());
         yubikit::log_traffic!("CTAP cmd={:02x} << {}", cmd, data_hex);
         Vec::from_hex(data_hex).map_err(|e| FidoError::Other(format!("bad hex from RPC: {e}")))
@@ -234,11 +316,8 @@ impl OtpConnection for RpcOtpConnection {
             )
             .map_err(|e| OtpError::CommandRejected(format!("{e}")))?;
 
-        let data_hex = result
-            .body
-            .get("data")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let data_hex = required_str(&result.body, "data")
+            .map_err(|e| OtpError::CommandRejected(e.to_string()))?;
         let data = Vec::from_hex(data_hex)
             .map_err(|e| OtpError::CommandRejected(format!("bad hex from RPC: {e}")))?;
         yubikit::log_traffic!("otp_receive << {}", data_hex);
@@ -319,7 +398,9 @@ impl RpcDevice {
     }
 
     /// Parse device info from a JSON value (children map entry from the service).
-    pub fn parse_device_info(data: &serde_json::Value) -> yubikit::management::DeviceInfo {
+    pub fn parse_device_info(
+        data: &serde_json::Value,
+    ) -> Result<yubikit::management::DeviceInfo, RpcCallError> {
         Self::read_device_info(data)
     }
 
@@ -336,38 +417,40 @@ impl RpcDevice {
             .borrow_mut()
             .get(&prefix)
             .map_err(|e| RpcCallError::Transport(format!("Failed to get root node: {e}")))?;
-        let data = root.body.get("data").cloned().unwrap_or(json!({}));
-        let children = root.body.get("children").cloned().unwrap_or(json!({}));
+        let data = required_field(&root.body, "data")?;
+        let children = required_field(&root.body, "children")?;
+        let children = children.as_object().ok_or_else(|| {
+            RpcCallError::Transport("Malformed RPC response: children is not an object".into())
+        })?;
 
-        let transport = match data.get("transport").and_then(|v| v.as_str()) {
-            Some("nfc") => Transport::Nfc,
-            _ => Transport::Usb,
+        let transport = match required_str(data, "transport")? {
+            "usb" => Transport::Usb,
+            "nfc" => Transport::Nfc,
+            other => {
+                return Err(RpcCallError::Transport(format!(
+                    "Malformed RPC response: unknown transport {other}"
+                )));
+            }
         };
 
-        let name = data
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("YubiKey")
-            .to_string();
+        let name = required_str(data, "name")?.to_string();
 
-        let pid = data.get("pid").and_then(|v| v.as_u64()).map(|p| p as u16);
+        let pid = optional_u64(data, "pid")?
+            .map(|p| as_u16(p, "pid"))
+            .transpose()?;
 
-        let reader_name = data
-            .get("reader_name")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        let reader_name = optional_str(data, "reader_name")?;
 
         let has_ccid = children.get("ccid").is_some();
         let has_ctap = children.get("ctap").is_some();
         let has_otp = children.get("otp").is_some();
 
-        let usb_ifaces = UsbInterface(
-            data.get("usb_interfaces")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u8,
-        );
+        let usb_ifaces = UsbInterface(as_u8(
+            required_u64(data, "usb_interfaces")?,
+            "usb_interfaces",
+        )?);
 
-        let info = Self::read_device_info(&data);
+        let info = Self::read_device_info(data)?;
 
         log::debug!(
             "RPC device: {name}, transport={transport:?}, ccid={has_ccid}, ctap={has_ctap}, otp={has_otp}"
@@ -387,121 +470,113 @@ impl RpcDevice {
         })
     }
 
-    fn read_device_info(data: &Value) -> DeviceInfo {
+    fn read_device_info(data: &Value) -> Result<DeviceInfo, RpcCallError> {
         use std::collections::HashMap;
 
-        let parse_version = |v: &Value| -> yubikit::core::Version {
-            if let Some(arr) = v.as_array()
-                && arr.len() == 3
-            {
-                yubikit::core::Version(
-                    arr[0].as_u64().unwrap_or(0) as u8,
-                    arr[1].as_u64().unwrap_or(0) as u8,
-                    arr[2].as_u64().unwrap_or(0) as u8,
-                )
-            } else {
-                yubikit::core::Version(0, 0, 0)
-            }
-        };
+        let version = parse_version_array(required_field(data, "version")?, "version")?;
 
-        let version = data
-            .get("version")
-            .map(parse_version)
-            .unwrap_or(yubikit::core::Version(0, 0, 0));
+        let serial = optional_u64(data, "serial")?
+            .map(|s| {
+                s.try_into().map_err(|_| {
+                    RpcCallError::Transport("Malformed RPC response: serial exceeds u32".into())
+                })
+            })
+            .transpose()?;
 
-        let serial = data
-            .get("serial")
-            .and_then(|v| v.as_u64())
-            .map(|s| s as u32);
-
-        let parse_cap_map = |key: &str| -> HashMap<Transport, Capability> {
+        let parse_cap_map = |key: &str| -> Result<HashMap<Transport, Capability>, RpcCallError> {
             let mut map = HashMap::new();
-            if let Some(obj) = data.get(key).and_then(|v| v.as_object()) {
-                for (k, v) in obj {
-                    let transport = match k.as_str() {
-                        "usb" => Transport::Usb,
-                        "nfc" => Transport::Nfc,
-                        _ => continue,
-                    };
-                    let cap = Capability(v.as_u64().unwrap_or(0) as u16);
-                    map.insert(transport, cap);
-                }
+            let Some(value) = data.get(key) else {
+                return Ok(map);
+            };
+            let obj = value.as_object().ok_or_else(|| {
+                RpcCallError::Transport(format!("Malformed RPC response: {key} is not an object"))
+            })?;
+            for (k, v) in obj {
+                let transport = match k.as_str() {
+                    "usb" => Transport::Usb,
+                    "nfc" => Transport::Nfc,
+                    _ => continue,
+                };
+                let cap = Capability(as_u16(
+                    v.as_u64().ok_or_else(|| {
+                        RpcCallError::Transport(format!(
+                            "Malformed RPC response: {key}.{k} is not an integer"
+                        ))
+                    })?,
+                    key,
+                )?);
+                map.insert(transport, cap);
             }
-            map
+            Ok(map)
         };
 
-        let parse_cap = |key: &str| -> Capability {
-            Capability(data.get(key).and_then(|v| v.as_u64()).unwrap_or(0) as u16)
+        let parse_cap = |key: &str| -> Result<Capability, RpcCallError> {
+            optional_u64(data, key)?
+                .map(|v| as_u16(v, key).map(Capability))
+                .transpose()
+                .map(|v| v.unwrap_or(Capability(0)))
         };
 
-        let form_factor_raw = data
-            .get("form_factor")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u8;
+        let form_factor_raw = as_u8(required_u64(data, "form_factor")?, "form_factor")?;
 
-        let opt_version = |key: &str| -> Option<yubikit::core::Version> {
-            data.get(key).filter(|v| !v.is_null()).map(&parse_version)
+        let opt_version = |key: &str| -> Result<Option<yubikit::core::Version>, RpcCallError> {
+            data.get(key)
+                .filter(|v| !v.is_null())
+                .map(|v| parse_version_array(v, key))
+                .transpose()
         };
 
         let version_qualifier = if let Some(vq) = data.get("version_qualifier") {
-            let vq_version = vq.get("version").map(parse_version).unwrap_or(version);
+            let vq_version = vq
+                .get("version")
+                .map(|v| parse_version_array(v, "version_qualifier.version"))
+                .transpose()?
+                .unwrap_or(version);
             let release_type = yubikit::management::ReleaseType::from_value(
-                vq.get("release_type").and_then(|v| v.as_u64()).unwrap_or(2) as u8,
+                optional_u64(vq, "release_type")?
+                    .map(|v| as_u8(v, "version_qualifier.release_type"))
+                    .transpose()?
+                    .unwrap_or(2),
             );
-            let iteration = vq.get("iteration").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+            let iteration = optional_u64(vq, "iteration")?
+                .map(|v| as_u8(v, "version_qualifier.iteration"))
+                .transpose()?
+                .unwrap_or(0);
             yubikit::management::VersionQualifier::new(vq_version, release_type, iteration)
         } else {
             yubikit::management::VersionQualifier::final_release(version)
         };
 
-        DeviceInfo {
+        Ok(DeviceInfo {
             config: yubikit::management::DeviceConfig {
-                enabled_capabilities: parse_cap_map("enabled_capabilities"),
-                auto_eject_timeout: data
-                    .get("auto_eject_timeout")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as u16),
-                challenge_response_timeout: data
-                    .get("challenge_response_timeout")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as u8),
-                device_flags: data
-                    .get("device_flags")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| yubikit::management::DeviceFlag(v as u8)),
-                nfc_restricted: data.get("nfc_restricted").and_then(|v| v.as_bool()),
+                enabled_capabilities: parse_cap_map("enabled_capabilities")?,
+                auto_eject_timeout: optional_u64(data, "auto_eject_timeout")?
+                    .map(|v| as_u16(v, "auto_eject_timeout"))
+                    .transpose()?,
+                challenge_response_timeout: optional_u64(data, "challenge_response_timeout")?
+                    .map(|v| as_u8(v, "challenge_response_timeout"))
+                    .transpose()?,
+                device_flags: optional_u64(data, "device_flags")?
+                    .map(|v| as_u8(v, "device_flags").map(yubikit::management::DeviceFlag))
+                    .transpose()?,
+                nfc_restricted: optional_bool(data, "nfc_restricted")?,
             },
             serial,
             version,
             form_factor: yubikit::management::FormFactor::from_code(form_factor_raw),
-            supported_capabilities: parse_cap_map("supported_capabilities"),
-            is_locked: data
-                .get("is_locked")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-            is_fips: data
-                .get("is_fips")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-            is_sky: data
-                .get("is_sky")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-            part_number: data
-                .get("part_number")
-                .and_then(|v| v.as_str())
-                .map(String::from),
-            fips_capable: parse_cap("fips_capable"),
-            fips_approved: parse_cap("fips_approved"),
-            pin_complexity: data
-                .get("pin_complexity")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-            reset_blocked: parse_cap("reset_blocked"),
-            fps_version: opt_version("fps_version"),
-            stm_version: opt_version("stm_version"),
+            supported_capabilities: parse_cap_map("supported_capabilities")?,
+            is_locked: optional_bool(data, "is_locked")?.unwrap_or(false),
+            is_fips: optional_bool(data, "is_fips")?.unwrap_or(false),
+            is_sky: optional_bool(data, "is_sky")?.unwrap_or(false),
+            part_number: optional_str(data, "part_number")?,
+            fips_capable: parse_cap("fips_capable")?,
+            fips_approved: parse_cap("fips_approved")?,
+            pin_complexity: optional_bool(data, "pin_complexity")?.unwrap_or(false),
+            reset_blocked: parse_cap("reset_blocked")?,
+            fps_version: opt_version("fps_version")?,
+            stm_version: opt_version("stm_version")?,
             version_qualifier,
-        }
+        })
     }
 }
 

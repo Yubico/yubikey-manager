@@ -7,6 +7,17 @@ use serde_json::{Value, json};
 
 use crate::cancel;
 
+fn field<'a>(data: &'a Value, key: &str) -> Result<&'a Value, RpcCallError> {
+    data.get(key)
+        .ok_or_else(|| RpcCallError::Transport(format!("Malformed RPC response: missing {key}")))
+}
+
+fn str_field(data: &Value, key: &str) -> Result<String, RpcCallError> {
+    field(data, key)?.as_str().map(String::from).ok_or_else(|| {
+        RpcCallError::Transport(format!("Malformed RPC response: {key} is not a string"))
+    })
+}
+
 /// Transport abstraction for the RPC client's read/write streams.
 enum Transport {
     /// Generic stream (Named Pipe file handle, Unix socket, etc).
@@ -81,10 +92,10 @@ impl RpcClient {
         {
             use std::os::unix::net::UnixStream;
 
-            let socket_path = "/tmp/ykman-svc.sock";
-            log::debug!("Connecting to Unix socket: {socket_path}");
+            let socket_path = super::socket_path().map_err(RpcCallError::Transport)?;
+            log::debug!("Connecting to Unix socket: {}", socket_path.display());
 
-            let stream = UnixStream::connect(socket_path).map_err(|e| {
+            let stream = UnixStream::connect(&socket_path).map_err(|e| {
                 RpcCallError::Transport(format!("Failed to connect to ykman-svc socket: {e}"))
             })?;
 
@@ -205,30 +216,32 @@ impl RpcClient {
 
             match resp.get("kind").and_then(|v| v.as_str()) {
                 Some("success") => {
-                    let body = resp.get("body").cloned().unwrap_or(json!({}));
-                    let flags: Vec<String> = resp
-                        .get("flags")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str().map(String::from))
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    let body = field(&resp, "body")?.clone();
+                    let flags = match resp.get("flags") {
+                        Some(Value::Null) | None => Vec::new(),
+                        Some(v) => v
+                            .as_array()
+                            .ok_or_else(|| {
+                                RpcCallError::Transport(
+                                    "Malformed RPC response: flags is not an array".into(),
+                                )
+                            })?
+                            .iter()
+                            .map(|v| {
+                                v.as_str().map(String::from).ok_or_else(|| {
+                                    RpcCallError::Transport(
+                                        "Malformed RPC response: flags contains non-string".into(),
+                                    )
+                                })
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                    };
                     return Ok(RpcResult { body, flags });
                 }
                 Some("error") => {
-                    let status = resp
-                        .get("status")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string();
-                    let message = resp
-                        .get("message")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Unknown error")
-                        .to_string();
-                    let body = resp.get("body").cloned().unwrap_or(json!({}));
+                    let status = str_field(&resp, "status")?;
+                    let message = str_field(&resp, "message")?;
+                    let body = field(&resp, "body")?.clone();
                     return Err(RpcCallError::Rpc(RpcClientError {
                         status,
                         message,
@@ -237,9 +250,12 @@ impl RpcClient {
                 }
                 Some("signal") => {
                     if let Some(handler) = signal_handler {
-                        let status = resp.get("status").and_then(|v| v.as_str()).unwrap_or("");
-                        let empty = json!({});
-                        let body = resp.get("body").unwrap_or(&empty);
+                        let status = field(&resp, "status")?.as_str().ok_or_else(|| {
+                            RpcCallError::Transport(
+                                "Malformed RPC response: status is not a string".into(),
+                            )
+                        })?;
+                        let body = field(&resp, "body")?;
                         handler(status, body);
                     }
                 }

@@ -227,28 +227,18 @@ impl From<ApduError> for SmartCardError {
 
 #[derive(Debug, Error)]
 enum ScpError {
-    #[error("L must be 0x40 or 0x80")]
-    InvalidDerivationLength,
-    #[error("CMAC init failed: {0}")]
-    CmacInit(String),
-    #[error("AES init failed: {0}")]
-    AesInit(String),
-    #[error("CBC init failed: {0}")]
-    CbcInit(String),
-    #[error("CBC decrypt failed: {0}")]
-    CbcDecrypt(String),
-    #[error("Wrong MAC")]
-    WrongMac,
-    #[error("Wrong padding")]
-    WrongPadding,
-    #[error("Response too short for MAC")]
-    ResponseTooShort,
+    #[error("Crypto init failed: {0}")]
+    CryptoInit(String),
+    #[error("Crypto operation failed: {0}")]
+    CryptoError(String),
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
 }
 
 impl From<ScpError> for SmartCardError {
     fn from(e: ScpError) -> Self {
         match e {
-            ScpError::WrongMac | ScpError::ResponseTooShort => {
+            ScpError::CryptoInit(_) | ScpError::CryptoError(_) => {
                 SmartCardError::InvalidState(e.to_string())
             }
             _ => SmartCardError::InvalidData(e.to_string()),
@@ -414,21 +404,20 @@ impl ScpState {
         key_srmac: [u8; 16],
         mac_chain: Option<Vec<u8>>,
         enc_counter: Option<u32>,
-    ) -> Self {
-        ScpState {
+    ) -> Result<Self, ScpError> {
+        let mac_chain = match mac_chain {
+            Some(v) => v
+                .try_into()
+                .map_err(|_| ScpError::InvalidData("Invalid MAC chain length".into()))?,
+            None => [0u8; 16],
+        };
+        Ok(ScpState {
             key_senc,
             key_smac,
             key_srmac,
-            mac_chain: match mac_chain {
-                Some(v) => {
-                    let mut a = [0u8; 16];
-                    a.copy_from_slice(&v);
-                    a
-                }
-                None => [0u8; 16],
-            },
+            mac_chain,
             enc_counter: enc_counter.unwrap_or(1),
-        }
+        })
     }
 
     fn encrypt(&mut self, data: &[u8]) -> Result<Vec<u8>, ScpError> {
@@ -452,7 +441,7 @@ impl ScpState {
 
     fn unmac(&self, data: &[u8], sw: u16) -> Result<Vec<u8>, ScpError> {
         if data.len() < 8 {
-            return Err(ScpError::ResponseTooShort);
+            return Err(ScpError::InvalidData("Response too short for MAC".into()));
         }
         let msg = &data[..data.len() - 8];
         let mac = &data[data.len() - 8..];
@@ -464,7 +453,7 @@ impl ScpState {
         let (_, expected_mac) = calculate_mac_inner(&self.key_srmac, &self.mac_chain, &rmac_input)?;
 
         if !bool::from(mac.ct_eq(&expected_mac)) {
-            return Err(ScpError::WrongMac);
+            return Err(ScpError::InvalidData("Wrong MAC".into()));
         }
         Ok(msg.to_vec())
     }
@@ -475,9 +464,9 @@ impl ScpState {
         let unpadded = decrypted
             .iter()
             .rposition(|&b| b != 0x00)
-            .ok_or(ScpError::WrongPadding)?;
+            .ok_or(ScpError::CryptoError("Bad padding".into()))?;
         if decrypted[unpadded] != 0x80 {
-            return Err(ScpError::WrongPadding);
+            return Err(ScpError::CryptoError("Bad padding".into()));
         }
         Ok(decrypted[..unpadded].to_vec())
     }
@@ -1065,7 +1054,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         let host_cryptogram = scp03_derive(&*key_smac, 0x01, &context, 0x40)?;
 
         // 7. Set SCP state (copies keys into ScpState which has ZeroizeOnDrop)
-        let state = ScpState::new(*key_senc, *key_smac, *key_srmac, None, None);
+        let state = ScpState::new(*key_senc, *key_smac, *key_srmac, None, None)?;
         self.set_scp_state(state);
 
         // 8. EXTERNAL AUTHENTICATE (MAC but no encryption)
@@ -1248,7 +1237,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         let key_dek: [u8; 16] = keybytes[64..80].try_into().unwrap();
 
         // For SCP11 the MAC chain starts with the receipt
-        let state = ScpState::new(*key_senc, *key_smac, *key_srmac, Some(receipt), Some(1));
+        let state = ScpState::new(*key_senc, *key_smac, *key_srmac, Some(receipt), Some(1))?;
         self.set_scp_state(state);
 
         Ok(Some(Dek(key_dek)))
@@ -1305,7 +1294,7 @@ fn calculate_mac_inner(
     message: &[u8],
 ) -> Result<([u8; 16], [u8; 8]), ScpError> {
     let mut mac = <Cmac<Aes128> as Mac>::new_from_slice(key)
-        .map_err(|e| ScpError::CmacInit(e.to_string()))?;
+        .map_err(|e| ScpError::CryptoInit(e.to_string()))?;
     mac.update(chain);
     mac.update(message);
     let result = mac.finalize().into_bytes();
@@ -1315,7 +1304,8 @@ fn calculate_mac_inner(
 }
 
 fn derive_iv(key: &[u8], counter: u32, response: bool) -> Result<[u8; 16], ScpError> {
-    let mut cipher = Aes128::new_from_slice(key).map_err(|e| ScpError::AesInit(e.to_string()))?;
+    let mut cipher =
+        Aes128::new_from_slice(key).map_err(|e| ScpError::CryptoInit(e.to_string()))?;
     let mut iv_input = [0u8; 16];
     iv_input[0] = if response { 0x80 } else { 0x00 };
     iv_input[12..16].copy_from_slice(&counter.to_be_bytes());
@@ -1332,7 +1322,7 @@ fn aes_cbc_encrypt(
 ) -> Result<Vec<u8>, ScpError> {
     let iv = derive_iv(key, counter, response)?;
     let encryptor =
-        Aes128CbcEnc::new_from_slices(key, &iv).map_err(|e| ScpError::CbcInit(e.to_string()))?;
+        Aes128CbcEnc::new_from_slices(key, &iv).map_err(|e| ScpError::CryptoInit(e.to_string()))?;
     Ok(encryptor.encrypt_padded_vec_mut::<cipher::block_padding::NoPadding>(plaintext))
 }
 
@@ -1344,15 +1334,15 @@ fn aes_cbc_decrypt(
 ) -> Result<Vec<u8>, ScpError> {
     let iv = derive_iv(key, counter, response)?;
     let decryptor =
-        Aes128CbcDec::new_from_slices(key, &iv).map_err(|e| ScpError::CbcInit(e.to_string()))?;
+        Aes128CbcDec::new_from_slices(key, &iv).map_err(|e| ScpError::CryptoInit(e.to_string()))?;
     decryptor
         .decrypt_padded_vec_mut::<cipher::block_padding::NoPadding>(ciphertext)
-        .map_err(|e| ScpError::CbcDecrypt(e.to_string()))
+        .map_err(|e| ScpError::CryptoError(e.to_string()))
 }
 
 fn aes_cmac(key: &[u8], data: &[u8]) -> Result<[u8; 16], ScpError> {
     let mut mac = <Cmac<Aes128> as Mac>::new_from_slice(key)
-        .map_err(|e| ScpError::CmacInit(e.to_string()))?;
+        .map_err(|e| ScpError::CryptoInit(e.to_string()))?;
     mac.update(data);
     Ok(mac.finalize().into_bytes().into())
 }
@@ -1374,7 +1364,7 @@ fn x963_kdf(shared_secret: &[u8], shared_info: &[u8], length: usize) -> Zeroizin
 
 fn scp03_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> Result<Zeroizing<Vec<u8>>, ScpError> {
     if l != 0x80 && l != 0x40 {
-        return Err(ScpError::InvalidDerivationLength);
+        return Err(ScpError::InvalidData("Invalid derivation length".into()));
     }
     let mut input = vec![0u8; 11];
     input.push(t);
@@ -1386,4 +1376,15 @@ fn scp03_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> Result<Zeroizing<V
 
     let result = aes_cmac(key, &input)?;
     Ok(Zeroizing::new(result[..(l as usize / 8)].to_vec()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_scp_state_rejects_invalid_mac_chain_length() {
+        let result = ScpState::new([0; 16], [0; 16], [0; 16], Some(vec![0; 15]), Some(1));
+        assert!(matches!(result, Err(ScpError::InvalidData(_))));
+    }
 }

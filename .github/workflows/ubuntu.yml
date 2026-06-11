@@ -29,6 +29,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install cargo-about
+        run: cargo install cargo-about --locked
+
       - name: Build Rust CLI
         run: |
           cargo build --release -p ykman-cli
@@ -48,3 +51,26 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  test:
+    runs-on: ubuntu-latest
+    name: Rust tests (no hardware)
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -qq libpcsclite-dev libudev-dev libdbus-1-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-about
+        run: cargo install cargo-about --locked
+
+      - name: Run non-hardware tests
+        run: cargo test --workspace --all-features --lib --bins
+
+      - name: Compile hardware integration tests
+        run: cargo test -p yubikit --tests --no-run

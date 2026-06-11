@@ -15,9 +15,9 @@
 //! Cryptographic key types and parsing utilities.
 //!
 //! This module provides:
-//! - [`KeyAlgorithm`] — algorithm identifier for asymmetric keys
-//! - [`PrivateKey`] — private key material parsed from PKCS#8 or constructed directly
-//! - [`PublicKey`] — public key material with SPKI serialization
+//! - [`crate::keys::KeyAlgorithm`] — algorithm identifier for asymmetric keys
+//! - [`crate::keys::PrivateKey`] — private key material parsed from PKCS#8 or constructed directly
+//! - [`crate::keys::PublicKey`] — public key material with SPKI serialization
 //! - OID encoding/decoding utilities
 //! - Well-known curve OID constants
 

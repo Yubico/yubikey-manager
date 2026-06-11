@@ -60,13 +60,9 @@ fn generate_licenses() {
         Ok(result) if result.status.success() => result.stdout,
         Ok(result) => {
             let stderr = String::from_utf8_lossy(&result.stderr);
-            eprintln!("cargo:warning=cargo-about failed: {stderr}");
-            b"License information unavailable (cargo-about failed).\n".to_vec()
+            panic!("cargo-about failed: {stderr}");
         }
-        Err(e) => {
-            eprintln!("cargo:warning=cargo-about not found: {e}");
-            b"License information unavailable (cargo-about not installed).\n".to_vec()
-        }
+        Err(e) => panic!("cargo-about not found: {e}"),
     };
 
     fs::write(&dest, compress(&raw)).expect("Failed to write licenses.deflate");

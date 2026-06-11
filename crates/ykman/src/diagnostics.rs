@@ -57,6 +57,7 @@ pub struct DiagnosticsReport {
     pub pcsc: Option<ResultOrError<PcscDiag>>,
     pub otp: Option<ResultOrError<BTreeMap<String, OtpDeviceDiag>>>,
     pub fido: Option<ResultOrError<BTreeMap<String, FidoDeviceDiag>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub svc: Option<ResultOrError<SvcDiag>>,
 }
 
@@ -1082,7 +1083,10 @@ pub fn run_diagnostics() -> DiagnosticsReport {
         fido: Some(probe_fido()),
         #[cfg(not(feature = "hardware"))]
         fido: None,
+        #[cfg(any(target_os = "windows", debug_assertions))]
         svc: Some(probe_svc()),
+        #[cfg(not(any(target_os = "windows", debug_assertions)))]
+        svc: None,
     }
 }
 
@@ -1203,7 +1207,10 @@ fn probe_svc_device(name: &str, info: &serde_json::Value) -> SvcDeviceDiag {
 }
 
 fn parse_svc_management(info: &serde_json::Value) -> ResultOrError<ManagementDiag> {
-    let dev_info = crate::rpc::proxy::RpcDevice::parse_device_info(info);
+    let dev_info = match crate::rpc::proxy::RpcDevice::parse_device_info(info) {
+        Ok(dev_info) => dev_info,
+        Err(e) => return ResultOrError::Err(e.to_string()),
+    };
     ResultOrError::Ok(management_diag(&dev_info))
 }
 

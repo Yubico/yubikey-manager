@@ -13,8 +13,8 @@ use crate::cli_enums::{CliOathAlgorithm, CliOathDigits, CliOathType};
 use crate::scp::{self, ScpConfig, ScpParams};
 use crate::util::CliError;
 
-fn oath_keys() -> AppData {
-    AppData::new("oath_keys")
+fn oath_keys() -> Result<AppData, CliError> {
+    AppData::new("oath_keys").map_err(|e| CliError(format!("Failed to open OATH key store: {e}")))
 }
 
 /// Validate the key against the session, optionally remembering it.
@@ -65,7 +65,7 @@ fn open_session<'a>(
     };
 
     if session.locked() {
-        let mut keys = oath_keys();
+        let mut keys = oath_keys()?;
 
         // 1. Explicit password from CLI
         if let Some(pw) = password {
@@ -167,7 +167,7 @@ pub fn run_info(
         }
     };
     let _ = password; // Not needed for info
-    let keys = oath_keys();
+    let keys = oath_keys()?;
     println!("OATH version: {}", session.version());
     println!(
         "Password protection: {}",
@@ -208,7 +208,7 @@ pub fn run_reset(
         .map_err(|e| CliError(format!("Failed to reset OATH: {e}")))?;
 
     // Clean up any stored password for this device
-    let mut keys = oath_keys();
+    let mut keys = oath_keys()?;
     if keys.contains(&device_id) {
         let _ = keys.remove(&device_id);
     }
@@ -519,7 +519,7 @@ pub fn run_access_change(
             .unset_key()
             .map_err(|e| CliError(format!("Failed to clear password: {e}")))?;
         // Remove stored password
-        let mut keys = oath_keys();
+        let mut keys = oath_keys()?;
         let _ = keys.remove(session.device_id());
         println!("Password cleared.");
     } else {
@@ -533,7 +533,7 @@ pub fn run_access_change(
             .map_err(|e| CliError(format!("Failed to set password: {e}")))?;
         eprintln!("Password set.");
         if remember {
-            let mut keys = oath_keys();
+            let mut keys = oath_keys()?;
             keys.put_secret(session.device_id(), &hex::encode(key.expose_secret()))
                 .map_err(|e| CliError(format!("Failed to remember password: {e}")))?;
             eprintln!("Password remembered.");
@@ -578,7 +578,7 @@ pub fn run_access_remember(
         None => crate::util::prompt_secret("Enter OATH password")?,
     };
     let key = session.derive_key(&pw);
-    let mut keys = oath_keys();
+    let mut keys = oath_keys()?;
     validate_and_remember(&mut session, &key, true, &mut keys)?;
     Ok(())
 }
@@ -588,7 +588,7 @@ pub fn run_access_forget(
     scp_params: &ScpParams,
     all: bool,
 ) -> Result<(), CliError> {
-    let mut keys = oath_keys();
+    let mut keys = oath_keys()?;
     if all {
         keys.clear()
             .map_err(|e| CliError(format!("Failed to clear stored passwords: {e}")))?;

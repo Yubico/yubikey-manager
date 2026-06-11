@@ -23,8 +23,11 @@ pub fn verify_peer_by_pid(peer_pid: u32) -> Result<(), SigningError> {
     let own_cert = match get_signing_cert(&own_exe) {
         Ok(cert) => cert,
         Err(_) => {
-            log::debug!("Process is unsigned, skipping peer verification");
-            return Ok(());
+            if cfg!(debug_assertions) {
+                log::debug!("Debug build is unsigned, skipping peer verification");
+                return Ok(());
+            }
+            return Err(SigningError("Current process is unsigned!".into()));
         }
     };
 

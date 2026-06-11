@@ -6,7 +6,40 @@
 //! that prints instructions to the user (for USB).
 
 use std::io::{self, Write};
+use std::sync::{Mutex, Once, OnceLock};
 use std::time::Duration;
+
+static PICO_CLEANUP_TARGETS: OnceLock<Mutex<Vec<(String, u8)>>> = OnceLock::new();
+static REGISTER_PICO_CLEANUP: Once = Once::new();
+
+extern "C" fn cleanup_pico_touch() {
+    if let Some(targets) = PICO_CLEANUP_TARGETS.get()
+        && let Ok(targets) = targets.lock()
+    {
+        for (base_url, port) in targets.iter() {
+            let url = format!("{base_url}/usb{port}/touch/off");
+            eprintln!("PicoController cleanup: GET {url}");
+            let _ = ureq::get(&url).call();
+        }
+    }
+}
+
+fn register_pico_cleanup(base_url: &str, port: u8) {
+    let targets = PICO_CLEANUP_TARGETS.get_or_init(|| Mutex::new(Vec::new()));
+    if let Ok(mut targets) = targets.lock() {
+        let target = (base_url.to_string(), port);
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
+
+    REGISTER_PICO_CLEANUP.call_once(|| unsafe {
+        unsafe extern "C" {
+            fn atexit(cb: extern "C" fn()) -> i32;
+        }
+        let _ = atexit(cleanup_pico_touch);
+    });
+}
 
 /// Abstraction over physical interactions required during FIDO tests.
 pub trait Controller: Send + Sync {
@@ -134,10 +167,9 @@ pub struct PicoController {
 
 impl PicoController {
     pub fn new(base_url: &str, port: u8) -> Self {
-        Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
-            port,
-        }
+        let base_url = base_url.trim_end_matches('/').to_string();
+        register_pico_cleanup(&base_url, port);
+        Self { base_url, port }
     }
 
     fn format_url(&self, action: &str) -> String {
