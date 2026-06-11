@@ -30,7 +30,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-about
-        run: cargo install cargo-about --locked
+        run: cargo install cargo-about --locked --features cli
 
       - name: Build Rust CLI
         run: |
@@ -67,7 +67,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-about
-        run: cargo install cargo-about --locked
+        run: cargo install cargo-about --locked --features cli
 
       - name: Run non-hardware tests
         run: cargo test --workspace --all-features --lib --bins

@@ -25,7 +25,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-about
-        run: cargo install cargo-about --locked
+        run: cargo install cargo-about --locked --features cli
 
       - name: Build Rust CLI
         shell: bash

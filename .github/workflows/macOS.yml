@@ -18,7 +18,7 @@ jobs:
           targets: x86_64-apple-darwin aarch64-apple-darwin
 
       - name: Install cargo-about
-        run: cargo install cargo-about --locked
+        run: cargo install cargo-about --locked --features cli
 
       - name: Build Rust CLI (universal)
         run: |
