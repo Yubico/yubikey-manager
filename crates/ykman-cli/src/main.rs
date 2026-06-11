@@ -448,8 +448,8 @@ enum ConfigAction {
         /// List enabled applications
         #[arg(short = 'l', long)]
         list: bool,
-        /// Current lock code (hex)
-        #[arg(short = 'L', long = "lock-code")]
+        /// Current lock code as 32 hex characters (16 bytes)
+        #[arg(short = 'L', long = "lock-code", value_name = "HEX")]
         lock_code: Option<String>,
         /// Enable touch-eject
         #[arg(long)]
@@ -484,8 +484,8 @@ enum ConfigAction {
         /// List enabled applications
         #[arg(short = 'l', long)]
         list: bool,
-        /// Current lock code (hex)
-        #[arg(short = 'L', long = "lock-code")]
+        /// Current lock code as 32 hex characters (16 bytes)
+        #[arg(short = 'L', long = "lock-code", value_name = "HEX")]
         lock_code: Option<String>,
         /// Disable NFC until next USB power cycle
         #[arg(short = 'R', long)]
@@ -495,20 +495,28 @@ enum ConfigAction {
         force: bool,
     },
     /// Set or change the configuration lock code
+    ///
+    /// A lock code may be used to protect the application configuration. It must be exactly
+    /// 32 hexadecimal characters, representing 16 bytes.
     SetLockCode {
-        /// Current lock code (hex)
-        #[arg(short = 'l', long = "lock-code")]
+        /// Current lock code as 32 hex characters (16 bytes)
+        #[arg(short = 'l', long = "lock-code", value_name = "HEX")]
         lock_code: Option<String>,
-        /// New lock code (hex)
-        #[arg(short = 'n', long = "new-lock-code")]
+        /// New lock code as 32 hex characters (16 bytes)
+        #[arg(
+            short = 'n',
+            long = "new-lock-code",
+            value_name = "HEX",
+            conflicts_with = "generate"
+        )]
         new_lock_code: Option<String>,
         /// Clear the lock code
-        #[arg(short = 'c', long)]
+        #[arg(short = 'c', long, conflicts_with_all = ["new_lock_code", "generate"])]
         clear: bool,
-        /// Generate a random lock code
-        #[arg(short = 'g', long)]
+        /// Generate a random 32-character hex lock code
+        #[arg(short = 'g', long, conflicts_with = "new_lock_code")]
         generate: bool,
-        /// Confirm without prompting
+        /// Confirm the action without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },

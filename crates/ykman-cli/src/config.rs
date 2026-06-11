@@ -6,7 +6,7 @@ use yubikit::device::YubiKeyDevice;
 use yubikit::management::{Capability, DeviceConfig, DeviceFlag, ManagementSession};
 
 use crate::cli_enums::CliCapability;
-use crate::util::CliError;
+use crate::util::{CliError, prompt_new_secret, prompt_secret};
 
 /// Open a management session on any available transport and run a generic function.
 ///
@@ -104,6 +104,33 @@ fn confirm(msg: &str) -> bool {
     matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
+fn current_lock_code(
+    is_locked: bool,
+    lock_code: Option<&str>,
+    prompt: &str,
+) -> Result<Option<Vec<u8>>, CliError> {
+    if is_locked {
+        let code = match lock_code {
+            Some(code) => code.to_string(),
+            None => prompt_secret(prompt)?,
+        };
+        Ok(Some(parse_lock_code(&code)?))
+    } else {
+        reject_lock_code_if_unlocked(is_locked, lock_code)?;
+        Ok(None)
+    }
+}
+
+fn reject_lock_code_if_unlocked(is_locked: bool, lock_code: Option<&str>) -> Result<(), CliError> {
+    if !is_locked && lock_code.is_some() {
+        Err(CliError(
+            "Lock code provided, but configuration is not locked.".into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 pub fn run_usb(
     dev: &dyn YubiKeyDevice,
     enable: &[CliCapability],
@@ -129,6 +156,8 @@ pub fn run_usb(
         .get(&Transport::Usb)
         .copied()
         .unwrap_or(Capability::NONE);
+
+    reject_lock_code_if_unlocked(info.is_locked, lock_code)?;
 
     if list {
         for &cap in Capability::ALL {
@@ -204,6 +233,12 @@ pub fn run_usb(
         changes.push("The YubiKey will reboot".into());
     }
 
+    let lc = current_lock_code(
+        info.is_locked,
+        lock_code,
+        "Enter lock code (32 hex characters)",
+    )?;
+
     if !force {
         eprintln!("USB configuration changes:");
         for c in &changes {
@@ -226,7 +261,6 @@ pub fn run_usb(
     config.auto_eject_timeout = autoeject_timeout;
     config.challenge_response_timeout = chalresp_timeout;
 
-    let lc = lock_code.map(parse_lock_code).transpose()?;
     write_config(dev, &config, reboot, lc.as_deref(), None)?;
 
     eprintln!("USB application configuration updated.");
@@ -257,6 +291,8 @@ pub fn run_nfc(
         .copied()
         .unwrap_or(Capability::NONE);
 
+    reject_lock_code_if_unlocked(info.is_locked, lock_code)?;
+
     if list {
         for &cap in Capability::ALL {
             if nfc_supported.contains(cap) {
@@ -276,7 +312,11 @@ pub fn run_nfc(
             nfc_restricted: Some(true),
             ..Default::default()
         };
-        let lc = lock_code.map(parse_lock_code).transpose()?;
+        let lc = current_lock_code(
+            info.is_locked,
+            lock_code,
+            "Enter lock code (32 hex characters)",
+        )?;
         if !force {
             eprintln!("NFC configuration changes:");
             eprintln!("  Disable NFC until next USB power cycle");
@@ -336,6 +376,12 @@ pub fn run_nfc(
         return Err(CliError("No configuration changes specified.".into()));
     }
 
+    let lc = current_lock_code(
+        info.is_locked,
+        lock_code,
+        "Enter lock code (32 hex characters)",
+    )?;
+
     if !force {
         eprintln!("NFC configuration changes:");
         for c in &changes {
@@ -350,7 +396,6 @@ pub fn run_nfc(
     config
         .enabled_capabilities
         .insert(Transport::Nfc, new_enabled);
-    let lc = lock_code.map(parse_lock_code).transpose()?;
     write_config(dev, &config, false, lc.as_deref(), None)?;
 
     eprintln!("NFC application configuration updated.");
@@ -365,7 +410,18 @@ pub fn run_set_lock_code(
     generate: bool,
     force: bool,
 ) -> Result<(), CliError> {
-    let cur = lock_code.map(parse_lock_code).transpose()?;
+    let is_locked = dev.info().is_locked;
+    if clear && !is_locked {
+        eprintln!("No lock code is currently set.");
+        return Ok(());
+    }
+
+    let cur = if is_locked {
+        current_lock_code(true, lock_code, "Current lock code (32 hex characters)")?
+    } else {
+        lock_code.map(parse_lock_code).transpose()?
+    };
+
     let new = if clear {
         Some(vec![0u8; 16])
     } else if generate {
@@ -379,7 +435,13 @@ pub fn run_set_lock_code(
         }
         Some(code)
     } else {
-        new_lock_code.map(parse_lock_code).transpose()?
+        Some(parse_lock_code(
+            match new_lock_code {
+                Some(code) => code.to_string(),
+                None => prompt_new_secret("New lock code (32 hex characters)")?,
+            }
+            .as_str(),
+        )?)
     };
 
     let config = DeviceConfig::default();
@@ -495,4 +557,34 @@ pub fn run_mode(
         "Mode set! You must remove and re-insert your YubiKey for this change to take effect."
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::current_lock_code;
+
+    const LOCK_CODE: &str = "01020304050607080102030405060708";
+
+    #[test]
+    fn config_lock_code_rejects_code_when_unlocked() {
+        let err = current_lock_code(false, Some(LOCK_CODE), "Lock code").unwrap_err();
+        assert!(err.0.contains("configuration is not locked"));
+    }
+
+    #[test]
+    fn config_lock_code_accepts_code_when_locked() {
+        let code = current_lock_code(true, Some(LOCK_CODE), "Lock code")
+            .unwrap()
+            .unwrap();
+        assert_eq!(code, [1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn config_lock_code_is_optional_when_unlocked() {
+        assert!(
+            current_lock_code(false, None, "Lock code")
+                .unwrap()
+                .is_none()
+        );
+    }
 }

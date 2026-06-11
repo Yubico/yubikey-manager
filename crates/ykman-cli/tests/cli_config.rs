@@ -1,5 +1,6 @@
 mod common;
 
+use assert_cmd::Command;
 use common::ykman_dev;
 use predicates::prelude::*;
 use serial_test::serial;
@@ -9,6 +10,50 @@ use std::time::Duration;
 /// Wait for the YubiKey to re-enumerate after a USB config change.
 fn wait_for_reenumeration() {
     thread::sleep(Duration::from_secs(3));
+}
+
+#[test]
+fn test_config_set_lock_code_help() {
+    Command::cargo_bin("ykman")
+        .expect("binary 'ykman' not found")
+        .args(["config", "set-lock-code", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "A lock code may be used to protect the application configuration.",
+        ))
+        .stdout(predicate::str::contains(
+            "32 hexadecimal characters, representing 16 bytes",
+        ))
+        .stdout(predicate::str::contains("-l, --lock-code <HEX>"))
+        .stdout(predicate::str::contains("-n, --new-lock-code <HEX>"));
+}
+
+#[test]
+fn test_config_set_lock_code_conflicts() {
+    Command::cargo_bin("ykman")
+        .expect("binary 'ykman' not found")
+        .args([
+            "config",
+            "set-lock-code",
+            "--new-lock-code",
+            "01020304050607080102030405060708",
+            "--generate",
+        ])
+        .assert()
+        .failure();
+
+    Command::cargo_bin("ykman")
+        .expect("binary 'ykman' not found")
+        .args([
+            "config",
+            "set-lock-code",
+            "--clear",
+            "--new-lock-code",
+            "01020304050607080102030405060708",
+        ])
+        .assert()
+        .failure();
 }
 
 #[test]
