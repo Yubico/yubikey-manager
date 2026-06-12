@@ -1,6 +1,6 @@
 mod common;
 
-use common::{OATH_PASSWORD, fixture_path, oath_reset, ykman_dev};
+use common::{OATH_PASSWORD, fixture_path, oath_reset, ykman_dev, ykman_dev_tty};
 use predicates::prelude::*;
 use serial_test::serial;
 
@@ -229,12 +229,17 @@ fn test_oath_password_change_prompts_for_new_password() {
     require_interface!("CCID");
     oath_reset();
 
-    ykman_dev()
-        .args(["oath", "access", "change"])
-        .write_stdin(format!("{OATH_PASSWORD}\n{OATH_PASSWORD}\n"))
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("New OATH password"));
+    let output = ykman_dev_tty(
+        &["oath", "access", "change"],
+        &format!("{OATH_PASSWORD}\n{OATH_PASSWORD}\n"),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(combined.contains("New OATH password"), "{combined}");
 
     ykman_dev()
         .args(["oath", "accounts", "list", "-p", OATH_PASSWORD])

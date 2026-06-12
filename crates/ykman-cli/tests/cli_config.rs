@@ -1,7 +1,7 @@
 mod common;
 
 use assert_cmd::Command;
-use common::{skip_if_fips, ykman_dev};
+use common::{skip_if_fips, ykman_dev, ykman_dev_tty};
 use predicates::prelude::*;
 use serial_test::serial;
 use std::thread;
@@ -292,12 +292,17 @@ fn test_config_set_lock_code_prompts_for_current_code() {
     }
 
     let guard = LockCodeGuard::set(TEST_LOCK_CODE);
-    ykman_dev()
-        .args(["config", "set-lock-code", "--clear", "-f"])
-        .write_stdin(format!("{TEST_LOCK_CODE}\n"))
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Current lock code"));
+    let output = ykman_dev_tty(
+        &["config", "set-lock-code", "--clear", "-f"],
+        &format!("{TEST_LOCK_CODE}\n"),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(combined.contains("Current lock code"), "{combined}");
     guard.disarm();
 }
 
@@ -316,12 +321,17 @@ fn test_config_usb_lock_code_prompt_and_explicit_code() {
     }
 
     let guard = LockCodeGuard::set(TEST_LOCK_CODE);
-    ykman_dev()
-        .args(["config", "usb", "--disable", "hsmauth", "-f"])
-        .write_stdin(format!("{TEST_LOCK_CODE}\n"))
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Enter lock code"));
+    let output = ykman_dev_tty(
+        &["config", "usb", "--disable", "hsmauth", "-f"],
+        &format!("{TEST_LOCK_CODE}\n"),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(combined.contains("Enter lock code"), "{combined}");
     wait_for_reenumeration();
 
     ykman_dev()
@@ -370,12 +380,17 @@ fn test_config_nfc_lock_code_prompt_and_explicit_code() {
     }
 
     let guard = LockCodeGuard::set(TEST_LOCK_CODE);
-    ykman_dev()
-        .args(["config", "nfc", "--disable", "hsmauth", "-f"])
-        .write_stdin(format!("{TEST_LOCK_CODE}\n"))
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Enter lock code"));
+    let output = ykman_dev_tty(
+        &["config", "nfc", "--disable", "hsmauth", "-f"],
+        &format!("{TEST_LOCK_CODE}\n"),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(combined.contains("Enter lock code"), "{combined}");
 
     ykman_dev()
         .args([

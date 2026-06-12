@@ -2,7 +2,9 @@
 
 use assert_cmd::Command;
 use std::env;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::{Command as StdCommand, Output, Stdio};
 use std::sync::{Mutex, Once, OnceLock};
 
 static PICO_CLEANUP_TARGETS: OnceLock<Mutex<Vec<(String, u8)>>> = OnceLock::new();
@@ -101,6 +103,45 @@ pub fn ykman_dev() -> Command {
         cmd.args(["--device", serial]);
     }
     cmd
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// Run ykman under a pseudo-terminal so rpassword-backed prompts can be tested.
+///
+/// This is intended for ignored hardware tests. It uses the POSIX `script`
+/// command, which is available on the Linux hardware-test hosts.
+pub fn ykman_dev_tty(args: &[&str], input: &str) -> Output {
+    let bin = assert_cmd::cargo::cargo_bin("ykman");
+    let mut command = shell_quote(&bin.display().to_string());
+    let dev = test_device();
+    if let Some(ref serial) = dev.serial {
+        command.push_str(" --device ");
+        command.push_str(&shell_quote(serial));
+    }
+    for arg in args {
+        command.push(' ');
+        command.push_str(&shell_quote(arg));
+    }
+
+    let mut child = StdCommand::new("script")
+        .args(["-qfec", &command, "/dev/null"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn script(1) for pseudo-terminal test");
+    child
+        .stdin
+        .as_mut()
+        .expect("script stdin must be piped")
+        .write_all(input.as_bytes())
+        .expect("failed to write prompt input");
+    child
+        .wait_with_output()
+        .expect("failed to wait for pseudo-terminal test")
 }
 
 extern "C" fn cleanup_pico_touch() {

@@ -2,10 +2,25 @@ mod common;
 
 use common::{
     DEFAULT_MANAGEMENT_KEY, DEFAULT_PIN, DEFAULT_PUK, NON_DEFAULT_MANAGEMENT_KEY, NON_DEFAULT_PIN,
-    NON_DEFAULT_PUK, fixture_path, piv_reset, ykman_dev,
+    NON_DEFAULT_PUK, fixture_path, piv_reset, ykman_dev, ykman_dev_tty,
 };
 use predicates::prelude::*;
 use serial_test::serial;
+
+struct PivResetGuard;
+
+impl PivResetGuard {
+    fn reset() -> Self {
+        piv_reset();
+        Self
+    }
+}
+
+impl Drop for PivResetGuard {
+    fn drop(&mut self) {
+        piv_reset();
+    }
+}
 
 #[test]
 #[ignore]
@@ -32,7 +47,7 @@ fn test_piv_reset() {
 #[serial]
 fn test_piv_change_pin() {
     require_interface!("CCID");
-    piv_reset();
+    let _guard = PivResetGuard::reset();
 
     ykman_dev()
         .args([
@@ -46,21 +61,6 @@ fn test_piv_change_pin() {
         ])
         .assert()
         .success();
-
-    ykman_dev()
-        .args([
-            "piv",
-            "access",
-            "change-pin",
-            "--pin",
-            NON_DEFAULT_PIN,
-            "--new-pin",
-            DEFAULT_PIN,
-        ])
-        .assert()
-        .success();
-
-    piv_reset();
 }
 
 #[test]
@@ -68,34 +68,20 @@ fn test_piv_change_pin() {
 #[serial]
 fn test_piv_change_pin_prompts_for_pin_and_new_pin() {
     require_interface!("CCID");
-    piv_reset();
+    let _guard = PivResetGuard::reset();
 
-    ykman_dev()
-        .args(["piv", "access", "change-pin"])
-        .write_stdin(format!(
-            "{DEFAULT_PIN}\n{NON_DEFAULT_PIN}\n{NON_DEFAULT_PIN}\n"
-        ))
-        .assert()
-        .success()
-        .stderr(
-            predicate::str::contains("Enter the current PIN")
-                .and(predicate::str::contains("New PIN")),
-        );
-
-    ykman_dev()
-        .args([
-            "piv",
-            "access",
-            "change-pin",
-            "--pin",
-            NON_DEFAULT_PIN,
-            "--new-pin",
-            DEFAULT_PIN,
-        ])
-        .assert()
-        .success();
-
-    piv_reset();
+    let output = ykman_dev_tty(
+        &["piv", "access", "change-pin"],
+        &format!("{DEFAULT_PIN}\n{NON_DEFAULT_PIN}\n{NON_DEFAULT_PIN}\n"),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(combined.contains("Enter the current PIN"), "{combined}");
+    assert!(combined.contains("New PIN"), "{combined}");
 }
 
 #[test]
