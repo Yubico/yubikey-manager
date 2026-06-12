@@ -367,7 +367,7 @@ enum FidoCredentialAction {
         #[arg(short = 'n', long)]
         name: Option<String>,
         /// New display name
-        #[arg(short = 'd', long)]
+        #[arg(long)]
         display_name: Option<String>,
         /// PIN code
         #[arg(short = 'P', long)]
