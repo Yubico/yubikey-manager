@@ -3,12 +3,15 @@
 use assert_cmd::Command;
 use std::env;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, Once, OnceLock};
+
+static PICO_CLEANUP_TARGETS: OnceLock<Mutex<Vec<(String, u8)>>> = OnceLock::new();
+static REGISTER_PICO_CLEANUP: Once = Once::new();
 
 /// Test device configuration, resolved from environment variables.
 ///
-/// Set `YKMAN_TEST_SERIAL` for USB testing with a known serial.
-/// Set `YKMAN_TEST_NO_SERIAL=1` for devices without a serial number.
+/// Set `YUBIKEY_SERIAL` for testing with a known serial.
+/// Set `YUBIKEY_NO_SERIAL=1` for devices without a serial number.
 /// If neither is set, all device tests abort.
 struct TestDevice {
     serial: Option<String>,
@@ -17,9 +20,15 @@ struct TestDevice {
 
 fn test_device() -> &'static TestDevice {
     static DEVICE: OnceLock<TestDevice> = OnceLock::new();
-    DEVICE.get_or_init(|| TestDevice {
-        serial: env::var("YKMAN_TEST_SERIAL").ok(),
-        no_serial: env::var("YKMAN_TEST_NO_SERIAL").is_ok(),
+    DEVICE.get_or_init(|| {
+        register_pico_cleanup_if_configured();
+        TestDevice {
+            serial: env::var("YUBIKEY_SERIAL")
+                .or_else(|_| env::var("YKMAN_TEST_SERIAL"))
+                .ok(),
+            no_serial: env::var("YUBIKEY_NO_SERIAL").is_ok()
+                || env::var("YKMAN_TEST_NO_SERIAL").is_ok(),
+        }
     })
 }
 
@@ -28,8 +37,8 @@ fn require_device() {
     let dev = test_device();
     if dev.serial.is_none() && !dev.no_serial {
         panic!(
-            "No test device configured. Set YKMAN_TEST_SERIAL=<serial> \
-             or YKMAN_TEST_NO_SERIAL=1 to run device tests."
+            "No test device configured. Set YUBIKEY_SERIAL=<serial> \
+             or YUBIKEY_NO_SERIAL=1 to run device tests."
         );
     }
 }
@@ -94,20 +103,116 @@ pub fn ykman_dev() -> Command {
     cmd
 }
 
-/// Returns true if the device has the given USB interface enabled.
-pub fn has_usb_interface(name: &str) -> bool {
+extern "C" fn cleanup_pico_touch() {
+    if let Some(targets) = PICO_CLEANUP_TARGETS.get()
+        && let Ok(targets) = targets.lock()
+    {
+        for (base_url, port) in targets.iter() {
+            let url = format!("{base_url}/usb{port}/touch/off");
+            eprintln!("PicoController cleanup: GET {url}");
+            let _ = ureq::get(&url).call();
+        }
+    }
+}
+
+fn register_pico_cleanup_if_configured() {
+    let Ok(controller) = env::var("CONTROLLER") else {
+        return;
+    };
+    if controller.eq_ignore_ascii_case("interactive") {
+        return;
+    }
+
+    let base_url = controller.trim_end_matches('/').to_string();
+    let port = env::var("PICO_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(6);
+
+    let targets = PICO_CLEANUP_TARGETS.get_or_init(|| Mutex::new(Vec::new()));
+    if let Ok(mut targets) = targets.lock() {
+        let target = (base_url, port);
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
+
+    REGISTER_PICO_CLEANUP.call_once(|| unsafe {
+        unsafe extern "C" {
+            fn atexit(cb: extern "C" fn()) -> i32;
+        }
+        let _ = atexit(cleanup_pico_touch);
+    });
+}
+
+/// Cached `ykman info` output for skip decisions.
+pub fn device_info() -> &'static str {
     static INFO: OnceLock<String> = OnceLock::new();
-    let stdout = INFO.get_or_init(|| {
+    INFO.get_or_init(|| {
         let output = ykman_dev()
-            .args(["info"])
+            .arg("info")
             .output()
             .expect("failed to run ykman info");
+        if !output.status.success() {
+            panic!(
+                "failed to run ykman info: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
         String::from_utf8_lossy(&output.stdout).into_owned()
-    });
+    })
+}
+
+pub fn device_version() -> Option<(u8, u8, u8)> {
+    device_info()
+        .lines()
+        .find_map(|line| line.strip_prefix("Firmware version:"))
+        .and_then(|version| {
+            let mut parts = version.trim().split('.').filter_map(|p| {
+                p.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse::<u8>()
+                    .ok()
+            });
+            Some((parts.next()?, parts.next()?, parts.next()?))
+        })
+}
+
+pub fn is_fips() -> bool {
+    device_info().contains("FIPS")
+}
+
+pub fn skip_if_fips(feature: &str) -> bool {
+    if is_fips() {
+        eprintln!("SKIP: {feature} is restricted or differs on FIPS YubiKeys");
+        true
+    } else {
+        false
+    }
+}
+
+pub fn skip_before_version(required: (u8, u8, u8), feature: &str) -> bool {
+    let Some(version) = device_version() else {
+        eprintln!("SKIP: could not determine firmware version for {feature}");
+        return true;
+    };
+    if version < required {
+        eprintln!("SKIP: {feature} requires {required:?}, device has {version:?}");
+        true
+    } else {
+        false
+    }
+}
+
+/// Returns true if the device has the given USB interface enabled.
+pub fn has_usb_interface(name: &str) -> bool {
+    let stdout = device_info();
     // Look for the interface name in the "Enabled USB interfaces:" line
     stdout
         .lines()
         .any(|line| line.starts_with("Enabled USB interfaces:") && line.contains(name))
+        || (name == "CCID" && stdout.contains("Applications"))
 }
 
 /// Skip the test if the device does not have the given USB interface enabled.
