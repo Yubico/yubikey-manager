@@ -66,6 +66,41 @@ fn test_piv_change_pin() {
 #[test]
 #[ignore]
 #[serial]
+fn test_piv_change_pin_prompts_for_pin_and_new_pin() {
+    require_interface!("CCID");
+    piv_reset();
+
+    ykman_dev()
+        .args(["piv", "access", "change-pin"])
+        .write_stdin(format!(
+            "{DEFAULT_PIN}\n{NON_DEFAULT_PIN}\n{NON_DEFAULT_PIN}\n"
+        ))
+        .assert()
+        .success()
+        .stderr(
+            predicate::str::contains("Enter the current PIN")
+                .and(predicate::str::contains("New PIN")),
+        );
+
+    ykman_dev()
+        .args([
+            "piv",
+            "access",
+            "change-pin",
+            "--pin",
+            NON_DEFAULT_PIN,
+            "--new-pin",
+            DEFAULT_PIN,
+        ])
+        .assert()
+        .success();
+
+    piv_reset();
+}
+
+#[test]
+#[ignore]
+#[serial]
 fn test_piv_change_puk() {
     require_interface!("CCID");
     piv_reset();

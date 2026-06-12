@@ -225,6 +225,33 @@ fn test_oath_password_set_and_clear() {
 #[test]
 #[ignore]
 #[serial]
+fn test_oath_password_change_prompts_for_new_password() {
+    require_interface!("CCID");
+    oath_reset();
+
+    ykman_dev()
+        .args(["oath", "access", "change"])
+        .write_stdin(format!("{OATH_PASSWORD}\n{OATH_PASSWORD}\n"))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("New OATH password"));
+
+    ykman_dev()
+        .args(["oath", "accounts", "list", "-p", OATH_PASSWORD])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args(["oath", "access", "change", "-p", OATH_PASSWORD, "-c"])
+        .assert()
+        .success();
+
+    oath_reset();
+}
+
+#[test]
+#[ignore]
+#[serial]
 fn test_oath_add_totp_sha256_7digits() {
     require_interface!("CCID");
     oath_reset();
