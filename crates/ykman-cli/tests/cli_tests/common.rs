@@ -68,12 +68,23 @@ pub const DEFAULT_PUK: &str = "12345678";
 pub const NON_DEFAULT_PUK: &str = "12341236";
 pub const DEFAULT_MANAGEMENT_KEY: &str = "010203040506070801020304050607080102030405060708";
 pub const NON_DEFAULT_MANAGEMENT_KEY: &str = "010103040506070801020304050607080102030405060708";
+pub const FIPS_PIV_PIN: &str = "97463218";
+pub const FIPS_PIV_PIN_2: &str = "68352749";
+pub const FIPS_PIV_PUK: &str = "83726145";
+pub const FIPS_PIV_PUK_2: &str = "58274936";
+pub const FIPS_PIV_MANAGEMENT_KEY: &str = "0102030405060708090a0b0c0d0e0f10";
+pub const FIPS_PIV_MANAGEMENT_KEY_2: &str = "100f0e0d0c0b0a090807060504030201";
 
 // OpenPGP defaults
 pub const DEFAULT_OPENPGP_PIN: &str = "123456";
 pub const NON_DEFAULT_OPENPGP_PIN: &str = "12345679";
 pub const DEFAULT_OPENPGP_ADMIN_PIN: &str = "12345678";
 pub const NON_DEFAULT_OPENPGP_ADMIN_PIN: &str = "12345670";
+pub const FIPS_OPENPGP_PIN: &str = "97463218";
+pub const FIPS_OPENPGP_PIN_2: &str = "68352749";
+pub const FIPS_OPENPGP_ADMIN_PIN: &str = "8372614597";
+pub const FIPS_OPENPGP_ADMIN_PIN_2: &str = "9583726140";
+pub const FIPS_OPENPGP_RESET_CODE: &str = "5839472618";
 
 // OATH
 pub const OATH_PASSWORD: &str = "N9!aR4#sT7$vX2%q";
@@ -235,6 +246,110 @@ pub fn is_fips() -> bool {
     device_info().contains("FIPS")
 }
 
+pub fn app_is_fips_capable(app: &str) -> bool {
+    let marker = format!("  {app}:");
+    device_info()
+        .lines()
+        .skip_while(|line| *line != "FIPS approved applications")
+        .any(|line| line.starts_with(&marker))
+}
+
+pub fn piv_pin() -> &'static str {
+    if app_is_fips_capable("PIV") {
+        FIPS_PIV_PIN
+    } else {
+        DEFAULT_PIN
+    }
+}
+
+pub fn piv_new_pin() -> &'static str {
+    if app_is_fips_capable("PIV") {
+        FIPS_PIV_PIN_2
+    } else {
+        NON_DEFAULT_PIN
+    }
+}
+
+pub fn piv_puk() -> &'static str {
+    if app_is_fips_capable("PIV") {
+        FIPS_PIV_PUK
+    } else {
+        DEFAULT_PUK
+    }
+}
+
+pub fn piv_new_puk() -> &'static str {
+    if app_is_fips_capable("PIV") {
+        FIPS_PIV_PUK_2
+    } else {
+        NON_DEFAULT_PUK
+    }
+}
+
+pub fn piv_management_key() -> &'static str {
+    if app_is_fips_capable("PIV") {
+        FIPS_PIV_MANAGEMENT_KEY
+    } else {
+        DEFAULT_MANAGEMENT_KEY
+    }
+}
+
+pub fn piv_new_management_key() -> &'static str {
+    if app_is_fips_capable("PIV") {
+        FIPS_PIV_MANAGEMENT_KEY_2
+    } else {
+        NON_DEFAULT_MANAGEMENT_KEY
+    }
+}
+
+pub fn piv_management_key_algorithm() -> &'static str {
+    if app_is_fips_capable("PIV") {
+        "aes128"
+    } else {
+        "tdes"
+    }
+}
+
+pub fn openpgp_pin() -> &'static str {
+    if app_is_fips_capable("OpenPGP") {
+        FIPS_OPENPGP_PIN
+    } else {
+        DEFAULT_OPENPGP_PIN
+    }
+}
+
+pub fn openpgp_new_pin() -> &'static str {
+    if app_is_fips_capable("OpenPGP") {
+        FIPS_OPENPGP_PIN_2
+    } else {
+        NON_DEFAULT_OPENPGP_PIN
+    }
+}
+
+pub fn openpgp_admin_pin() -> &'static str {
+    if app_is_fips_capable("OpenPGP") {
+        FIPS_OPENPGP_ADMIN_PIN
+    } else {
+        DEFAULT_OPENPGP_ADMIN_PIN
+    }
+}
+
+pub fn openpgp_new_admin_pin() -> &'static str {
+    if app_is_fips_capable("OpenPGP") {
+        FIPS_OPENPGP_ADMIN_PIN_2
+    } else {
+        NON_DEFAULT_OPENPGP_ADMIN_PIN
+    }
+}
+
+pub fn openpgp_reset_code() -> &'static str {
+    if app_is_fips_capable("OpenPGP") {
+        FIPS_OPENPGP_RESET_CODE
+    } else {
+        NON_DEFAULT_OPENPGP_PIN
+    }
+}
+
 pub fn skip_if_fips(feature: &str) -> bool {
     if is_fips() {
         eprintln!("SKIP: {feature} is restricted or differs on FIPS YubiKeys");
@@ -294,35 +409,120 @@ macro_rules! require_device_configured {
 }
 
 /// Reset PIV to factory defaults (force, no prompt).
-pub fn piv_reset() {
+pub fn piv_reset_raw() {
     ykman_dev()
         .args(["piv", "reset", "-f"])
         .ok()
         .expect("PIV reset failed");
 }
 
+/// Reset PIV and, on FIPS-capable keys, perform the personalization required
+/// to bring the application into FIPS approved mode.
+pub fn piv_reset() {
+    piv_reset_raw();
+    if app_is_fips_capable("PIV") {
+        ykman_dev()
+            .args([
+                "piv",
+                "access",
+                "change-pin",
+                "--pin",
+                DEFAULT_PIN,
+                "--new-pin",
+                FIPS_PIV_PIN,
+            ])
+            .assert()
+            .success();
+        ykman_dev()
+            .args([
+                "piv",
+                "access",
+                "change-puk",
+                "--puk",
+                DEFAULT_PUK,
+                "--new-puk",
+                FIPS_PIV_PUK,
+            ])
+            .assert()
+            .success();
+        ykman_dev()
+            .args([
+                "piv",
+                "access",
+                "change-management-key",
+                "--management-key",
+                DEFAULT_MANAGEMENT_KEY,
+                "--new-management-key",
+                FIPS_PIV_MANAGEMENT_KEY,
+                "--algorithm",
+                "aes128",
+                "-f",
+            ])
+            .assert()
+            .success();
+    }
+}
+
 /// Reset OATH to factory defaults.
-pub fn oath_reset() {
+pub fn oath_reset_raw() {
     ykman_dev()
         .args(["oath", "reset", "-f"])
         .ok()
         .expect("OATH reset failed");
 }
 
+pub fn oath_reset() {
+    oath_reset_raw();
+}
+
 /// Reset OpenPGP to factory defaults.
-pub fn openpgp_reset() {
+pub fn openpgp_reset_raw() {
     ykman_dev()
         .args(["openpgp", "reset", "-f"])
         .ok()
         .expect("OpenPGP reset failed");
 }
 
+pub fn openpgp_reset() {
+    openpgp_reset_raw();
+    if app_is_fips_capable("OpenPGP") {
+        ykman_dev()
+            .args([
+                "openpgp",
+                "access",
+                "change-pin",
+                "--pin",
+                DEFAULT_OPENPGP_PIN,
+                "--new-pin",
+                FIPS_OPENPGP_PIN,
+            ])
+            .assert()
+            .success();
+        ykman_dev()
+            .args([
+                "openpgp",
+                "access",
+                "change-admin-pin",
+                "--admin-pin",
+                DEFAULT_OPENPGP_ADMIN_PIN,
+                "--new-admin-pin",
+                FIPS_OPENPGP_ADMIN_PIN,
+            ])
+            .assert()
+            .success();
+    }
+}
+
 /// Reset HSMAuth to factory defaults.
-pub fn hsmauth_reset() {
+pub fn hsmauth_reset_raw() {
     ykman_dev()
         .args(["hsmauth", "reset", "-f"])
         .ok()
         .expect("HSMAuth reset failed");
+}
+
+pub fn hsmauth_reset() {
+    hsmauth_reset_raw();
 }
 
 /// Delete OTP slot 2 (ignore errors if empty).

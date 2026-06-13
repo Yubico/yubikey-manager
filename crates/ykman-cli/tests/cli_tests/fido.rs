@@ -1,4 +1,4 @@
-use super::common::{device_serial, device_without_serial, ykman_dev};
+use super::common::{app_is_fips_capable, device_serial, device_without_serial, ykman_dev};
 use predicates::prelude::*;
 use std::time::Duration;
 use yubikit::core::Transport;
@@ -357,6 +357,17 @@ fn test_fido_config_toggle_always_uv() {
         .expect("failed to run ykman fido info");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let initially_on = stdout.contains("Always Require UV: On");
+
+    if app_is_fips_capable("FIDO2") && initially_on {
+        ykman_dev()
+            .args(["fido", "config", "toggle-always-uv", "--pin", FIDO_PIN])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "Always Require UV cannot be disabled",
+            ));
+        return;
+    }
 
     // Toggle
     ykman_dev()

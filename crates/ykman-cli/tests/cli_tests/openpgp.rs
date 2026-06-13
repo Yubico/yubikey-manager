@@ -1,6 +1,6 @@
 use super::common::{
-    DEFAULT_OPENPGP_ADMIN_PIN, DEFAULT_OPENPGP_PIN, NON_DEFAULT_OPENPGP_ADMIN_PIN,
-    NON_DEFAULT_OPENPGP_PIN, fixture_path, openpgp_reset, ykman_dev,
+    fixture_path, openpgp_admin_pin, openpgp_new_admin_pin, openpgp_new_pin, openpgp_pin,
+    openpgp_reset, openpgp_reset_code, ykman_dev,
 };
 use predicates::prelude::*;
 
@@ -40,6 +40,7 @@ fn test_openpgp_reset() {
         .args(["openpgp", "reset", "-f"])
         .assert()
         .success();
+    openpgp_reset();
 }
 
 #[test]
@@ -53,9 +54,9 @@ fn test_openpgp_change_pin() {
             "access",
             "change-pin",
             "--pin",
-            DEFAULT_OPENPGP_PIN,
+            openpgp_pin(),
             "--new-pin",
-            NON_DEFAULT_OPENPGP_PIN,
+            openpgp_new_pin(),
         ])
         .assert()
         .success();
@@ -72,9 +73,9 @@ fn test_openpgp_change_admin_pin() {
             "access",
             "change-admin-pin",
             "--admin-pin",
-            DEFAULT_OPENPGP_ADMIN_PIN,
+            openpgp_admin_pin(),
             "--new-admin-pin",
-            NON_DEFAULT_OPENPGP_ADMIN_PIN,
+            openpgp_new_admin_pin(),
         ])
         .assert()
         .success();
@@ -94,7 +95,7 @@ fn test_openpgp_set_pin_retries() {
             "5",
             "5",
             "-a",
-            DEFAULT_OPENPGP_ADMIN_PIN,
+            openpgp_admin_pin(),
             "-f",
         ])
         .assert()
@@ -119,7 +120,7 @@ fn test_openpgp_keys_set_touch() {
             "aut",
             "on",
             "--admin-pin",
-            DEFAULT_OPENPGP_ADMIN_PIN,
+            openpgp_admin_pin(),
             "-f",
         ])
         .assert()
@@ -134,7 +135,7 @@ fn test_openpgp_keys_set_touch() {
             "aut",
             "off",
             "--admin-pin",
-            DEFAULT_OPENPGP_ADMIN_PIN,
+            openpgp_admin_pin(),
             "-f",
         ])
         .assert()
@@ -160,7 +161,7 @@ fn test_openpgp_certificates_import_export() {
             "att",
             cert_file.to_str().unwrap(),
             "--admin-pin",
-            DEFAULT_OPENPGP_ADMIN_PIN,
+            openpgp_admin_pin(),
         ])
         .assert()
         .success();
@@ -189,7 +190,7 @@ fn test_openpgp_certificates_delete() {
             "att",
             cert_file.to_str().unwrap(),
             "--admin-pin",
-            DEFAULT_OPENPGP_ADMIN_PIN,
+            openpgp_admin_pin(),
         ])
         .assert()
         .success();
@@ -201,7 +202,7 @@ fn test_openpgp_certificates_delete() {
             "delete",
             "att",
             "--admin-pin",
-            DEFAULT_OPENPGP_ADMIN_PIN,
+            openpgp_admin_pin(),
         ])
         .assert()
         .success();
@@ -214,8 +215,6 @@ fn test_openpgp_change_reset_code() {
     require_interface!("CCID");
     openpgp_reset();
 
-    let new_reset_code = "12345679";
-
     // Set a reset code (requires admin PIN)
     ykman_dev()
         .args([
@@ -223,9 +222,9 @@ fn test_openpgp_change_reset_code() {
             "access",
             "change-reset-code",
             "--admin-pin",
-            DEFAULT_OPENPGP_ADMIN_PIN,
+            openpgp_admin_pin(),
             "--reset-code",
-            new_reset_code,
+            openpgp_reset_code(),
         ])
         .assert()
         .success();

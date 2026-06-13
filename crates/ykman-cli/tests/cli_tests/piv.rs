@@ -1,6 +1,6 @@
 use super::common::{
-    DEFAULT_MANAGEMENT_KEY, DEFAULT_PIN, DEFAULT_PUK, NON_DEFAULT_MANAGEMENT_KEY, NON_DEFAULT_PIN,
-    NON_DEFAULT_PUK, fixture_path, piv_reset, ykman_dev, ykman_dev_tty,
+    fixture_path, piv_management_key, piv_management_key_algorithm, piv_new_management_key,
+    piv_new_pin, piv_new_puk, piv_pin, piv_puk, piv_reset, ykman_dev, ykman_dev_tty,
 };
 use predicates::prelude::*;
 
@@ -33,6 +33,7 @@ fn test_piv_info() {
 fn test_piv_reset() {
     require_interface!("CCID");
     ykman_dev().args(["piv", "reset", "-f"]).assert().success();
+    piv_reset();
 }
 
 #[test]
@@ -46,9 +47,9 @@ fn test_piv_change_pin() {
             "access",
             "change-pin",
             "--pin",
-            DEFAULT_PIN,
+            piv_pin(),
             "--new-pin",
-            NON_DEFAULT_PIN,
+            piv_new_pin(),
         ])
         .assert()
         .success();
@@ -61,7 +62,7 @@ fn test_piv_change_pin_prompts_for_pin_and_new_pin() {
 
     let output = ykman_dev_tty(
         &["piv", "access", "change-pin"],
-        &format!("{DEFAULT_PIN}\n{NON_DEFAULT_PIN}\n{NON_DEFAULT_PIN}\n"),
+        &format!("{}\n{}\n{}\n", piv_pin(), piv_new_pin(), piv_new_pin()),
     );
     assert!(output.status.success(), "{output:?}");
     let combined = format!(
@@ -84,9 +85,9 @@ fn test_piv_change_puk() {
             "access",
             "change-puk",
             "--puk",
-            DEFAULT_PUK,
+            piv_puk(),
             "--new-puk",
-            NON_DEFAULT_PUK,
+            piv_new_puk(),
         ])
         .assert()
         .success();
@@ -103,9 +104,11 @@ fn test_piv_change_management_key() {
             "access",
             "change-management-key",
             "--management-key",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "--new-management-key",
-            NON_DEFAULT_MANAGEMENT_KEY,
+            piv_new_management_key(),
+            "--algorithm",
+            piv_management_key_algorithm(),
             "-f",
         ])
         .assert()
@@ -117,9 +120,11 @@ fn test_piv_change_management_key() {
             "access",
             "change-management-key",
             "--management-key",
-            NON_DEFAULT_MANAGEMENT_KEY,
+            piv_new_management_key(),
             "--new-management-key",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
+            "--algorithm",
+            piv_management_key_algorithm(),
             "-f",
         ])
         .assert()
@@ -141,9 +146,9 @@ fn test_piv_generate_self_signed() {
             "9a",
             "-",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success()
@@ -158,9 +163,9 @@ fn test_piv_generate_self_signed() {
             "-s",
             "CN=test",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -187,9 +192,9 @@ fn test_piv_export_certificate() {
             "9a",
             "-",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -203,9 +208,9 @@ fn test_piv_export_certificate() {
             "-s",
             "CN=export-test",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -233,9 +238,9 @@ fn test_piv_import_key_ec() {
             "9a",
             key_file.to_str().unwrap(),
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -260,9 +265,9 @@ fn test_piv_import_key_rsa() {
             "9a",
             key_file.to_str().unwrap(),
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -284,9 +289,9 @@ fn test_piv_import_certificate() {
             "9a",
             cert_file.to_str().unwrap(),
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -314,9 +319,9 @@ fn test_piv_import_certificate_der() {
             "9a",
             cert_file.to_str().unwrap(),
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -338,9 +343,9 @@ fn test_piv_delete_certificate() {
             "9a",
             "-",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -354,9 +359,9 @@ fn test_piv_delete_certificate() {
             "-s",
             "CN=delete-test",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -369,9 +374,9 @@ fn test_piv_delete_certificate() {
             "delete",
             "9a",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -393,9 +398,9 @@ fn test_piv_export_key() {
             "9a",
             "-",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -409,9 +414,9 @@ fn test_piv_export_key() {
             "-s",
             "CN=export-key-test",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -439,9 +444,9 @@ fn test_piv_export_key_der() {
             "9a",
             "-",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -455,9 +460,9 @@ fn test_piv_export_key_der() {
             "-s",
             "CN=der-test",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -487,9 +492,9 @@ fn test_piv_export_key_verify() {
             "9a",
             "-",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -503,9 +508,9 @@ fn test_piv_export_key_verify() {
             "-s",
             "CN=verify-test",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -519,7 +524,7 @@ fn test_piv_export_key_verify() {
             "-",
             "--verify",
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success()
@@ -542,9 +547,9 @@ fn test_piv_key_move() {
             "9a",
             "-",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -558,9 +563,9 @@ fn test_piv_key_move() {
             "9a",
             "9c",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -580,9 +585,9 @@ fn test_piv_objects_generate_chuid() {
             "generate",
             "chuid",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -602,9 +607,9 @@ fn test_piv_objects_generate_ccc() {
             "generate",
             "ccc",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -625,9 +630,9 @@ fn test_piv_objects_export_chuid() {
             "generate",
             "chuid",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -659,9 +664,9 @@ fn test_piv_unblock_pin() {
                 "access",
                 "change-pin",
                 "--pin",
-                "00000000",
+                "91827364",
                 "--new-pin",
-                "00000000",
+                "82736495",
             ])
             .ok();
     }
@@ -673,9 +678,9 @@ fn test_piv_unblock_pin() {
             "access",
             "unblock-pin",
             "--puk",
-            DEFAULT_PUK,
+            piv_puk(),
             "--new-pin",
-            NON_DEFAULT_PIN,
+            piv_new_pin(),
         ])
         .assert()
         .success();
@@ -696,9 +701,9 @@ fn test_piv_generate_rsa2048() {
             "--algorithm",
             "rsa2048",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success()
@@ -722,9 +727,9 @@ fn test_piv_generate_eccp384() {
             "--algorithm",
             "eccp384",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success()
@@ -748,9 +753,9 @@ fn test_piv_key_pin_policy() {
             "--pin-policy",
             "once",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success()
@@ -774,9 +779,9 @@ fn test_piv_key_touch_policy() {
             "--touch-policy",
             "cached",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success()
@@ -801,9 +806,9 @@ fn test_piv_import_key_ec_der() {
             "9a",
             key_file.to_str().unwrap(),
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -825,9 +830,9 @@ fn test_piv_import_key_ec_p384() {
             "9a",
             key_file.to_str().unwrap(),
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -849,9 +854,9 @@ fn test_piv_import_key_ec_p384_der() {
             "9a",
             key_file.to_str().unwrap(),
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -873,9 +878,9 @@ fn test_piv_import_key_rsa_der() {
             "9a",
             key_file.to_str().unwrap(),
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -899,9 +904,9 @@ fn test_piv_import_key_ec_pkcs12() {
             "--password",
             "",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -925,9 +930,9 @@ fn test_piv_import_key_ec_pkcs12_encrypted() {
             "--password",
             "test123",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -951,9 +956,9 @@ fn test_piv_import_key_rsa_pkcs12() {
             "--password",
             "",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -977,9 +982,9 @@ fn test_piv_import_key_rsa_pkcs12_encrypted() {
             "--password",
             "test123",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1003,9 +1008,9 @@ fn test_piv_import_key_ec_p384_pkcs12() {
             "--password",
             "",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1029,9 +1034,9 @@ fn test_piv_import_key_ec_p256_pkcs12_modern() {
             "--password",
             "test123",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1055,9 +1060,9 @@ fn test_piv_import_certificate_rsa_pem() {
             "9a",
             cert_file.to_str().unwrap(),
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1079,9 +1084,9 @@ fn test_piv_import_certificate_rsa_der() {
             "9a",
             cert_file.to_str().unwrap(),
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1105,9 +1110,9 @@ fn test_piv_import_certificate_ec_pkcs12() {
             "--password",
             "",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1138,9 +1143,9 @@ fn test_piv_import_certificate_ec_pkcs12_encrypted() {
             "--password",
             "test123",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1164,9 +1169,9 @@ fn test_piv_import_certificate_rsa_pkcs12() {
             "--password",
             "",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1190,9 +1195,9 @@ fn test_piv_import_certificate_rsa_pkcs12_encrypted() {
             "--password",
             "test123",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1216,9 +1221,9 @@ fn test_piv_import_certificate_ec_pkcs12_modern() {
             "--password",
             "test123",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1244,9 +1249,9 @@ fn test_piv_import_key_and_cert_pkcs12_verify() {
             "--password",
             "test123",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1263,9 +1268,9 @@ fn test_piv_import_key_and_cert_pkcs12_verify() {
             "test123",
             "--verify",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1289,9 +1294,9 @@ fn test_piv_import_key_ec_encrypted_pem() {
             "--password",
             "test123",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1315,9 +1320,9 @@ fn test_piv_import_key_rsa_encrypted_pem() {
             "--password",
             "test123",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .success();
@@ -1341,9 +1346,9 @@ fn test_piv_import_pkcs12_wrong_password() {
             "--password",
             "wrongpassword",
             "-m",
-            DEFAULT_MANAGEMENT_KEY,
+            piv_management_key(),
             "-P",
-            DEFAULT_PIN,
+            piv_pin(),
         ])
         .assert()
         .failure()
