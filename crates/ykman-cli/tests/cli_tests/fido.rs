@@ -3,7 +3,7 @@ use predicates::prelude::*;
 use std::time::Duration;
 use yubikit::core::Transport;
 use yubikit::ctap::CtapSession;
-use yubikit::ctap2::{ClientPin, Ctap2Error, Ctap2Session, CtapStatus};
+use yubikit::ctap2::Ctap2Session;
 use yubikit::management::{Capability, UsbInterface};
 use yubikit::platform::device::{LocalYubiKeyDevice, list_devices};
 
@@ -38,11 +38,23 @@ fn setup_fido_pin() -> bool {
         return set_initial_pin();
     }
 
+    if verify_pin(FIDO_PIN) {
+        return true;
+    }
+
     if !reset_fido_with_controller() {
         eprintln!("FIDO setup: existing PIN is unavailable and automated reset is unavailable");
         return false;
     }
     set_initial_pin()
+}
+
+fn verify_pin(pin: &str) -> bool {
+    ykman_dev()
+        .args(["fido", "access", "verify-pin", "--pin", pin])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn set_initial_pin() -> bool {
@@ -175,16 +187,19 @@ fn require_pin_set() {
 }
 
 fn pin_retries() -> Option<u32> {
-    let device = test_device()?;
-    let conn = device.open_fido().ok()?;
-    let ctap = CtapSession::new_fido(conn).map_err(|(e, _)| e).ok()?;
-    let session = Ctap2Session::new(ctap).map_err(|(e, _)| e).ok()?;
-    let mut client_pin = ClientPin::new(session).map_err(|(e, _)| e).ok()?;
-    match client_pin.get_pin_retries() {
-        Ok((retries, _)) => Some(retries),
-        Err(Ctap2Error::StatusError(CtapStatus::PinNotSet)) => None,
-        Err(_) => None,
+    let output = ykman_dev()
+        .args(["fido", "info"])
+        .output()
+        .expect("failed to run ykman fido info");
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return stdout
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("PIN:"))
+            .and_then(|status| status.split_whitespace().next())
+            .and_then(|retries| retries.parse().ok());
     }
+    None
 }
 
 fn restore_pin_if_needed() {

@@ -372,17 +372,30 @@ pub fn skip_before_version(required: (u8, u8, u8), feature: &str) -> bool {
     }
 }
 
-/// Returns true if the device has the given USB interface enabled.
-pub fn has_usb_interface(name: &str) -> bool {
+/// Returns true if the selected test device has the given interface/application enabled.
+pub fn has_interface(name: &str) -> bool {
     let stdout = device_info();
-    // Look for the interface name in the "Enabled USB interfaces:" line
-    stdout
+    if stdout
         .lines()
         .any(|line| line.starts_with("Enabled USB interfaces:") && line.contains(name))
-        || (name == "CCID" && stdout.contains("Applications"))
+    {
+        return true;
+    }
+
+    let app_name = match name {
+        "CCID" => return stdout.contains("Applications"),
+        "FIDO" => "FIDO2",
+        "OTP" => "Yubico OTP",
+        other => other,
+    };
+
+    stdout
+        .lines()
+        .filter(|line| line.starts_with(app_name))
+        .any(|line| line.split_whitespace().any(|field| field == "Enabled"))
 }
 
-/// Skip the test if the device does not have the given USB interface enabled.
+/// Skip the test if the device does not have the given interface/application enabled.
 #[macro_export]
 macro_rules! require_interface {
     ($name:expr) => {
@@ -390,7 +403,7 @@ macro_rules! require_interface {
             eprintln!("SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
             return;
         }
-        if !$crate::common::has_usb_interface($name) {
+        if !$crate::common::has_interface($name) {
             eprintln!("SKIP: {} not enabled on device", $name);
             return;
         }
