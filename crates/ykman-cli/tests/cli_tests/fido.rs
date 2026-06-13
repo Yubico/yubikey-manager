@@ -1,6 +1,4 @@
-mod common;
-
-use common::{device_serial, device_without_serial, ykman_dev};
+use super::common::{device_serial, device_without_serial, ykman_dev};
 use predicates::prelude::*;
 use std::time::Duration;
 use yubikit::core::Transport;

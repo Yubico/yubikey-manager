@@ -1,7 +1,5 @@
-mod common;
-
+use super::common::{skip_if_fips, ykman_dev, ykman_dev_tty};
 use assert_cmd::Command;
-use common::{skip_if_fips, ykman_dev, ykman_dev_tty};
 use predicates::prelude::*;
 use std::thread;
 use std::time::Duration;

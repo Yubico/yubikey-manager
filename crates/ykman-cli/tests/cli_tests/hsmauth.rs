@@ -1,6 +1,4 @@
-mod common;
-
-use common::{DEFAULT_HSMAUTH_MANAGEMENT_KEY, fixture_path, hsmauth_reset, ykman_dev};
+use super::common::{DEFAULT_HSMAUTH_MANAGEMENT_KEY, fixture_path, hsmauth_reset, ykman_dev};
 use predicates::prelude::*;
 
 const NON_DEFAULT_HSMAUTH_MANAGEMENT_KEY: &str = "Ru7!vN2$qL9#zX5%";

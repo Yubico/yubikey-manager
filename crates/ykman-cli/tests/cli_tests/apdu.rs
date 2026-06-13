@@ -1,6 +1,4 @@
-mod common;
-
-use common::ykman_dev;
+use super::common::ykman_dev;
 use predicates::prelude::*;
 
 #[test]

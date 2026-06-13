@@ -1,6 +1,4 @@
-mod common;
-
-use common::{
+use super::common::{
     DEFAULT_OPENPGP_ADMIN_PIN, DEFAULT_OPENPGP_PIN, NON_DEFAULT_OPENPGP_ADMIN_PIN,
     NON_DEFAULT_OPENPGP_PIN, fixture_path, openpgp_reset, ykman_dev,
 };

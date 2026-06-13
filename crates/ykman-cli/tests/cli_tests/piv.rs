@@ -1,6 +1,4 @@
-mod common;
-
-use common::{
+use super::common::{
     DEFAULT_MANAGEMENT_KEY, DEFAULT_PIN, DEFAULT_PUK, NON_DEFAULT_MANAGEMENT_KEY, NON_DEFAULT_PIN,
     NON_DEFAULT_PUK, fixture_path, piv_reset, ykman_dev, ykman_dev_tty,
 };

@@ -1,6 +1,4 @@
-mod common;
-
-use common::{device_serial, ykman, ykman_dev};
+use super::common::{device_serial, ykman, ykman_dev};
 use predicates::prelude::*;
 
 #[test]

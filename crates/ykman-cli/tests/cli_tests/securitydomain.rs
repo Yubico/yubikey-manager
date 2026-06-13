@@ -1,6 +1,4 @@
-mod common;
-
-use common::{DEFAULT_SCP03_KEYS, sd_reset, ykman_dev, ykman_dev_scp};
+use super::common::{DEFAULT_SCP03_KEYS, fixture_path, sd_reset, ykman_dev, ykman_dev_scp};
 use predicates::prelude::*;
 
 #[test]
@@ -102,7 +100,7 @@ fn test_sd_keys_import_scp11() {
     sd_reset();
 
     // Import a CA certificate as SCP11 OCE CA key (KID=0x10).
-    let ca_file = common::fixture_path("ec_p256_cert.pem");
+    let ca_file = fixture_path("ec_p256_cert.pem");
 
     ykman_dev_scp()
         .args([

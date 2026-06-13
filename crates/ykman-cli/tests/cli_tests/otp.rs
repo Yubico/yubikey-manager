@@ -1,6 +1,4 @@
-mod common;
-
-use common::{otp_delete_slot2, ykman_dev};
+use super::common::{otp_delete_slot2, ykman_dev};
 use predicates::prelude::*;
 
 #[test]

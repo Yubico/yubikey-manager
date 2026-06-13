@@ -271,11 +271,11 @@ pub fn has_usb_interface(name: &str) -> bool {
 #[macro_export]
 macro_rules! require_interface {
     ($name:expr) => {
-        if !common::device_configured() {
+        if !$crate::common::device_configured() {
             eprintln!("SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
             return;
         }
-        if !common::has_usb_interface($name) {
+        if !$crate::common::has_usb_interface($name) {
             eprintln!("SKIP: {} not enabled on device", $name);
             return;
         }
@@ -286,7 +286,7 @@ macro_rules! require_interface {
 #[macro_export]
 macro_rules! require_device_configured {
     () => {
-        if !common::device_configured() {
+        if !$crate::common::device_configured() {
             eprintln!("SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
             return;
         }

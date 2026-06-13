@@ -1,6 +1,4 @@
-mod common;
-
-use common::{OATH_PASSWORD, fixture_path, is_fips, oath_reset, ykman_dev, ykman_dev_tty};
+use super::common::{OATH_PASSWORD, fixture_path, is_fips, oath_reset, ykman_dev, ykman_dev_tty};
 use predicates::prelude::*;
 
 const OATH_ACCOUNT_SECRET: &str = "KE4CG4SUGIQW2VRXER5EYNJFNY";
