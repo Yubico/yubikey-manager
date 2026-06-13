@@ -12,7 +12,15 @@ fn open_session<'a>(
     dev: &'a dyn YubiKeyDevice,
     scp_params: &ScpParams,
 ) -> Result<OpenPgpSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
-    let scp_config = scp::resolve_scp(dev, scp_params, Capability::OPENPGP)?;
+    let scp_config = match scp::resolve_scp(dev, scp_params, Capability::OPENPGP) {
+        Ok(config) => config,
+        Err(_) if !scp_params.is_explicit() && scp::needs_scp11b(dev, Capability::OPENPGP) => {
+            return Err(CliError(
+                "Unable to manage OpenPGP over NFC without SCP".into(),
+            ));
+        }
+        Err(e) => return Err(e),
+    };
     match scp_config {
         ScpConfig::None => {
             let conn = dev
@@ -180,18 +188,24 @@ pub fn run_reset(
         }
     }
 
-    if scp_params.is_explicit() {
-        let mut session = open_session(dev, scp_params)?;
-        session
-            .reset()
-            .map_err(|e| CliError(format!("Failed to reset OpenPGP: {e}")))?;
-    } else {
+    let safe_reset = || -> Result<(), CliError> {
         let conn = dev
             .open_smartcard()
             .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
         yubikit::openpgp::safe_reset(conn)
-            .map_err(|e| CliError(format!("Failed to reset OpenPGP: {e}")))?;
+            .map_err(|e| CliError(format!("Failed to reset OpenPGP: {e}")))
+    };
+
+    match open_session(dev, scp_params) {
+        Ok(mut session) => {
+            if session.reset().is_err() {
+                safe_reset()?;
+            }
+        }
+        Err(e) if e.0 == "Unable to manage OpenPGP over NFC without SCP" => return Err(e),
+        Err(_) => safe_reset()?,
     }
+
     eprintln!("OpenPGP application has been reset.");
     Ok(())
 }
