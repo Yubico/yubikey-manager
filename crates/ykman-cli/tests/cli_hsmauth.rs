@@ -4,7 +4,26 @@ use common::{DEFAULT_HSMAUTH_MANAGEMENT_KEY, fixture_path, hsmauth_reset, ykman_
 use predicates::prelude::*;
 use serial_test::serial;
 
-const NON_DEFAULT_HSMAUTH_MANAGEMENT_KEY: &str = "01020304050607080102030405060708";
+const NON_DEFAULT_HSMAUTH_MANAGEMENT_KEY: &str = "Ru7!vN2$qL9#zX5%";
+const HSMAUTH_CREDENTIAL_PASSWORD: &str = "T8#qZ2!mV7$rB4n%";
+const HSMAUTH_DERIVATION_PASSWORD: &str = "K9$wQ3#nR6!tM2x%";
+
+fn prepare_hsmauth_for_credentials() -> &'static str {
+    hsmauth_reset();
+    ykman_dev()
+        .args([
+            "hsmauth",
+            "access",
+            "change-management-password",
+            "-m",
+            DEFAULT_HSMAUTH_MANAGEMENT_KEY,
+            "-n",
+            NON_DEFAULT_HSMAUTH_MANAGEMENT_KEY,
+        ])
+        .assert()
+        .success();
+    NON_DEFAULT_HSMAUTH_MANAGEMENT_KEY
+}
 
 #[test]
 #[ignore]
@@ -35,7 +54,7 @@ fn test_hsmauth_reset() {
 #[serial]
 fn test_hsmauth_add_symmetric_and_list() {
     require_interface!("CCID");
-    hsmauth_reset();
+    let management_key = prepare_hsmauth_for_credentials();
 
     ykman_dev()
         .args([
@@ -45,9 +64,9 @@ fn test_hsmauth_add_symmetric_and_list() {
             "test-cred",
             "--generate",
             "-c",
-            "12345679",
+            HSMAUTH_CREDENTIAL_PASSWORD,
             "-m",
-            DEFAULT_HSMAUTH_MANAGEMENT_KEY,
+            management_key,
         ])
         .assert()
         .success();
@@ -65,7 +84,7 @@ fn test_hsmauth_add_symmetric_and_list() {
             "delete",
             "test-cred",
             "-m",
-            DEFAULT_HSMAUTH_MANAGEMENT_KEY,
+            management_key,
             "-f",
         ])
         .assert()
@@ -85,7 +104,7 @@ fn test_hsmauth_add_symmetric_and_list() {
 #[serial]
 fn test_hsmauth_add_derive_and_list() {
     require_interface!("CCID");
-    hsmauth_reset();
+    let management_key = prepare_hsmauth_for_credentials();
 
     ykman_dev()
         .args([
@@ -93,11 +112,11 @@ fn test_hsmauth_add_derive_and_list() {
             "credentials",
             "derive",
             "derive-cred",
-            "p4ssw0rd",
+            HSMAUTH_DERIVATION_PASSWORD,
             "-c",
-            "12345679",
+            HSMAUTH_CREDENTIAL_PASSWORD,
             "-m",
-            DEFAULT_HSMAUTH_MANAGEMENT_KEY,
+            management_key,
         ])
         .assert()
         .success();
@@ -116,7 +135,7 @@ fn test_hsmauth_add_derive_and_list() {
 #[serial]
 fn test_hsmauth_credential_import() {
     require_interface!("CCID");
-    hsmauth_reset();
+    let management_key = prepare_hsmauth_for_credentials();
 
     let key_file = fixture_path("ec_p256_key.pem");
     ykman_dev()
@@ -127,9 +146,9 @@ fn test_hsmauth_credential_import() {
             "import-cred",
             key_file.to_str().unwrap(),
             "-c",
-            "12345679",
+            HSMAUTH_CREDENTIAL_PASSWORD,
             "-m",
-            DEFAULT_HSMAUTH_MANAGEMENT_KEY,
+            management_key,
         ])
         .assert()
         .success();
@@ -175,9 +194,9 @@ fn test_hsmauth_change_management_password() {
             "credentials",
             "derive",
             "verify-key",
-            "p4ssw0rd",
+            HSMAUTH_DERIVATION_PASSWORD,
             "-c",
-            "12345679",
+            HSMAUTH_CREDENTIAL_PASSWORD,
             "-m",
             NON_DEFAULT_HSMAUTH_MANAGEMENT_KEY,
         ])
