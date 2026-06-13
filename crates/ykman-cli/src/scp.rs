@@ -130,6 +130,21 @@ pub fn resolve_scp(
     Ok(ScpConfig::None)
 }
 
+pub fn resolve_scp_for_app(
+    dev: &dyn YubiKeyDevice,
+    params: &ScpParams,
+    capability: Capability,
+    app_name: &str,
+) -> Result<ScpConfig, CliError> {
+    match resolve_scp(dev, params, capability) {
+        Ok(config) => Ok(config),
+        Err(_) if !params.is_explicit() && needs_scp11b(dev, capability) => Err(CliError(format!(
+            "Unable to manage {app_name} over NFC without SCP"
+        ))),
+        Err(e) => Err(e),
+    }
+}
+
 /// Apply SCP configuration to a SmartCardProtocol.
 /// The AID must already be selected before calling this.
 /// Convert an `ScpConfig` into `ScpKeyParams`, returning `None` for

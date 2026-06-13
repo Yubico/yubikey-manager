@@ -44,7 +44,7 @@ fn open_session<'a>(
     password: Option<&str>,
     remember: bool,
 ) -> Result<OathSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
-    let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
+    let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
     let mut session = match scp_config {
         ScpConfig::None => {
             let conn = dev
@@ -147,7 +147,7 @@ pub fn run_info(
     password: Option<&str>,
 ) -> Result<(), CliError> {
     // Open a raw session without unlocking — info doesn't require authentication
-    let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
+    let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
     let session = match scp_config {
         ScpConfig::None => {
             let conn = dev
@@ -547,7 +547,7 @@ pub fn run_access_remember(
     scp_params: &ScpParams,
     password: Option<&str>,
 ) -> Result<(), CliError> {
-    let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
+    let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
     let mut session = match scp_config {
         ScpConfig::None => {
             let conn = dev
@@ -595,7 +595,7 @@ pub fn run_access_forget(
         eprintln!("All stored OATH passwords have been removed.");
     } else {
         // Need to open session to get device_id (without unlocking)
-        let scp_config = scp::resolve_scp(dev, scp_params, Capability::OATH)?;
+        let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
         let session = match scp_config {
             ScpConfig::None => {
                 let conn = dev

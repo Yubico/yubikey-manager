@@ -30,7 +30,7 @@ fn open_session<'a>(
     dev: &'a dyn YubiKeyDevice,
     scp_params: &ScpParams,
 ) -> Result<PivSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
-    let scp_config = scp::resolve_scp(dev, scp_params, Capability::PIV)?;
+    let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::PIV, "PIV")?;
     match scp_config {
         ScpConfig::None => {
             let conn = dev

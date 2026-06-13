@@ -12,15 +12,7 @@ fn open_session<'a>(
     dev: &'a dyn YubiKeyDevice,
     scp_params: &ScpParams,
 ) -> Result<OpenPgpSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
-    let scp_config = match scp::resolve_scp(dev, scp_params, Capability::OPENPGP) {
-        Ok(config) => config,
-        Err(_) if !scp_params.is_explicit() && scp::needs_scp11b(dev, Capability::OPENPGP) => {
-            return Err(CliError(
-                "Unable to manage OpenPGP over NFC without SCP".into(),
-            ));
-        }
-        Err(e) => return Err(e),
-    };
+    let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OPENPGP, "OpenPGP")?;
     match scp_config {
         ScpConfig::None => {
             let conn = dev

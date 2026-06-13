@@ -14,7 +14,8 @@ fn open_session<'a>(
     dev: &'a dyn YubiKeyDevice,
     scp_params: &ScpParams,
 ) -> Result<HsmAuthSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
-    let scp_config = scp::resolve_scp(dev, scp_params, Capability::HSMAUTH)?;
+    let scp_config =
+        scp::resolve_scp_for_app(dev, scp_params, Capability::HSMAUTH, "YubiHSM Auth")?;
     match scp_config {
         ScpConfig::None => {
             let conn = dev
