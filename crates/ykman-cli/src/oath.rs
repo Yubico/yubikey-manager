@@ -11,7 +11,7 @@ use yubikit::oath::{
 use crate::appdata::AppData;
 use crate::cli_enums::{CliOathAlgorithm, CliOathDigits, CliOathType};
 use crate::scp::{self, ScpConfig, ScpParams};
-use crate::util::CliError;
+use crate::util::{CliError, format_session_error, format_smartcard_connection_error};
 
 fn oath_keys() -> Result<AppData, CliError> {
     AppData::new("oath_keys").map_err(|e| CliError(format!("Failed to open OATH key store: {e}")))
@@ -35,6 +35,24 @@ fn validate_and_remember(
     Ok(())
 }
 
+fn new_oath_session<'a>(
+    dev: &'a dyn YubiKeyDevice,
+    scp_config: &ScpConfig,
+) -> Result<OathSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
+    let conn = dev
+        .open_smartcard()
+        .map_err(|e| format_smartcard_connection_error("OATH", e))?;
+    match scp_config {
+        ScpConfig::None => OathSession::new(conn).map_err(|(e, _)| format_session_error("OATH", e)),
+        config => {
+            let params = scp::to_scp_key_params(config)
+                .expect("non-None ScpConfig must convert to ScpKeyParams");
+            OathSession::new_with_scp(conn, &params)
+                .map_err(|(e, _)| format_session_error("OATH", e))
+        }
+    }
+}
+
 /// Open an OATH session, unlocking it if needed.
 ///
 /// Tries (in order): explicit password, stored key, interactive prompt.
@@ -45,24 +63,7 @@ fn open_session<'a>(
     remember: bool,
 ) -> Result<OathSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
-    let mut session = match scp_config {
-        ScpConfig::None => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            OathSession::new(conn)
-                .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
-        }
-        ref config => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            let params = scp::to_scp_key_params(config)
-                .expect("non-None ScpConfig must convert to ScpKeyParams");
-            OathSession::new_with_scp(conn, &params)
-                .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
-        }
-    };
+    let mut session = new_oath_session(dev, &scp_config)?;
 
     if session.locked() {
         let mut keys = oath_keys()?;
@@ -109,7 +110,7 @@ fn open_session<'a>(
         validate_and_remember(&mut session, &key, remember, &mut keys)?;
     } else if password.is_some() {
         return Err(CliError(
-            "Password provided, but no password is set.".into(),
+            "Password provided, but no password is set on this YubiKey's OATH application.".into(),
         ));
     }
     Ok(session)
@@ -148,24 +149,7 @@ pub fn run_info(
 ) -> Result<(), CliError> {
     // Open a raw session without unlocking — info doesn't require authentication
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
-    let session = match scp_config {
-        ScpConfig::None => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            OathSession::new(conn)
-                .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
-        }
-        ref config => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            let params = scp::to_scp_key_params(config)
-                .expect("non-None ScpConfig must convert to ScpKeyParams");
-            OathSession::new_with_scp(conn, &params)
-                .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
-        }
-    };
+    let session = new_oath_session(dev, &scp_config)?;
     let _ = password; // Not needed for info
     let keys = oath_keys()?;
     println!("OATH version: {}", session.version());
@@ -188,7 +172,6 @@ pub fn run_reset(
     scp_params: &ScpParams,
     force: bool,
 ) -> Result<(), CliError> {
-    let _ = scp_params;
     if !force {
         eprintln!(
             "WARNING! This will delete all stored OATH accounts and restore factory settings of the OATH application."
@@ -197,11 +180,8 @@ pub fn run_reset(
             return Err(CliError("Aborted by user.".into()));
         }
     }
-    let conn = dev
-        .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    let mut session = OathSession::new(conn)
-        .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?;
+    let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
+    let mut session = new_oath_session(dev, &scp_config)?;
     let device_id = session.device_id().to_string();
     session
         .reset()
@@ -548,24 +528,7 @@ pub fn run_access_remember(
     password: Option<&str>,
 ) -> Result<(), CliError> {
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
-    let mut session = match scp_config {
-        ScpConfig::None => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            OathSession::new(conn)
-                .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
-        }
-        ref config => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            let params = scp::to_scp_key_params(config)
-                .expect("non-None ScpConfig must convert to ScpKeyParams");
-            OathSession::new_with_scp(conn, &params)
-                .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
-        }
-    };
+    let mut session = new_oath_session(dev, &scp_config)?;
 
     if !session.locked() {
         return Err(CliError(
@@ -596,24 +559,7 @@ pub fn run_access_forget(
     } else {
         // Need to open session to get device_id (without unlocking)
         let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
-        let session = match scp_config {
-            ScpConfig::None => {
-                let conn = dev
-                    .open_smartcard()
-                    .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-                OathSession::new(conn)
-                    .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
-            }
-            ref config => {
-                let conn = dev
-                    .open_smartcard()
-                    .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-                let params = scp::to_scp_key_params(config)
-                    .expect("non-None ScpConfig must convert to ScpKeyParams");
-                OathSession::new_with_scp(conn, &params)
-                    .map_err(|(e, _)| CliError(format!("Failed to open OATH session: {e}")))?
-            }
-        };
+        let session = new_oath_session(dev, &scp_config)?;
         let device_id = session.device_id();
         if keys.contains(device_id) {
             keys.remove(device_id)

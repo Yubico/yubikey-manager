@@ -24,7 +24,10 @@ use crate::cli_enums::{
     CliFormat, CliHashAlgorithm, CliKeyType, CliMgmtKeyType, CliPinPolicy, CliTouchPolicy,
 };
 use crate::scp::{self, ScpConfig, ScpParams};
-use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
+use crate::util::{
+    CliError, format_session_error, format_smartcard_connection_error, read_file_or_stdin,
+    write_file_or_stdout,
+};
 
 fn open_session<'a>(
     dev: &'a dyn YubiKeyDevice,
@@ -35,18 +38,16 @@ fn open_session<'a>(
         ScpConfig::None => {
             let conn = dev
                 .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            PivSession::new(conn)
-                .map_err(|(e, _)| CliError(format!("Failed to open PIV session: {e}")))
+                .map_err(|e| format_smartcard_connection_error("PIV", e))?;
+            PivSession::new(conn).map_err(|(e, _)| format_session_error("PIV", e))
         }
         ref config => {
             let conn = dev
                 .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+                .map_err(|e| format_smartcard_connection_error("PIV", e))?;
             let params = scp::to_scp_key_params(config)
                 .expect("non-None ScpConfig must convert to ScpKeyParams");
-            PivSession::new_with_scp(conn, &params)
-                .map_err(|(e, _)| CliError(format!("Failed to open PIV session: {e}")))
+            PivSession::new_with_scp(conn, &params).map_err(|(e, _)| format_session_error("PIV", e))
         }
     }
 }
@@ -84,7 +85,16 @@ fn parse_slot(s: &str) -> Result<Slot, CliError> {
 }
 
 fn parse_management_key(s: &str) -> Result<Vec<u8>, CliError> {
-    hex::decode(s).map_err(|_| CliError("Management key must be hex-encoded.".into()))
+    let key = hex::decode(s).map_err(|_| {
+        CliError("Management key must be hex-encoded (32, 48, or 64 hexadecimal digits).".into())
+    })?;
+    if !matches!(key.len(), 16 | 24 | 32) {
+        return Err(CliError(
+            "Management key must be exactly 16, 24, or 32 bytes (32, 48, or 64 hexadecimal digits) long."
+                .into(),
+        ));
+    }
+    Ok(key)
 }
 
 fn to_management_key(key_type: ManagementKeyType, key: &[u8]) -> Result<ManagementKey, CliError> {

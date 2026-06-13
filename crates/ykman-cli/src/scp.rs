@@ -7,7 +7,7 @@ use yubikit::management::Capability;
 use yubikit::securitydomain::{KeyRef, SecurityDomainSession};
 use yubikit::smartcard::{SmartCardConnection, SmartCardProtocol};
 
-use crate::util::CliError;
+use crate::util::{CliError, format_session_error, format_smartcard_connection_error};
 
 /// SCP configuration resolved from CLI flags and device state.
 #[derive(Clone)]
@@ -228,9 +228,9 @@ fn find_scp11_pk(
 ) -> Result<Vec<u8>, CliError> {
     let conn = dev
         .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection for SCP: {e}")))?;
+        .map_err(|e| format_smartcard_connection_error("Security Domain", e))?;
     let mut sd = SecurityDomainSession::new(conn)
-        .map_err(|(e, _)| CliError(format!("Failed to open Security Domain: {e}")))?;
+        .map_err(|(e, _)| format_session_error("Security Domain", e))?;
 
     let key_ref = KeyRef::new(kid, kvn);
     let certs = sd
@@ -250,9 +250,9 @@ fn find_scp11_pk(
 fn find_scp11_pk_with_kid(dev: &dyn YubiKeyDevice, kid: u8) -> Result<(u8, Vec<u8>), CliError> {
     let conn = dev
         .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection for SCP: {e}")))?;
+        .map_err(|e| format_smartcard_connection_error("Security Domain", e))?;
     let mut sd = SecurityDomainSession::new(conn)
-        .map_err(|(e, _)| CliError(format!("Failed to open Security Domain: {e}")))?;
+        .map_err(|(e, _)| format_session_error("Security Domain", e))?;
 
     let keys = sd
         .get_key_information()

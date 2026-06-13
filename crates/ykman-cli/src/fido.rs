@@ -25,7 +25,7 @@ use yubikit::management::Capability;
 
 use crate::cancel;
 use crate::scp::{self, ScpParams};
-use crate::util::CliError;
+use crate::util::{CliError, format_smartcard_connection_error};
 
 const KEEPALIVE_PROCESSING: u8 = 1;
 const KEEPALIVE_UPNEEDED: u8 = 2;
@@ -100,7 +100,7 @@ macro_rules! with_fido_session {
             }
             let conn = $dev
                 .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+                .map_err(|e| format_smartcard_connection_error("FIDO", e))?;
             let ctap = if let Some(ref scp_cfg) = scp_config {
                 if let Some(params) = scp::to_scp_key_params(scp_cfg) {
                     CtapSession::new_with_scp(conn, &params)
@@ -145,13 +145,16 @@ fn format_pin_error<E: std::error::Error + Send + Sync + 'static>(
             if let Ok((retries, _)) = client_pin.get_pin_retries() {
                 CliError(format!("Wrong PIN, {retries} attempt(s) remaining."))
             } else {
-                CliError(format!("{context}: {e}"))
+                CliError("Wrong PIN.".into())
             }
         }
         Some(CtapStatus::PinBlocked) => CliError("PIN is blocked.".into()),
         Some(CtapStatus::PinAuthBlocked) => CliError(
             "PIN authentication is currently blocked. Remove and re-insert the YubiKey.".into(),
         ),
+        Some(CtapStatus::PinPolicyViolation) => {
+            CliError("New PIN doesn't meet complexity requirements.".into())
+        }
         _ => CliError(format!("{context}: {e}")),
     }
 }
@@ -163,7 +166,7 @@ fn require_pin_from_info(
 ) -> Result<Ctap2Pin, CliError> {
     if info.options.get("clientPin") != Some(&true) {
         return Err(CliError(format!(
-            "{feature} requires having a PIN. Set a PIN first."
+            "{feature} requires a PIN, but no PIN is currently set. Use 'ykman fido access change-pin --new-pin PIN' to set one."
         )));
     }
     let pin = match pin {
@@ -507,6 +510,11 @@ pub fn run_access_change_pin(
             println!("PIN has been changed.");
         } else {
             // Set new PIN
+            if pin.is_some() && new_pin.is_none() {
+                return Err(CliError(
+                    "There is no current PIN set. Use --new-pin to set one.".into(),
+                ));
+            }
             let new = match new_pin.or(pin) {
                 Some(p) => Ctap2Pin::new(p).map_err(CliError)?,
                 None => {
@@ -524,7 +532,7 @@ pub fn run_access_change_pin(
             };
             client_pin
                 .set_pin(&new)
-                .map_err(|e| CliError(format!("Failed to set PIN: {e}")))?;
+                .map_err(|e| format_pin_error(&mut client_pin, "Failed to set PIN", &e))?;
             println!("PIN has been set.");
         }
 

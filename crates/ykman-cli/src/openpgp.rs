@@ -6,7 +6,10 @@ use yubikit::openpgp::{KeyRef, KeyStatus, OpenPgpPin, OpenPgpSession, PinPolicy,
 
 use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
 use crate::scp::{self, ScpConfig, ScpParams};
-use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
+use crate::util::{
+    CliError, format_session_error, format_smartcard_connection_error, read_file_or_stdin,
+    write_file_or_stdout,
+};
 
 fn open_session<'a>(
     dev: &'a dyn YubiKeyDevice,
@@ -17,18 +20,17 @@ fn open_session<'a>(
         ScpConfig::None => {
             let conn = dev
                 .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-            OpenPgpSession::new(conn)
-                .map_err(|(e, _)| CliError(format!("Failed to open OpenPGP session: {e}")))
+                .map_err(|e| format_smartcard_connection_error("OpenPGP", e))?;
+            OpenPgpSession::new(conn).map_err(|(e, _)| format_session_error("OpenPGP", e))
         }
         ref config => {
             let conn = dev
                 .open_smartcard()
-                .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+                .map_err(|e| format_smartcard_connection_error("OpenPGP", e))?;
             let params = scp::to_scp_key_params(config)
                 .expect("non-None ScpConfig must convert to ScpKeyParams");
             OpenPgpSession::new_with_scp(conn, &params)
-                .map_err(|(e, _)| CliError(format!("Failed to open OpenPGP session: {e}")))
+                .map_err(|(e, _)| format_session_error("OpenPGP", e))
         }
     }
 }
@@ -183,7 +185,7 @@ pub fn run_reset(
     let safe_reset = || -> Result<(), CliError> {
         let conn = dev
             .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            .map_err(|e| format_smartcard_connection_error("OpenPGP", e))?;
         yubikit::openpgp::safe_reset(conn)
             .map_err(|e| CliError(format!("Failed to reset OpenPGP: {e}")))
     };

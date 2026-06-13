@@ -4,7 +4,7 @@ use yubikit::management::Capability;
 use yubikit::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 
 use crate::scp::{self, ScpParams};
-use crate::util::CliError;
+use crate::util::{CliError, format_smartcard_connection_error};
 
 /// Format a case-1 or case-3 APDU (no LE byte).
 fn format_apdu_no_le(cla: u8, ins: u8, p1: u8, p2: u8, data: &[u8]) -> Vec<u8> {
@@ -157,7 +157,7 @@ pub fn run_apdu(
         // Raw send-apdu mode: send full hex APDUs directly
         let mut conn = dev
             .open_smartcard()
-            .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+            .map_err(|e| format_smartcard_connection_error("APDU", e))?;
         let mut is_first = true;
         for apdu_hex in send_apdu {
             if !is_first {
@@ -186,7 +186,7 @@ pub fn run_apdu(
     // Standard mode with protocol
     let conn = dev
         .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        .map_err(|e| format_smartcard_connection_error("APDU", e))?;
     let mut protocol = SmartCardProtocol::new(conn);
 
     if short {

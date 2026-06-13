@@ -1,6 +1,9 @@
+use std::fmt;
 use std::io::{self, Read, Write};
 
 use ykman::rpc::client::RpcCallError;
+use yubikit::device::DeviceError;
+use yubikit::smartcard::{SmartCardError, Sw};
 
 /// CLI error type for user-facing error messages.
 #[derive(Debug)]
@@ -9,6 +12,51 @@ pub struct CliError(pub String);
 impl From<RpcCallError> for CliError {
     fn from(e: RpcCallError) -> Self {
         CliError(format!("{e}"))
+    }
+}
+
+/// Format a failed CCID connection in a way that points at the selected application.
+pub fn format_smartcard_connection_error(app: &str, e: DeviceError) -> CliError {
+    match e {
+        DeviceError::NoDeviceFound => CliError("No YubiKey detected!".into()),
+        DeviceError::NotYubiKey => CliError("Connected smart card is not a YubiKey.".into()),
+        DeviceError::Cancelled => CliError("Operation cancelled.".into()),
+        DeviceError::WrongDevice => {
+            CliError("Inserted YubiKey does not match the one removed.".into())
+        }
+        DeviceError::SmartCard(SmartCardError::ApplicationNotAvailable) => {
+            CliError(format!("{app} is not available on this YubiKey."))
+        }
+        DeviceError::SmartCard(SmartCardError::Apdu { sw, .. }) => CliError(format!(
+            "{app} is not available on this YubiKey: {}",
+            sw_message(sw)
+        )),
+        DeviceError::Transport(e) => CliError(format!(
+            "Failed to connect to {app} over CCID: {e}. Make sure the CCID interface is enabled and the YubiKey is accessible."
+        )),
+        other => CliError(format!("Failed to connect to {app} over CCID: {other}")),
+    }
+}
+
+/// Format a failed application session open.
+pub fn format_session_error(app: &str, e: impl fmt::Display) -> CliError {
+    CliError(format!("Failed to open {app} session: {e}"))
+}
+
+fn sw_message(sw: u16) -> String {
+    match Sw::from_u16(sw) {
+        Some(Sw::FileNotFound | Sw::AppletSelectFailed) => {
+            format!("application not found (SW=0x{sw:04X})")
+        }
+        Some(Sw::SecurityConditionNotSatisfied) => {
+            format!("security condition not satisfied (SW=0x{sw:04X})")
+        }
+        Some(Sw::ConditionsNotSatisfied) => {
+            format!("conditions of use not satisfied (SW=0x{sw:04X})")
+        }
+        Some(Sw::CommandNotAllowed) => format!("command not allowed (SW=0x{sw:04X})"),
+        Some(Sw::FunctionNotSupported) => format!("function not supported (SW=0x{sw:04X})"),
+        _ => format!("APDU error SW=0x{sw:04X}"),
     }
 }
 

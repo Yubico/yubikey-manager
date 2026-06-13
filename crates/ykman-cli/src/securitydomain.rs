@@ -5,7 +5,10 @@ use yubikit::securitydomain::{KeyRef, ScpKid, SecurityDomainSession};
 
 use crate::cli_enums::CliSdKeyType;
 use crate::scp::{self, ScpConfig, ScpParams};
-use crate::util::{CliError, read_file_or_stdin, write_file_or_stdout};
+use crate::util::{
+    CliError, format_session_error, format_smartcard_connection_error, read_file_or_stdin,
+    write_file_or_stdout,
+};
 
 fn open_session<'a>(
     dev: &'a dyn YubiKeyDevice,
@@ -24,20 +27,18 @@ fn open_session<'a>(
             ref config => {
                 let conn = dev
                     .open_smartcard()
-                    .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+                    .map_err(|e| format_smartcard_connection_error("Security Domain", e))?;
                 let params = scp::to_scp_key_params(config)
                     .expect("non-None ScpConfig must convert to ScpKeyParams");
-                return SecurityDomainSession::new_with_scp(conn, &params).map_err(|(e, _)| {
-                    CliError(format!("Failed to open SD session with SCP: {e}"))
-                });
+                return SecurityDomainSession::new_with_scp(conn, &params)
+                    .map_err(|(e, _)| format_session_error("Security Domain with SCP", e));
             }
         }
     }
     let conn = dev
         .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    SecurityDomainSession::new(conn)
-        .map_err(|(e, _)| CliError(format!("Failed to open Security Domain session: {e}")))
+        .map_err(|e| format_smartcard_connection_error("Security Domain", e))?;
+    SecurityDomainSession::new(conn).map_err(|(e, _)| format_session_error("Security Domain", e))
 }
 
 fn confirm(msg: &str) -> bool {

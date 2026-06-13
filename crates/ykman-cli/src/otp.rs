@@ -16,7 +16,7 @@ use crate::cancel;
 use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliKeyboardLayout, CliOtpSlot, CliPacing};
 use crate::keyboard::{self, MODHEX_CHARS};
 use crate::scp::{self, ScpConfig, ScpParams};
-use crate::util::{self, CliError};
+use crate::util::{self, CliError, format_session_error, format_smartcard_connection_error};
 
 /// Trait for operations that can be run on any [`YubiOtpSession`].
 trait YubiOtpOp<R> {
@@ -54,18 +54,18 @@ fn with_otp_sc<F: YubiOtpOp<R>, R>(
 ) -> Result<R, CliError> {
     let conn = dev
         .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
+        .map_err(|e| format_smartcard_connection_error("OTP", e))?;
     match scp_config {
         ScpConfig::None => {
-            let mut session = YubiOtpSession::new(conn)
-                .map_err(|(e, _)| CliError(format!("Failed to open OTP session: {e}")))?;
+            let mut session =
+                YubiOtpSession::new(conn).map_err(|(e, _)| format_session_error("OTP", e))?;
             f.run(&mut session)
         }
         ref config => {
             let params = scp::to_scp_key_params(config)
                 .expect("non-None ScpConfig must convert to ScpKeyParams");
             let mut session = YubiOtpSession::new_with_scp(conn, &params)
-                .map_err(|(e, _)| CliError(format!("Failed to open OTP session: {e}")))?;
+                .map_err(|(e, _)| format_session_error("OTP", e))?;
             f.run(&mut session)
         }
     }

@@ -6,7 +6,10 @@ use yubikit::device::YubiKeyDevice;
 use yubikit::management::{Capability, DeviceConfig, DeviceFlag, ManagementSession};
 
 use crate::cli_enums::CliCapability;
-use crate::util::{CliError, prompt_new_secret, prompt_secret};
+use crate::util::{
+    CliError, format_session_error, format_smartcard_connection_error, prompt_new_secret,
+    prompt_secret,
+};
 
 /// Open a management session on any available transport and run a generic function.
 ///
@@ -16,22 +19,22 @@ where
     F: ManagementOp<R>,
 {
     if let Ok(conn) = dev.open_smartcard() {
-        let mut session = ManagementSession::new(conn)
-            .map_err(|(e, _)| CliError(format!("Failed to open management session: {e}")))?;
+        let mut session =
+            ManagementSession::new(conn).map_err(|(e, _)| format_session_error("management", e))?;
         return f.run(&mut session);
     }
     if let Ok(conn) = dev.open_otp() {
         let mut session = ManagementSession::new_otp(conn)
-            .map_err(|(e, _)| CliError(format!("Failed to open management session: {e}")))?;
+            .map_err(|(e, _)| format_session_error("management", e))?;
         return f.run(&mut session);
     }
     if let Ok(conn) = dev.open_fido() {
         let mut session = ManagementSession::new_fido(conn)
-            .map_err(|(e, _)| CliError(format!("Failed to open management session: {e}")))?;
+            .map_err(|(e, _)| format_session_error("management", e))?;
         return f.run(&mut session);
     }
     Err(CliError(
-        "Failed to open connection: No SmartCard, OTP, or FIDO connection available.".into(),
+        "Couldn't connect to the YubiKey. Command requires CCID, OTP, or FIDO access to be enabled.".into(),
     ))
 }
 
@@ -80,17 +83,19 @@ fn write_config(
 fn parse_lock_code(hex: &str) -> Result<Vec<u8>, CliError> {
     if hex.len() % 2 != 0 {
         return Err(CliError(
-            "Lock code hex string must have even length.".into(),
+            "Lock code has the wrong format. It must be 32 hexadecimal characters.".into(),
         ));
     }
     let bytes: Result<Vec<u8>, _> = (0..hex.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
         .collect();
-    let bytes = bytes.map_err(|_| CliError("Invalid hex in lock code.".into()))?;
+    let bytes = bytes.map_err(|_| {
+        CliError("Lock code has the wrong format. It must be 32 hexadecimal characters.".into())
+    })?;
     if bytes.len() != 16 {
         return Err(CliError(
-            "Lock code must be exactly 16 bytes (32 hex characters).".into(),
+            "Lock code has the wrong format. It must be 32 hexadecimal characters.".into(),
         ));
     }
     Ok(bytes)
@@ -461,9 +466,9 @@ pub fn run_reset(dev: &dyn YubiKeyDevice, force: bool) -> Result<(), CliError> {
     eprintln!("Resetting YubiKey data...");
     let conn = dev
         .open_smartcard()
-        .map_err(|e| CliError(format!("Failed to open connection: {e}")))?;
-    let mut session = ManagementSession::new(conn)
-        .map_err(|(e, _)| CliError(format!("Failed to open management session: {e}")))?;
+        .map_err(|e| format_smartcard_connection_error("management", e))?;
+    let mut session =
+        ManagementSession::new(conn).map_err(|(e, _)| format_session_error("management", e))?;
     session
         .device_reset()
         .map_err(|e| CliError(format!("Failed to reset device: {e}")))?;
