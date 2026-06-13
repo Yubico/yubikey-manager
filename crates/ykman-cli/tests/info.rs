@@ -2,10 +2,8 @@ mod common;
 
 use common::{device_serial, ykman, ykman_dev};
 use predicates::prelude::*;
-use serial_test::serial;
 
 #[test]
-#[serial]
 fn test_list_devices() {
     require_device_configured!();
     ykman()
@@ -16,7 +14,6 @@ fn test_list_devices() {
 }
 
 #[test]
-#[serial]
 fn test_list_devices_serial() {
     require_device_configured!();
     let serial = match device_serial() {
@@ -31,7 +28,6 @@ fn test_list_devices_serial() {
 }
 
 #[test]
-#[serial]
 fn test_list_readers() {
     require_device_configured!();
     ykman()
@@ -42,7 +38,6 @@ fn test_list_readers() {
 }
 
 #[test]
-#[serial]
 fn test_info() {
     require_device_configured!();
     let assert = ykman_dev()
@@ -56,7 +51,6 @@ fn test_info() {
 }
 
 #[test]
-#[serial]
 fn test_info_check_fips() {
     require_device_configured!();
     ykman_dev()
@@ -66,7 +60,6 @@ fn test_info_check_fips() {
 }
 
 #[test]
-#[serial]
 fn test_diagnose() {
     require_device_configured!();
     ykman().arg("--diagnose").assert().success();

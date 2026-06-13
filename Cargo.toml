@@ -89,7 +89,7 @@ ml-dsa = "0.1"
 ml-kem = "0.3"
 predicates = "3"
 rstest = "0.26"
-serial_test = "3"
+
 tempfile = "3"
 
 # Build

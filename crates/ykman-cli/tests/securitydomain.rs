@@ -2,10 +2,8 @@ mod common;
 
 use common::{DEFAULT_SCP03_KEYS, sd_reset, ykman_dev, ykman_dev_scp};
 use predicates::prelude::*;
-use serial_test::serial;
 
 #[test]
-#[serial]
 fn test_sd_info() {
     require_interface!("CCID");
     ykman_dev()
@@ -16,14 +14,12 @@ fn test_sd_info() {
 }
 
 #[test]
-#[serial]
 fn test_sd_reset() {
     require_interface!("CCID");
     ykman_dev().args(["sd", "reset", "-f"]).assert().success();
 }
 
 #[test]
-#[serial]
 fn test_sd_keys_generate() {
     require_interface!("CCID");
     sd_reset();
@@ -49,7 +45,6 @@ fn test_sd_keys_generate() {
 }
 
 #[test]
-#[serial]
 fn test_sd_keys_import_scp03() {
     require_interface!("CCID");
     sd_reset();
@@ -73,7 +68,6 @@ fn test_sd_keys_import_scp03() {
 }
 
 #[test]
-#[serial]
 fn test_sd_keys_delete() {
     require_interface!("CCID");
     sd_reset();
@@ -103,7 +97,6 @@ fn test_sd_keys_delete() {
 }
 
 #[test]
-#[serial]
 fn test_sd_keys_import_scp11() {
     require_interface!("CCID");
     sd_reset();

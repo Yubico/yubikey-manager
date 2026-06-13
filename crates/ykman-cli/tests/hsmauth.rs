@@ -2,7 +2,6 @@ mod common;
 
 use common::{DEFAULT_HSMAUTH_MANAGEMENT_KEY, fixture_path, hsmauth_reset, ykman_dev};
 use predicates::prelude::*;
-use serial_test::serial;
 
 const NON_DEFAULT_HSMAUTH_MANAGEMENT_KEY: &str = "Ru7!vN2$qL9#zX5%";
 const HSMAUTH_CREDENTIAL_PASSWORD: &str = "T8#qZ2!mV7$rB4n%";
@@ -26,7 +25,6 @@ fn prepare_hsmauth_for_credentials() -> &'static str {
 }
 
 #[test]
-#[serial]
 fn test_hsmauth_info() {
     require_interface!("CCID");
     hsmauth_reset();
@@ -38,7 +36,6 @@ fn test_hsmauth_info() {
 }
 
 #[test]
-#[serial]
 fn test_hsmauth_reset() {
     require_interface!("CCID");
     ykman_dev()
@@ -48,7 +45,6 @@ fn test_hsmauth_reset() {
 }
 
 #[test]
-#[serial]
 fn test_hsmauth_add_symmetric_and_list() {
     require_interface!("CCID");
     let management_key = prepare_hsmauth_for_credentials();
@@ -97,7 +93,6 @@ fn test_hsmauth_add_symmetric_and_list() {
 }
 
 #[test]
-#[serial]
 fn test_hsmauth_add_derive_and_list() {
     require_interface!("CCID");
     let management_key = prepare_hsmauth_for_credentials();
@@ -127,7 +122,6 @@ fn test_hsmauth_add_derive_and_list() {
 }
 
 #[test]
-#[serial]
 fn test_hsmauth_credential_import() {
     require_interface!("CCID");
     let management_key = prepare_hsmauth_for_credentials();
@@ -162,7 +156,6 @@ fn test_hsmauth_credential_import() {
 // test_hsmauth_credential_import_encrypted
 
 #[test]
-#[serial]
 fn test_hsmauth_change_management_password() {
     require_interface!("CCID");
     hsmauth_reset();

@@ -5,7 +5,6 @@ use common::{
     NON_DEFAULT_PUK, fixture_path, piv_reset, ykman_dev, ykman_dev_tty,
 };
 use predicates::prelude::*;
-use serial_test::serial;
 
 struct PivResetGuard;
 
@@ -23,7 +22,6 @@ impl Drop for PivResetGuard {
 }
 
 #[test]
-#[serial]
 fn test_piv_info() {
     require_interface!("CCID");
     piv_reset();
@@ -34,14 +32,12 @@ fn test_piv_info() {
 }
 
 #[test]
-#[serial]
 fn test_piv_reset() {
     require_interface!("CCID");
     ykman_dev().args(["piv", "reset", "-f"]).assert().success();
 }
 
 #[test]
-#[serial]
 fn test_piv_change_pin() {
     require_interface!("CCID");
     let _guard = PivResetGuard::reset();
@@ -61,7 +57,6 @@ fn test_piv_change_pin() {
 }
 
 #[test]
-#[serial]
 fn test_piv_change_pin_prompts_for_pin_and_new_pin() {
     require_interface!("CCID");
     let _guard = PivResetGuard::reset();
@@ -81,7 +76,6 @@ fn test_piv_change_pin_prompts_for_pin_and_new_pin() {
 }
 
 #[test]
-#[serial]
 fn test_piv_change_puk() {
     require_interface!("CCID");
     let _guard = PivResetGuard::reset();
@@ -101,7 +95,6 @@ fn test_piv_change_puk() {
 }
 
 #[test]
-#[serial]
 fn test_piv_change_management_key() {
     require_interface!("CCID");
     piv_reset();
@@ -138,7 +131,6 @@ fn test_piv_change_management_key() {
 }
 
 #[test]
-#[serial]
 fn test_piv_generate_self_signed() {
     require_interface!("CCID");
     piv_reset();
@@ -185,7 +177,6 @@ fn test_piv_generate_self_signed() {
 }
 
 #[test]
-#[serial]
 fn test_piv_export_certificate() {
     require_interface!("CCID");
     piv_reset();
@@ -231,7 +222,6 @@ fn test_piv_export_certificate() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_ec() {
     require_interface!("CCID");
     piv_reset();
@@ -259,7 +249,6 @@ fn test_piv_import_key_ec() {
 // in-process. test_piv_import_key_encrypted would test this when supported.
 
 #[test]
-#[serial]
 fn test_piv_import_key_rsa() {
     require_interface!("CCID");
     piv_reset();
@@ -284,7 +273,6 @@ fn test_piv_import_key_rsa() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_certificate() {
     require_interface!("CCID");
     piv_reset();
@@ -315,7 +303,6 @@ fn test_piv_import_certificate() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_certificate_der() {
     require_interface!("CCID");
     piv_reset();
@@ -340,7 +327,6 @@ fn test_piv_import_certificate_der() {
 }
 
 #[test]
-#[serial]
 fn test_piv_delete_certificate() {
     require_interface!("CCID");
     piv_reset();
@@ -396,7 +382,6 @@ fn test_piv_delete_certificate() {
 }
 
 #[test]
-#[serial]
 fn test_piv_export_key() {
     require_interface!("CCID");
     piv_reset();
@@ -444,7 +429,6 @@ fn test_piv_export_key() {
 }
 
 #[test]
-#[serial]
 fn test_piv_export_key_der() {
     require_interface!("CCID");
     piv_reset();
@@ -492,7 +476,6 @@ fn test_piv_export_key_der() {
 }
 
 #[test]
-#[serial]
 fn test_piv_export_key_verify() {
     require_interface!("CCID");
     piv_reset();
@@ -548,7 +531,6 @@ fn test_piv_export_key_verify() {
 }
 
 #[test]
-#[serial]
 fn test_piv_key_move() {
     require_interface!("CCID");
     piv_reset();
@@ -589,7 +571,6 @@ fn test_piv_key_move() {
 }
 
 #[test]
-#[serial]
 fn test_piv_objects_generate_chuid() {
     require_interface!("CCID");
     piv_reset();
@@ -612,7 +593,6 @@ fn test_piv_objects_generate_chuid() {
 }
 
 #[test]
-#[serial]
 fn test_piv_objects_generate_ccc() {
     require_interface!("CCID");
     piv_reset();
@@ -635,7 +615,6 @@ fn test_piv_objects_generate_ccc() {
 }
 
 #[test]
-#[serial]
 fn test_piv_objects_export_chuid() {
     require_interface!("CCID");
     piv_reset();
@@ -670,7 +649,6 @@ fn test_piv_objects_export_chuid() {
 }
 
 #[test]
-#[serial]
 fn test_piv_unblock_pin() {
     require_interface!("CCID");
     let _guard = PivResetGuard::reset();
@@ -706,7 +684,6 @@ fn test_piv_unblock_pin() {
 }
 
 #[test]
-#[serial]
 fn test_piv_generate_rsa2048() {
     require_interface!("CCID");
     piv_reset();
@@ -733,7 +710,6 @@ fn test_piv_generate_rsa2048() {
 }
 
 #[test]
-#[serial]
 fn test_piv_generate_eccp384() {
     require_interface!("CCID");
     piv_reset();
@@ -760,7 +736,6 @@ fn test_piv_generate_eccp384() {
 }
 
 #[test]
-#[serial]
 fn test_piv_key_pin_policy() {
     require_interface!("CCID");
     piv_reset();
@@ -787,7 +762,6 @@ fn test_piv_key_pin_policy() {
 }
 
 #[test]
-#[serial]
 fn test_piv_key_touch_policy() {
     require_interface!("CCID");
     piv_reset();
@@ -816,7 +790,6 @@ fn test_piv_key_touch_policy() {
 // ── key import (additional formats) ──────────────────────────────────
 
 #[test]
-#[serial]
 fn test_piv_import_key_ec_der() {
     require_interface!("CCID");
     piv_reset();
@@ -841,7 +814,6 @@ fn test_piv_import_key_ec_der() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_ec_p384() {
     require_interface!("CCID");
     piv_reset();
@@ -866,7 +838,6 @@ fn test_piv_import_key_ec_p384() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_ec_p384_der() {
     require_interface!("CCID");
     piv_reset();
@@ -891,7 +862,6 @@ fn test_piv_import_key_ec_p384_der() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_rsa_der() {
     require_interface!("CCID");
     piv_reset();
@@ -916,7 +886,6 @@ fn test_piv_import_key_rsa_der() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_ec_pkcs12() {
     require_interface!("CCID");
     piv_reset();
@@ -943,7 +912,6 @@ fn test_piv_import_key_ec_pkcs12() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_ec_pkcs12_encrypted() {
     require_interface!("CCID");
     piv_reset();
@@ -970,7 +938,6 @@ fn test_piv_import_key_ec_pkcs12_encrypted() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_rsa_pkcs12() {
     require_interface!("CCID");
     piv_reset();
@@ -997,7 +964,6 @@ fn test_piv_import_key_rsa_pkcs12() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_rsa_pkcs12_encrypted() {
     require_interface!("CCID");
     piv_reset();
@@ -1024,7 +990,6 @@ fn test_piv_import_key_rsa_pkcs12_encrypted() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_ec_p384_pkcs12() {
     require_interface!("CCID");
     piv_reset();
@@ -1051,7 +1016,6 @@ fn test_piv_import_key_ec_p384_pkcs12() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_ec_p256_pkcs12_modern() {
     require_interface!("CCID");
     piv_reset();
@@ -1080,7 +1044,6 @@ fn test_piv_import_key_ec_p256_pkcs12_modern() {
 // ── certificate import (additional formats) ──────────────────────────
 
 #[test]
-#[serial]
 fn test_piv_import_certificate_rsa_pem() {
     require_interface!("CCID");
     piv_reset();
@@ -1105,7 +1068,6 @@ fn test_piv_import_certificate_rsa_pem() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_certificate_rsa_der() {
     require_interface!("CCID");
     piv_reset();
@@ -1130,7 +1092,6 @@ fn test_piv_import_certificate_rsa_der() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_certificate_ec_pkcs12() {
     require_interface!("CCID");
     piv_reset();
@@ -1164,7 +1125,6 @@ fn test_piv_import_certificate_ec_pkcs12() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_certificate_ec_pkcs12_encrypted() {
     require_interface!("CCID");
     piv_reset();
@@ -1191,7 +1151,6 @@ fn test_piv_import_certificate_ec_pkcs12_encrypted() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_certificate_rsa_pkcs12() {
     require_interface!("CCID");
     piv_reset();
@@ -1218,7 +1177,6 @@ fn test_piv_import_certificate_rsa_pkcs12() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_certificate_rsa_pkcs12_encrypted() {
     require_interface!("CCID");
     piv_reset();
@@ -1245,7 +1203,6 @@ fn test_piv_import_certificate_rsa_pkcs12_encrypted() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_certificate_ec_pkcs12_modern() {
     require_interface!("CCID");
     piv_reset();
@@ -1272,7 +1229,6 @@ fn test_piv_import_certificate_ec_pkcs12_modern() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_and_cert_pkcs12_verify() {
     require_interface!("CCID");
     piv_reset();
@@ -1320,7 +1276,6 @@ fn test_piv_import_key_and_cert_pkcs12_verify() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_ec_encrypted_pem() {
     require_interface!("CCID");
     piv_reset();
@@ -1347,7 +1302,6 @@ fn test_piv_import_key_ec_encrypted_pem() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_key_rsa_encrypted_pem() {
     require_interface!("CCID");
     piv_reset();
@@ -1374,7 +1328,6 @@ fn test_piv_import_key_rsa_encrypted_pem() {
 }
 
 #[test]
-#[serial]
 fn test_piv_import_pkcs12_wrong_password() {
     require_interface!("CCID");
     piv_reset();

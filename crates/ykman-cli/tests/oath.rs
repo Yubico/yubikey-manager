@@ -2,7 +2,6 @@ mod common;
 
 use common::{OATH_PASSWORD, fixture_path, is_fips, oath_reset, ykman_dev, ykman_dev_tty};
 use predicates::prelude::*;
-use serial_test::serial;
 
 const OATH_ACCOUNT_SECRET: &str = "KE4CG4SUGIQW2VRXER5EYNJFNY";
 
@@ -26,7 +25,6 @@ fn add_password<'a>(args: &mut Vec<&'a str>, password: Option<&'a str>) {
 }
 
 #[test]
-#[serial]
 fn test_oath_info() {
     require_interface!("CCID");
     oath_reset();
@@ -38,14 +36,12 @@ fn test_oath_info() {
 }
 
 #[test]
-#[serial]
 fn test_oath_reset() {
     require_interface!("CCID");
     ykman_dev().args(["oath", "reset", "-f"]).assert().success();
 }
 
 #[test]
-#[serial]
 fn test_oath_add_and_list() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();
@@ -93,7 +89,6 @@ fn test_oath_add_and_list() {
 }
 
 #[test]
-#[serial]
 fn test_oath_add_totp_and_code() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();
@@ -127,7 +122,6 @@ fn test_oath_add_totp_and_code() {
 }
 
 #[test]
-#[serial]
 fn test_oath_add_hotp_and_code() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();
@@ -161,7 +155,6 @@ fn test_oath_add_hotp_and_code() {
 }
 
 #[test]
-#[serial]
 fn test_oath_rename() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();
@@ -204,7 +197,6 @@ fn test_oath_rename() {
 }
 
 #[test]
-#[serial]
 fn test_oath_password_set_and_clear() {
     require_interface!("CCID");
     oath_reset();
@@ -239,7 +231,6 @@ fn test_oath_password_set_and_clear() {
 }
 
 #[test]
-#[serial]
 fn test_oath_password_change_prompts_for_new_password() {
     require_interface!("CCID");
     oath_reset();
@@ -276,7 +267,6 @@ fn test_oath_password_change_prompts_for_new_password() {
 }
 
 #[test]
-#[serial]
 fn test_oath_add_totp_sha256_7digits() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();
@@ -311,7 +301,6 @@ fn test_oath_add_totp_sha256_7digits() {
 }
 
 #[test]
-#[serial]
 fn test_oath_add_with_issuer() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();
@@ -343,7 +332,6 @@ fn test_oath_add_with_issuer() {
 }
 
 #[test]
-#[serial]
 fn test_oath_add_totp_touch() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();
@@ -375,7 +363,6 @@ fn test_oath_add_totp_touch() {
 }
 
 #[test]
-#[serial]
 fn test_oath_import_pskc() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();
@@ -397,7 +384,6 @@ fn test_oath_import_pskc() {
 }
 
 #[test]
-#[serial]
 fn test_oath_import_pskc_multi() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();
@@ -419,7 +405,6 @@ fn test_oath_import_pskc_multi() {
 }
 
 #[test]
-#[serial]
 fn test_oath_list_oath_type() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();
@@ -449,7 +434,6 @@ fn test_oath_list_oath_type() {
 }
 
 #[test]
-#[serial]
 fn test_oath_accounts_code_totp_single() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();
@@ -482,7 +466,6 @@ fn test_oath_accounts_code_totp_single() {
 // ── PSKC import (additional formats) ─────────────────────────────────
 
 #[test]
-#[serial]
 fn test_oath_import_pskc_hotp() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();
@@ -513,7 +496,6 @@ fn test_oath_import_pskc_hotp() {
 }
 
 #[test]
-#[serial]
 fn test_oath_import_pskc_sha256() {
     require_interface!("CCID");
     let password = prepare_oath_for_credentials();

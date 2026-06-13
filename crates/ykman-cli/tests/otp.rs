@@ -2,10 +2,8 @@ mod common;
 
 use common::{otp_delete_slot2, ykman_dev};
 use predicates::prelude::*;
-use serial_test::serial;
 
 #[test]
-#[serial]
 fn test_otp_info() {
     require_interface!("OTP");
     ykman_dev()
@@ -16,7 +14,6 @@ fn test_otp_info() {
 }
 
 #[test]
-#[serial]
 fn test_otp_static() {
     require_interface!("OTP");
     otp_delete_slot2();
@@ -39,7 +36,6 @@ fn test_otp_static() {
 }
 
 #[test]
-#[serial]
 fn test_otp_chalresp() {
     require_interface!("OTP");
     otp_delete_slot2();
@@ -62,7 +58,6 @@ fn test_otp_chalresp() {
 }
 
 #[test]
-#[serial]
 fn test_otp_swap() {
     require_interface!("OTP");
     otp_delete_slot2();
@@ -83,7 +78,6 @@ fn test_otp_swap() {
 }
 
 #[test]
-#[serial]
 fn test_otp_hotp() {
     require_interface!("OTP");
     otp_delete_slot2();
@@ -108,7 +102,6 @@ fn test_otp_hotp() {
 }
 
 #[test]
-#[serial]
 fn test_otp_yubiotp() {
     require_interface!("OTP");
     otp_delete_slot2();
@@ -140,7 +133,6 @@ fn test_otp_yubiotp() {
 }
 
 #[test]
-#[serial]
 fn test_otp_calculate_standalone() {
     require_interface!("OTP");
     otp_delete_slot2();
@@ -165,7 +157,6 @@ fn test_otp_calculate_standalone() {
 }
 
 #[test]
-#[serial]
 fn test_otp_calculate_totp_8digits() {
     require_interface!("OTP");
     otp_delete_slot2();
@@ -188,7 +179,6 @@ fn test_otp_calculate_totp_8digits() {
 }
 
 #[test]
-#[serial]
 fn test_otp_delete() {
     require_interface!("OTP");
     otp_delete_slot2();
@@ -219,7 +209,6 @@ fn test_otp_delete() {
 }
 
 #[test]
-#[serial]
 fn test_otp_static_length() {
     require_interface!("OTP");
     otp_delete_slot2();
@@ -242,7 +231,6 @@ fn test_otp_static_length() {
 }
 
 #[test]
-#[serial]
 fn test_otp_hotp_8digits() {
     require_interface!("OTP");
     otp_delete_slot2();
@@ -269,7 +257,6 @@ fn test_otp_hotp_8digits() {
 }
 
 #[test]
-#[serial]
 fn test_otp_settings_enter() {
     require_interface!("OTP");
     otp_delete_slot2();
@@ -293,7 +280,6 @@ fn test_otp_settings_enter() {
 }
 
 #[test]
-#[serial]
 fn test_otp_ndef() {
     require_interface!("OTP");
     otp_delete_slot2();

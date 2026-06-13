@@ -3,7 +3,6 @@ mod common;
 use assert_cmd::Command;
 use common::{skip_if_fips, ykman_dev, ykman_dev_tty};
 use predicates::prelude::*;
-use serial_test::serial;
 use std::thread;
 use std::time::Duration;
 
@@ -105,7 +104,6 @@ fn test_config_set_lock_code_conflicts() {
 }
 
 #[test]
-#[serial]
 fn test_config_usb_list() {
     require_device_configured!();
     ykman_dev()
@@ -116,7 +114,6 @@ fn test_config_usb_list() {
 }
 
 #[test]
-#[serial]
 fn test_config_nfc_list() {
     require_device_configured!();
     let output = ykman_dev()
@@ -131,7 +128,6 @@ fn test_config_nfc_list() {
 }
 
 #[test]
-#[serial]
 fn test_config_usb_disable_enable_hsmauth() {
     require_interface!("CCID");
     let _ = ykman_dev()
@@ -165,7 +161,6 @@ fn test_config_usb_disable_enable_hsmauth() {
 }
 
 #[test]
-#[serial]
 fn test_config_nfc_enable_disable() {
     require_interface!("CCID");
     // Skip if key has no NFC support
@@ -208,7 +203,6 @@ fn test_config_nfc_enable_disable() {
 }
 
 #[test]
-#[serial]
 fn test_config_usb_enable_all() {
     require_interface!("CCID");
     // First disable an app so --enable-all has something to do
@@ -233,7 +227,6 @@ fn test_config_usb_enable_all() {
 }
 
 #[test]
-#[serial]
 fn test_config_nfc_disable_all_enable_all() {
     require_interface!("CCID");
     // NFC disable-all is safe — USB access can always recover.
@@ -258,7 +251,6 @@ fn test_config_nfc_disable_all_enable_all() {
 }
 
 #[test]
-#[serial]
 fn test_config_set_lock_code() {
     require_interface!("CCID");
     let lock_code = TEST_LOCK_CODE;
@@ -277,7 +269,6 @@ fn test_config_set_lock_code() {
 }
 
 #[test]
-#[serial]
 fn test_config_set_lock_code_prompts_for_current_code() {
     require_interface!("CCID");
     if configuration_is_locked() {
@@ -301,7 +292,6 @@ fn test_config_set_lock_code_prompts_for_current_code() {
 }
 
 #[test]
-#[serial]
 fn test_config_usb_lock_code_prompt_and_explicit_code() {
     require_interface!("CCID");
     if configuration_is_locked() {
@@ -356,7 +346,6 @@ fn test_config_usb_lock_code_prompt_and_explicit_code() {
 }
 
 #[test]
-#[serial]
 fn test_config_nfc_lock_code_prompt_and_explicit_code() {
     require_interface!("CCID");
     if skip_if_fips("mutable NFC configuration lock-code prompt test") {

@@ -2,7 +2,6 @@ mod common;
 
 use common::{device_serial, device_without_serial, ykman_dev};
 use predicates::prelude::*;
-use serial_test::serial;
 use std::time::Duration;
 use yubikit::core::Transport;
 use yubikit::ctap::CtapSession;
@@ -227,7 +226,6 @@ fn fido_pin_guard() -> FidoPinGuard {
 // ── info ──────────────────────────────────────────────────────────────
 
 #[test]
-#[serial]
 fn test_fido_info() {
     require_interface!("FIDO");
     ykman_dev()
@@ -244,7 +242,6 @@ fn test_fido_info() {
 // ── access ────────────────────────────────────────────────────────────
 
 #[test]
-#[serial]
 fn test_fido_verify_pin() {
     require_interface!("FIDO");
     require_pin_set();
@@ -256,7 +253,6 @@ fn test_fido_verify_pin() {
 }
 
 #[test]
-#[serial]
 fn test_fido_verify_pin_wrong() {
     require_interface!("FIDO");
     require_pin_set();
@@ -271,7 +267,6 @@ fn test_fido_verify_pin_wrong() {
 }
 
 #[test]
-#[serial]
 fn test_fido_change_pin() {
     require_interface!("FIDO");
     require_pin_set();
@@ -320,7 +315,6 @@ fn test_fido_change_pin() {
 }
 
 #[test]
-#[serial]
 fn test_fido_set_pin_too_short() {
     require_interface!("FIDO");
     require_pin_set();
@@ -341,7 +335,6 @@ fn test_fido_set_pin_too_short() {
 // ── credentials ───────────────────────────────────────────────────────
 
 #[test]
-#[serial]
 fn test_fido_credentials_list_empty() {
     require_interface!("FIDO");
     require_pin_set();
@@ -355,7 +348,6 @@ fn test_fido_credentials_list_empty() {
 // ── config ────────────────────────────────────────────────────────────
 
 #[test]
-#[serial]
 fn test_fido_config_toggle_always_uv() {
     require_interface!("FIDO");
     require_pin_set();
@@ -408,7 +400,6 @@ fn test_fido_config_toggle_always_uv() {
 // ── access (advanced, requires setMinPINLength) ───────────────────────
 
 #[test]
-#[serial]
 fn test_fido_access_set_min_pin_length() {
     require_interface!("FIDO");
     require_pin_set();
@@ -460,7 +451,6 @@ fn test_fido_access_set_min_pin_length() {
 }
 
 #[test]
-#[serial]
 fn test_fido_access_force_change() {
     require_interface!("FIDO");
     require_pin_set();

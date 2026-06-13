@@ -5,7 +5,6 @@ use common::{
     NON_DEFAULT_OPENPGP_PIN, fixture_path, openpgp_reset, ykman_dev,
 };
 use predicates::prelude::*;
-use serial_test::serial;
 
 struct OpenPgpResetGuard;
 
@@ -23,7 +22,6 @@ impl Drop for OpenPgpResetGuard {
 }
 
 #[test]
-#[serial]
 fn test_openpgp_info() {
     require_interface!("CCID");
     openpgp_reset();
@@ -38,7 +36,6 @@ fn test_openpgp_info() {
 }
 
 #[test]
-#[serial]
 fn test_openpgp_reset() {
     require_interface!("CCID");
     ykman_dev()
@@ -48,7 +45,6 @@ fn test_openpgp_reset() {
 }
 
 #[test]
-#[serial]
 fn test_openpgp_change_pin() {
     require_interface!("CCID");
     let _guard = OpenPgpResetGuard::reset();
@@ -68,7 +64,6 @@ fn test_openpgp_change_pin() {
 }
 
 #[test]
-#[serial]
 fn test_openpgp_change_admin_pin() {
     require_interface!("CCID");
     let _guard = OpenPgpResetGuard::reset();
@@ -88,7 +83,6 @@ fn test_openpgp_change_admin_pin() {
 }
 
 #[test]
-#[serial]
 fn test_openpgp_set_pin_retries() {
     require_interface!("CCID");
     openpgp_reset();
@@ -114,7 +108,6 @@ fn test_openpgp_set_pin_retries() {
 }
 
 #[test]
-#[serial]
 fn test_openpgp_keys_set_touch() {
     require_interface!("CCID");
     openpgp_reset();
@@ -156,7 +149,6 @@ fn test_openpgp_keys_set_touch() {
 // test_openpgp_keys_import would test this when available.
 
 #[test]
-#[serial]
 fn test_openpgp_certificates_import_export() {
     require_interface!("CCID");
     openpgp_reset();
@@ -186,7 +178,6 @@ fn test_openpgp_certificates_import_export() {
 }
 
 #[test]
-#[serial]
 fn test_openpgp_certificates_delete() {
     require_interface!("CCID");
     openpgp_reset();
@@ -221,7 +212,6 @@ fn test_openpgp_certificates_delete() {
 }
 
 #[test]
-#[serial]
 fn test_openpgp_change_reset_code() {
     require_interface!("CCID");
     openpgp_reset();
