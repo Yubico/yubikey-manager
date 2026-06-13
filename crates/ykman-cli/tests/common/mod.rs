@@ -65,7 +65,7 @@ pub const DEFAULT_OPENPGP_ADMIN_PIN: &str = "12345678";
 pub const NON_DEFAULT_OPENPGP_ADMIN_PIN: &str = "12345670";
 
 // OATH
-pub const OATH_PASSWORD: &str = "aaaa";
+pub const OATH_PASSWORD: &str = "N9!aR4#sT7$vX2%q";
 
 // HSMAuth
 pub const DEFAULT_HSMAUTH_MANAGEMENT_KEY: &str = "00000000000000000000000000000000";
