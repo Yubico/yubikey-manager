@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 
+use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
 use yubikit::securitydomain::{KeyRef, ScpKid, SecurityDomainSession};
 
@@ -138,6 +139,14 @@ pub fn run_reset(
     scp_params: &ScpParams,
     force: bool,
 ) -> Result<(), CliError> {
+    if dev.transport() == Transport::Nfc && dev.info().is_fips {
+        return Err(CliError(
+            "Security Domain reset is not supported for FIPS YubiKeys over NFC. \
+             Connect the YubiKey over USB and try again."
+                .into(),
+        ));
+    }
+
     if !force {
         eprintln!("WARNING! This will reset all Security Domain data.");
         if !confirm("Proceed?") {
