@@ -7,8 +7,22 @@ use common::{
 use predicates::prelude::*;
 use serial_test::serial;
 
+struct OpenPgpResetGuard;
+
+impl OpenPgpResetGuard {
+    fn reset() -> Self {
+        openpgp_reset();
+        Self
+    }
+}
+
+impl Drop for OpenPgpResetGuard {
+    fn drop(&mut self) {
+        openpgp_reset();
+    }
+}
+
 #[test]
-#[ignore]
 #[serial]
 fn test_openpgp_info() {
     require_interface!("CCID");
@@ -24,7 +38,6 @@ fn test_openpgp_info() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_openpgp_reset() {
     require_interface!("CCID");
@@ -35,11 +48,10 @@ fn test_openpgp_reset() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_openpgp_change_pin() {
     require_interface!("CCID");
-    openpgp_reset();
+    let _guard = OpenPgpResetGuard::reset();
 
     ykman_dev()
         .args([
@@ -53,29 +65,13 @@ fn test_openpgp_change_pin() {
         ])
         .assert()
         .success();
-
-    ykman_dev()
-        .args([
-            "openpgp",
-            "access",
-            "change-pin",
-            "--pin",
-            NON_DEFAULT_OPENPGP_PIN,
-            "--new-pin",
-            DEFAULT_OPENPGP_PIN,
-        ])
-        .assert()
-        .success();
-
-    openpgp_reset();
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_openpgp_change_admin_pin() {
     require_interface!("CCID");
-    openpgp_reset();
+    let _guard = OpenPgpResetGuard::reset();
 
     ykman_dev()
         .args([
@@ -89,25 +85,9 @@ fn test_openpgp_change_admin_pin() {
         ])
         .assert()
         .success();
-
-    ykman_dev()
-        .args([
-            "openpgp",
-            "access",
-            "change-admin-pin",
-            "--admin-pin",
-            NON_DEFAULT_OPENPGP_ADMIN_PIN,
-            "--new-admin-pin",
-            DEFAULT_OPENPGP_ADMIN_PIN,
-        ])
-        .assert()
-        .success();
-
-    openpgp_reset();
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_openpgp_set_pin_retries() {
     require_interface!("CCID");
@@ -134,7 +114,6 @@ fn test_openpgp_set_pin_retries() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_openpgp_keys_set_touch() {
     require_interface!("CCID");
@@ -177,7 +156,6 @@ fn test_openpgp_keys_set_touch() {
 // test_openpgp_keys_import would test this when available.
 
 #[test]
-#[ignore]
 #[serial]
 fn test_openpgp_certificates_import_export() {
     require_interface!("CCID");
@@ -208,7 +186,6 @@ fn test_openpgp_certificates_import_export() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_openpgp_certificates_delete() {
     require_interface!("CCID");
@@ -244,7 +221,6 @@ fn test_openpgp_certificates_delete() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_openpgp_change_reset_code() {
     require_interface!("CCID");

@@ -105,9 +105,9 @@ fn test_config_set_lock_code_conflicts() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_config_usb_list() {
+    require_device_configured!();
     ykman_dev()
         .args(["config", "usb", "--list"])
         .assert()
@@ -116,9 +116,9 @@ fn test_config_usb_list() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_config_nfc_list() {
+    require_device_configured!();
     let output = ykman_dev()
         .args(["config", "nfc", "--list"])
         .output()
@@ -131,7 +131,6 @@ fn test_config_nfc_list() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_config_usb_disable_enable_hsmauth() {
     require_interface!("CCID");
@@ -166,7 +165,6 @@ fn test_config_usb_disable_enable_hsmauth() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_config_nfc_enable_disable() {
     require_interface!("CCID");
@@ -210,7 +208,6 @@ fn test_config_nfc_enable_disable() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_config_usb_enable_all() {
     require_interface!("CCID");
@@ -236,7 +233,6 @@ fn test_config_usb_enable_all() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_config_nfc_disable_all_enable_all() {
     require_interface!("CCID");
@@ -262,7 +258,6 @@ fn test_config_nfc_disable_all_enable_all() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_config_set_lock_code() {
     require_interface!("CCID");
@@ -282,7 +277,6 @@ fn test_config_set_lock_code() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_config_set_lock_code_prompts_for_current_code() {
     require_interface!("CCID");
@@ -307,7 +301,6 @@ fn test_config_set_lock_code_prompts_for_current_code() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_config_usb_lock_code_prompt_and_explicit_code() {
     require_interface!("CCID");
@@ -363,7 +356,6 @@ fn test_config_usb_lock_code_prompt_and_explicit_code() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_config_nfc_lock_code_prompt_and_explicit_code() {
     require_interface!("CCID");

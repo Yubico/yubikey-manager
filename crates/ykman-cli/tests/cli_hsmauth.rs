@@ -26,7 +26,6 @@ fn prepare_hsmauth_for_credentials() -> &'static str {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_hsmauth_info() {
     require_interface!("CCID");
@@ -39,7 +38,6 @@ fn test_hsmauth_info() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_hsmauth_reset() {
     require_interface!("CCID");
@@ -50,7 +48,6 @@ fn test_hsmauth_reset() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_hsmauth_add_symmetric_and_list() {
     require_interface!("CCID");
@@ -100,7 +97,6 @@ fn test_hsmauth_add_symmetric_and_list() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_hsmauth_add_derive_and_list() {
     require_interface!("CCID");
@@ -131,7 +127,6 @@ fn test_hsmauth_add_derive_and_list() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_hsmauth_credential_import() {
     require_interface!("CCID");
@@ -167,7 +162,6 @@ fn test_hsmauth_credential_import() {
 // test_hsmauth_credential_import_encrypted
 
 #[test]
-#[ignore]
 #[serial]
 fn test_hsmauth_change_management_password() {
     require_interface!("CCID");

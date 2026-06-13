@@ -282,6 +282,17 @@ macro_rules! require_interface {
     };
 }
 
+/// Skip the test if no device is configured.
+#[macro_export]
+macro_rules! require_device_configured {
+    () => {
+        if !common::device_configured() {
+            eprintln!("SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
+            return;
+        }
+    };
+}
+
 /// Reset PIV to factory defaults (force, no prompt).
 pub fn piv_reset() {
     ykman_dev()

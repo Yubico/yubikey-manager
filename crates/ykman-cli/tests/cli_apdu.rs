@@ -5,7 +5,6 @@ use predicates::prelude::*;
 use serial_test::serial;
 
 #[test]
-#[ignore]
 #[serial]
 fn test_apdu_select_oath() {
     require_interface!("CCID");
@@ -17,7 +16,6 @@ fn test_apdu_select_oath() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_apdu_hex_format() {
     require_interface!("CCID");
@@ -30,7 +28,6 @@ fn test_apdu_hex_format() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_apdu_send_flag() {
     require_interface!("CCID");
@@ -42,7 +39,6 @@ fn test_apdu_send_flag() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_apdu_expected_sw() {
     require_interface!("CCID");

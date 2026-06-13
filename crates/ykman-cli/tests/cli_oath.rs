@@ -26,7 +26,6 @@ fn add_password<'a>(args: &mut Vec<&'a str>, password: Option<&'a str>) {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_info() {
     require_interface!("CCID");
@@ -39,7 +38,6 @@ fn test_oath_info() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_reset() {
     require_interface!("CCID");
@@ -47,7 +45,6 @@ fn test_oath_reset() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_add_and_list() {
     require_interface!("CCID");
@@ -96,7 +93,6 @@ fn test_oath_add_and_list() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_add_totp_and_code() {
     require_interface!("CCID");
@@ -131,7 +127,6 @@ fn test_oath_add_totp_and_code() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_add_hotp_and_code() {
     require_interface!("CCID");
@@ -166,7 +161,6 @@ fn test_oath_add_hotp_and_code() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_rename() {
     require_interface!("CCID");
@@ -210,7 +204,6 @@ fn test_oath_rename() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_password_set_and_clear() {
     require_interface!("CCID");
@@ -246,7 +239,6 @@ fn test_oath_password_set_and_clear() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_password_change_prompts_for_new_password() {
     require_interface!("CCID");
@@ -284,7 +276,6 @@ fn test_oath_password_change_prompts_for_new_password() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_add_totp_sha256_7digits() {
     require_interface!("CCID");
@@ -320,7 +311,6 @@ fn test_oath_add_totp_sha256_7digits() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_add_with_issuer() {
     require_interface!("CCID");
@@ -353,7 +343,6 @@ fn test_oath_add_with_issuer() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_add_totp_touch() {
     require_interface!("CCID");
@@ -386,7 +375,6 @@ fn test_oath_add_totp_touch() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_import_pskc() {
     require_interface!("CCID");
@@ -409,7 +397,6 @@ fn test_oath_import_pskc() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_import_pskc_multi() {
     require_interface!("CCID");
@@ -432,7 +419,6 @@ fn test_oath_import_pskc_multi() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_list_oath_type() {
     require_interface!("CCID");
@@ -463,7 +449,6 @@ fn test_oath_list_oath_type() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_accounts_code_totp_single() {
     require_interface!("CCID");
@@ -497,7 +482,6 @@ fn test_oath_accounts_code_totp_single() {
 // ── PSKC import (additional formats) ─────────────────────────────────
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_import_pskc_hotp() {
     require_interface!("CCID");
@@ -529,7 +513,6 @@ fn test_oath_import_pskc_hotp() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_oath_import_pskc_sha256() {
     require_interface!("CCID");

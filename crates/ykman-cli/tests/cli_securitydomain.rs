@@ -5,7 +5,6 @@ use predicates::prelude::*;
 use serial_test::serial;
 
 #[test]
-#[ignore]
 #[serial]
 fn test_sd_info() {
     require_interface!("CCID");
@@ -17,7 +16,6 @@ fn test_sd_info() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_sd_reset() {
     require_interface!("CCID");
@@ -25,7 +23,6 @@ fn test_sd_reset() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_sd_keys_generate() {
     require_interface!("CCID");
@@ -52,7 +49,6 @@ fn test_sd_keys_generate() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_sd_keys_import_scp03() {
     require_interface!("CCID");
@@ -77,7 +73,6 @@ fn test_sd_keys_import_scp03() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_sd_keys_delete() {
     require_interface!("CCID");
@@ -108,7 +103,6 @@ fn test_sd_keys_delete() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_sd_keys_import_scp11() {
     require_interface!("CCID");

@@ -5,7 +5,6 @@ use predicates::prelude::*;
 use serial_test::serial;
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_info() {
     require_interface!("OTP");
@@ -17,7 +16,6 @@ fn test_otp_info() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_static() {
     require_interface!("OTP");
@@ -41,7 +39,6 @@ fn test_otp_static() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_chalresp() {
     require_interface!("OTP");
@@ -65,7 +62,6 @@ fn test_otp_chalresp() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_swap() {
     require_interface!("OTP");
@@ -87,7 +83,6 @@ fn test_otp_swap() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_hotp() {
     require_interface!("OTP");
@@ -113,7 +108,6 @@ fn test_otp_hotp() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_yubiotp() {
     require_interface!("OTP");
@@ -146,7 +140,6 @@ fn test_otp_yubiotp() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_calculate_standalone() {
     require_interface!("OTP");
@@ -172,7 +165,6 @@ fn test_otp_calculate_standalone() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_calculate_totp_8digits() {
     require_interface!("OTP");
@@ -196,7 +188,6 @@ fn test_otp_calculate_totp_8digits() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_delete() {
     require_interface!("OTP");
@@ -228,7 +219,6 @@ fn test_otp_delete() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_static_length() {
     require_interface!("OTP");
@@ -252,7 +242,6 @@ fn test_otp_static_length() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_hotp_8digits() {
     require_interface!("OTP");
@@ -280,7 +269,6 @@ fn test_otp_hotp_8digits() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_settings_enter() {
     require_interface!("OTP");
@@ -305,7 +293,6 @@ fn test_otp_settings_enter() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_otp_ndef() {
     require_interface!("OTP");
