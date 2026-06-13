@@ -50,6 +50,17 @@ pub fn device_serial() -> Option<&'static str> {
     test_device().serial.as_deref()
 }
 
+/// Returns true if a test device is configured.
+pub fn device_configured() -> bool {
+    let dev = test_device();
+    dev.serial.is_some() || dev.no_serial
+}
+
+/// Returns true if testing a device without a serial number.
+pub fn device_without_serial() -> bool {
+    test_device().no_serial
+}
+
 // PIV defaults
 pub const DEFAULT_PIN: &str = "123456";
 pub const NON_DEFAULT_PIN: &str = "12341235";
@@ -260,6 +271,10 @@ pub fn has_usb_interface(name: &str) -> bool {
 #[macro_export]
 macro_rules! require_interface {
     ($name:expr) => {
+        if !common::device_configured() {
+            eprintln!("SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
+            return;
+        }
         if !common::has_usb_interface($name) {
             eprintln!("SKIP: {} not enabled on device", $name);
             return;

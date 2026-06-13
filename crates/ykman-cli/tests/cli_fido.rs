@@ -1,36 +1,232 @@
 mod common;
 
-use common::ykman_dev;
+use common::{device_serial, device_without_serial, ykman_dev};
 use predicates::prelude::*;
 use serial_test::serial;
+use std::time::Duration;
+use yubikit::core::Transport;
+use yubikit::ctap::CtapSession;
+use yubikit::ctap2::{ClientPin, Ctap2Error, Ctap2Session, CtapStatus};
+use yubikit::management::{Capability, UsbInterface};
+use yubikit::platform::device::{LocalYubiKeyDevice, list_devices};
 
-// FIDO reset requires physical reinsert + touch, so we cannot automate it.
-// Once a PIN is set it can only be changed, not removed.
-// All tests that need a PIN call ensure_pin_set() first, so they can run
-// in any order.
+// FIDO PIN-dependent tests reset the FIDO applet into a known state when a
+// controller is configured. If the existing PIN is blocked or unknown and reset
+// cannot be automated, those tests skip instead of consuming retries.
 
-const FIDO_PIN: &str = "11234567";
-const FIDO_PIN_2: &str = "22345678";
+const FIDO_PIN: &str = "FidoPin1!";
+const FIDO_PIN_2: &str = "FidoPin2!";
+
+macro_rules! skip {
+    ($($arg:tt)*) => {{
+        eprintln!("SKIP: {}", format_args!($($arg)*));
+        return;
+    }};
+}
 
 /// Ensure a PIN is set on the device (idempotent).
-fn ensure_pin_set() {
+fn ensure_pin_set() -> bool {
+    use std::sync::OnceLock;
+    static FIDO_PIN_READY: OnceLock<bool> = OnceLock::new();
+    *FIDO_PIN_READY.get_or_init(setup_fido_pin)
+}
+
+fn setup_fido_pin() -> bool {
     let output = ykman_dev()
         .args(["fido", "info"])
         .output()
         .expect("failed to run ykman fido info");
     let stdout = String::from_utf8_lossy(&output.stdout);
     if stdout.contains("Not set") {
-        ykman_dev()
-            .args(["fido", "access", "change-pin", "--new-pin", FIDO_PIN])
-            .ok()
-            .expect("Failed to set initial FIDO PIN");
+        return set_initial_pin();
     }
+
+    if !reset_fido_with_controller() {
+        eprintln!("FIDO setup: existing PIN is unavailable and automated reset is unavailable");
+        return false;
+    }
+    set_initial_pin()
+}
+
+fn set_initial_pin() -> bool {
+    let output = ykman_dev()
+        .args(["fido", "access", "change-pin", "--new-pin", FIDO_PIN])
+        .output()
+        .expect("failed to set initial FIDO PIN");
+    if output.status.success() {
+        return true;
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("policy") || stderr.contains("complexity") {
+        eprintln!("SKIP: test FIDO PIN rejected by PIN policy: {stderr}");
+        return false;
+    }
+    panic!("Failed to set initial FIDO PIN: {output:?}");
+}
+
+fn test_device() -> Option<LocalYubiKeyDevice> {
+    let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO).ok()?;
+    if device_without_serial() {
+        let mut devices: Vec<_> = devices
+            .into_iter()
+            .filter(|device| device.info().serial.is_none())
+            .collect();
+        return (devices.len() == 1).then(|| devices.remove(0));
+    }
+
+    let serial = device_serial()?.parse::<u32>().ok()?;
+    devices
+        .into_iter()
+        .find(|device| device.info().serial == Some(serial))
+}
+
+fn reset_fido_with_controller() -> bool {
+    let Some(device) = test_device() else {
+        eprintln!("FIDO setup: configured test device was not found");
+        return false;
+    };
+    if device.transport() != Transport::Usb {
+        eprintln!("FIDO setup: automated ykman FIDO reset currently requires USB");
+        return false;
+    }
+    if device.info().reset_blocked.contains(Capability::FIDO2) {
+        eprintln!("FIDO setup: FIDO reset is blocked by device configuration");
+        return false;
+    }
+
+    let Ok(controller) = std::env::var("CONTROLLER") else {
+        eprintln!("FIDO setup: set CONTROLLER to reset a key with an existing or blocked PIN");
+        return false;
+    };
+    if controller.eq_ignore_ascii_case("interactive") {
+        eprintln!("FIDO setup: interactive controller is not supported for automated reset");
+        return false;
+    }
+
+    let base_url = controller.trim_end_matches('/').to_string();
+    let port = std::env::var("PICO_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u8>().ok())
+        .unwrap_or(6);
+    let get = |path: &str| {
+        let url = format!("{base_url}/usb{port}/{path}");
+        eprintln!("PicoController: GET {url}");
+        ureq::get(&url)
+            .call()
+            .unwrap_or_else(|e| panic!("PicoController request failed: {url}: {e}"));
+    };
+
+    get("touch/off");
+    get("power/off");
+    get("power/on");
+    std::thread::sleep(Duration::from_millis(2_000));
+
+    let Some(device) = test_device() else {
+        eprintln!("FIDO setup: device did not re-enumerate after reset power cycle");
+        return false;
+    };
+    let conn = device.open_fido().expect("open FIDO HID after power cycle");
+    let ctap = CtapSession::new_fido(conn)
+        .map_err(|(e, _)| e)
+        .expect("CtapSession::new_fido");
+    let mut session = Ctap2Session::new(ctap)
+        .map_err(|(e, _)| e)
+        .expect("Ctap2Session::new");
+    let info = session.get_info().expect("get_info");
+    if !info.transports_for_reset.is_empty()
+        && !info
+            .transports_for_reset
+            .iter()
+            .any(|transport| transport.eq_ignore_ascii_case("usb"))
+    {
+        eprintln!(
+            "FIDO setup: reset is not allowed over USB (transports_for_reset={:?})",
+            info.transports_for_reset
+        );
+        return false;
+    }
+
+    if info.long_touch_for_reset {
+        get("touch/on");
+    }
+    let result = session.reset(
+        Some(&mut |status| {
+            if status == 0x02 && !info.long_touch_for_reset {
+                get("touch/off");
+                std::thread::sleep(Duration::from_millis(200));
+                get("touch/on");
+            }
+        }),
+        None,
+    );
+    get("touch/off");
+
+    match result {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("FIDO setup: reset failed: {e}");
+            false
+        }
+    }
+}
+
+fn require_pin_set() {
+    if !ensure_pin_set() {
+        skip!("FIDO PIN setup unavailable");
+    }
+}
+
+fn pin_retries() -> Option<u32> {
+    let device = test_device()?;
+    let conn = device.open_fido().ok()?;
+    let ctap = CtapSession::new_fido(conn).map_err(|(e, _)| e).ok()?;
+    let session = Ctap2Session::new(ctap).map_err(|(e, _)| e).ok()?;
+    let mut client_pin = ClientPin::new(session).map_err(|(e, _)| e).ok()?;
+    match client_pin.get_pin_retries() {
+        Ok((retries, _)) => Some(retries),
+        Err(Ctap2Error::StatusError(CtapStatus::PinNotSet)) => None,
+        Err(_) => None,
+    }
+}
+
+fn restore_pin_if_needed() {
+    let output = ykman_dev()
+        .args(["fido", "access", "verify-pin", "--pin", FIDO_PIN])
+        .output()
+        .expect("failed to verify restored FIDO PIN");
+    if output.status.success() {
+        return;
+    }
+
+    let _ = ykman_dev()
+        .args([
+            "fido",
+            "access",
+            "change-pin",
+            "--pin",
+            FIDO_PIN_2,
+            "--new-pin",
+            FIDO_PIN,
+        ])
+        .ok();
+}
+
+struct FidoPinGuard;
+
+impl Drop for FidoPinGuard {
+    fn drop(&mut self) {
+        restore_pin_if_needed();
+    }
+}
+
+fn fido_pin_guard() -> FidoPinGuard {
+    FidoPinGuard
 }
 
 // ── info ──────────────────────────────────────────────────────────────
 
 #[test]
-#[ignore]
 #[serial]
 fn test_fido_info() {
     require_interface!("FIDO");
@@ -48,11 +244,10 @@ fn test_fido_info() {
 // ── access ────────────────────────────────────────────────────────────
 
 #[test]
-#[ignore]
 #[serial]
 fn test_fido_verify_pin() {
     require_interface!("FIDO");
-    ensure_pin_set();
+    require_pin_set();
     ykman_dev()
         .args(["fido", "access", "verify-pin", "--pin", FIDO_PIN])
         .assert()
@@ -61,11 +256,13 @@ fn test_fido_verify_pin() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_fido_verify_pin_wrong() {
     require_interface!("FIDO");
-    ensure_pin_set();
+    require_pin_set();
+    if pin_retries().is_some_and(|retries| retries <= 1) {
+        skip!("not enough FIDO PIN retries for wrong-PIN test");
+    }
     ykman_dev()
         .args(["fido", "access", "verify-pin", "--pin", "wrongpin"])
         .assert()
@@ -74,11 +271,11 @@ fn test_fido_verify_pin_wrong() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_fido_change_pin() {
     require_interface!("FIDO");
-    ensure_pin_set();
+    require_pin_set();
+    let _guard = fido_pin_guard();
 
     // Change PIN
     ykman_dev()
@@ -123,11 +320,10 @@ fn test_fido_change_pin() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_fido_set_pin_too_short() {
     require_interface!("FIDO");
-    ensure_pin_set();
+    require_pin_set();
     ykman_dev()
         .args([
             "fido",
@@ -145,11 +341,10 @@ fn test_fido_set_pin_too_short() {
 // ── credentials ───────────────────────────────────────────────────────
 
 #[test]
-#[ignore]
 #[serial]
 fn test_fido_credentials_list_empty() {
     require_interface!("FIDO");
-    ensure_pin_set();
+    require_pin_set();
     ykman_dev()
         .args(["fido", "credentials", "list", "--pin", FIDO_PIN])
         .assert()
@@ -160,11 +355,10 @@ fn test_fido_credentials_list_empty() {
 // ── config ────────────────────────────────────────────────────────────
 
 #[test]
-#[ignore]
 #[serial]
 fn test_fido_config_toggle_always_uv() {
     require_interface!("FIDO");
-    ensure_pin_set();
+    require_pin_set();
 
     // Check initial state
     let output = ykman_dev()
@@ -214,11 +408,10 @@ fn test_fido_config_toggle_always_uv() {
 // ── access (advanced, requires setMinPINLength) ───────────────────────
 
 #[test]
-#[ignore]
 #[serial]
 fn test_fido_access_set_min_pin_length() {
     require_interface!("FIDO");
-    ensure_pin_set();
+    require_pin_set();
 
     // Read current minimum length
     let output = ykman_dev()
@@ -267,11 +460,11 @@ fn test_fido_access_set_min_pin_length() {
 }
 
 #[test]
-#[ignore]
 #[serial]
 fn test_fido_access_force_change() {
     require_interface!("FIDO");
-    ensure_pin_set();
+    require_pin_set();
+    let _guard = fido_pin_guard();
 
     ykman_dev()
         .args(["fido", "access", "force-change", "--pin", FIDO_PIN])
