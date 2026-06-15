@@ -1,5 +1,8 @@
-use super::common::{app_is_fips_capable, device_serial, device_without_serial, ykman_dev};
+use super::common::{
+    InputMode, app_is_fips_capable, device_serial, device_without_serial, ykman_dev, ykman_dev_tty,
+};
 use predicates::prelude::*;
+use rstest::rstest;
 use std::time::Duration;
 use yubikit::core::Transport;
 use yubikit::ctap::CtapSession;
@@ -254,15 +257,26 @@ fn test_fido_info() {
 
 // ── access ────────────────────────────────────────────────────────────
 
-#[test]
-fn test_fido_verify_pin() {
+#[rstest]
+#[case::arguments(InputMode::Arguments)]
+#[case::interactive(InputMode::Interactive)]
+fn test_fido_verify_pin(#[case] mode: InputMode) {
     require_interface!("FIDO");
     require_pin_set();
-    ykman_dev()
-        .args(["fido", "access", "verify-pin", "--pin", FIDO_PIN])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("PIN verified."));
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(&["fido", "access", "verify-pin"], &format!("{FIDO_PIN}\n"));
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("PIN verified."),
+            "{output:?}"
+        );
+    } else {
+        ykman_dev()
+            .args(["fido", "access", "verify-pin", "--pin", FIDO_PIN])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("PIN verified."));
+    }
 }
 
 #[test]
@@ -279,26 +293,40 @@ fn test_fido_verify_pin_wrong() {
         .stderr(predicate::str::contains("Wrong PIN"));
 }
 
-#[test]
-fn test_fido_change_pin() {
+#[rstest]
+#[case::arguments(InputMode::Arguments)]
+#[case::interactive(InputMode::Interactive)]
+fn test_fido_change_pin(#[case] mode: InputMode) {
     require_interface!("FIDO");
     require_pin_set();
     let _guard = fido_pin_guard();
 
     // Change PIN
-    ykman_dev()
-        .args([
-            "fido",
-            "access",
-            "change-pin",
-            "--pin",
-            FIDO_PIN,
-            "--new-pin",
-            FIDO_PIN_2,
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("PIN has been changed."));
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &["fido", "access", "change-pin"],
+            &format!("{FIDO_PIN}\n{FIDO_PIN_2}\n{FIDO_PIN_2}\n"),
+        );
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("PIN has been changed."),
+            "{output:?}"
+        );
+    } else {
+        ykman_dev()
+            .args([
+                "fido",
+                "access",
+                "change-pin",
+                "--pin",
+                FIDO_PIN,
+                "--new-pin",
+                FIDO_PIN_2,
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("PIN has been changed."));
+    }
 
     // Verify new PIN works
     ykman_dev()
@@ -347,15 +375,26 @@ fn test_fido_set_pin_too_short() {
 
 // ── credentials ───────────────────────────────────────────────────────
 
-#[test]
-fn test_fido_credentials_list_empty() {
+#[rstest]
+#[case::arguments(InputMode::Arguments)]
+#[case::interactive(InputMode::Interactive)]
+fn test_fido_credentials_list_empty(#[case] mode: InputMode) {
     require_interface!("FIDO");
     require_pin_set();
-    ykman_dev()
-        .args(["fido", "credentials", "list", "--pin", FIDO_PIN])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("No discoverable credentials."));
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(&["fido", "credentials", "list"], &format!("{FIDO_PIN}\n"));
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("No discoverable credentials."),
+            "{output:?}"
+        );
+    } else {
+        ykman_dev()
+            .args(["fido", "credentials", "list", "--pin", FIDO_PIN])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No discoverable credentials."));
+    }
 }
 
 // ── config ────────────────────────────────────────────────────────────
@@ -423,8 +462,10 @@ fn test_fido_config_toggle_always_uv() {
 
 // ── access (advanced, requires setMinPINLength) ───────────────────────
 
-#[test]
-fn test_fido_access_set_min_pin_length() {
+#[rstest]
+#[case::arguments(InputMode::Arguments)]
+#[case::interactive(InputMode::Interactive)]
+fn test_fido_access_set_min_pin_length(#[case] mode: InputMode) {
     require_interface!("FIDO");
     require_pin_set();
 
@@ -460,31 +501,58 @@ fn test_fido_access_set_min_pin_length() {
     }
 
     // Setting to current value should succeed (no-op)
-    ykman_dev()
-        .args([
-            "fido",
-            "access",
-            "set-min-length",
-            &current_min.to_string(),
-            "--pin",
-            FIDO_PIN,
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Minimum PIN length set."));
+    if mode.is_interactive() {
+        let min = current_min.to_string();
+        let output = ykman_dev_tty(
+            &["fido", "access", "set-min-length", &min],
+            &format!("{FIDO_PIN}\n"),
+        );
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("Minimum PIN length set."),
+            "{output:?}"
+        );
+    } else {
+        ykman_dev()
+            .args([
+                "fido",
+                "access",
+                "set-min-length",
+                &current_min.to_string(),
+                "--pin",
+                FIDO_PIN,
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Minimum PIN length set."));
+    }
 }
 
-#[test]
-fn test_fido_access_force_change() {
+#[rstest]
+#[case::arguments(InputMode::Arguments)]
+#[case::interactive(InputMode::Interactive)]
+fn test_fido_access_force_change(#[case] mode: InputMode) {
     require_interface!("FIDO");
     require_pin_set();
     let _guard = fido_pin_guard();
 
-    ykman_dev()
-        .args(["fido", "access", "force-change", "--pin", FIDO_PIN])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Force PIN change set."));
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &["fido", "access", "force-change"],
+            &format!("{FIDO_PIN}\n"),
+        );
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("Force PIN change set."),
+            "{output:?}"
+        );
+    } else {
+        ykman_dev()
+            .args(["fido", "access", "force-change", "--pin", FIDO_PIN])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Force PIN change set."));
+    }
 
     // PIN is now in force-change state; change to a new PIN to clear
     ykman_dev()

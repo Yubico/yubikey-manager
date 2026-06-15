@@ -1,5 +1,8 @@
-use super::common::{OATH_PASSWORD, fixture_path, is_fips, oath_reset, ykman_dev, ykman_dev_tty};
+use super::common::{
+    InputMode, OATH_PASSWORD, fixture_path, is_fips, oath_reset, ykman_dev, ykman_dev_tty,
+};
 use predicates::prelude::*;
+use rstest::rstest;
 
 const OATH_ACCOUNT_SECRET: &str = "KE4CG4SUGIQW2VRXER5EYNJFNY";
 
@@ -194,23 +197,50 @@ fn test_oath_rename() {
     oath_reset();
 }
 
-#[test]
-fn test_oath_password_set_and_clear() {
+#[rstest]
+#[case::arguments(InputMode::Arguments)]
+#[case::interactive(InputMode::Interactive)]
+fn test_oath_password_set_and_clear(#[case] mode: InputMode) {
     require_interface!("CCID");
     oath_reset();
 
-    ykman_dev()
-        .args(["oath", "access", "change", "-n", OATH_PASSWORD])
-        .assert()
-        .success();
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &["oath", "access", "change"],
+            &format!("{OATH_PASSWORD}\n{OATH_PASSWORD}\n"),
+        );
+        assert!(output.status.success(), "{output:?}");
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(combined.contains("New OATH password"), "{combined}");
+    } else {
+        ykman_dev()
+            .args(["oath", "access", "change", "-n", OATH_PASSWORD])
+            .assert()
+            .success();
+    }
 
-    ykman_dev()
-        .args(["oath", "accounts", "list", "-p", OATH_PASSWORD])
-        .assert()
-        .success();
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(&["oath", "accounts", "list"], &format!("{OATH_PASSWORD}\n"));
+        assert!(output.status.success(), "{output:?}");
+    } else {
+        ykman_dev()
+            .args(["oath", "accounts", "list", "-p", OATH_PASSWORD])
+            .assert()
+            .success();
+    }
 
     if is_fips() {
         oath_reset();
+    } else if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &["oath", "access", "change", "-c"],
+            &format!("{OATH_PASSWORD}\n"),
+        );
+        assert!(output.status.success(), "{output:?}");
     } else {
         ykman_dev()
             .args(["oath", "access", "change", "-p", OATH_PASSWORD, "-c"])
@@ -227,43 +257,6 @@ fn test_oath_password_set_and_clear() {
         oath_reset();
     }
 }
-
-#[test]
-fn test_oath_password_change_prompts_for_new_password() {
-    require_interface!("CCID");
-    oath_reset();
-
-    let output = ykman_dev_tty(
-        &["oath", "access", "change"],
-        &format!("{OATH_PASSWORD}\n{OATH_PASSWORD}\n"),
-    );
-    assert!(output.status.success(), "{output:?}");
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(combined.contains("New OATH password"), "{combined}");
-
-    ykman_dev()
-        .args(["oath", "accounts", "list", "-p", OATH_PASSWORD])
-        .assert()
-        .success();
-
-    if is_fips() {
-        oath_reset();
-    } else {
-        ykman_dev()
-            .args(["oath", "access", "change", "-p", OATH_PASSWORD, "-c"])
-            .assert()
-            .success();
-    }
-
-    if !is_fips() {
-        oath_reset();
-    }
-}
-
 #[test]
 fn test_oath_add_totp_sha256_7digits() {
     require_interface!("CCID");

@@ -3299,6 +3299,7 @@ dependencies = [
  "predicates",
  "quick-xml",
  "rpassword",
+ "rstest",
  "serde",
  "serde_json",
  "sha2",

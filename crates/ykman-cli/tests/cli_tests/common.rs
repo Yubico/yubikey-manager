@@ -6,6 +6,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Output, Stdio};
 use std::sync::{Mutex, Once, OnceLock};
+use std::time::{Duration, Instant};
 
 static PICO_CLEANUP_TARGETS: OnceLock<Mutex<Vec<(String, u8)>>> = OnceLock::new();
 static REGISTER_PICO_CLEANUP: Once = Once::new();
@@ -161,9 +162,40 @@ pub fn ykman_dev_tty(args: &[&str], input: &str) -> Output {
         .expect("script stdin must be piped")
         .write_all(input.as_bytes())
         .expect("failed to write prompt input");
-    child
-        .wait_with_output()
-        .expect("failed to wait for pseudo-terminal test")
+    drop(child.stdin.take());
+
+    let start = Instant::now();
+    loop {
+        if child
+            .try_wait()
+            .expect("failed to wait for pseudo-terminal test")
+            .is_some()
+        {
+            return child
+                .wait_with_output()
+                .expect("failed to collect pseudo-terminal test output");
+        }
+        if start.elapsed() >= Duration::from_secs(60) {
+            let _ = child.kill();
+            let output = child
+                .wait_with_output()
+                .expect("failed to collect timed-out pseudo-terminal test output");
+            panic!("pseudo-terminal test timed out after 60s: {output:?}");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InputMode {
+    Arguments,
+    Interactive,
+}
+
+impl InputMode {
+    pub fn is_interactive(self) -> bool {
+        matches!(self, Self::Interactive)
+    }
 }
 
 extern "C" fn cleanup_pico_touch() {

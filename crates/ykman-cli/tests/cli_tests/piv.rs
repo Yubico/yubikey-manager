@@ -1,8 +1,10 @@
 use super::common::{
-    fixture_path, piv_management_key, piv_management_key_algorithm, piv_new_management_key,
-    piv_new_pin, piv_new_puk, piv_pin, piv_puk, piv_reset, ykman_dev, ykman_dev_tty,
+    InputMode, fixture_path, piv_management_key, piv_management_key_algorithm,
+    piv_new_management_key, piv_new_pin, piv_new_puk, piv_pin, piv_puk, piv_reset, ykman_dev,
+    ykman_dev_tty,
 };
 use predicates::prelude::*;
+use rstest::rstest;
 
 struct PivResetGuard;
 
@@ -36,105 +38,240 @@ fn test_piv_reset() {
     piv_reset();
 }
 
-#[test]
-fn test_piv_change_pin() {
+#[rstest]
+#[case::arguments(InputMode::Arguments)]
+#[case::interactive(InputMode::Interactive)]
+fn test_piv_change_pin(#[case] mode: InputMode) {
     require_interface!("CCID");
     let _guard = PivResetGuard::reset();
 
-    ykman_dev()
-        .args([
-            "piv",
-            "access",
-            "change-pin",
-            "--pin",
-            piv_pin(),
-            "--new-pin",
-            piv_new_pin(),
-        ])
-        .assert()
-        .success();
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &["piv", "access", "change-pin"],
+            &format!("{}\n{}\n{}\n", piv_pin(), piv_new_pin(), piv_new_pin()),
+        );
+        assert!(output.status.success(), "{output:?}");
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(combined.contains("Enter the current PIN"), "{combined}");
+        assert!(combined.contains("New PIN"), "{combined}");
+    } else {
+        ykman_dev()
+            .args([
+                "piv",
+                "access",
+                "change-pin",
+                "--pin",
+                piv_pin(),
+                "--new-pin",
+                piv_new_pin(),
+            ])
+            .assert()
+            .success();
+    }
 }
 
-#[test]
-fn test_piv_change_pin_prompts_for_pin_and_new_pin() {
+#[rstest]
+#[case::arguments(InputMode::Arguments)]
+#[case::interactive(InputMode::Interactive)]
+fn test_piv_change_puk(#[case] mode: InputMode) {
     require_interface!("CCID");
     let _guard = PivResetGuard::reset();
 
-    let output = ykman_dev_tty(
-        &["piv", "access", "change-pin"],
-        &format!("{}\n{}\n{}\n", piv_pin(), piv_new_pin(), piv_new_pin()),
-    );
-    assert!(output.status.success(), "{output:?}");
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(combined.contains("Enter the current PIN"), "{combined}");
-    assert!(combined.contains("New PIN"), "{combined}");
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &["piv", "access", "change-puk"],
+            &format!("{}\n{}\n{}\n", piv_puk(), piv_new_puk(), piv_new_puk()),
+        );
+        assert!(output.status.success(), "{output:?}");
+    } else {
+        ykman_dev()
+            .args([
+                "piv",
+                "access",
+                "change-puk",
+                "--puk",
+                piv_puk(),
+                "--new-puk",
+                piv_new_puk(),
+            ])
+            .assert()
+            .success();
+    }
 }
 
-#[test]
-fn test_piv_change_puk() {
-    require_interface!("CCID");
-    let _guard = PivResetGuard::reset();
-
-    ykman_dev()
-        .args([
-            "piv",
-            "access",
-            "change-puk",
-            "--puk",
-            piv_puk(),
-            "--new-puk",
-            piv_new_puk(),
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_piv_change_management_key() {
+#[rstest]
+#[case::arguments(InputMode::Arguments)]
+#[case::interactive(InputMode::Interactive)]
+fn test_piv_change_management_key(#[case] mode: InputMode) {
     require_interface!("CCID");
     piv_reset();
 
-    ykman_dev()
-        .args([
-            "piv",
-            "access",
-            "change-management-key",
-            "--management-key",
-            piv_management_key(),
-            "--new-management-key",
-            piv_new_management_key(),
-            "--algorithm",
-            piv_management_key_algorithm(),
-            "-f",
-        ])
-        .assert()
-        .success();
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &[
+                "piv",
+                "access",
+                "change-management-key",
+                "--algorithm",
+                piv_management_key_algorithm(),
+                "-f",
+            ],
+            &format!(
+                "{}\n{}\n{}\n",
+                piv_new_management_key(),
+                piv_new_management_key(),
+                piv_management_key()
+            ),
+        );
+        assert!(output.status.success(), "{output:?}");
+    } else {
+        ykman_dev()
+            .args([
+                "piv",
+                "access",
+                "change-management-key",
+                "--management-key",
+                piv_management_key(),
+                "--new-management-key",
+                piv_new_management_key(),
+                "--algorithm",
+                piv_management_key_algorithm(),
+                "-f",
+            ])
+            .assert()
+            .success();
+    }
+
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &[
+                "piv",
+                "access",
+                "change-management-key",
+                "--algorithm",
+                piv_management_key_algorithm(),
+                "-f",
+            ],
+            &format!(
+                "{}\n{}\n{}\n",
+                piv_management_key(),
+                piv_management_key(),
+                piv_new_management_key()
+            ),
+        );
+        assert!(output.status.success(), "{output:?}");
+    } else {
+        ykman_dev()
+            .args([
+                "piv",
+                "access",
+                "change-management-key",
+                "--management-key",
+                piv_new_management_key(),
+                "--new-management-key",
+                piv_management_key(),
+                "--algorithm",
+                piv_management_key_algorithm(),
+                "-f",
+            ])
+            .assert()
+            .success();
+    }
+
+    piv_reset();
+}
+
+#[rstest]
+#[case::arguments(InputMode::Arguments)]
+#[case::interactive(InputMode::Interactive)]
+fn test_piv_generate_self_signed(#[case] mode: InputMode) {
+    require_interface!("CCID");
+    piv_reset();
+
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &[
+                "piv",
+                "keys",
+                "generate",
+                "9a",
+                "-",
+                "-m",
+                piv_management_key(),
+            ],
+            &format!("{}\n", piv_pin()),
+        );
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("BEGIN PUBLIC KEY"),
+            "{output:?}"
+        );
+    } else {
+        ykman_dev()
+            .args([
+                "piv",
+                "keys",
+                "generate",
+                "9a",
+                "-",
+                "-m",
+                piv_management_key(),
+                "-P",
+                piv_pin(),
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("BEGIN PUBLIC KEY"));
+    }
+
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &[
+                "piv",
+                "certificates",
+                "generate",
+                "9a",
+                "-s",
+                "CN=test",
+                "-m",
+                piv_management_key(),
+            ],
+            &format!("{}\n", piv_pin()),
+        );
+        assert!(output.status.success(), "{output:?}");
+    } else {
+        ykman_dev()
+            .args([
+                "piv",
+                "certificates",
+                "generate",
+                "9a",
+                "-s",
+                "CN=test",
+                "-m",
+                piv_management_key(),
+                "-P",
+                piv_pin(),
+            ])
+            .assert()
+            .success();
+    }
 
     ykman_dev()
-        .args([
-            "piv",
-            "access",
-            "change-management-key",
-            "--management-key",
-            piv_new_management_key(),
-            "--new-management-key",
-            piv_management_key(),
-            "--algorithm",
-            piv_management_key_algorithm(),
-            "-f",
-        ])
+        .args(["piv", "info"])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("9A"));
 
     piv_reset();
 }
 
 #[test]
-fn test_piv_generate_self_signed() {
+fn test_piv_export_certificate() {
     require_interface!("CCID");
     piv_reset();
 
@@ -151,38 +288,7 @@ fn test_piv_generate_self_signed() {
             piv_pin(),
         ])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("BEGIN PUBLIC KEY"));
-
-    ykman_dev()
-        .args([
-            "piv",
-            "certificates",
-            "generate",
-            "9a",
-            "-s",
-            "CN=test",
-            "-m",
-            piv_management_key(),
-            "-P",
-            piv_pin(),
-        ])
-        .assert()
         .success();
-
-    ykman_dev()
-        .args(["piv", "info"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("9A"));
-
-    piv_reset();
-}
-
-#[test]
-fn test_piv_export_certificate() {
-    require_interface!("CCID");
-    piv_reset();
 
     ykman_dev()
         .args([
@@ -651,8 +757,10 @@ fn test_piv_objects_export_chuid() {
     piv_reset();
 }
 
-#[test]
-fn test_piv_unblock_pin() {
+#[rstest]
+#[case::arguments(InputMode::Arguments)]
+#[case::interactive(InputMode::Interactive)]
+fn test_piv_unblock_pin(#[case] mode: InputMode) {
     require_interface!("CCID");
     let _guard = PivResetGuard::reset();
 
@@ -672,18 +780,26 @@ fn test_piv_unblock_pin() {
     }
 
     // Unblock PIN using PUK
-    ykman_dev()
-        .args([
-            "piv",
-            "access",
-            "unblock-pin",
-            "--puk",
-            piv_puk(),
-            "--new-pin",
-            piv_new_pin(),
-        ])
-        .assert()
-        .success();
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &["piv", "access", "unblock-pin"],
+            &format!("{}\n{}\n{}\n", piv_puk(), piv_new_pin(), piv_new_pin()),
+        );
+        assert!(output.status.success(), "{output:?}");
+    } else {
+        ykman_dev()
+            .args([
+                "piv",
+                "access",
+                "unblock-pin",
+                "--puk",
+                piv_puk(),
+                "--new-pin",
+                piv_new_pin(),
+            ])
+            .assert()
+            .success();
+    }
 }
 
 #[test]
