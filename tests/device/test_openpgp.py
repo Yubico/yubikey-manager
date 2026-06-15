@@ -61,7 +61,7 @@ def not_fips_capable(info):
 
 @pytest.fixture
 def keys(session, info, transport, scp_params, ccid_connection):
-    if fips_capable(info):
+    if fips_capable(info) or info.pin_complexity:
         new_keys = Keys(
             "12345679",
             "12345679",

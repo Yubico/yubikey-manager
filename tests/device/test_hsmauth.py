@@ -226,7 +226,7 @@ class TestCredentialManagement:
     @condition.min_version(5, 8)
     def test_change_credential_password(self, session, management_key):
         credential_password = "987654321"
-        new_credential_password = "123456789"
+        new_credential_password = "12342345"
         credential = import_key_derived(session, management_key, credential_password)
 
         # Try to change credential password using wrong old password
@@ -249,7 +249,7 @@ class TestCredentialManagement:
 
     @condition.min_version(5, 8)
     def test_change_credential_password_admin(self, session, management_key):
-        new_credential_password = "123456789"
+        new_credential_password = "12342345"
         credential = import_key_derived(session, management_key)
 
         # Try to change credential password using wrong management key
