@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 
 use assert_cmd::Command;
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::env;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command as StdCommand, Output, Stdio};
 use std::sync::{Mutex, Once, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -128,61 +128,105 @@ pub fn ykman_dev() -> Command {
     cmd
 }
 
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+#[derive(Debug)]
+pub struct TtyStatus {
+    success: bool,
+}
+
+impl TtyStatus {
+    pub fn success(&self) -> bool {
+        self.success
+    }
+}
+
+#[derive(Debug)]
+pub struct TtyOutput {
+    pub status: TtyStatus,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
 
 /// Run ykman under a pseudo-terminal so rpassword-backed prompts can be tested.
 ///
-/// This is intended for ignored hardware tests. It uses the POSIX `script`
-/// command, which is available on the Linux hardware-test hosts.
-pub fn ykman_dev_tty(args: &[&str], input: &str) -> Output {
+/// This is intended for hardware tests that need an interactive TTY.
+pub fn ykman_dev_tty(args: &[&str], input: &str) -> TtyOutput {
     let bin = assert_cmd::cargo::cargo_bin("ykman");
-    let mut command = shell_quote(&bin.display().to_string());
+    let mut command = CommandBuilder::new(bin);
     let dev = test_device();
     if let Some(ref serial) = dev.serial {
-        command.push_str(" --device ");
-        command.push_str(&shell_quote(serial));
+        command.arg("--device");
+        command.arg(serial);
     }
     for arg in args {
-        command.push(' ');
-        command.push_str(&shell_quote(arg));
+        command.arg(arg);
     }
 
-    let mut child = StdCommand::new("script")
-        .args(["-qfec", &command, "/dev/null"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn script(1) for pseudo-terminal test");
-    child
-        .stdin
-        .as_mut()
-        .expect("script stdin must be piped")
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .expect("failed to open pseudo-terminal");
+    let mut child = pair
+        .slave
+        .spawn_command(command)
+        .expect("failed to spawn ykman in pseudo-terminal");
+    drop(pair.slave);
+
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .expect("failed to clone pseudo-terminal reader");
+    let mut writer = pair
+        .master
+        .take_writer()
+        .expect("failed to open pseudo-terminal writer");
+    let reader_thread = std::thread::spawn(move || {
+        let mut output = Vec::new();
+        reader
+            .read_to_end(&mut output)
+            .expect("failed to read pseudo-terminal output");
+        output
+    });
+
+    writer
         .write_all(input.as_bytes())
         .expect("failed to write prompt input");
-    drop(child.stdin.take());
+    writer.flush().expect("failed to flush prompt input");
+    drop(writer);
 
     let start = Instant::now();
-    loop {
-        if child
+    let exit_status = loop {
+        if let Some(status) = child
             .try_wait()
             .expect("failed to wait for pseudo-terminal test")
-            .is_some()
         {
-            return child
-                .wait_with_output()
-                .expect("failed to collect pseudo-terminal test output");
+            break status;
         }
         if start.elapsed() >= Duration::from_secs(60) {
             let _ = child.kill();
-            let output = child
-                .wait_with_output()
-                .expect("failed to collect timed-out pseudo-terminal test output");
-            panic!("pseudo-terminal test timed out after 60s: {output:?}");
+            let _ = child.wait();
+            let stdout = reader_thread
+                .join()
+                .expect("failed to join pseudo-terminal reader thread");
+            panic!("pseudo-terminal test timed out after 60s: {stdout:?}");
         }
         std::thread::sleep(Duration::from_millis(100));
+    };
+    drop(pair.master);
+    let stdout = reader_thread
+        .join()
+        .expect("failed to join pseudo-terminal reader thread");
+
+    TtyOutput {
+        status: TtyStatus {
+            success: exit_status.success(),
+        },
+        stdout,
+        stderr: Vec::new(),
     }
 }
 
