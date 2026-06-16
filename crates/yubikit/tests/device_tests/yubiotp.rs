@@ -127,9 +127,6 @@ fn test_calculate_hmac_sha1_cancel(#[case] tc: TestConnection) {
 
     assert!(result.is_err(), "Expected error from cancelled operation");
     let err_msg = result.unwrap_err().to_string();
-    if err_msg.contains("No data") {
-        skip!("HMAC challenge-response not supported over OTP HID on this key");
-    }
     assert!(
         err_msg.contains("cancelled") || err_msg.contains("Timeout"),
         "Expected cancel/timeout error, got: {err_msg}"
@@ -194,14 +191,9 @@ fn test_hmac_sha1_known_vector(#[case] tc: TestConnection) {
         TestConnection::UsbHid => {
             let conn = dev.open_otp().expect("open OTP");
             let mut session = YubiOtpSession::new_otp(conn).expect("YubiOtpSession OTP");
-            let result = session.calculate_hmac_sha1(Slot::Two, b"Hi There");
-            match result {
-                Err(ref e) if e.to_string().contains("No data") => {
-                    skip!("HMAC challenge-response not supported over OTP HID on this key");
-                }
-                _ => {}
-            }
-            let result = result.expect("calculate_hmac_sha1");
+            let result = session
+                .calculate_hmac_sha1(Slot::Two, b"Hi There")
+                .expect("calculate_hmac_sha1");
             assert_eq!(result, expected, "HMAC-SHA1 test vector mismatch");
         }
         _ => {

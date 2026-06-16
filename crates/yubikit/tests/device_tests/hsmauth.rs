@@ -13,27 +13,14 @@ fn open_hsmauth_session(tc: &TestConnection) -> HsmAuthSession<PcscSmartCardConn
     }
 }
 
-const FIPS_MANAGEMENT_KEY: [u8; 16] = [
-    0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0x00, 0xEE, 0xFF,
-];
-
 /// Get the effective management key — use default since FIPS key change may not work.
 fn effective_hsmauth_mgmt_key() -> HsmAuthManagementKey {
     HsmAuthManagementKey::new(DEFAULT_MANAGEMENT_KEY).unwrap()
 }
 
-/// Reset HSMAuth and change management key on FIPS keys.
-/// Returns the effective management key to use.
+/// Reset HSMAuth to a known state.
 fn reset_hsmauth(session: &mut HsmAuthSession<PcscSmartCardConnection>) {
     session.reset().expect("reset");
-    if device_is_fips() {
-        let old_key = HsmAuthManagementKey::new(DEFAULT_MANAGEMENT_KEY).unwrap();
-        let new_key = HsmAuthManagementKey::new(&FIPS_MANAGEMENT_KEY).unwrap();
-        // On some FIPS keys, management key change may not be allowed
-        if session.put_management_key(&old_key, &new_key).is_err() {
-            // Fall back to using default key (some FIPS keys allow operations with default)
-        }
-    }
 }
 
 #[rstest]
@@ -65,6 +52,9 @@ fn test_hsmauth_reset_and_list(#[case] tc: TestConnection) {
 fn test_hsmauth_credential_lifecycle(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::HSMAUTH);
+    if device_is_fips_capable(Capability::HSMAUTH) {
+        skip!("HSMAuth credential operations are restricted on FIPS-capable keys");
+    }
     let mut session = open_hsmauth_session(&tc);
     reset_hsmauth(&mut session);
 
@@ -74,15 +64,9 @@ fn test_hsmauth_credential_lifecycle(#[case] tc: TestConnection) {
     // Put symmetric credential with explicit keys
     let key_enc = [0x11u8; 16];
     let key_mac = [0x22u8; 16];
-    let cred = match session
+    let cred = session
         .put_credential_symmetric(&mgmt_key, "sym-test", &key_enc, &key_mac, &cred_pw, false)
-    {
-        Ok(c) => c,
-        Err(e) if is_conditions_not_satisfied(&e) => {
-            skip!("HSMAuth credential operations not available (FIPS restrictions)");
-        }
-        Err(e) => panic!("put_credential_symmetric: {e}"),
-    };
+        .expect("put_credential_symmetric");
     assert_eq!(cred.label, "sym-test");
 
     // Put derived credential
@@ -129,6 +113,9 @@ fn test_hsmauth_credential_lifecycle(#[case] tc: TestConnection) {
 fn test_hsmauth_management_key(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::HSMAUTH);
+    if device_is_fips_capable(Capability::HSMAUTH) {
+        skip!("HSMAuth management key changes are restricted on FIPS-capable keys");
+    }
     let mut session = open_hsmauth_session(&tc);
     session.reset().expect("reset");
 
@@ -140,21 +127,19 @@ fn test_hsmauth_management_key(#[case] tc: TestConnection) {
 
     // Change management key
     let old_key = HsmAuthManagementKey::new(DEFAULT_MANAGEMENT_KEY).expect("default mgmt key");
-    let new_key_bytes = [0xAAu8; 16];
+    let new_key_bytes = [
+        0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+        0x12,
+    ];
     let new_key = HsmAuthManagementKey::new(&new_key_bytes).expect("new mgmt key");
-    match session.put_management_key(&old_key, &new_key) {
-        Ok(()) => {
-            // Verify new key works by using it for a put
-            let cred_pw = CredentialPassword::from_password("test");
-            session
-                .put_credential_derived(&new_key, "key-test", "pw123", &cred_pw, false)
-                .expect("put with new key");
-        }
-        Err(e) if is_conditions_not_satisfied(&e) => {
-            skip!("Management key change not allowed on this device");
-        }
-        Err(e) => panic!("put_management_key: {e}"),
-    }
+    session
+        .put_management_key(&old_key, &new_key)
+        .expect("put_management_key");
+    // Verify new key works by using it for a put
+    let cred_pw = CredentialPassword::from_password("12345679");
+    session
+        .put_credential_derived(&new_key, "key-test", "pw123", &cred_pw, false)
+        .expect("put with new key");
 
     // Clean up
     session.reset().expect("reset");
@@ -167,20 +152,18 @@ fn test_hsmauth_management_key(#[case] tc: TestConnection) {
 fn test_hsmauth_wrong_credential_password(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::HSMAUTH);
+    if device_is_fips_capable(Capability::HSMAUTH) {
+        skip!("HSMAuth credential operations are restricted on FIPS-capable keys");
+    }
     let mut session = open_hsmauth_session(&tc);
     reset_hsmauth(&mut session);
 
     let mgmt_key = effective_hsmauth_mgmt_key();
     let cred_pw = CredentialPassword::from_password("correct-password");
 
-    match session.put_credential_derived(&mgmt_key, "pw-test", "derivation-secret", &cred_pw, false)
-    {
-        Ok(_) => {}
-        Err(e) if is_conditions_not_satisfied(&e) => {
-            skip!("HSMAuth credential operations not available");
-        }
-        Err(e) => panic!("put_credential_derived: {e}"),
-    }
+    session
+        .put_credential_derived(&mgmt_key, "pw-test", "derivation-secret", &cred_pw, false)
+        .expect("put_credential_derived");
 
     // Try calculating session keys with wrong password
     let wrong_pw = CredentialPassword::from_password("wrong-password");
@@ -218,6 +201,9 @@ fn test_hsmauth_asymmetric_credential(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::HSMAUTH);
     require_version!(Version(5, 6, 0));
+    if device_is_fips_capable(Capability::HSMAUTH) {
+        skip!("HSMAuth asymmetric credentials are restricted on FIPS-capable keys");
+    }
 
     let mut session = open_hsmauth_session(&tc);
     reset_hsmauth(&mut session);
@@ -226,15 +212,10 @@ fn test_hsmauth_asymmetric_credential(#[case] tc: TestConnection) {
     let cred_pw = CredentialPassword::from_password("asym-password");
 
     // Generate an asymmetric credential on-device
-    match session.generate_credential_asymmetric(&mgmt_key, "asym-test", &cred_pw, false) {
-        Ok(cred) => {
-            assert_eq!(cred.label, "asym-test");
-        }
-        Err(e) if is_conditions_not_satisfied(&e) => {
-            skip!("HSMAuth asymmetric not available: {e}");
-        }
-        Err(e) => panic!("generate_credential_asymmetric: {e}"),
-    }
+    let cred = session
+        .generate_credential_asymmetric(&mgmt_key, "asym-test", &cred_pw, false)
+        .expect("generate_credential_asymmetric");
+    assert_eq!(cred.label, "asym-test");
 
     // Get the public key
     let public_key = session.get_public_key("asym-test").expect("get_public_key");

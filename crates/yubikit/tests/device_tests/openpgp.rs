@@ -92,23 +92,12 @@ fn test_openpgp_get_application_data(#[case] tc: TestConnection) {
 #[case::smart_card(TestConnection::SmartCard)]
 #[case::scp11b(TestConnection::SmartCardScp11b)]
 fn test_openpgp_get_challenge(#[case] tc: TestConnection) {
-    use yubikit::openpgp::OpenPgpError;
-
     skip_if_needed!(tc);
     require_capability!(Capability::OPENPGP);
     let mut session = open_openpgp_session(&tc);
-    match session.get_challenge(8) {
-        Ok(challenge) => {
-            assert_eq!(challenge.len(), 8);
-            assert!(challenge.iter().any(|&b| b != 0));
-        }
-        Err(OpenPgpError::NotSupported(_)) => {
-            skip!("get_challenge not supported");
-        }
-        Err(e) => {
-            panic!("get_challenge failed: {e}");
-        }
-    }
+    let challenge = session.get_challenge(8).expect("get_challenge");
+    assert_eq!(challenge.len(), 8);
+    assert!(challenge.iter().any(|&b| b != 0));
 }
 
 #[rstest]
@@ -223,6 +212,9 @@ fn test_openpgp_generate_rsa_key_and_sign(#[case] tc: TestConnection) {
 fn test_openpgp_rsa_decrypt(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OPENPGP);
+    if device_is_fips_capable(Capability::OPENPGP) {
+        skip!("RSA2048 decryption is not supported by FIPS-capable OpenPGP");
+    }
     let mut session = open_openpgp_session(&tc);
     reset_openpgp(&mut session);
     session
@@ -233,16 +225,12 @@ fn test_openpgp_rsa_decrypt(#[case] tc: TestConnection) {
         .expect("verify PIN for decrypt");
 
     // Generate RSA 2048 decryption key
-    let pk = match session.generate_rsa_key(
-        yubikit::openpgp::KeyRef::Dec,
-        yubikit::keys::RsaKeySize::Rsa2048,
-    ) {
-        Ok(data) => data,
-        Err(e) if has_sw(&e, 0x6A80) || is_conditions_not_satisfied(&e) => {
-            skip!("RSA2048 not supported on this device (FIPS may require larger keys)");
-        }
-        Err(e) => panic!("generate_rsa_key: {e}"),
-    };
+    let pk = session
+        .generate_rsa_key(
+            yubikit::openpgp::KeyRef::Dec,
+            yubikit::keys::RsaKeySize::Rsa2048,
+        )
+        .expect("generate_rsa_key");
 
     // Extract modulus and exponent
     let (modulus_bytes, exponent_bytes) = match &pk {
@@ -350,17 +338,15 @@ fn test_openpgp_pin_management(#[case] tc: TestConnection) {
     assert!(status.attempts_user > 0);
 
     // Change user PIN
-    let new_pin = OpenPgpPin::new("974632");
-    match session.change_pin(&default_user_pin(), &new_pin) {
-        Ok(()) => {
-            // Verify new PIN works
-            session.verify_pin(&new_pin, false).expect("verify new pin");
-        }
-        Err(e) if is_conditions_not_satisfied(&e) => {
-            skip!("PIN complexity rejected new PIN");
-        }
-        Err(e) => panic!("change_pin: {e}"),
-    }
+    let new_pin = if device_has_pin_complexity() {
+        OpenPgpPin::new("97463218")
+    } else {
+        OpenPgpPin::new("974632")
+    };
+    session
+        .change_pin(&default_user_pin(), &new_pin)
+        .expect("change_pin");
+    session.verify_pin(&new_pin, false).expect("verify new pin");
 
     // Reset to restore defaults
     session.reset().expect("reset after pin change");
@@ -369,16 +355,15 @@ fn test_openpgp_pin_management(#[case] tc: TestConnection) {
     session
         .verify_admin(&default_admin_pin())
         .expect("verify default admin after reset");
-    let new_admin = OpenPgpPin::new("83726145");
-    match session.change_admin(&default_admin_pin(), &new_admin) {
-        Ok(()) => {
-            session.verify_admin(&new_admin).expect("verify new admin");
-        }
-        Err(e) if is_conditions_not_satisfied(&e) => {
-            skip!("PIN complexity rejected new admin PIN");
-        }
-        Err(e) => panic!("change_admin: {e}"),
-    }
+    let new_admin = if device_has_pin_complexity() {
+        OpenPgpPin::new("8372614597")
+    } else {
+        OpenPgpPin::new("83726145")
+    };
+    session
+        .change_admin(&default_admin_pin(), &new_admin)
+        .expect("change_admin");
+    session.verify_admin(&new_admin).expect("verify new admin");
 
     // Reset again to restore defaults for reset code test
     session.reset().expect("reset after admin change");
@@ -387,32 +372,29 @@ fn test_openpgp_pin_management(#[case] tc: TestConnection) {
     session
         .verify_admin(&default_admin_pin())
         .expect("verify admin for reset code");
-    let reset_code = OpenPgpPin::new("83726145");
-    match session.set_reset_code(&reset_code) {
-        Ok(()) => {
-            // Use wrong PIN 3 times to lock it
-            let wrong = OpenPgpPin::new("000000");
-            for _ in 0..3 {
-                let _ = session.verify_pin(&wrong, false);
-            }
-            // Now reset PIN using reset code
-            match session.reset_pin(&default_user_pin(), Some(&reset_code)) {
-                Ok(()) => {
-                    session
-                        .verify_pin(&default_user_pin(), false)
-                        .expect("verify after reset");
-                }
-                Err(e) if is_conditions_not_satisfied(&e) => {
-                    // Can't reset to weak default PIN, just reset applet
-                }
-                Err(e) => panic!("reset_pin: {e}"),
-            }
-        }
-        Err(e) if is_conditions_not_satisfied(&e) => {
-            skip!("PIN complexity rejected reset code");
-        }
-        Err(e) => panic!("set_reset_code: {e}"),
+    let reset_code = if device_has_pin_complexity() {
+        OpenPgpPin::new("8372614597")
+    } else {
+        OpenPgpPin::new("83726145")
+    };
+    let reset_pin = if device_has_pin_complexity() {
+        OpenPgpPin::new("91827364")
+    } else {
+        default_user_pin()
+    };
+    session.set_reset_code(&reset_code).expect("set_reset_code");
+    // Use wrong PIN 3 times to lock it
+    let wrong = OpenPgpPin::new("000000");
+    for _ in 0..3 {
+        let _ = session.verify_pin(&wrong, false);
     }
+    // Now reset PIN using reset code
+    session
+        .reset_pin(&reset_pin, Some(&reset_code))
+        .expect("reset_pin");
+    session
+        .verify_pin(&reset_pin, false)
+        .expect("verify after reset");
 
     // Final reset to clean up
     session.reset().expect("final reset");

@@ -12,20 +12,15 @@ fn open_oath_session(tc: &TestConnection) -> OathSession<PcscSmartCardConnection
 }
 
 /// On FIPS keys, set an access key after reset so operations are allowed.
-/// Returns false if the operation is blocked (e.g., FIPS+NFC).
-fn reset_oath(session: &mut OathSession<PcscSmartCardConnection>) -> bool {
+fn reset_oath(session: &mut OathSession<PcscSmartCardConnection>) {
+    if device_is_fips() && get_device().transport() == Transport::Nfc {
+        skip!("OATH blocked on FIPS+NFC");
+    }
     session.reset().expect("reset");
     if device_is_fips() {
         let key = session.derive_key("fips-test-password");
-        if let Err(e) = session.set_key(&key) {
-            if get_device().transport() == Transport::Nfc {
-                eprintln!("OATH set_key blocked on FIPS+NFC: {e:?}");
-                return false;
-            }
-            panic!("FIPS: set OATH access key: {e:?}");
-        }
+        session.set_key(&key).expect("FIPS: set OATH access key");
     }
-    true
 }
 
 #[rstest]
@@ -45,9 +40,7 @@ fn test_oath_reset_and_list(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
     let mut session = open_oath_session(&tc);
-    if !reset_oath(&mut session) {
-        skip!("OATH blocked on FIPS+NFC");
-    }
+    reset_oath(&mut session);
 
     let creds = session.list_credentials().expect("list_credentials");
     assert!(creds.is_empty(), "Expected no credentials after reset");
@@ -60,9 +53,7 @@ fn test_oath_put_list_delete(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
     let mut session = open_oath_session(&tc);
-    if !reset_oath(&mut session) {
-        skip!("OATH blocked on FIPS+NFC");
-    }
+    reset_oath(&mut session);
 
     let cred_data = CredentialData {
         name: "test@example.com".into(),
@@ -98,9 +89,7 @@ fn test_oath_calculate_all(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
     let mut session = open_oath_session(&tc);
-    if !reset_oath(&mut session) {
-        skip!("OATH blocked on FIPS+NFC");
-    }
+    reset_oath(&mut session);
 
     let cred_data = CredentialData {
         name: "calc@test.com".into(),
@@ -133,18 +122,16 @@ fn test_oath_access_key_lifecycle(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
     let mut session = open_oath_session(&tc);
+    if device_is_fips() && get_device().transport() == Transport::Nfc {
+        skip!("OATH blocked on FIPS+NFC");
+    }
     session.reset().expect("reset");
 
     if device_is_fips() {
         // FIPS requires an access key to be set before operations.
         // However, set_key is blocked over NFC even with SCP.
         let key = session.derive_key("fips_password");
-        if let Err(e) = session.set_key(&key) {
-            if get_device().transport() == Transport::Nfc {
-                skip!("OATH set_key blocked on FIPS+NFC: {e:?}");
-            }
-            panic!("set_key: {e:?}");
-        }
+        session.set_key(&key).expect("set_key");
 
         // Re-open — should be locked
         drop(session);
@@ -204,9 +191,7 @@ fn test_oath_rename_credential(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
     let mut session = open_oath_session(&tc);
-    if !reset_oath(&mut session) {
-        skip!("OATH blocked on FIPS+NFC");
-    }
+    reset_oath(&mut session);
 
     let cred_data = CredentialData {
         name: "original@test.com".into(),
@@ -231,9 +216,7 @@ fn test_oath_rename_credential(#[case] tc: TestConnection) {
     assert_eq!(creds[0].issuer.as_deref(), Some("NewIssuer"));
     assert_eq!(creds[0].name, "renamed@test.com");
 
-    if !reset_oath(&mut session) {
-        skip!("OATH blocked on FIPS+NFC");
-    }
+    reset_oath(&mut session);
 }
 
 #[rstest]
@@ -243,9 +226,7 @@ fn test_oath_calculate_single(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
     let mut session = open_oath_session(&tc);
-    if !reset_oath(&mut session) {
-        skip!("OATH blocked on FIPS+NFC");
-    }
+    reset_oath(&mut session);
 
     // Add HOTP credential
     let hotp_data = CredentialData {
@@ -293,9 +274,7 @@ fn test_oath_calculate_single(#[case] tc: TestConnection) {
         .expect("calculate totp256");
     assert_eq!(code.value.len(), 8, "Expected 8-digit code");
 
-    if !reset_oath(&mut session) {
-        skip!("OATH blocked on FIPS+NFC");
-    }
+    reset_oath(&mut session);
 }
 
 /// Test HOTP with RFC 4226 test vectors.
@@ -308,9 +287,7 @@ fn test_oath_hotp_rfc4226_vectors(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
     let mut session = open_oath_session(&tc);
-    if !reset_oath(&mut session) {
-        skip!("OATH blocked on FIPS+NFC");
-    }
+    reset_oath(&mut session);
 
     let expected = ["755224", "287082", "359152", "969429", "338314"];
 
@@ -337,9 +314,7 @@ fn test_oath_hotp_rfc4226_vectors(#[case] tc: TestConnection) {
         );
     }
 
-    if !reset_oath(&mut session) {
-        skip!("OATH cleanup blocked");
-    }
+    reset_oath(&mut session);
 }
 
 /// Test TOTP with SHA-256, verifying consistency: same timestamp → same code.
@@ -350,9 +325,7 @@ fn test_oath_totp_sha256_consistency(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
     let mut session = open_oath_session(&tc);
-    if !reset_oath(&mut session) {
-        skip!("OATH blocked on FIPS+NFC");
-    }
+    reset_oath(&mut session);
 
     let cred_data = CredentialData {
         name: "sha256-totp@test".into(),
@@ -392,9 +365,7 @@ fn test_oath_totp_sha256_consistency(#[case] tc: TestConnection) {
         "Different time step should give different code"
     );
 
-    if !reset_oath(&mut session) {
-        skip!("OATH cleanup blocked");
-    }
+    reset_oath(&mut session);
 }
 
 /// Test OATH with SHA-512 algorithm (covers all hash algorithm variants).
@@ -405,9 +376,7 @@ fn test_oath_totp_sha512(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
     let mut session = open_oath_session(&tc);
-    if !reset_oath(&mut session) {
-        skip!("OATH blocked on FIPS+NFC");
-    }
+    reset_oath(&mut session);
 
     let cred_data = CredentialData {
         name: "sha512@test".into(),
@@ -426,7 +395,5 @@ fn test_oath_totp_sha512(#[case] tc: TestConnection) {
     let code = session.calculate_code(&cred, 59).expect("calculate");
     assert_eq!(code.value.len(), 8);
 
-    if !reset_oath(&mut session) {
-        skip!("OATH cleanup blocked");
-    }
+    reset_oath(&mut session);
 }

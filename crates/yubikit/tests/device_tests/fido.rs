@@ -244,13 +244,6 @@ fn setup_fido_pin() -> bool {
             .unwrap_or_else(|e| panic!("FIDO setup: ClientPin::new failed: {e}"));
         match cp.set_pin(&ctap2_pin(TEST_PIN)) {
             Ok(()) => {}
-            Err(Ctap2Error::StatusError(CtapStatus::PinPolicyViolation)) => {
-                eprintln!(
-                    "FIDO setup: TEST_PIN rejected by PIN complexity policy; \
-                     skipping PIN-dependent tests"
-                );
-                return false;
-            }
             Err(e) => panic!("FIDO setup: set_pin failed: {e}"),
         }
     } else {
@@ -260,13 +253,6 @@ fn setup_fido_pin() -> bool {
             .unwrap_or_else(|e| panic!("FIDO setup: ClientPin::new failed: {e}"));
         match cp.set_pin(&ctap2_pin(TEST_PIN)) {
             Ok(()) => {}
-            Err(Ctap2Error::StatusError(CtapStatus::PinPolicyViolation)) => {
-                eprintln!(
-                    "FIDO setup: TEST_PIN rejected by PIN complexity policy; \
-                     skipping PIN-dependent tests"
-                );
-                return false;
-            }
             Err(e) => panic!("FIDO setup: set_pin failed: {e}"),
         }
     }
@@ -328,12 +314,6 @@ macro_rules! get_pin_token_or_skip {
     ($cp:expr, $pin:expr, $perms:expr, $rpid:expr) => {
         match $cp.get_pin_token($pin, $perms, $rpid) {
             Ok(t) => t,
-            Err(Ctap2Error::StatusError(CtapStatus::PinInvalid)) => {
-                skip!("device PIN is not TEST_PIN; reset FIDO applet to rerun");
-            }
-            Err(Ctap2Error::StatusError(CtapStatus::PinAuthBlocked)) => {
-                skip!("PIN auth blocked (re-power/re-tap device to clear)");
-            }
             Err(e) => panic!("get_pin_token failed: {e}"),
         }
     };
@@ -522,13 +502,8 @@ fn test_ctap2_client_pin(#[case] tc: TestConnection, #[case] protocol: PinProtoc
 
         // ── Change PIN ───────────────────────────────────────────────────
         const TEMP_PIN: &str = "99887766";
-        match cp.change_pin(&ctap2_pin(TEST_PIN), &ctap2_pin(TEMP_PIN)) {
-            Ok(()) => {}
-            Err(Ctap2Error::StatusError(CtapStatus::PinPolicyViolation)) => {
-                skip!("PIN complexity policy rejected TEMP_PIN");
-            }
-            Err(e) => panic!("change_pin to TEMP_PIN: {e}"),
-        }
+        cp.change_pin(&ctap2_pin(TEST_PIN), &ctap2_pin(TEMP_PIN))
+            .expect("change_pin to TEMP_PIN");
 
         // Verify new PIN works
         let token3 = cp
@@ -585,21 +560,17 @@ fn test_ctap2_selection(#[case] tc: TestConnection) {
         reset_up_budget();
         let ctrl = require_controller!();
         let mut session = open();
-        match session.selection(
-            Some(&mut |status: u8| {
-                if status == 0x02 {
-                    ctrl.touch();
-                }
-            }),
-            None,
-        ) {
-            Ok(()) => eprintln!("selection: OK"),
-            Err(Ctap2Error::StatusError(CtapStatus::InvalidCommand))
-            | Err(Ctap2Error::StatusError(CtapStatus::InvalidCbor)) => {
-                skip!("authenticatorSelection not supported by this device");
-            }
-            Err(e) => panic!("  selection: {e}"),
-        }
+        session
+            .selection(
+                Some(&mut |status: u8| {
+                    if status == 0x02 {
+                        ctrl.touch();
+                    }
+                }),
+                None,
+            )
+            .expect("selection");
+        eprintln!("selection: OK");
     });
 }
 
@@ -919,6 +890,9 @@ fn test_ctap2_credential_management(#[case] tc: TestConnection) {
         {
             skip!("CredentialManagement not supported");
         }
+        if device_is_fips() && get_device().transport() == Transport::Nfc {
+            skip!("CredentialManagement blocked on FIPS+NFC");
+        }
 
         // ── Step 1: Get initial metadata ─────────────────────────────────
         reset_up_budget();
@@ -938,15 +912,7 @@ fn test_ctap2_credential_management(#[case] tc: TestConnection) {
             .map_err(|(e, _)| e)
             .expect("CredentialManagement::new");
 
-        let (initial_existing, initial_remaining) = match credmgmt.get_metadata() {
-            Ok(v) => v,
-            Err(e) => {
-                if device_is_fips() && get_device().transport() == Transport::Nfc {
-                    skip!("CredentialManagement blocked on FIPS+NFC: {e:?}");
-                }
-                panic!("get_metadata: {e:?}");
-            }
-        };
+        let (initial_existing, initial_remaining) = credmgmt.get_metadata().expect("get_metadata");
         eprintln!("initial: existing={initial_existing}, remaining={initial_remaining}");
         assert!(initial_remaining > 0, "no remaining credential slots");
         drop(credmgmt);

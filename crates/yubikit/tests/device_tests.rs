@@ -37,12 +37,6 @@ fn has_sw(e: &dyn std::fmt::Display, sw: u16) -> bool {
     e.to_string().contains(&format!("0x{sw:04X}"))
 }
 
-/// Check if an error indicates "conditions of use not satisfied" (SW=6985),
-/// typically returned by FIPS keys when policy prevents an operation.
-fn is_conditions_not_satisfied(e: &dyn std::fmt::Display) -> bool {
-    has_sw(e, 0x6985) || e.to_string().contains("policy")
-}
-
 // ───────────────────────── Connection Parameterization ─────────────────────────
 
 #[derive(Debug, Clone)]
@@ -334,6 +328,10 @@ fn device_is_fips() -> bool {
 
 fn device_is_fips_capable(capability: Capability) -> bool {
     get_device().info().fips_capable.contains(capability)
+}
+
+fn device_has_pin_complexity() -> bool {
+    get_device().info().pin_complexity
 }
 
 macro_rules! require_capability {

@@ -167,22 +167,17 @@ fn test_piv_generate_key_rsa2048(#[case] tc: TestConnection) {
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
 
-    match session.generate_key(
-        Slot::Retired1,
-        KeyType::Rsa2048,
-        PinPolicy::Default,
-        TouchPolicy::Never,
-    ) {
-        Ok(pub_key) => {
-            let spki_der = pub_key.to_spki().unwrap();
-            assert!(!spki_der.is_empty());
-            assert!(spki_der.len() > 256, "RSA SPKI should be large");
-        }
-        Err(e) if has_sw(&e, 0x6A80) || is_conditions_not_satisfied(&e) => {
-            skip!("RSA2048 not supported on this device (FIPS may require RSA3072+)");
-        }
-        Err(e) => panic!("generate_key: {e}"),
-    }
+    let pub_key = session
+        .generate_key(
+            Slot::Retired1,
+            KeyType::Rsa2048,
+            PinPolicy::Default,
+            TouchPolicy::Never,
+        )
+        .expect("generate_key");
+    let spki_der = pub_key.to_spki().unwrap();
+    assert!(!spki_der.is_empty());
+    assert!(spki_der.len() > 256, "RSA SPKI should be large");
 }
 
 #[rstest]
@@ -769,13 +764,9 @@ fn test_piv_pin_management(#[case] tc: TestConnection) {
     let new_pin = PivPin::new("71829364").unwrap();
 
     // Change PIN
-    match session.change_pin(&current_pin, &new_pin) {
-        Ok(()) => {}
-        Err(e) if is_conditions_not_satisfied(&e) => {
-            skip!("PIN complexity rejected new PIN");
-        }
-        Err(e) => panic!("change_pin: {e}"),
-    }
+    session
+        .change_pin(&current_pin, &new_pin)
+        .expect("change_pin");
 
     // Old PIN should fail
     assert!(session.verify_pin(&current_pin).is_err());
@@ -800,13 +791,9 @@ fn test_piv_pin_management(#[case] tc: TestConnection) {
 
     // Unblock with PUK
     let unblocked_pin = PivPin::new("83726145").unwrap();
-    match session.unblock_pin(&current_puk, &unblocked_pin) {
-        Ok(()) => {}
-        Err(e) if is_conditions_not_satisfied(&e) => {
-            skip!("PIN complexity rejected unblocked PIN");
-        }
-        Err(e) => panic!("unblock_pin: {e}"),
-    }
+    session
+        .unblock_pin(&current_puk, &unblocked_pin)
+        .expect("unblock_pin");
     session
         .verify_pin(&unblocked_pin)
         .expect("verify unblocked PIN");
@@ -1172,18 +1159,14 @@ fn test_piv_pin_policy_always(#[case] tc: TestConnection) {
     session.authenticate(&mgmt_key).expect("authenticate");
 
     // Generate key with PinPolicy::Always
-    match session.generate_key(
-        Slot::Retired1,
-        KeyType::EccP256,
-        PinPolicy::Always,
-        TouchPolicy::Never,
-    ) {
-        Ok(_) => {}
-        Err(e) if is_conditions_not_satisfied(&e) => {
-            skip!("PinPolicy::Always not supported: {e}");
-        }
-        Err(e) => panic!("generate_key: {e}"),
-    }
+    session
+        .generate_key(
+            Slot::Retired1,
+            KeyType::EccP256,
+            PinPolicy::Always,
+            TouchPolicy::Never,
+        )
+        .expect("generate_key");
 
     // Attempt signing without PIN — should fail
     let hash = <sha2::Sha256 as sha2::Digest>::digest(b"test");
@@ -1221,18 +1204,14 @@ fn test_piv_pin_policy_never(#[case] tc: TestConnection) {
     session.authenticate(&mgmt_key).expect("authenticate");
 
     // Generate key with PinPolicy::Never
-    match session.generate_key(
-        Slot::Retired1,
-        KeyType::EccP256,
-        PinPolicy::Never,
-        TouchPolicy::Never,
-    ) {
-        Ok(_) => {}
-        Err(e) if is_conditions_not_satisfied(&e) => {
-            skip!("PinPolicy::Never not supported on this key: {e}");
-        }
-        Err(e) => panic!("generate_key: {e}"),
-    }
+    session
+        .generate_key(
+            Slot::Retired1,
+            KeyType::EccP256,
+            PinPolicy::Never,
+            TouchPolicy::Never,
+        )
+        .expect("generate_key");
 
     // Sign without verifying PIN — should succeed with Never policy
     let hash = <sha2::Sha256 as sha2::Digest>::digest(b"test no pin");

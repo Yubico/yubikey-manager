@@ -139,6 +139,13 @@ fn verify_auth(session: &mut SecurityDomainSession<impl yubikit::smartcard::Smar
         .expect("delete temp key");
 }
 
+fn open_securitydomain_session(
+    tc: &TestConnection,
+) -> SecurityDomainSession<PcscSmartCardConnection> {
+    let conn = open_smartcard_connection(tc);
+    SecurityDomainSession::new(conn).expect("SecurityDomainSession::new")
+}
+
 /// Load SCP11a/c keys: generate SD key, import OCE certs, return ScpKeyParams.
 fn load_scp11_keys(
     session: &mut SecurityDomainSession<impl yubikit::smartcard::SmartCardConnection>,
@@ -197,28 +204,17 @@ fn load_scp11_keys(
 #[case::smart_card(TestConnection::SmartCard)]
 fn test_securitydomain_version(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
-    let conn = open_smartcard_connection(&tc);
-    match SecurityDomainSession::new(conn) {
-        Ok(session) => {
-            let _v = session.version();
-        }
-        Err(_) => {
-            eprintln!("SKIP {tc:?}: SecurityDomain not available");
-        }
-    }
+    require_version!(Version(5, 7, 2));
+    let session = open_securitydomain_session(&tc);
+    let _v = session.version();
 }
 
 #[rstest]
 #[case::smart_card(TestConnection::SmartCard)]
 fn test_securitydomain_get_key_information(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
-    let conn = open_smartcard_connection(&tc);
-    let mut session = match SecurityDomainSession::new(conn) {
-        Ok(s) => s,
-        Err(_) => {
-            skip!("{tc:?}: SecurityDomain not available");
-        }
-    };
+    require_version!(Version(5, 7, 2));
+    let mut session = open_securitydomain_session(&tc);
     let key_info = session.get_key_information().expect("get_key_information");
     assert!(!key_info.is_empty(), "Expected at least one key entry");
 }
@@ -227,13 +223,8 @@ fn test_securitydomain_get_key_information(#[case] tc: TestConnection) {
 #[case::smart_card(TestConnection::SmartCard)]
 fn test_card_recognition_data(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
-    let conn = open_smartcard_connection(&tc);
-    let mut session = match SecurityDomainSession::new(conn) {
-        Ok(s) => s,
-        Err(_) => {
-            skip!("{tc:?}: SecurityDomain not available");
-        }
-    };
+    require_version!(Version(5, 7, 2));
+    let mut session = open_securitydomain_session(&tc);
     ensure_default_keys(&mut session);
     let data = session
         .get_card_recognition_data()
@@ -254,13 +245,7 @@ fn test_card_recognition_data(#[case] tc: TestConnection) {
 fn test_scp03_authenticate(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(5, 7, 2));
-    let conn = open_smartcard_connection(&tc);
-    let mut session = match SecurityDomainSession::new(conn) {
-        Ok(s) => s,
-        Err(_) => {
-            skip!("{tc:?}: SecurityDomain not available");
-        }
-    };
+    let mut session = open_securitydomain_session(&tc);
     ensure_default_keys(&mut session);
     let conn = session.into_connection();
 
@@ -275,13 +260,8 @@ fn test_scp03_authenticate(#[case] tc: TestConnection) {
 #[case::smart_card(TestConnection::SmartCard)]
 fn test_scp03_wrong_key(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
-    let conn = open_smartcard_connection(&tc);
-    let mut session = match SecurityDomainSession::new(conn) {
-        Ok(s) => s,
-        Err(_) => {
-            skip!("{tc:?}: SecurityDomain not available");
-        }
-    };
+    require_version!(Version(5, 7, 2));
+    let mut session = open_securitydomain_session(&tc);
     ensure_default_keys(&mut session);
     let conn = session.into_connection();
 
@@ -301,13 +281,7 @@ fn test_scp03_wrong_key(#[case] tc: TestConnection) {
 fn test_scp03_change_key(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(5, 7, 2));
-    let conn = open_smartcard_connection(&tc);
-    let mut session = match SecurityDomainSession::new(conn) {
-        Ok(s) => s,
-        Err(_) => {
-            skip!("{tc:?}: SecurityDomain not available");
-        }
-    };
+    let mut session = open_securitydomain_session(&tc);
     ensure_default_keys(&mut session);
     let conn = session.into_connection();
 
@@ -362,13 +336,7 @@ fn test_scp03_change_key(#[case] tc: TestConnection) {
 fn test_scp11b_ok(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(5, 7, 2));
-    let conn = open_smartcard_connection(&tc);
-    let mut session = match SecurityDomainSession::new(conn) {
-        Ok(s) => s,
-        Err(_) => {
-            skip!("{tc:?}: SecurityDomain not available");
-        }
-    };
+    let mut session = open_securitydomain_session(&tc);
     ensure_default_keys(&mut session);
 
     let scp11b_ref = KeyRef::new(0x13, 0x01);
@@ -406,13 +374,7 @@ fn test_scp11b_ok(#[case] tc: TestConnection) {
 fn test_scp11b_import(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(5, 7, 2));
-    let conn = open_smartcard_connection(&tc);
-    let mut session = match SecurityDomainSession::new(conn) {
-        Ok(s) => s,
-        Err(_) => {
-            skip!("{tc:?}: SecurityDomain not available");
-        }
-    };
+    let mut session = open_securitydomain_session(&tc);
     ensure_default_keys(&mut session);
     let conn = session.into_connection();
 
@@ -461,13 +423,7 @@ fn test_scp11b_import(#[case] tc: TestConnection) {
 fn test_scp11a_ok(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(5, 7, 2));
-    let conn = open_smartcard_connection(&tc);
-    let mut session = match SecurityDomainSession::new(conn) {
-        Ok(s) => s,
-        Err(_) => {
-            skip!("{tc:?}: SecurityDomain not available");
-        }
-    };
+    let mut session = open_securitydomain_session(&tc);
     ensure_default_keys(&mut session);
     let conn = session.into_connection();
 
@@ -503,13 +459,7 @@ fn test_scp11a_ok(#[case] tc: TestConnection) {
 fn test_scp11a_allowlist(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(5, 7, 2));
-    let conn = open_smartcard_connection(&tc);
-    let mut session = match SecurityDomainSession::new(conn) {
-        Ok(s) => s,
-        Err(_) => {
-            skip!("{tc:?}: SecurityDomain not available");
-        }
-    };
+    let mut session = open_securitydomain_session(&tc);
     ensure_default_keys(&mut session);
     let conn = session.into_connection();
 
@@ -560,13 +510,7 @@ fn test_scp11a_allowlist(#[case] tc: TestConnection) {
 fn test_scp11a_allowlist_blocked(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(5, 7, 2));
-    let conn = open_smartcard_connection(&tc);
-    let mut session = match SecurityDomainSession::new(conn) {
-        Ok(s) => s,
-        Err(_) => {
-            skip!("{tc:?}: SecurityDomain not available");
-        }
-    };
+    let mut session = open_securitydomain_session(&tc);
     ensure_default_keys(&mut session);
     let conn = session.into_connection();
 
@@ -645,13 +589,7 @@ fn test_scp11a_allowlist_blocked(#[case] tc: TestConnection) {
 fn test_scp11c_ok(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(5, 7, 2));
-    let conn = open_smartcard_connection(&tc);
-    let mut session = match SecurityDomainSession::new(conn) {
-        Ok(s) => s,
-        Err(_) => {
-            skip!("{tc:?}: SecurityDomain not available");
-        }
-    };
+    let mut session = open_securitydomain_session(&tc);
     ensure_default_keys(&mut session);
     let conn = session.into_connection();
 
@@ -691,13 +629,7 @@ fn test_scp11c_ok(#[case] tc: TestConnection) {
 fn test_scp03_apdu_echo(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(5, 7, 2));
-    let conn = open_smartcard_connection(&tc);
-    let mut session = match SecurityDomainSession::new(conn) {
-        Ok(s) => s,
-        Err(_) => {
-            skip!("{tc:?}: SecurityDomain not available");
-        }
-    };
+    let mut session = open_securitydomain_session(&tc);
     ensure_default_keys(&mut session);
     let conn = session.into_connection();
 
