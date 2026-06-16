@@ -58,6 +58,8 @@ pub enum DeviceError {
     Cancelled,
     /// A different YubiKey was inserted or removed during reinsert.
     WrongDevice,
+    /// The operation requires a disabled Cargo feature.
+    UnsupportedFeature(&'static str),
 }
 
 /// Status updates during a device reinsert operation.
@@ -79,6 +81,9 @@ impl fmt::Display for DeviceError {
             Self::NotYubiKey => write!(f, "Not a YubiKey"),
             Self::Cancelled => write!(f, "Operation cancelled"),
             Self::WrongDevice => write!(f, "A different YubiKey was inserted/removed"),
+            Self::UnsupportedFeature(feature) => {
+                write!(f, "Operation requires the '{feature}' feature")
+            }
         }
     }
 }
@@ -89,7 +94,11 @@ impl std::error::Error for DeviceError {
             Self::SmartCard(e) => Some(e),
             Self::Management(e) => Some(e),
             Self::Transport(e) => Some(e.as_ref()),
-            Self::NoDeviceFound | Self::NotYubiKey | Self::Cancelled | Self::WrongDevice => None,
+            Self::NoDeviceFound
+            | Self::NotYubiKey
+            | Self::Cancelled
+            | Self::WrongDevice
+            | Self::UnsupportedFeature(_) => None,
         }
     }
 }

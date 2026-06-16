@@ -17,8 +17,8 @@
 //! This module provides low-level transport drivers for communicating with
 //! YubiKeys over different interfaces:
 //!
-//! - [`hidapi`] — HID transport (CTAP HID for FIDO2, OTP HID for YubiOTP)
-//! - [`pcsc`] — PC/SC smart card reader access (used by CCID applications)
+//! - `hidapi` — HID transport (CTAP HID for FIDO2, OTP HID for YubiOTP)
+//! - `pcsc` — PC/SC smart card reader access (used by CCID applications)
 //! - [`device`] — Local device enumeration and connection management
 //!
 //! Most users don't need to interact with these directly — use
@@ -27,8 +27,10 @@
 
 /// Local device enumeration and connection management.
 ///
-/// Requires both the `pcsc` and `hid` features.
-#[cfg(all(feature = "pcsc", feature = "hid"))]
+/// Available when either the `pcsc` or `hid` feature is enabled.
+/// Transport-specific operations return an error when their required feature is
+/// disabled.
+#[cfg(any(feature = "pcsc", feature = "hid"))]
 pub mod device;
 /// HID transport for FIDO (CTAP HID) and OTP (feature reports).
 #[cfg(feature = "hid")]
