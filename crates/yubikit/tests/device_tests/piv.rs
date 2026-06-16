@@ -1096,6 +1096,9 @@ fn test_piv_x25519_key_agreement(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::PIV);
     require_version!(Version(5, 7, 0));
+    if device_is_fips_capable(Capability::PIV) {
+        skip!("X25519 is not supported by FIPS-capable PIV");
+    }
 
     let mut session = open_piv_session(&tc);
     reset_piv(&mut session);
@@ -1207,6 +1210,9 @@ fn test_piv_pin_policy_never(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::PIV);
     require_version!(Version(4, 0, 0));
+    if device_is_fips_capable(Capability::PIV) {
+        skip!("PinPolicy::Never is not supported by FIPS-capable PIV");
+    }
 
     let mut session = open_piv_session(&tc);
     reset_piv(&mut session);

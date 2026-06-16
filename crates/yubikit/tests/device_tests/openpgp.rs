@@ -523,6 +523,9 @@ fn test_import_ec_secp256k1(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OPENPGP);
     require_version!(Version(5, 2, 0));
+    if device_is_fips_capable(Capability::OPENPGP) {
+        skip!("secp256k1 is not supported by FIPS-capable OpenPGP");
+    }
     let mut session = setup_for_import(&tc);
 
     let (key, vk) = generate_ec_private_key_secp256k1();
@@ -649,6 +652,9 @@ fn test_import_x25519(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OPENPGP);
     require_version!(Version(5, 2, 0));
+    if device_is_fips_capable(Capability::OPENPGP) {
+        skip!("X25519 is not supported by FIPS-capable OpenPGP");
+    }
     let mut session = setup_for_import(&tc);
 
     use x25519_dalek::StaticSecret;

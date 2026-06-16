@@ -332,6 +332,10 @@ fn device_is_fips() -> bool {
     get_device().info().is_fips
 }
 
+fn device_is_fips_capable(capability: Capability) -> bool {
+    get_device().info().fips_capable.contains(capability)
+}
+
 macro_rules! require_capability {
     ($cap:expr) => {
         if !device_capabilities().contains($cap) {
