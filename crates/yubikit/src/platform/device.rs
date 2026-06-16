@@ -10,7 +10,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::core::{Transport, Version, set_override_version};
-use crate::device::{DeviceError, DeviceSource, ReinsertStatus, YubiKeyDevice, fido_only};
+use crate::device::{DeviceError, ReinsertStatus, YubiKeyDevice, fido_only};
 
 #[cfg(test)]
 use crate::device::is_preview;
@@ -1402,29 +1402,6 @@ fn apply_device_info_fixups(info: &mut DeviceInfo) {
 // ---------------------------------------------------------------------------
 
 pub use crate::device::get_name;
-
-// ---------------------------------------------------------------------------
-// LocalDeviceSource
-// ---------------------------------------------------------------------------
-
-/// Device source using direct local access (USB HID, PC/SC).
-pub struct LocalDeviceSource;
-
-impl DeviceSource for LocalDeviceSource {
-    fn list_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError> {
-        let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
-        let devices = list_devices(all)?;
-        Ok(devices.into_iter().map(|d| Box::new(d) as _).collect())
-    }
-
-    fn select_fido(
-        &mut self,
-        cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Box<dyn YubiKeyDevice>, DeviceError> {
-        let dev = select_fido(cancel)?;
-        Ok(Box::new(dev))
-    }
-}
 
 #[cfg(test)]
 mod tests {

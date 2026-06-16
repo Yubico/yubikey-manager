@@ -9,12 +9,67 @@ use std::rc::Rc;
 
 use serde_json::json;
 
-use yubikit::device::{DeviceError, DeviceSource, YubiKeyDevice};
-#[cfg(feature = "hardware")]
-use yubikit::platform::device::LocalDeviceSource;
+use yubikit::device::{DeviceError, YubiKeyDevice};
 
 use crate::rpc::client::{RpcCallError, RpcClient};
 use crate::rpc::proxy::RpcDevice;
+
+// ---------------------------------------------------------------------------
+// DeviceSource trait
+// ---------------------------------------------------------------------------
+
+/// A source of YubiKey devices.
+///
+/// Abstracts over local enumeration (USB/NFC) and remote access via the
+/// ykman-svc service, allowing callers to enumerate devices without caring
+/// about the underlying transport.
+pub trait DeviceSource {
+    /// List all currently connected YubiKey devices.
+    fn list_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError>;
+
+    /// Select a YubiKey by touch via CTAP2 authenticator selection.
+    ///
+    /// Waits for the user to touch a connected YubiKey and returns it.
+    fn select_fido(
+        &mut self,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Box<dyn YubiKeyDevice>, DeviceError>;
+
+    /// Whether this source is backed by a remote service.
+    fn is_service(&self) -> bool {
+        false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LocalDeviceSource
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "hardware")]
+/// Device source using direct local access (USB HID, PC/SC).
+pub struct LocalDeviceSource;
+
+#[cfg(feature = "hardware")]
+impl DeviceSource for LocalDeviceSource {
+    fn list_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError> {
+        use yubikit::management::UsbInterface;
+        use yubikit::platform::device::list_devices;
+
+        let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
+        let devices = list_devices(all)?;
+        Ok(devices.into_iter().map(|d| Box::new(d) as _).collect())
+    }
+
+    fn select_fido(
+        &mut self,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Box<dyn YubiKeyDevice>, DeviceError> {
+        use yubikit::platform::device::select_fido;
+
+        let dev = select_fido(cancel)?;
+        Ok(Box::new(dev))
+    }
+}
 
 /// A device source that always returns "no device found".
 ///

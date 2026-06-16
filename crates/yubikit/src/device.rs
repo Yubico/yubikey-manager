@@ -189,33 +189,6 @@ impl YubiKeyDevice for Box<dyn YubiKeyDevice> {
 }
 
 // ---------------------------------------------------------------------------
-// DeviceSource trait
-// ---------------------------------------------------------------------------
-
-/// A source of YubiKey devices.
-///
-/// Abstracts over local enumeration (USB/NFC) and remote access via the
-/// ykman-svc service, allowing callers to enumerate devices without caring
-/// about the underlying transport.
-pub trait DeviceSource {
-    /// List all currently connected YubiKey devices.
-    fn list_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError>;
-
-    /// Select a YubiKey by touch via CTAP2 authenticator selection.
-    ///
-    /// Waits for the user to touch a connected YubiKey and returns it.
-    fn select_fido(
-        &mut self,
-        cancel: Option<&dyn Fn() -> bool>,
-    ) -> Result<Box<dyn YubiKeyDevice>, DeviceError>;
-
-    /// Whether this source is backed by a remote service.
-    fn is_service(&self) -> bool {
-        false
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Device naming
 // ---------------------------------------------------------------------------
 
