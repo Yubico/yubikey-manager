@@ -1008,7 +1008,7 @@ impl PublicKey {
                 .algorithm
                 .parameters
                 .as_ref()
-                .and_then(|p| ObjectIdentifier::from_der(p.value()).ok())
+                .and_then(|p| ObjectIdentifier::from_bytes(p.value()).ok())
                 .ok_or(KeyError("Missing EC curve parameter"))?;
             let curve =
                 EcCurve::from_oid(&curve_oid).ok_or(KeyError("Unsupported EC curve in SPKI"))?;
@@ -1179,5 +1179,90 @@ fn parse_pkcs8(pkcs8_der: &[u8]) -> Result<(KeyAlgorithm, Zeroizing<Vec<u8>>), K
             algorithm,
             Zeroizing::new(private_key_data[key_off..key_off + key_len].to_vec()),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_spki_roundtrip(public_key: PublicKey) {
+        let spki = public_key.to_spki().expect("encode SPKI");
+        let decoded = PublicKey::from_spki(&spki).expect("decode SPKI");
+        assert_eq!(decoded, public_key);
+
+        let reencoded = decoded.to_spki().expect("re-encode SPKI");
+        assert_eq!(reencoded, spki);
+    }
+
+    #[test]
+    fn rsa_public_keys_roundtrip_spki() {
+        for size in [
+            RsaKeySize::Rsa1024,
+            RsaKeySize::Rsa2048,
+            RsaKeySize::Rsa3072,
+            RsaKeySize::Rsa4096,
+        ] {
+            let n = vec![0x01; size.bit_len() / 8];
+            let e = vec![0x01, 0x00, 0x01];
+            assert_spki_roundtrip(RsaPublicKey::new(n, e).unwrap().into());
+        }
+    }
+
+    #[test]
+    fn ec_public_keys_roundtrip_spki() {
+        for curve in [
+            EcCurve::P256,
+            EcCurve::P384,
+            EcCurve::P521,
+            EcCurve::Secp256k1,
+            EcCurve::BrainpoolP256r1,
+            EcCurve::BrainpoolP384r1,
+            EcCurve::BrainpoolP512r1,
+        ] {
+            let mut point = vec![0x04];
+            point.extend(vec![0x01; curve.scalar_len() * 2]);
+            assert_spki_roundtrip(EcPublicKey::new(curve, point).unwrap().into());
+        }
+    }
+
+    #[test]
+    fn ed25519_public_key_roundtrips_spki() {
+        assert_spki_roundtrip(Ed25519PublicKey::new(vec![0x01; 32]).unwrap().into());
+    }
+
+    #[test]
+    fn x25519_public_key_roundtrips_spki() {
+        assert_spki_roundtrip(X25519PublicKey::new(vec![0x02; 32]).unwrap().into());
+    }
+
+    #[test]
+    fn ml_dsa_public_keys_roundtrip_spki() {
+        for parameter_set in [
+            MlDsaParameterSet::MlDsa44,
+            MlDsaParameterSet::MlDsa65,
+            MlDsaParameterSet::MlDsa87,
+        ] {
+            assert_spki_roundtrip(
+                MlDsaPublicKey::new(parameter_set, vec![0x03; 32])
+                    .unwrap()
+                    .into(),
+            );
+        }
+    }
+
+    #[test]
+    fn ml_kem_public_keys_roundtrip_spki() {
+        for parameter_set in [
+            MlKemParameterSet::MlKem512,
+            MlKemParameterSet::MlKem768,
+            MlKemParameterSet::MlKem1024,
+        ] {
+            assert_spki_roundtrip(
+                MlKemPublicKey::new(parameter_set, vec![0x04; 32])
+                    .unwrap()
+                    .into(),
+            );
+        }
     }
 }
