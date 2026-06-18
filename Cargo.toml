@@ -11,7 +11,7 @@ repository = "https://github.com/Yubico/yubikey-manager"
 [workspace.dependencies]
 # Internal crates
 yubikit = { version = "0.1.0", path = "crates/yubikit", default-features = false }
-ykman = { version = "6.0.0-dev.0", path = "crates/ykman", default-features = false }
+ykman = { version = "0.1.0-dev.0", path = "crates/ykman", default-features = false }
 
 # Cryptography
 aes = "0.8"
