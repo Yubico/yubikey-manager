@@ -489,9 +489,16 @@ fn pem_decode_all_certs(text: &str) -> Result<Vec<Vec<u8>>, CliError> {
 }
 
 fn extract_ec_private_key(der: &[u8]) -> Result<Vec<u8>, CliError> {
-    if der.len() < 34 {
-        return Err(CliError("EC private key too short.".into()));
+    use elliptic_curve::SecretKey;
+    use elliptic_curve::pkcs8::DecodePrivateKey;
+
+    if let Ok(sk) = SecretKey::<p256::NistP256>::from_pkcs8_der(der) {
+        return Ok(sk.to_bytes().as_slice().to_vec());
     }
+    if let Ok(sk) = SecretKey::<p256::NistP256>::from_sec1_der(der) {
+        return Ok(sk.to_bytes().as_slice().to_vec());
+    }
+
     for i in 0..der.len().saturating_sub(33) {
         if der[i] == 0x04 && der[i + 1] == 0x20 {
             return Ok(der[i + 2..i + 34].to_vec());

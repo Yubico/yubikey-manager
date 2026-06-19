@@ -628,24 +628,20 @@ fn extract_ski_from_cert(cert_der: &[u8]) -> Option<Vec<u8>> {
 
 /// Try to decrypt an encrypted private key from PEM data.
 /// Returns the DER-encoded PKCS#8 private key on success.
-fn try_decrypt_sd_private_key(
-    _pem_data: &str,
-    _password: &str,
-) -> Result<Option<Vec<u8>>, CliError> {
-    // The pkcs8 crate at version 0.10 does not support encrypted PKCS#8 without
-    // the "encryption" feature. Try to parse as unencrypted in case the tool
-    // wrote an unencrypted key with the ENCRYPTED header.
+fn try_decrypt_sd_private_key(pem_data: &str, password: &str) -> Result<Option<Vec<u8>>, CliError> {
+    use base64::Engine;
     use elliptic_curve::SecretKey;
     use elliptic_curve::pkcs8::DecodePrivateKey;
+    use pkcs8::EncryptedPrivateKeyInfo;
 
-    if let Ok(sk) = SecretKey::<p256::NistP256>::from_pkcs8_pem(_pem_data) {
+    if let Ok(sk) = SecretKey::<p256::NistP256>::from_pkcs8_pem(pem_data) {
         use elliptic_curve::pkcs8::EncodePrivateKey;
         let doc = sk
             .to_pkcs8_der()
             .map_err(|e| CliError(format!("Failed to re-encode key: {e}")))?;
         return Ok(Some(doc.as_bytes().to_vec()));
     }
-    if let Ok(sk) = SecretKey::<p384::NistP384>::from_pkcs8_pem(_pem_data) {
+    if let Ok(sk) = SecretKey::<p384::NistP384>::from_pkcs8_pem(pem_data) {
         use elliptic_curve::pkcs8::EncodePrivateKey;
         let doc = sk
             .to_pkcs8_der()
@@ -653,9 +649,22 @@ fn try_decrypt_sd_private_key(
         return Ok(Some(doc.as_bytes().to_vec()));
     }
 
-    Err(CliError(
-        "Cannot decrypt encrypted key in-process. Convert first:\n  \
-         openssl pkey -in key.pem -out key_dec.pem"
-            .into(),
-    ))
+    let Some(block) = pem_data
+        .split("-----BEGIN ENCRYPTED PRIVATE KEY-----")
+        .nth(1)
+        .and_then(|rest| rest.split("-----END ENCRYPTED PRIVATE KEY-----").next())
+    else {
+        return Ok(None);
+    };
+
+    let der = base64::engine::general_purpose::STANDARD
+        .decode(block.replace(['\n', '\r'], ""))
+        .map_err(|e| CliError(format!("Invalid encrypted private key PEM: {e}")))?;
+    let enc_key = EncryptedPrivateKeyInfo::try_from(der.as_slice())
+        .map_err(|e| CliError(format!("Failed to parse encrypted private key: {e}")))?;
+    let dec_key = enc_key
+        .decrypt(password)
+        .map_err(|_| CliError("Wrong password for encrypted private key.".into()))?;
+
+    Ok(Some(dec_key.as_bytes().to_vec()))
 }
