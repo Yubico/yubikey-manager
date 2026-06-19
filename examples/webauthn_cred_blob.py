@@ -53,9 +53,8 @@ def main() -> None:
     print(f"✅ Credential: {cred_id}")
 
     ext = reg.get("clientExtensionResults", {})
-    cb = ext.get("credBlob", {})
-    if cb:
-        print(f"  Blob stored: {cb.get('stored')}")
+    if "credBlob" in ext:
+        print(f"  Blob stored: {ext['credBlob']}")
 
     # -- Authentication: retrieve the blob --
     print("\n━━━ Authentication (getCredBlob) ━━━")
@@ -79,9 +78,8 @@ def main() -> None:
     print("✅ Authentication succeeded")
 
     ext = a.get("clientExtensionResults", {})
-    cb = ext.get("credBlob", {})
-    if cb:
-        blob_b64 = cb.get("blob", "")
+    blob_b64 = ext.get("credBlob", "")
+    if blob_b64:
         retrieved = base64.urlsafe_b64decode(blob_b64 + "==")
         print(f"  Retrieved blob: {retrieved.hex()}")
         try:

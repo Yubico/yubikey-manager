@@ -26,35 +26,27 @@ pub const EXTENSION_ID: &str = "credBlob";
 
 /// Registration input for credBlob — the blob data to store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct RegistrationInput {
     /// The blob data to store with the credential (base64url-encoded in JSON).
-    #[serde(
-        rename = "credBlob",
-        serialize_with = "b64_ser",
-        deserialize_with = "b64_de"
-    )]
-    /// The blob data to store with the credential (base64url-encoded in JSON).
+    #[serde(serialize_with = "b64_ser", deserialize_with = "b64_de")]
     pub blob: Vec<u8>,
 }
 
 /// Registration output for credBlob.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct RegistrationOutput {
     /// Whether the authenticator successfully stored the blob.
-    #[serde(rename = "credBlob")]
     pub stored: bool,
 }
 
 /// Authentication output for credBlob.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct AuthenticationOutput {
     /// The blob data retrieved from the credential (base64url-encoded in JSON).
-    #[serde(
-        rename = "credBlob",
-        serialize_with = "b64_ser",
-        deserialize_with = "b64_de"
-    )]
-    /// The blob data retrieved from the credential (base64url-encoded in JSON).
+    #[serde(serialize_with = "b64_ser", deserialize_with = "b64_de")]
     pub blob: Vec<u8>,
 }
 
@@ -208,5 +200,25 @@ mod tests {
         let (key, val) = get_assertion_to_cbor();
         assert_eq!(key, "credBlob");
         assert_eq!(val.as_bool(), Some(true));
+    }
+
+    #[test]
+    fn test_registration_input_json() {
+        let input: RegistrationInput = serde_json::from_str(r#""aGVsbG8""#).unwrap();
+        assert_eq!(input.blob, b"hello");
+    }
+
+    #[test]
+    fn test_registration_output_json() {
+        let output = RegistrationOutput { stored: true };
+        assert_eq!(serde_json::to_string(&output).unwrap(), "true");
+    }
+
+    #[test]
+    fn test_authentication_output_json() {
+        let output = AuthenticationOutput {
+            blob: b"hello".to_vec(),
+        };
+        assert_eq!(serde_json::to_string(&output).unwrap(), r#""aGVsbG8""#);
     }
 }
