@@ -1,5 +1,3 @@
-use std::io::{self, Write};
-
 use clap::Subcommand;
 use yubikit::core::Connection;
 use yubikit::core::Transport;
@@ -8,7 +6,7 @@ use yubikit::management::{Capability, DeviceConfig, DeviceFlag, ManagementSessio
 
 use crate::cli_enums::CliCapability;
 use crate::util::{
-    CliError, format_session_error, format_smartcard_connection_error, prompt_new_secret,
+    CliError, confirm, format_session_error, format_smartcard_connection_error, prompt_new_secret,
     prompt_secret,
 };
 
@@ -307,14 +305,6 @@ fn parse_lock_code(hex: &str) -> Result<Vec<u8>, CliError> {
     Ok(bytes)
 }
 
-fn confirm(msg: &str) -> bool {
-    eprint!("{msg} [y/N] ");
-    io::stderr().flush().ok();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).ok();
-    matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
-}
-
 fn current_lock_code(
     is_locked: bool,
     lock_code: Option<&str>,
@@ -340,6 +330,102 @@ fn reject_lock_code_if_unlocked(is_locked: bool, lock_code: Option<&str>) -> Res
     } else {
         Ok(())
     }
+}
+
+/// Compute capability changes for a transport and confirm with the user.
+///
+/// Returns the new enabled capabilities set and a list of change descriptions.
+/// The caller is responsible for checking whether the overall changes list is empty.
+fn compute_capability_changes(
+    transport_name: &str,
+    supported: Capability,
+    enabled: Capability,
+    enable: &[CliCapability],
+    disable: &[CliCapability],
+    enable_all: bool,
+    disable_all: bool,
+    allow_disable_all: bool,
+) -> Result<(Capability, Vec<String>), CliError> {
+    let mut new_enabled = enabled;
+    let mut changes = Vec::new();
+
+    if enable_all {
+        for &cap in Capability::ALL {
+            if supported.contains(cap) && !enabled.contains(cap) {
+                new_enabled |= cap;
+                changes.push(format!("Enable {}", cap.display_name()));
+            }
+        }
+    }
+    if disable_all {
+        for &cap in Capability::ALL {
+            if supported.contains(cap) && enabled.contains(cap) {
+                new_enabled = Capability(new_enabled.0 & !cap.0);
+                changes.push(format!("Disable {}", cap.display_name()));
+            }
+        }
+    }
+
+    for name in enable {
+        let cap: Capability = (*name).into();
+        if !supported.contains(cap) {
+            return Err(CliError(format!(
+                "{} is not supported on {transport_name}.",
+                cap.display_name()
+            )));
+        }
+        if !enabled.contains(cap) {
+            new_enabled |= cap;
+            changes.push(format!("Enable {}", cap.display_name()));
+        }
+    }
+    for name in disable {
+        let cap: Capability = (*name).into();
+        if enabled.contains(cap) {
+            new_enabled = Capability(new_enabled.0 & !cap.0);
+            changes.push(format!("Disable {}", cap.display_name()));
+        }
+    }
+
+    if !allow_disable_all && new_enabled.is_empty() {
+        return Err(CliError(format!(
+            "Cannot disable all {transport_name} applications."
+        )));
+    }
+
+    Ok((new_enabled, changes))
+}
+
+/// List capabilities and their enabled/disabled status for a transport.
+fn list_capabilities(supported: Capability, enabled: Capability) {
+    for &cap in Capability::ALL {
+        if supported.contains(cap) {
+            let status = if enabled.contains(cap) {
+                "Enabled"
+            } else {
+                "Disabled"
+            };
+            println!("{}: {status}", cap.display_name());
+        }
+    }
+}
+
+/// Confirm configuration changes with the user, or proceed if `force` is set.
+fn confirm_config_changes(
+    transport_name: &str,
+    changes: &[String],
+    force: bool,
+) -> Result<(), CliError> {
+    if !force {
+        eprintln!("{transport_name} configuration changes:");
+        for c in changes {
+            eprintln!("  {c}");
+        }
+        if !confirm("Proceed?") {
+            return Err(CliError("Aborted by user.".into()));
+        }
+    }
+    Ok(())
 }
 
 pub fn run_usb(
@@ -371,52 +457,20 @@ pub fn run_usb(
     reject_lock_code_if_unlocked(info.is_locked, lock_code)?;
 
     if list {
-        for &cap in Capability::ALL {
-            if usb_supported.contains(cap) {
-                let status = if usb_enabled.contains(cap) {
-                    "Enabled"
-                } else {
-                    "Disabled"
-                };
-                println!("{}: {status}", cap.display_name());
-            }
-        }
+        list_capabilities(usb_supported, usb_enabled);
         return Ok(());
     }
 
-    let mut new_enabled = usb_enabled;
-    let mut changes = Vec::new();
-
-    if enable_all {
-        for &cap in Capability::ALL {
-            if usb_supported.contains(cap) && !usb_enabled.contains(cap) {
-                new_enabled |= cap;
-                changes.push(format!("Enable {}", cap.display_name()));
-            }
-        }
-    }
-
-    for name in enable {
-        let cap: Capability = (*name).into();
-        if !usb_supported.contains(cap) {
-            return Err(CliError(format!(
-                "{} is not supported on USB.",
-                cap.display_name()
-            )));
-        }
-        if !usb_enabled.contains(cap) {
-            new_enabled |= cap;
-            changes.push(format!("Enable {}", cap.display_name()));
-        }
-    }
-
-    for name in disable {
-        let cap: Capability = (*name).into();
-        if usb_enabled.contains(cap) {
-            new_enabled = Capability(new_enabled.0 & !cap.0);
-            changes.push(format!("Disable {}", cap.display_name()));
-        }
-    }
+    let (new_enabled, mut changes) = compute_capability_changes(
+        "USB",
+        usb_supported,
+        usb_enabled,
+        enable,
+        disable,
+        enable_all,
+        false,
+        false,
+    )?;
 
     if touch_eject {
         changes.push("Enable touch-eject".into());
@@ -435,10 +489,6 @@ pub fn run_usb(
         return Err(CliError("No configuration changes specified.".into()));
     }
 
-    if new_enabled.is_empty() {
-        return Err(CliError("Cannot disable all USB applications.".into()));
-    }
-
     let reboot = new_enabled != usb_enabled;
     if reboot {
         changes.push("The YubiKey will reboot".into());
@@ -450,15 +500,7 @@ pub fn run_usb(
         "Enter lock code (32 hex characters)",
     )?;
 
-    if !force {
-        eprintln!("USB configuration changes:");
-        for c in &changes {
-            eprintln!("  {c}");
-        }
-        if !confirm("Proceed?") {
-            return Err(CliError("Aborted by user.".into()));
-        }
-    }
+    confirm_config_changes("USB", &changes, force)?;
 
     let mut config = DeviceConfig::default();
     config
@@ -505,16 +547,7 @@ pub fn run_nfc(
     reject_lock_code_if_unlocked(info.is_locked, lock_code)?;
 
     if list {
-        for &cap in Capability::ALL {
-            if nfc_supported.contains(cap) {
-                let status = if nfc_enabled.contains(cap) {
-                    "Enabled"
-                } else {
-                    "Disabled"
-                };
-                println!("{}: {status}", cap.display_name());
-            }
-        }
+        list_capabilities(nfc_supported, nfc_enabled);
         return Ok(());
     }
 
@@ -528,13 +561,11 @@ pub fn run_nfc(
             lock_code,
             "Enter lock code (32 hex characters)",
         )?;
-        if !force {
-            eprintln!("NFC configuration changes:");
-            eprintln!("  Disable NFC until next USB power cycle");
-            if !confirm("Proceed?") {
-                return Err(CliError("Aborted by user.".into()));
-            }
-        }
+        confirm_config_changes(
+            "NFC",
+            &["Disable NFC until next USB power cycle".into()],
+            force,
+        )?;
         write_config(dev, &config, false, lc.as_deref(), None)?;
         println!(
             "YubiKey NFC disabled. It will be re-enabled automatically the next time it is connected to USB power."
@@ -542,46 +573,16 @@ pub fn run_nfc(
         return Ok(());
     }
 
-    let mut new_enabled = nfc_enabled;
-    let mut changes = Vec::new();
-
-    if enable_all {
-        for &cap in Capability::ALL {
-            if nfc_supported.contains(cap) && !nfc_enabled.contains(cap) {
-                new_enabled |= cap;
-                changes.push(format!("Enable {}", cap.display_name()));
-            }
-        }
-    }
-    if disable_all {
-        for &cap in Capability::ALL {
-            if nfc_supported.contains(cap) && nfc_enabled.contains(cap) {
-                new_enabled = Capability(new_enabled.0 & !cap.0);
-                changes.push(format!("Disable {}", cap.display_name()));
-            }
-        }
-    }
-
-    for name in enable {
-        let cap: Capability = (*name).into();
-        if !nfc_supported.contains(cap) {
-            return Err(CliError(format!(
-                "{} is not supported on NFC.",
-                cap.display_name()
-            )));
-        }
-        if !nfc_enabled.contains(cap) {
-            new_enabled |= cap;
-            changes.push(format!("Enable {}", cap.display_name()));
-        }
-    }
-    for name in disable {
-        let cap: Capability = (*name).into();
-        if nfc_enabled.contains(cap) {
-            new_enabled = Capability(new_enabled.0 & !cap.0);
-            changes.push(format!("Disable {}", cap.display_name()));
-        }
-    }
+    let (new_enabled, changes) = compute_capability_changes(
+        "NFC",
+        nfc_supported,
+        nfc_enabled,
+        enable,
+        disable,
+        enable_all,
+        disable_all,
+        true,
+    )?;
 
     if changes.is_empty() {
         return Err(CliError("No configuration changes specified.".into()));
@@ -593,15 +594,7 @@ pub fn run_nfc(
         "Enter lock code (32 hex characters)",
     )?;
 
-    if !force {
-        eprintln!("NFC configuration changes:");
-        for c in &changes {
-            eprintln!("  {c}");
-        }
-        if !confirm("Proceed?") {
-            return Err(CliError("Aborted by user.".into()));
-        }
-    }
+    confirm_config_changes("NFC", &changes, force)?;
 
     let mut config = DeviceConfig::default();
     config

@@ -1,4 +1,3 @@
-use std::io::{self, Write};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -24,10 +23,9 @@ use yubikit::tlv::{parse_tlv_list, tlv_encode};
 use crate::cli_enums::{
     CliFormat, CliHashAlgorithm, CliKeyType, CliMgmtKeyType, CliPinPolicy, CliTouchPolicy,
 };
-use crate::scp::{self, ScpParams};
+use crate::scp::ScpParams;
 use crate::util::{
-    CliError, format_session_error, format_smartcard_connection_error, read_file_or_stdin,
-    write_file_or_stdout,
+    CliError, confirm, open_smartcard_session, read_file_or_stdin, write_file_or_stdout,
 };
 
 #[derive(Subcommand)]
@@ -588,33 +586,18 @@ impl PivAction {
     }
 }
 
-fn open_session<'a>(
-    dev: &'a dyn YubiKeyDevice,
+fn open_session(
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<PivSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
-    let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::PIV, "PIV")?;
-    match scp_config {
-        None => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| format_smartcard_connection_error("PIV", e))?;
-            PivSession::new(conn).map_err(|(e, _)| format_session_error("PIV", e))
-        }
-        Some(params) => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| format_smartcard_connection_error("PIV", e))?;
-            PivSession::new_with_scp(conn, &params).map_err(|(e, _)| format_session_error("PIV", e))
-        }
-    }
-}
-
-fn confirm(msg: &str) -> bool {
-    eprint!("{msg} [y/N] ");
-    io::stderr().flush().ok();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).ok();
-    matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+) -> Result<PivSession<Box<dyn yubikit::smartcard::SmartCardConnection + Send>>, CliError> {
+    open_smartcard_session(
+        dev,
+        scp_params,
+        Capability::PIV,
+        "PIV",
+        PivSession::new,
+        PivSession::new_with_scp,
+    )
 }
 
 fn parse_slot(s: &str) -> Result<Slot, CliError> {

@@ -1,4 +1,3 @@
-use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -17,7 +16,9 @@ use crate::cancel;
 use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliKeyboardLayout, CliOtpSlot, CliPacing};
 use crate::keyboard::{self, MODHEX_CHARS};
 use crate::scp::{self, ScpParams};
-use crate::util::{self, CliError, format_session_error, format_smartcard_connection_error};
+use crate::util::{
+    self, CliError, confirm, format_session_error, format_smartcard_connection_error,
+};
 
 pub fn effective_access_code<'a>(
     parent_access_code: &'a Option<String>,
@@ -540,14 +541,6 @@ fn parse_access_code(s: &str) -> Result<[u8; ACC_CODE_SIZE], CliError> {
 
 fn to_access_code(code: &[u8; ACC_CODE_SIZE]) -> Result<AccessCode, CliError> {
     AccessCode::new(code.as_slice()).map_err(|e| CliError(format!("Invalid access code: {e}")))
-}
-
-fn confirm(msg: &str) -> bool {
-    eprint!("{msg} [y/N] ");
-    io::stderr().flush().ok();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).ok();
-    matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 fn confirm_slot_overwrite<C: Connection + 'static>(session: &YubiOtpSession<C>, slot: Slot) {

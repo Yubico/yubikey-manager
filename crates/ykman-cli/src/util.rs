@@ -2,8 +2,11 @@ use std::fmt;
 use std::io::{self, Read, Write};
 
 use ykman::rpc::client::RpcCallError;
-use yubikit::device::DeviceError;
-use yubikit::smartcard::{SmartCardError, Sw};
+use yubikit::device::{DeviceError, YubiKeyDevice};
+use yubikit::management::Capability;
+use yubikit::smartcard::{ScpKeyParams, SmartCardConnection, SmartCardError, Sw};
+
+use crate::scp::{self, ScpParams};
 
 /// CLI error type for user-facing error messages.
 #[derive(Debug)]
@@ -108,6 +111,15 @@ pub fn parse_hex_u8(s: &str) -> Result<u8, CliError> {
         .map_err(|_| CliError(format!("Invalid hex value: {s}")))
 }
 
+/// Prompt the user with a yes/no confirmation.
+pub fn confirm(msg: &str) -> bool {
+    eprint!("{msg} [y/N] ");
+    io::stderr().flush().ok();
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).ok();
+    matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
 /// Write to a file, or to stdout if path is "-".
 pub fn write_file_or_stdout(path: &str, data: &[u8]) -> Result<(), CliError> {
     if path == "-" {
@@ -121,5 +133,38 @@ pub fn write_file_or_stdout(path: &str, data: &[u8]) -> Result<(), CliError> {
     } else {
         std::fs::write(path, data)
             .map_err(|e| CliError(format!("Failed to write file '{path}': {e}")))
+    }
+}
+
+/// Open a smartcard session with optional SCP, handling connection and error mapping.
+///
+/// Resolves SCP configuration, opens the smartcard connection, and creates a session
+/// using the provided constructors. This eliminates the repetitive open-session boilerplate
+/// across application modules.
+pub fn open_smartcard_session<S, E>(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    capability: Capability,
+    app_name: &str,
+    new_session: impl FnOnce(
+        Box<dyn SmartCardConnection + Send>,
+    ) -> Result<S, (E, Box<dyn SmartCardConnection + Send>)>,
+    new_session_with_scp: impl FnOnce(
+        Box<dyn SmartCardConnection + Send>,
+        &ScpKeyParams,
+    ) -> Result<S, (E, Box<dyn SmartCardConnection + Send>)>,
+) -> Result<S, CliError>
+where
+    E: fmt::Display,
+{
+    let scp_config = scp::resolve_scp_for_app(dev, scp_params, capability, app_name)?;
+    let conn = dev
+        .open_smartcard()
+        .map_err(|e| format_smartcard_connection_error(app_name, e))?;
+    match scp_config {
+        None => new_session(conn).map_err(|(e, _)| format_session_error(app_name, e)),
+        Some(params) => {
+            new_session_with_scp(conn, &params).map_err(|(e, _)| format_session_error(app_name, e))
+        }
     }
 }

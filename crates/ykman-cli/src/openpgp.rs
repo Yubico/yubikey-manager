@@ -1,15 +1,13 @@
-use std::io::{self, Write};
-
 use clap::Subcommand;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::openpgp::{KeyRef, KeyStatus, OpenPgpPin, OpenPgpSession, PinPolicy, Uif};
 
 use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
-use crate::scp::{self, ScpParams};
+use crate::scp::ScpParams;
 use crate::util::{
-    CliError, format_session_error, format_smartcard_connection_error, read_file_or_stdin,
-    write_file_or_stdout,
+    CliError, confirm, format_smartcard_connection_error, open_smartcard_session,
+    read_file_or_stdin, write_file_or_stdout,
 };
 
 #[derive(Subcommand)]
@@ -252,34 +250,18 @@ impl OpenpgpAction {
     }
 }
 
-fn open_session<'a>(
-    dev: &'a dyn YubiKeyDevice,
+fn open_session(
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<OpenPgpSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
-    let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OPENPGP, "OpenPGP")?;
-    match scp_config {
-        None => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| format_smartcard_connection_error("OpenPGP", e))?;
-            OpenPgpSession::new(conn).map_err(|(e, _)| format_session_error("OpenPGP", e))
-        }
-        Some(params) => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| format_smartcard_connection_error("OpenPGP", e))?;
-            OpenPgpSession::new_with_scp(conn, &params)
-                .map_err(|(e, _)| format_session_error("OpenPGP", e))
-        }
-    }
-}
-
-fn confirm(msg: &str) -> bool {
-    eprint!("{msg} [y/N] ");
-    io::stderr().flush().ok();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).ok();
-    matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+) -> Result<OpenPgpSession<Box<dyn yubikit::smartcard::SmartCardConnection + Send>>, CliError> {
+    open_smartcard_session(
+        dev,
+        scp_params,
+        Capability::OPENPGP,
+        "OpenPGP",
+        OpenPgpSession::new,
+        OpenPgpSession::new_with_scp,
+    )
 }
 
 fn ensure_admin_pin(admin_pin: Option<&str>) -> Result<OpenPgpPin, CliError> {

@@ -1,15 +1,11 @@
-use std::io::{self, Write};
-
 use clap::Subcommand;
 use yubikit::device::YubiKeyDevice;
 use yubikit::hsmauth::{CredentialPassword, HsmAuthManagementKey, HsmAuthSession};
 use yubikit::management::Capability;
 
 use crate::cli_enums::CliFormat;
-use crate::scp::{self, ScpParams};
-use crate::util::{
-    CliError, format_session_error, format_smartcard_connection_error, write_file_or_stdout,
-};
+use crate::scp::ScpParams;
+use crate::util::{CliError, confirm, open_smartcard_session, write_file_or_stdout};
 
 const MANAGEMENT_KEY_LEN: usize = 16;
 
@@ -255,35 +251,18 @@ impl HsmauthAction {
     }
 }
 
-fn open_session<'a>(
-    dev: &'a dyn YubiKeyDevice,
+fn open_session(
+    dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<HsmAuthSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
-    let scp_config =
-        scp::resolve_scp_for_app(dev, scp_params, Capability::HSMAUTH, "YubiHSM Auth")?;
-    match scp_config {
-        None => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| format_smartcard_connection_error("YubiHSM Auth", e))?;
-            HsmAuthSession::new(conn).map_err(|(e, _)| format_session_error("YubiHSM Auth", e))
-        }
-        Some(params) => {
-            let conn = dev
-                .open_smartcard()
-                .map_err(|e| format_smartcard_connection_error("YubiHSM Auth", e))?;
-            HsmAuthSession::new_with_scp(conn, &params)
-                .map_err(|(e, _)| format_session_error("YubiHSM Auth", e))
-        }
-    }
-}
-
-fn confirm(msg: &str) -> bool {
-    eprint!("{msg} [y/N] ");
-    io::stderr().flush().ok();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).ok();
-    matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+) -> Result<HsmAuthSession<Box<dyn yubikit::smartcard::SmartCardConnection + Send>>, CliError> {
+    open_smartcard_session(
+        dev,
+        scp_params,
+        Capability::HSMAUTH,
+        "YubiHSM Auth",
+        HsmAuthSession::new,
+        HsmAuthSession::new_with_scp,
+    )
 }
 
 /// Parse a management password: UTF-8 string (≤16 bytes, null-padded) or hex (32 chars).

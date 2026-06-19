@@ -12,7 +12,7 @@ use yubikit::oath::{
 use crate::appdata::AppData;
 use crate::cli_enums::{CliOathAlgorithm, CliOathDigits, CliOathType};
 use crate::scp::{self, ScpParams};
-use crate::util::{CliError, format_session_error, format_smartcard_connection_error};
+use crate::util::{CliError, confirm, format_session_error, format_smartcard_connection_error};
 
 #[derive(Subcommand)]
 pub enum OathAction {
@@ -455,14 +455,6 @@ fn open_session<'a>(
         ));
     }
     Ok(session)
-}
-
-fn confirm(msg: &str) -> bool {
-    eprint!("{msg} [y/N] ");
-    io::stderr().flush().ok();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).ok();
-    matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 fn now_timestamp() -> u64 {

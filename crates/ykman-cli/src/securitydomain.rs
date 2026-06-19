@@ -1,5 +1,3 @@
-use std::io::{self, Write};
-
 use clap::Subcommand;
 use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
@@ -8,7 +6,7 @@ use yubikit::securitydomain::{KeyRef, ScpKid, SecurityDomainSession};
 use crate::cli_enums::CliSdKeyType;
 use crate::scp::{self, ScpParams};
 use crate::util::{
-    CliError, format_session_error, format_smartcard_connection_error, parse_hex_u8,
+    CliError, confirm, format_session_error, format_smartcard_connection_error, parse_hex_u8,
     read_file_or_stdin, write_file_or_stdout,
 };
 
@@ -165,14 +163,6 @@ fn open_session<'a>(
         .open_smartcard()
         .map_err(|e| format_smartcard_connection_error("Security Domain", e))?;
     SecurityDomainSession::new(conn).map_err(|(e, _)| format_session_error("Security Domain", e))
-}
-
-fn confirm(msg: &str) -> bool {
-    eprint!("{msg} [y/N] ");
-    io::stderr().flush().ok();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).ok();
-    matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
