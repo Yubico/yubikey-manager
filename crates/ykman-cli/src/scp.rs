@@ -5,38 +5,9 @@ use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::securitydomain::{KeyRef, SecurityDomainSession};
-use yubikit::smartcard::{SmartCardConnection, SmartCardProtocol};
+use yubikit::smartcard::{ScpKeyParams, SmartCardConnection, SmartCardProtocol};
 
 use crate::util::{CliError, format_session_error, format_smartcard_connection_error};
-
-/// SCP configuration resolved from CLI flags and device state.
-#[derive(Clone)]
-pub enum ScpConfig {
-    /// No SCP — plain connection.
-    None,
-    /// SCP03 with static keys.
-    Scp03 {
-        kvn: u8,
-        key_enc: Vec<u8>,
-        key_mac: Vec<u8>,
-        key_dek: Option<Vec<u8>>,
-    },
-    /// SCP11b — only needs card key reference + public key from SD.
-    Scp11b {
-        kid: u8,
-        kvn: u8,
-        pk_sd_ecka: Vec<u8>,
-    },
-    /// SCP11a or SCP11c — needs OCE private key + cert chain.
-    Scp11ac {
-        kid: u8,
-        kvn: u8,
-        pk_sd_ecka: Vec<u8>,
-        sk_oce_ecka: Vec<u8>,
-        certificates: Vec<Vec<u8>>,
-        oce_ref: Option<(u8, u8)>,
-    },
-}
 
 /// Parsed SCP parameters from CLI flags (before device interaction).
 #[derive(Clone, Default)]
@@ -81,53 +52,66 @@ pub fn resolve_scp(
     dev: &dyn YubiKeyDevice,
     params: &ScpParams,
     capability: Capability,
-) -> Result<ScpConfig, CliError> {
+) -> Result<Option<ScpKeyParams>, CliError> {
     // 1. Explicit SCP03
     if let Some((ref key_enc, ref key_mac, ref key_dek)) = params.scp03_keys {
         let kvn = params.sd_ref.map(|(_, kvn)| kvn).unwrap_or(0);
-        return Ok(ScpConfig::Scp03 {
+        return Ok(Some(ScpKeyParams::Scp03 {
             kvn,
-            key_enc: key_enc.clone(),
-            key_mac: key_mac.clone(),
-            key_dek: key_dek.clone(),
-        });
+            key_enc: key_enc
+                .as_slice()
+                .try_into()
+                .map_err(|_| CliError("SCP03 K-ENC must be 16 bytes.".into()))?,
+            key_mac: key_mac
+                .as_slice()
+                .try_into()
+                .map_err(|_| CliError("SCP03 K-MAC must be 16 bytes.".into()))?,
+            key_dek: key_dek
+                .as_deref()
+                .map(<[u8; 16]>::try_from)
+                .transpose()
+                .map_err(|_| CliError("SCP03 K-DEK must be 16 bytes.".into()))?,
+        }));
     }
 
     // 2. Explicit SCP11a/c (has private key + certs)
     if let Some(ref sk) = params.scp11_private_key {
         let (kid, kvn) = params.sd_ref.unwrap_or((0x11, 0));
         let pk = find_scp11_pk(dev, kid, kvn, params.ca_cert.as_deref())?;
-        return Ok(ScpConfig::Scp11ac {
+        return Ok(Some(ScpKeyParams::Scp11ac {
             kid,
             kvn,
             pk_sd_ecka: pk,
-            sk_oce_ecka: sk.clone(),
+            sk_oce_ecka: sk
+                .as_slice()
+                .try_into()
+                .map_err(|_| CliError("SCP11 OCE private key must be 32 bytes.".into()))?,
             certificates: params.scp11_certificates.clone(),
             oce_ref: params.oce_ref,
-        });
+        }));
     }
 
     // 3. Explicit --scp-sd without --scp (SCP11b with explicit ref)
     if let Some((kid, kvn)) = params.sd_ref {
         let pk = find_scp11_pk(dev, kid, kvn, params.ca_cert.as_deref())?;
-        return Ok(ScpConfig::Scp11b {
+        return Ok(Some(ScpKeyParams::Scp11b {
             kid,
             kvn,
             pk_sd_ecka: pk,
-        });
+        }));
     }
 
     // 4. Auto SCP11b for NFC + FIPS
     if needs_scp11b(dev, capability) {
         let (kid, kvn, pk) = find_scp11b_params(dev)?;
-        return Ok(ScpConfig::Scp11b {
+        return Ok(Some(ScpKeyParams::Scp11b {
             kid,
             kvn,
             pk_sd_ecka: pk,
-        });
+        }));
     }
 
-    Ok(ScpConfig::None)
+    Ok(None)
 }
 
 pub fn resolve_scp_for_app(
@@ -135,7 +119,7 @@ pub fn resolve_scp_for_app(
     params: &ScpParams,
     capability: Capability,
     app_name: &str,
-) -> Result<ScpConfig, CliError> {
+) -> Result<Option<ScpKeyParams>, CliError> {
     match resolve_scp(dev, params, capability) {
         Ok(config) => Ok(config),
         Err(_) if !params.is_explicit() && needs_scp11b(dev, capability) => Err(CliError(format!(
@@ -145,71 +129,15 @@ pub fn resolve_scp_for_app(
     }
 }
 
-/// Convert an `ScpConfig` into `ScpKeyParams`, returning `None` for
-/// `ScpConfig::None`.
-pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit::smartcard::ScpKeyParams> {
-    match config {
-        ScpConfig::None => None,
-        ScpConfig::Scp03 {
-            kvn,
-            key_enc,
-            key_mac,
-            key_dek,
-        } => Some(yubikit::smartcard::ScpKeyParams::Scp03 {
-            kvn: *kvn,
-            key_enc: key_enc
-                .as_slice()
-                .try_into()
-                .expect("key_enc must be 16 bytes"),
-            key_mac: key_mac
-                .as_slice()
-                .try_into()
-                .expect("key_mac must be 16 bytes"),
-            key_dek: key_dek
-                .as_ref()
-                .map(|v| v.as_slice().try_into().expect("key_dek must be 16 bytes")),
-        }),
-        ScpConfig::Scp11b {
-            kid,
-            kvn,
-            pk_sd_ecka,
-        } => Some(yubikit::smartcard::ScpKeyParams::Scp11b {
-            kid: *kid,
-            kvn: *kvn,
-            pk_sd_ecka: pk_sd_ecka.clone(),
-        }),
-        ScpConfig::Scp11ac {
-            kid,
-            kvn,
-            pk_sd_ecka,
-            sk_oce_ecka,
-            certificates,
-            oce_ref,
-        } => Some(yubikit::smartcard::ScpKeyParams::Scp11ac {
-            kid: *kid,
-            kvn: *kvn,
-            pk_sd_ecka: pk_sd_ecka.clone(),
-            sk_oce_ecka: sk_oce_ecka
-                .as_slice()
-                .try_into()
-                .expect("sk_oce_ecka must be 32 bytes"),
-            certificates: certificates.clone(),
-            oce_ref: *oce_ref,
-        }),
-    }
-}
-
 /// Apply SCP configuration to a SmartCardProtocol.
 /// The AID must already be selected before calling this.
 pub fn apply_scp<C: SmartCardConnection>(
     protocol: &mut SmartCardProtocol<C>,
-    config: &ScpConfig,
+    params: &ScpKeyParams,
 ) -> Result<(), CliError> {
-    if let Some(params) = to_scp_key_params(config) {
-        protocol
-            .init_scp(&params)
-            .map_err(|e| CliError(format!("SCP initialization failed: {e}")))?;
-    }
+    protocol
+        .init_scp(params)
+        .map_err(|e| CliError(format!("SCP initialization failed: {e}")))?;
     Ok(())
 }
 

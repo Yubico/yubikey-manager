@@ -5,7 +5,7 @@ use yubikit::device::YubiKeyDevice;
 use yubikit::securitydomain::{KeyRef, ScpKid, SecurityDomainSession};
 
 use crate::cli_enums::CliSdKeyType;
-use crate::scp::{self, ScpConfig, ScpParams};
+use crate::scp::{self, ScpParams};
 use crate::util::{
     CliError, format_session_error, format_smartcard_connection_error, read_file_or_stdin,
     write_file_or_stdout,
@@ -20,17 +20,12 @@ fn open_session<'a>(
         // SD doesn't use auto SCP11b (it manages those keys), but explicit SCP
         // is needed for authenticated operations like key management.
         let scp_config = scp::resolve_scp(dev, scp_params, yubikit::management::Capability::NONE)?;
-        if let ScpConfig::None = scp_config {
-            // resolve_scp returned None despite explicit params — shouldn't happen
-        }
         match scp_config {
-            ScpConfig::None => {}
-            ref config => {
+            None => {}
+            Some(params) => {
                 let conn = dev
                     .open_smartcard()
                     .map_err(|e| format_smartcard_connection_error("Security Domain", e))?;
-                let params = scp::to_scp_key_params(config)
-                    .expect("non-None ScpConfig must convert to ScpKeyParams");
                 return SecurityDomainSession::new_with_scp(conn, &params)
                     .map_err(|(e, _)| format_session_error("Security Domain with SCP", e));
             }

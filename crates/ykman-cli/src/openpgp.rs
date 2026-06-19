@@ -5,7 +5,7 @@ use yubikit::management::Capability;
 use yubikit::openpgp::{KeyRef, KeyStatus, OpenPgpPin, OpenPgpSession, PinPolicy, Uif};
 
 use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
-use crate::scp::{self, ScpConfig, ScpParams};
+use crate::scp::{self, ScpParams};
 use crate::util::{
     CliError, format_session_error, format_smartcard_connection_error, read_file_or_stdin,
     write_file_or_stdout,
@@ -17,18 +17,16 @@ fn open_session<'a>(
 ) -> Result<OpenPgpSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OPENPGP, "OpenPGP")?;
     match scp_config {
-        ScpConfig::None => {
+        None => {
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| format_smartcard_connection_error("OpenPGP", e))?;
             OpenPgpSession::new(conn).map_err(|(e, _)| format_session_error("OpenPGP", e))
         }
-        ref config => {
+        Some(params) => {
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| format_smartcard_connection_error("OpenPGP", e))?;
-            let params = scp::to_scp_key_params(config)
-                .expect("non-None ScpConfig must convert to ScpKeyParams");
             OpenPgpSession::new_with_scp(conn, &params)
                 .map_err(|(e, _)| format_session_error("OpenPGP", e))
         }

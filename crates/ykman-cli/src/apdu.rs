@@ -180,7 +180,7 @@ pub fn run_apdu(
     let scp_config = if scp_params.is_explicit() {
         scp::resolve_scp(dev, scp_params, Capability::OATH)?
     } else {
-        scp::ScpConfig::None
+        None
     };
 
     // Standard mode with protocol
@@ -207,9 +207,9 @@ pub fn run_apdu(
     }
 
     // Apply SCP after selecting the application
-    if !matches!(scp_config, scp::ScpConfig::None) {
+    if let Some(ref scp_config) = scp_config {
         println!("INITIALIZE SCP");
-        scp::apply_scp(&mut protocol, &scp_config)?;
+        scp::apply_scp(&mut protocol, scp_config)?;
     }
 
     for apdu_str in apdus {

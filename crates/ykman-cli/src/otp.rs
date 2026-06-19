@@ -15,7 +15,7 @@ use yubikit::yubiotp::{
 use crate::cancel;
 use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliKeyboardLayout, CliOtpSlot, CliPacing};
 use crate::keyboard::{self, MODHEX_CHARS};
-use crate::scp::{self, ScpConfig, ScpParams};
+use crate::scp::{self, ScpParams};
 use crate::util::{self, CliError, format_session_error, format_smartcard_connection_error};
 
 /// Trait for operations that can be run on any [`YubiOtpSession`].
@@ -32,7 +32,7 @@ fn with_otp_session<F: YubiOtpOp<R>, R>(
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::OTP)?;
 
     // If SCP is needed or NFC, must use SmartCard
-    if !matches!(scp_config, ScpConfig::None) || scp::is_nfc(dev) {
+    if scp_config.is_some() || scp::is_nfc(dev) {
         return with_otp_sc(dev, scp_config, f);
     }
 
@@ -49,21 +49,19 @@ fn with_otp_session<F: YubiOtpOp<R>, R>(
 
 fn with_otp_sc<F: YubiOtpOp<R>, R>(
     dev: &dyn YubiKeyDevice,
-    scp_config: ScpConfig,
+    scp_config: Option<yubikit::smartcard::ScpKeyParams>,
     f: F,
 ) -> Result<R, CliError> {
     let conn = dev
         .open_smartcard()
         .map_err(|e| format_smartcard_connection_error("OTP", e))?;
     match scp_config {
-        ScpConfig::None => {
+        None => {
             let mut session =
                 YubiOtpSession::new(conn).map_err(|(e, _)| format_session_error("OTP", e))?;
             f.run(&mut session)
         }
-        ref config => {
-            let params = scp::to_scp_key_params(config)
-                .expect("non-None ScpConfig must convert to ScpKeyParams");
+        Some(params) => {
             let mut session = YubiOtpSession::new_with_scp(conn, &params)
                 .map_err(|(e, _)| format_session_error("OTP", e))?;
             f.run(&mut session)

@@ -5,7 +5,7 @@ use yubikit::hsmauth::{CredentialPassword, HsmAuthManagementKey, HsmAuthSession}
 use yubikit::management::Capability;
 
 use crate::cli_enums::CliFormat;
-use crate::scp::{self, ScpConfig, ScpParams};
+use crate::scp::{self, ScpParams};
 use crate::util::{
     CliError, format_session_error, format_smartcard_connection_error, write_file_or_stdout,
 };
@@ -19,18 +19,16 @@ fn open_session<'a>(
     let scp_config =
         scp::resolve_scp_for_app(dev, scp_params, Capability::HSMAUTH, "YubiHSM Auth")?;
     match scp_config {
-        ScpConfig::None => {
+        None => {
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| format_smartcard_connection_error("YubiHSM Auth", e))?;
             HsmAuthSession::new(conn).map_err(|(e, _)| format_session_error("YubiHSM Auth", e))
         }
-        ref config => {
+        Some(params) => {
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| format_smartcard_connection_error("YubiHSM Auth", e))?;
-            let params = scp::to_scp_key_params(config)
-                .expect("non-None ScpConfig must convert to ScpKeyParams");
             HsmAuthSession::new_with_scp(conn, &params)
                 .map_err(|(e, _)| format_session_error("YubiHSM Auth", e))
         }

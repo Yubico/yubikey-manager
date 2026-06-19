@@ -77,7 +77,7 @@ fn check_fido_ccid(dev: &dyn YubiKeyDevice) -> Result<(), CliError> {
 macro_rules! with_fido_session {
     ($dev:expr, $scp_params:expr, |$session:ident, $info:ident| $body:block) => {{
         let scp_config = if $scp_params.is_explicit() {
-            Some(scp::resolve_scp($dev, $scp_params, Capability::FIDO2)?)
+            scp::resolve_scp($dev, $scp_params, Capability::FIDO2)?
         } else {
             None
         };
@@ -101,12 +101,8 @@ macro_rules! with_fido_session {
             let conn = $dev
                 .open_smartcard()
                 .map_err(|e| format_smartcard_connection_error("FIDO", e))?;
-            let ctap = if let Some(ref scp_cfg) = scp_config {
-                if let Some(params) = scp::to_scp_key_params(scp_cfg) {
-                    CtapSession::new_with_scp(conn, &params)
-                } else {
-                    CtapSession::new(conn)
-                }
+            let ctap = if let Some(ref params) = scp_config {
+                CtapSession::new_with_scp(conn, params)
             } else {
                 CtapSession::new(conn)
             }

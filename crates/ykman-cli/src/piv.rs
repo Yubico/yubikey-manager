@@ -23,7 +23,7 @@ use yubikit::tlv::{parse_tlv_list, tlv_encode};
 use crate::cli_enums::{
     CliFormat, CliHashAlgorithm, CliKeyType, CliMgmtKeyType, CliPinPolicy, CliTouchPolicy,
 };
-use crate::scp::{self, ScpConfig, ScpParams};
+use crate::scp::{self, ScpParams};
 use crate::util::{
     CliError, format_session_error, format_smartcard_connection_error, read_file_or_stdin,
     write_file_or_stdout,
@@ -35,18 +35,16 @@ fn open_session<'a>(
 ) -> Result<PivSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::PIV, "PIV")?;
     match scp_config {
-        ScpConfig::None => {
+        None => {
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| format_smartcard_connection_error("PIV", e))?;
             PivSession::new(conn).map_err(|(e, _)| format_session_error("PIV", e))
         }
-        ref config => {
+        Some(params) => {
             let conn = dev
                 .open_smartcard()
                 .map_err(|e| format_smartcard_connection_error("PIV", e))?;
-            let params = scp::to_scp_key_params(config)
-                .expect("non-None ScpConfig must convert to ScpKeyParams");
             PivSession::new_with_scp(conn, &params).map_err(|(e, _)| format_session_error("PIV", e))
         }
     }

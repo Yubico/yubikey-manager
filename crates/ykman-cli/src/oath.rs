@@ -10,7 +10,7 @@ use yubikit::oath::{
 
 use crate::appdata::AppData;
 use crate::cli_enums::{CliOathAlgorithm, CliOathDigits, CliOathType};
-use crate::scp::{self, ScpConfig, ScpParams};
+use crate::scp::{self, ScpParams};
 use crate::util::{CliError, format_session_error, format_smartcard_connection_error};
 
 fn oath_keys() -> Result<AppData, CliError> {
@@ -37,19 +37,15 @@ fn validate_and_remember(
 
 fn new_oath_session<'a>(
     dev: &'a dyn YubiKeyDevice,
-    scp_config: &ScpConfig,
+    scp_config: &Option<yubikit::smartcard::ScpKeyParams>,
 ) -> Result<OathSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
     let conn = dev
         .open_smartcard()
         .map_err(|e| format_smartcard_connection_error("OATH", e))?;
     match scp_config {
-        ScpConfig::None => OathSession::new(conn).map_err(|(e, _)| format_session_error("OATH", e)),
-        config => {
-            let params = scp::to_scp_key_params(config)
-                .expect("non-None ScpConfig must convert to ScpKeyParams");
-            OathSession::new_with_scp(conn, &params)
-                .map_err(|(e, _)| format_session_error("OATH", e))
-        }
+        None => OathSession::new(conn).map_err(|(e, _)| format_session_error("OATH", e)),
+        Some(params) => OathSession::new_with_scp(conn, params)
+            .map_err(|(e, _)| format_session_error("OATH", e)),
     }
 }
 
