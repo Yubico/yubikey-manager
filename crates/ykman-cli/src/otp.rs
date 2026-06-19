@@ -2,6 +2,7 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use clap::{Args, Subcommand};
 use yubikit::core::Connection;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
@@ -17,6 +18,387 @@ use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliKeyboardLayout, CliOtpSl
 use crate::keyboard::{self, MODHEX_CHARS};
 use crate::scp::{self, ScpParams};
 use crate::util::{self, CliError, format_session_error, format_smartcard_connection_error};
+
+pub fn effective_access_code<'a>(
+    parent_access_code: &'a Option<String>,
+    subcommand_access_code: &'a Option<String>,
+) -> Option<&'a str> {
+    parent_access_code
+        .as_deref()
+        .or(subcommand_access_code.as_deref())
+}
+
+#[derive(Args, Clone, Copy)]
+pub struct EnterArgs {
+    /// Append Enter after output
+    #[arg(long)]
+    enter: bool,
+    /// Do not append Enter
+    #[arg(long, conflicts_with = "enter")]
+    no_enter: bool,
+}
+
+#[derive(Subcommand)]
+pub enum OtpAction {
+    /// Display OTP slot status
+    Info,
+    /// Swap the two OTP slot configurations
+    Swap {
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Delete an OTP slot configuration
+    Delete {
+        /// Slot number (1 or 2)
+        slot: CliOtpSlot,
+        /// Access code (hex)
+        #[arg(short = 'A', long)]
+        access_code: Option<String>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Configure an NDEF slot
+    Ndef {
+        /// Slot number (1 or 2)
+        slot: CliOtpSlot,
+        /// URI or text prefix
+        #[arg(short = 'p', long)]
+        prefix: Option<String>,
+        /// NDEF type
+        #[arg(short = 't', long, default_value = "uri")]
+        ndef_type: crate::cli_enums::CliNdefType,
+        /// Access code (hex)
+        #[arg(short = 'A', long)]
+        access_code: Option<String>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Program a Yubico OTP credential
+    Yubiotp {
+        /// Slot number (1 or 2)
+        slot: CliOtpSlot,
+        /// Public ID (modhex)
+        #[arg(short = 'P', long)]
+        public_id: Option<String>,
+        /// Private ID (hex)
+        #[arg(short = 'p', long)]
+        private_id: Option<String>,
+        /// AES key (hex)
+        #[arg(short = 'k', long)]
+        key: Option<String>,
+        /// Use serial number as public ID
+        #[arg(short = 'S', long)]
+        serial_public_id: bool,
+        /// Generate random private ID
+        #[arg(short = 'g', long)]
+        generate_private_id: bool,
+        /// Generate random key
+        #[arg(short = 'G', long)]
+        generate_key: bool,
+        #[command(flatten)]
+        enter: EnterArgs,
+        /// Access code (hex)
+        #[arg(short = 'A', long)]
+        access_code: Option<String>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// File path to output configuration
+        #[arg(short = 'O', long)]
+        config_output: Option<String>,
+    },
+    /// Program a static password
+    Static {
+        /// Slot number (1 or 2)
+        slot: CliOtpSlot,
+        /// Password to store
+        password: Option<String>,
+        /// Generate a random password
+        #[arg(short, long)]
+        generate: bool,
+        /// Length of generated password
+        #[arg(short, long, default_value_t = 38)]
+        length: usize,
+        /// Keyboard layout
+        #[arg(short, long, default_value = "modhex")]
+        keyboard_layout: CliKeyboardLayout,
+        #[command(flatten)]
+        enter: EnterArgs,
+        /// Access code (hex)
+        #[arg(short = 'A', long)]
+        access_code: Option<String>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Program challenge-response (HMAC-SHA1)
+    Chalresp {
+        /// Slot number (1 or 2)
+        slot: CliOtpSlot,
+        /// HMAC-SHA1 key (hex)
+        key: Option<String>,
+        /// Use TOTP mode
+        #[arg(short, long)]
+        totp: bool,
+        /// Require touch
+        #[arg(short = 'T', long)]
+        touch: bool,
+        /// Generate random key
+        #[arg(short, long)]
+        generate: bool,
+        /// Access code (hex)
+        #[arg(short = 'A', long)]
+        access_code: Option<String>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Perform a challenge-response calculation
+    Calculate {
+        /// Slot number (1 or 2)
+        slot: CliOtpSlot,
+        /// Challenge (hex)
+        challenge: Option<String>,
+        /// Use TOTP mode (time-based challenge)
+        #[arg(short, long)]
+        totp: bool,
+        /// Number of digits for TOTP
+        #[arg(long, default_value = "6")]
+        digits: CliCalcDigits,
+    },
+    /// Program OATH-HOTP credential
+    Hotp {
+        /// Slot number (1 or 2)
+        slot: CliOtpSlot,
+        /// HMAC key (hex)
+        key: Option<String>,
+        /// Number of digits (6 or 8)
+        #[arg(long, default_value = "6")]
+        digits: CliHotpDigits,
+        /// Initial counter value
+        #[arg(short = 'c', long, default_value_t = 0)]
+        counter: u32,
+        #[command(flatten)]
+        enter: EnterArgs,
+        /// Access code (hex)
+        #[arg(short = 'A', long)]
+        access_code: Option<String>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Token identifier string
+        #[arg(short = 'i', long)]
+        identifier: Option<String>,
+    },
+    /// Update slot settings
+    Settings {
+        /// Slot number (1 or 2)
+        slot: CliOtpSlot,
+        #[command(flatten)]
+        enter: EnterArgs,
+        /// Keystroke pacing in ms
+        #[arg(short = 'p', long)]
+        pacing: Option<CliPacing>,
+        /// Use numeric keypad for digits
+        #[arg(long)]
+        use_numeric_keypad: bool,
+        /// Make serial visible over USB
+        #[arg(long)]
+        serial_usb_visible: bool,
+        /// New access code (hex)
+        #[arg(long)]
+        new_access_code: Option<String>,
+        /// Delete access code
+        #[arg(long)]
+        delete_access_code: bool,
+        /// Current access code (hex)
+        #[arg(short = 'A', long)]
+        access_code: Option<String>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+}
+
+impl OtpAction {
+    pub fn run(
+        self,
+        dev: &dyn YubiKeyDevice,
+        scp_params: &ScpParams,
+        parent_access_code: &Option<String>,
+    ) -> Result<(), CliError> {
+        match self {
+            Self::Info => run_info(dev, scp_params),
+            Self::Swap { force } => run_swap(dev, scp_params, force),
+            Self::Delete {
+                slot,
+                access_code,
+                force,
+            } => run_delete(
+                dev,
+                scp_params,
+                slot,
+                effective_access_code(parent_access_code, &access_code),
+                force,
+            ),
+            Self::Ndef {
+                slot,
+                prefix,
+                ndef_type,
+                access_code,
+                force,
+            } => run_ndef(
+                dev,
+                scp_params,
+                slot,
+                prefix.as_deref(),
+                ndef_type.into(),
+                effective_access_code(parent_access_code, &access_code),
+                force,
+            ),
+            Self::Yubiotp {
+                slot,
+                public_id,
+                private_id,
+                key,
+                serial_public_id,
+                generate_private_id,
+                generate_key,
+                enter,
+                access_code,
+                force,
+                config_output,
+            } => run_yubiotp(
+                dev,
+                scp_params,
+                YubiOtpOptions {
+                    slot,
+                    public_id: public_id.as_deref(),
+                    private_id: private_id.as_deref(),
+                    key: key.as_deref(),
+                    serial_public_id,
+                    generate_private_id,
+                    generate_key,
+                    enter: enter.value(),
+                    access_code: effective_access_code(parent_access_code, &access_code),
+                    force,
+                    config_output: config_output.as_deref(),
+                },
+            ),
+            Self::Static {
+                slot,
+                password,
+                generate,
+                length,
+                keyboard_layout,
+                enter,
+                access_code,
+                force,
+            } => run_static(
+                dev,
+                scp_params,
+                StaticOptions {
+                    slot,
+                    password: password.as_deref(),
+                    generate,
+                    length,
+                    keyboard_layout,
+                    enter: enter.value(),
+                    access_code: effective_access_code(parent_access_code, &access_code),
+                    force,
+                },
+            ),
+            Self::Chalresp {
+                slot,
+                key,
+                totp,
+                touch,
+                generate,
+                access_code,
+                force,
+            } => run_chalresp(
+                dev,
+                scp_params,
+                slot,
+                key.as_deref(),
+                totp,
+                touch,
+                generate,
+                effective_access_code(parent_access_code, &access_code),
+                force,
+            ),
+            Self::Calculate {
+                slot,
+                challenge,
+                totp,
+                digits,
+            } => run_calculate(dev, scp_params, slot, challenge.as_deref(), totp, digits),
+            Self::Hotp {
+                slot,
+                key,
+                digits,
+                counter,
+                enter,
+                access_code,
+                force,
+                identifier,
+            } => run_hotp(
+                dev,
+                scp_params,
+                HotpOptions {
+                    slot,
+                    key: key.as_deref(),
+                    digits,
+                    counter,
+                    enter: enter.value(),
+                    access_code: effective_access_code(parent_access_code, &access_code),
+                    force,
+                    identifier: identifier.as_deref(),
+                },
+            ),
+            Self::Settings {
+                slot,
+                enter,
+                pacing,
+                use_numeric_keypad,
+                serial_usb_visible,
+                new_access_code,
+                delete_access_code,
+                access_code,
+                force,
+            } => run_settings(
+                dev,
+                scp_params,
+                SettingsOptions {
+                    slot,
+                    enter: enter.value(),
+                    pacing,
+                    use_numeric: if use_numeric_keypad { Some(true) } else { None },
+                    serial_usb_visible: if serial_usb_visible { Some(true) } else { None },
+                    new_access_code: new_access_code.as_deref(),
+                    delete_access_code,
+                    access_code: effective_access_code(parent_access_code, &access_code),
+                    force,
+                },
+            ),
+        }
+    }
+}
+
+impl EnterArgs {
+    pub fn value(self) -> Option<bool> {
+        if self.enter {
+            Some(true)
+        } else if self.no_enter {
+            Some(false)
+        } else {
+            None
+        }
+    }
+}
 
 /// Trait for operations that can be run on any [`YubiOtpSession`].
 trait YubiOtpOp<R> {
