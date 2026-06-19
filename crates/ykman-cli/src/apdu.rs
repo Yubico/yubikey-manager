@@ -196,7 +196,7 @@ fn print_response(resp: &[u8], sw: u16, no_pretty: bool) {
     }
 }
 
-pub fn run_apdu(
+fn run_apdu(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     apdus: &[String],

@@ -365,30 +365,3 @@ fn main() {
         process::exit(1);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::otp::effective_access_code;
-
-    #[test]
-    fn otp_parent_access_code_overrides_subcommand_access_code() {
-        let parent = Some("010203040506".to_string());
-        let subcommand = Some("aabbccddeeff".to_string());
-
-        assert_eq!(
-            effective_access_code(&parent, &subcommand),
-            Some("010203040506")
-        );
-    }
-
-    #[test]
-    fn otp_subcommand_access_code_is_used_without_parent() {
-        let parent = None;
-        let subcommand = Some("aabbccddeeff".to_string());
-
-        assert_eq!(
-            effective_access_code(&parent, &subcommand),
-            Some("aabbccddeeff")
-        );
-    }
-}

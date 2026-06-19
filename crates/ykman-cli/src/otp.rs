@@ -28,6 +28,33 @@ pub fn effective_access_code<'a>(
         .or(subcommand_access_code.as_deref())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::effective_access_code;
+
+    #[test]
+    fn parent_access_code_overrides_subcommand_access_code() {
+        let parent = Some("010203040506".to_string());
+        let subcommand = Some("aabbccddeeff".to_string());
+
+        assert_eq!(
+            effective_access_code(&parent, &subcommand),
+            Some("010203040506")
+        );
+    }
+
+    #[test]
+    fn subcommand_access_code_is_used_without_parent() {
+        let parent = None;
+        let subcommand = Some("aabbccddeeff".to_string());
+
+        assert_eq!(
+            effective_access_code(&parent, &subcommand),
+            Some("aabbccddeeff")
+        );
+    }
+}
+
 #[derive(Args, Clone, Copy)]
 pub struct EnterArgs {
     /// Append Enter after output
