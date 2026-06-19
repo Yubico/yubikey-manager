@@ -7,7 +7,10 @@ use yubikit::management::Capability;
 use yubikit::securitydomain::{KeyRef, SecurityDomainSession};
 use yubikit::smartcard::{ScpKeyParams, SmartCardConnection, SmartCardProtocol};
 
-use crate::util::{CliError, format_session_error, format_smartcard_connection_error};
+use crate::util::{
+    CliError, format_session_error, format_smartcard_connection_error, parse_hex_u8,
+    read_file_or_stdin,
+};
 
 /// Parsed SCP parameters from CLI flags (before device interaction).
 #[derive(Clone, Default)]
@@ -31,6 +34,82 @@ impl ScpParams {
     pub fn is_explicit(&self) -> bool {
         self.scp03_keys.is_some() || self.scp11_private_key.is_some() || self.sd_ref.is_some()
     }
+}
+
+pub struct ScpInputs<'a> {
+    pub scp_cred: &'a [String],
+    pub scp_ca: Option<&'a str>,
+    pub scp_sd: Option<&'a [String]>,
+    pub scp_oce: Option<&'a [String]>,
+    pub scp_password: Option<&'a str>,
+}
+
+pub fn parse_scp_params(input: ScpInputs<'_>) -> Result<ScpParams, CliError> {
+    let mut params = ScpParams::default();
+
+    if let Some(sd) = input.scp_sd {
+        let kid = parse_hex_u8(&sd[0])?;
+        let kvn = parse_hex_u8(&sd[1])?;
+        params.sd_ref = Some((kid, kvn));
+    }
+
+    if let Some(oce) = input.scp_oce {
+        let kid = parse_hex_u8(&oce[0])?;
+        let kvn = parse_hex_u8(&oce[1])?;
+        params.oce_ref = Some((kid, kvn));
+    }
+
+    if let Some(ca_path) = input.scp_ca {
+        let data = read_file_or_stdin(ca_path)?;
+        params.ca_cert = Some(der_or_first_pem(&data)?);
+    }
+
+    if input.scp_cred.is_empty() {
+        return Ok(params);
+    }
+
+    let first = &input.scp_cred[0];
+    let parts: Vec<&str> = first.split(':').collect();
+    if (parts.len() == 2 || parts.len() == 3)
+        && parts
+            .iter()
+            .all(|p| p.len() == 32 && p.chars().all(|c| c.is_ascii_hexdigit()))
+    {
+        let key_enc =
+            hex::decode(parts[0]).map_err(|_| CliError("Invalid SCP03 K-ENC hex.".into()))?;
+        let key_mac =
+            hex::decode(parts[1]).map_err(|_| CliError("Invalid SCP03 K-MAC hex.".into()))?;
+        let key_dek = if parts.len() == 3 {
+            Some(hex::decode(parts[2]).map_err(|_| CliError("Invalid SCP03 K-DEK hex.".into()))?)
+        } else {
+            None
+        };
+        params.scp03_keys = Some((key_enc, key_mac, key_dek));
+        return Ok(params);
+    }
+
+    for path in input.scp_cred {
+        let data = read_file_or_stdin(path)?;
+        let pem_text = std::str::from_utf8(&data).ok();
+
+        if let Some(text) = pem_text {
+            if text.contains("-----BEGIN") {
+                if text.contains("PRIVATE KEY") {
+                    let der = decrypt_private_key_data(text, input.scp_password)?;
+                    params.scp11_private_key = Some(extract_ec_private_key(&der)?);
+                }
+                params
+                    .scp11_certificates
+                    .extend(pem_decode_all_certs(text)?);
+            } else {
+                params.scp11_certificates.push(data);
+            }
+        } else {
+            params.scp11_certificates.push(data);
+        }
+    }
+
+    Ok(params)
 }
 
 /// Check if a device is connected over NFC (external reader).
@@ -327,4 +406,98 @@ fn parse_der_length(data: &[u8], pos: usize) -> Result<(usize, usize), CliError>
             "DER parse: unsupported length encoding 0x{first:02X}"
         )))
     }
+}
+
+fn der_or_first_pem(data: &[u8]) -> Result<Vec<u8>, CliError> {
+    if let Ok(text) = std::str::from_utf8(data)
+        && text.contains("-----BEGIN")
+    {
+        return pem_decode_first(text);
+    }
+    Ok(data.to_vec())
+}
+
+fn decrypt_private_key_data(text: &str, password: Option<&str>) -> Result<Vec<u8>, CliError> {
+    if text.contains("ENCRYPTED") {
+        let password = match password {
+            Some(password) => password.to_string(),
+            None => crate::util::prompt_secret("Enter password to decrypt SCP key")?,
+        };
+        decrypt_pem_private_key(text, &password)
+    } else {
+        pem_decode_first(text)
+    }
+}
+
+fn decrypt_pem_private_key(pem_text: &str, password: &str) -> Result<Vec<u8>, CliError> {
+    use pkcs8::EncryptedPrivateKeyInfo;
+
+    let der = pem_decode_first(pem_text)?;
+    let enc_key = EncryptedPrivateKeyInfo::try_from(der.as_slice())
+        .map_err(|e| CliError(format!("Failed to parse encrypted SCP key: {e}")))?;
+    let dec_key = enc_key
+        .decrypt(password)
+        .map_err(|_| CliError("Wrong password for encrypted SCP key.".into()))?;
+    Ok(dec_key.as_bytes().to_vec())
+}
+
+fn pem_decode_first(text: &str) -> Result<Vec<u8>, CliError> {
+    use base64::Engine;
+    let mut in_block = false;
+    let mut b64 = String::new();
+    for line in text.lines() {
+        if line.starts_with("-----BEGIN") {
+            in_block = true;
+            continue;
+        }
+        if line.starts_with("-----END") {
+            break;
+        }
+        if in_block {
+            b64.push_str(line.trim());
+        }
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(&b64)
+        .map_err(|e| CliError(format!("Invalid PEM data: {e}")))
+}
+
+fn pem_decode_all_certs(text: &str) -> Result<Vec<Vec<u8>>, CliError> {
+    use base64::Engine;
+    let mut certs = Vec::new();
+    let mut in_cert = false;
+    let mut b64 = String::new();
+    for line in text.lines() {
+        if line.starts_with("-----BEGIN CERTIFICATE") {
+            in_cert = true;
+            b64.clear();
+            continue;
+        }
+        if line.starts_with("-----END CERTIFICATE") {
+            in_cert = false;
+            let der = base64::engine::general_purpose::STANDARD
+                .decode(&b64)
+                .map_err(|e| CliError(format!("Invalid PEM cert: {e}")))?;
+            certs.push(der);
+            continue;
+        }
+        if in_cert {
+            b64.push_str(line.trim());
+        }
+    }
+    Ok(certs)
+}
+
+fn extract_ec_private_key(der: &[u8]) -> Result<Vec<u8>, CliError> {
+    if der.len() < 34 {
+        return Err(CliError("EC private key too short.".into()));
+    }
+    for i in 0..der.len().saturating_sub(33) {
+        if der[i] == 0x04 && der[i + 1] == 0x20 {
+            return Ok(der[i + 2..i + 34].to_vec());
+        }
+    }
+    Err(CliError(
+        "Could not extract EC private key from DER.".into(),
+    ))
 }

@@ -102,6 +102,12 @@ pub fn read_file_or_stdin(path: &str) -> Result<Vec<u8>, CliError> {
     }
 }
 
+/// Parse a one-byte hexadecimal value, accepting an optional 0x prefix.
+pub fn parse_hex_u8(s: &str) -> Result<u8, CliError> {
+    u8::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16)
+        .map_err(|_| CliError(format!("Invalid hex value: {s}")))
+}
+
 /// Write to a file, or to stdout if path is "-".
 pub fn write_file_or_stdout(path: &str, data: &[u8]) -> Result<(), CliError> {
     if path == "-" {

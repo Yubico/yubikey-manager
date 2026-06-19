@@ -330,21 +330,38 @@ pub fn run_ndef(
     )
 }
 
+pub struct YubiOtpOptions<'a> {
+    pub slot: CliOtpSlot,
+    pub public_id: Option<&'a str>,
+    pub private_id: Option<&'a str>,
+    pub key: Option<&'a str>,
+    pub serial_public_id: bool,
+    pub generate_private_id: bool,
+    pub generate_key: bool,
+    pub enter: Option<bool>,
+    pub access_code: Option<&'a str>,
+    pub force: bool,
+    pub config_output: Option<&'a str>,
+}
+
 pub fn run_yubiotp(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
-    slot: CliOtpSlot,
-    public_id: Option<&str>,
-    private_id: Option<&str>,
-    key: Option<&str>,
-    serial_public_id: bool,
-    generate_private_id: bool,
-    generate_key: bool,
-    enter: Option<bool>,
-    access_code: Option<&str>,
-    force: bool,
-    config_output: Option<&str>,
+    options: YubiOtpOptions<'_>,
 ) -> Result<(), CliError> {
+    let YubiOtpOptions {
+        slot,
+        public_id,
+        private_id,
+        key,
+        serial_public_id,
+        generate_private_id,
+        generate_key,
+        enter,
+        access_code,
+        force,
+        config_output,
+    } = options;
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
@@ -544,19 +561,32 @@ pub fn run_yubiotp(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+pub struct StaticOptions<'a> {
+    pub slot: CliOtpSlot,
+    pub password: Option<&'a str>,
+    pub generate: bool,
+    pub length: usize,
+    pub keyboard_layout: CliKeyboardLayout,
+    pub enter: Option<bool>,
+    pub access_code: Option<&'a str>,
+    pub force: bool,
+}
+
 pub fn run_static(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
-    slot: CliOtpSlot,
-    password: Option<&str>,
-    generate: bool,
-    length: usize,
-    keyboard_layout: CliKeyboardLayout,
-    enter: Option<bool>,
-    access_code: Option<&str>,
-    force: bool,
+    options: StaticOptions<'_>,
 ) -> Result<(), CliError> {
+    let StaticOptions {
+        slot,
+        password,
+        generate,
+        length,
+        keyboard_layout,
+        enter,
+        access_code,
+        force,
+    } = options;
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
@@ -811,19 +841,32 @@ pub fn run_calculate(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+pub struct HotpOptions<'a> {
+    pub slot: CliOtpSlot,
+    pub key: Option<&'a str>,
+    pub digits: CliHotpDigits,
+    pub counter: u32,
+    pub enter: Option<bool>,
+    pub access_code: Option<&'a str>,
+    pub force: bool,
+    pub identifier: Option<&'a str>,
+}
+
 pub fn run_hotp(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
-    slot: CliOtpSlot,
-    key: Option<&str>,
-    digits: CliHotpDigits,
-    counter: u32,
-    enter: Option<bool>,
-    access_code: Option<&str>,
-    force: bool,
-    identifier: Option<&str>,
+    options: HotpOptions<'_>,
 ) -> Result<(), CliError> {
+    let HotpOptions {
+        slot,
+        key,
+        digits,
+        counter,
+        enter,
+        access_code,
+        force,
+        identifier,
+    } = options;
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
@@ -940,20 +983,34 @@ pub fn run_hotp(
     with_otp_session(dev, scp_params, ProgramHotp { slot, config, acc })
 }
 
-#[allow(clippy::too_many_arguments)]
+pub struct SettingsOptions<'a> {
+    pub slot: CliOtpSlot,
+    pub enter: Option<bool>,
+    pub pacing: Option<CliPacing>,
+    pub use_numeric: Option<bool>,
+    pub serial_usb_visible: Option<bool>,
+    pub new_access_code: Option<&'a str>,
+    pub delete_access_code: bool,
+    pub access_code: Option<&'a str>,
+    pub force: bool,
+}
+
 pub fn run_settings(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
-    slot: CliOtpSlot,
-    enter: Option<bool>,
-    pacing: Option<CliPacing>,
-    use_numeric: Option<bool>,
-    serial_usb_visible: Option<bool>,
-    new_access_code: Option<&str>,
-    delete_access_code: bool,
-    access_code: Option<&str>,
-    force: bool,
+    options: SettingsOptions<'_>,
 ) -> Result<(), CliError> {
+    let SettingsOptions {
+        slot,
+        enter,
+        pacing,
+        use_numeric,
+        serial_usb_visible,
+        new_access_code,
+        delete_access_code,
+        access_code,
+        force,
+    } = options;
     let slot: Slot = slot.into();
     let cur_acc = access_code.map(parse_access_code).transpose()?;
 
