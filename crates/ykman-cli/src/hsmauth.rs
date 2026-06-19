@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 
+use clap::Subcommand;
 use yubikit::device::YubiKeyDevice;
 use yubikit::hsmauth::{CredentialPassword, HsmAuthManagementKey, HsmAuthSession};
 use yubikit::management::Capability;
@@ -11,6 +12,248 @@ use crate::util::{
 };
 
 const MANAGEMENT_KEY_LEN: usize = 16;
+
+#[derive(Subcommand)]
+pub enum HsmauthAction {
+    /// Display HSM Auth status
+    Info,
+    /// Reset the HSM Auth application
+    Reset {
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Manage credentials
+    #[command(subcommand)]
+    Credentials(HsmauthCredAction),
+    /// Manage access
+    #[command(subcommand)]
+    Access(HsmauthAccessAction),
+}
+
+#[derive(Subcommand)]
+pub enum HsmauthCredAction {
+    /// List credentials
+    List,
+    /// Generate asymmetric credential
+    Generate {
+        label: String,
+        #[arg(short = 'c', long)]
+        credential_password: Option<String>,
+        /// Management password
+        #[arg(short, long)]
+        management_password: Option<String>,
+        #[arg(short, long)]
+        touch: bool,
+    },
+    /// Import symmetric credential
+    Symmetric {
+        label: String,
+        #[arg(short = 'E', long)]
+        enc_key: Option<String>,
+        #[arg(short = 'M', long)]
+        mac_key: Option<String>,
+        #[arg(short, long)]
+        generate: bool,
+        #[arg(short = 'c', long)]
+        credential_password: Option<String>,
+        /// Management password
+        #[arg(short, long)]
+        management_password: Option<String>,
+        #[arg(short, long)]
+        touch: bool,
+    },
+    /// Import credential derived from password
+    Derive {
+        label: String,
+        /// Derivation password
+        derivation_password: String,
+        #[arg(short = 'c', long)]
+        credential_password: Option<String>,
+        /// Management password
+        #[arg(short, long)]
+        management_password: Option<String>,
+        #[arg(short, long)]
+        touch: bool,
+    },
+    /// Delete credential
+    Delete {
+        label: String,
+        /// Management password
+        #[arg(short, long)]
+        management_password: Option<String>,
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Change credential password
+    ChangePassword {
+        label: String,
+        #[arg(short = 'c', long)]
+        credential_password: Option<String>,
+        /// New credential password
+        #[arg(short, long)]
+        new_credential_password: Option<String>,
+    },
+    /// Import an asymmetric credential
+    Import {
+        /// Credential label
+        label: String,
+        /// File containing the private key (use '-' for stdin)
+        #[arg(value_name = "PRIVATE-KEY")]
+        private_key: String,
+        /// Password to decrypt the private key
+        #[arg(short, long)]
+        password: Option<String>,
+        /// Password to protect credential
+        #[arg(short = 'c', long)]
+        credential_password: Option<String>,
+        /// Management password
+        #[arg(short, long)]
+        management_password: Option<String>,
+        /// Require touch
+        #[arg(short, long)]
+        touch: bool,
+    },
+    /// Export public key for asymmetric credential
+    Export {
+        /// Credential label
+        label: String,
+        /// Output file (- for stdout)
+        output: String,
+        /// Output format
+        #[arg(short = 'F', long, default_value = "pem")]
+        format: CliFormat,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum HsmauthAccessAction {
+    /// Change the management key
+    #[command(name = "change-management-password")]
+    ChangeManagementPassword {
+        #[arg(short, long)]
+        management_password: Option<String>,
+        #[arg(short, long)]
+        new_management_password: Option<String>,
+        #[arg(short, long)]
+        generate: bool,
+    },
+}
+
+impl HsmauthAction {
+    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+        match self {
+            Self::Info => run_info(dev, scp_params),
+            Self::Reset { force } => run_reset(dev, scp_params, force),
+            Self::Credentials(cred) => match cred {
+                HsmauthCredAction::List => run_credentials_list(dev, scp_params),
+                HsmauthCredAction::Generate {
+                    label,
+                    credential_password,
+                    management_password,
+                    touch,
+                } => run_credentials_generate(
+                    dev,
+                    scp_params,
+                    &label,
+                    credential_password.as_deref(),
+                    management_password.as_deref(),
+                    touch,
+                ),
+                HsmauthCredAction::Symmetric {
+                    label,
+                    enc_key,
+                    mac_key,
+                    generate,
+                    credential_password,
+                    management_password,
+                    touch,
+                } => run_credentials_symmetric(
+                    dev,
+                    scp_params,
+                    &label,
+                    enc_key.as_deref(),
+                    mac_key.as_deref(),
+                    generate,
+                    credential_password.as_deref(),
+                    management_password.as_deref(),
+                    touch,
+                ),
+                HsmauthCredAction::Derive {
+                    label,
+                    derivation_password,
+                    credential_password,
+                    management_password,
+                    touch,
+                } => run_credentials_derive(
+                    dev,
+                    scp_params,
+                    &label,
+                    &derivation_password,
+                    credential_password.as_deref(),
+                    management_password.as_deref(),
+                    touch,
+                ),
+                HsmauthCredAction::Delete {
+                    label,
+                    management_password,
+                    force,
+                } => run_credentials_delete(
+                    dev,
+                    scp_params,
+                    &label,
+                    management_password.as_deref(),
+                    force,
+                ),
+                HsmauthCredAction::ChangePassword {
+                    label,
+                    credential_password,
+                    new_credential_password,
+                } => run_credentials_change_password(
+                    dev,
+                    scp_params,
+                    &label,
+                    credential_password.as_deref(),
+                    new_credential_password.as_deref(),
+                ),
+                HsmauthCredAction::Export {
+                    label,
+                    output,
+                    format,
+                } => run_credentials_export(dev, scp_params, &label, &output, format),
+                HsmauthCredAction::Import {
+                    label,
+                    private_key,
+                    password,
+                    credential_password,
+                    management_password,
+                    touch,
+                } => run_credentials_import(
+                    dev,
+                    scp_params,
+                    &label,
+                    &private_key,
+                    password.as_deref(),
+                    credential_password.as_deref(),
+                    management_password.as_deref(),
+                    touch,
+                ),
+            },
+            Self::Access(access) => match access {
+                HsmauthAccessAction::ChangeManagementPassword {
+                    management_password,
+                    new_management_password,
+                    generate,
+                } => run_access_change_management_key(
+                    dev,
+                    scp_params,
+                    management_password.as_deref(),
+                    new_management_password.as_deref(),
+                    generate,
+                ),
+            },
+        }
+    }
+}
 
 fn open_session<'a>(
     dev: &'a dyn YubiKeyDevice,
