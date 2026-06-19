@@ -195,6 +195,24 @@ impl OpenPgpSession {
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for OpenPgpSession {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -231,11 +249,7 @@ impl OpenPgpSession {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(session) = self.inner.take() {
-            let conn = session.into_connection();
-            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     #[getter]

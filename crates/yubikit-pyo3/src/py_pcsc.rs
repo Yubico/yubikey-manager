@@ -58,7 +58,7 @@ impl PcscConnection {
             .inner
             .as_ref()
             .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
-        let atr = conn.get_atr().map_err(pcsc_err)?;
+        let atr = py.detach(|| conn.get_atr()).map_err(pcsc_err)?;
         Ok(PyBytes::new(py, &atr))
     }
 
@@ -67,7 +67,7 @@ impl PcscConnection {
             .inner
             .as_ref()
             .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
-        let resp = conn.transmit(apdu).map_err(pcsc_err)?;
+        let resp = py.detach(|| conn.transmit(apdu)).map_err(pcsc_err)?;
         Ok(PyBytes::new(py, &resp))
     }
 
@@ -76,7 +76,7 @@ impl PcscConnection {
             .inner
             .as_mut()
             .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
-        conn.disconnect().map_err(pcsc_err)
+        Python::attach(|py| py.detach(|| conn.disconnect())).map_err(pcsc_err)
     }
 
     #[pyo3(signature = (exclusive=false))]
@@ -85,7 +85,7 @@ impl PcscConnection {
             .inner
             .as_mut()
             .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
-        conn.connect(exclusive).map_err(pcsc_err)
+        Python::attach(|py| py.detach(|| conn.connect(exclusive))).map_err(pcsc_err)
     }
 
     #[pyo3(signature = (exclusive=true))]
@@ -94,7 +94,7 @@ impl PcscConnection {
             .inner
             .as_mut()
             .ok_or_else(|| PyOSError::new_err("Connection is closed"))?;
-        conn.reconnect(exclusive).map_err(pcsc_err)
+        Python::attach(|py| py.detach(|| conn.reconnect(exclusive))).map_err(pcsc_err)
     }
 
     /// Get the detected transport type ("usb" or "nfc").

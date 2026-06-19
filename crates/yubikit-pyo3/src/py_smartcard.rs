@@ -39,6 +39,24 @@ impl SmartCardProtocol {
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("SmartCardProtocol is closed"))
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(protocol) = self.inner.take() {
+            let conn = protocol.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for SmartCardProtocol {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -56,11 +74,7 @@ impl SmartCardProtocol {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(protocol) = self.inner.take() {
-            let conn = protocol.into_connection();
-            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     fn configure(&mut self, version: (u8, u8, u8), force_short: Option<bool>) -> PyResult<()> {

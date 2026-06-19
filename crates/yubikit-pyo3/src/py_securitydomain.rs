@@ -5,26 +5,15 @@ use yubikit::securitydomain::{
 };
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, extract_smartcard_connection, restore_smartcard_connection,
-    scp_key_params_from_py, smartcard_err,
+    BoxedSmartCardConnection, extract_smartcard_connection, not_supported_err,
+    restore_smartcard_connection, scp_key_params_from_py, smartcard_err,
 };
 
 fn sd_err(e: SecurityDomainError) -> PyErr {
     use pyo3::exceptions::*;
     match e {
         SecurityDomainError::Connection(sc) => smartcard_err(sc),
-        SecurityDomainError::NotSupported(msg) => {
-            Python::attach(|py| match py.import("yubikit.core") {
-                Ok(module) => match module.getattr("NotSupportedError") {
-                    Ok(cls) => match cls.call1((msg.clone(),)) {
-                        Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyRuntimeError::new_err(msg),
-                    },
-                    Err(_) => PyRuntimeError::new_err(msg),
-                },
-                Err(_) => PyRuntimeError::new_err(msg),
-            })
-        }
+        SecurityDomainError::NotSupported(msg) => not_supported_err(msg),
         SecurityDomainError::InvalidData(msg) => PyValueError::new_err(msg),
         SecurityDomainError::InvalidConfig(msg) => PyValueError::new_err(msg),
         other => PyRuntimeError::new_err(other.to_string()),
@@ -57,6 +46,24 @@ impl SecurityDomainSession {
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for SecurityDomainSession {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -76,11 +83,7 @@ impl SecurityDomainSession {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(session) = self.inner.take() {
-            let conn = session.into_connection();
-            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     /// Take the connection from the current session, re-open with SCP.

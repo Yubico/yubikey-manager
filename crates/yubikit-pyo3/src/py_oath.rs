@@ -2,24 +2,15 @@ use pyo3::prelude::*;
 use yubikit::oath::{self, OathAccessKey, OathError, OathSession as RustOathSession};
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, extract_smartcard_connection, restore_smartcard_connection,
-    scp_key_params_from_py, smartcard_err,
+    BoxedSmartCardConnection, extract_smartcard_connection, not_supported_err,
+    restore_smartcard_connection, scp_key_params_from_py, smartcard_err,
 };
 
 fn oath_err(e: OathError) -> PyErr {
     use pyo3::exceptions::*;
     match e {
         OathError::Connection(sc) => smartcard_err(sc),
-        OathError::NotSupported(msg) => Python::attach(|py| match py.import("yubikit.core") {
-            Ok(module) => match module.getattr("NotSupportedError") {
-                Ok(cls) => match cls.call1((msg.clone(),)) {
-                    Ok(exc) => PyErr::from_value(exc),
-                    Err(_) => PyRuntimeError::new_err(msg),
-                },
-                Err(_) => PyRuntimeError::new_err(msg),
-            },
-            Err(_) => PyRuntimeError::new_err(msg),
-        }),
+        OathError::NotSupported(msg) => not_supported_err(msg),
         OathError::InvalidData(msg) => PyValueError::new_err(msg),
         OathError::WrongMac => PyValueError::new_err("Wrong response MAC"),
         OathError::WrongDevice => {
@@ -68,6 +59,24 @@ impl OathSession {
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for OathSession {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -103,11 +112,7 @@ impl OathSession {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(session) = self.inner.take() {
-            let conn = session.into_connection();
-            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     #[getter]

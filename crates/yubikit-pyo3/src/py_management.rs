@@ -3,9 +3,10 @@ use yubikit::management::{DeviceInfo, ManagementSession};
 use yubikit::platform::hidapi::list_fido_devices;
 
 use crate::py_bridge::{
-    BoxedFidoConnection, BoxedOtpConnection, BoxedSmartCardConnection, extract_fido_connection,
-    extract_otp_connection, extract_smartcard_connection, restore_fido_connection,
-    restore_otp_connection, restore_smartcard_connection, scp_key_params_from_py, smartcard_err,
+    BoxedFidoConnection, BoxedOtpConnection, BoxedSmartCardConnection, bad_response_err,
+    extract_fido_connection, extract_otp_connection, extract_smartcard_connection,
+    not_supported_err, restore_fido_connection, restore_otp_connection,
+    restore_smartcard_connection, scp_key_params_from_py, smartcard_err,
 };
 
 fn management_err(e: impl std::fmt::Display) -> PyErr {
@@ -15,33 +16,10 @@ fn management_err(e: impl std::fmt::Display) -> PyErr {
 fn management_ccid_err(
     e: yubikit::management::ManagementError<yubikit::smartcard::SmartCardError>,
 ) -> PyErr {
-    use pyo3::exceptions::*;
     match e {
         yubikit::management::ManagementError::Connection(sc) => smartcard_err(sc),
-        yubikit::management::ManagementError::NotSupported(msg) => {
-            Python::attach(|py| match py.import("yubikit.core") {
-                Ok(module) => match module.getattr("NotSupportedError") {
-                    Ok(cls) => match cls.call1((msg.clone(),)) {
-                        Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyRuntimeError::new_err(msg),
-                    },
-                    Err(_) => PyRuntimeError::new_err(msg),
-                },
-                Err(_) => PyRuntimeError::new_err(msg),
-            })
-        }
-        yubikit::management::ManagementError::InvalidData(msg) => {
-            Python::attach(|py| match py.import("yubikit.core") {
-                Ok(module) => match module.getattr("BadResponseError") {
-                    Ok(cls) => match cls.call1((msg.clone(),)) {
-                        Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyRuntimeError::new_err(msg),
-                    },
-                    Err(_) => PyRuntimeError::new_err(msg),
-                },
-                Err(_) => PyRuntimeError::new_err(msg),
-            })
-        }
+        yubikit::management::ManagementError::NotSupported(msg) => not_supported_err(msg),
+        yubikit::management::ManagementError::InvalidData(msg) => bad_response_err(msg),
         other => management_err(other),
     }
 }
@@ -122,6 +100,24 @@ impl ManagementSessionCcid {
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for ManagementSessionCcid {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -158,11 +154,7 @@ impl ManagementSessionCcid {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(session) = self.inner.take() {
-            let conn = session.into_connection();
-            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     #[getter]
@@ -265,6 +257,24 @@ impl ManagementSessionOtp {
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_otp_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for ManagementSessionOtp {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -284,11 +294,7 @@ impl ManagementSessionOtp {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(session) = self.inner.take() {
-            let conn = session.into_connection();
-            restore_otp_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     #[getter]
@@ -381,6 +387,24 @@ impl ManagementSessionFido {
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_fido_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for ManagementSessionFido {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -400,11 +424,7 @@ impl ManagementSessionFido {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(session) = self.inner.take() {
-            let conn = session.into_connection();
-            restore_fido_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     #[getter]

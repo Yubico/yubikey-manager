@@ -41,6 +41,24 @@ impl OtpProtocol {
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("OtpProtocol is closed"))
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(protocol) = self.inner.take() {
+            let conn = protocol.into_connection();
+            restore_otp_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for OtpProtocol {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -48,8 +66,10 @@ impl OtpProtocol {
     #[new]
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let otp_conn = extract_otp_connection(connection)?;
-        let protocol = RustOtpProtocol::new(otp_conn)
-            .map_err(|(e, _)| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        let protocol = RustOtpProtocol::new(otp_conn).map_err(|(e, conn)| {
+            let _ = restore_otp_connection(connection, conn);
+            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
+        })?;
         Ok(Self {
             inner: Some(protocol),
             py_connection: connection.clone().unbind(),
@@ -57,11 +77,7 @@ impl OtpProtocol {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(protocol) = self.inner.take() {
-            let conn = protocol.into_connection();
-            restore_otp_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     #[getter]

@@ -220,6 +220,24 @@ impl PyCtap2SessionCcid {
     pub fn restore_session(&mut self, session: Ctap2Session<BoxedSmartCardConnection>) {
         self.session = Some(session);
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.session.take() {
+            let conn = session.into_session().into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PyCtap2SessionCcid {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -258,11 +276,7 @@ impl PyCtap2SessionCcid {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(session) = self.session.take() {
-            let conn = session.into_session().into_connection();
-            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     #[getter]
@@ -376,6 +390,24 @@ impl PyCtap2SessionFido {
     pub fn restore_session(&mut self, session: Ctap2Session<BoxedFidoConnection>) {
         self.session = Some(session);
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.session.take() {
+            let conn = session.into_session().into_connection();
+            restore_fido_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PyCtap2SessionFido {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -402,11 +434,7 @@ impl PyCtap2SessionFido {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(session) = self.session.take() {
-            let conn = session.into_session().into_connection();
-            restore_fido_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     #[getter]

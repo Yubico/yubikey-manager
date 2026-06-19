@@ -9,54 +9,17 @@ use yubikit::piv::{
 };
 
 use crate::py_bridge::{
-    BoxedSmartCardConnection, extract_smartcard_connection, restore_smartcard_connection,
-    scp_key_params_from_py, smartcard_err,
+    BoxedSmartCardConnection, bad_response_err, extract_smartcard_connection, invalid_pin_err,
+    not_supported_err, restore_smartcard_connection, scp_key_params_from_py, smartcard_err,
 };
 
 fn piv_err(e: piv::PivError) -> PyErr {
     use pyo3::exceptions::*;
     match e {
         piv::PivError::Connection(sc) => smartcard_err(sc),
-        piv::PivError::InvalidPin(retries) => {
-            Python::attach(|py| match py.import("yubikit.core") {
-                Ok(module) => match module.getattr("InvalidPinError") {
-                    Ok(cls) => match cls.call1((retries,)) {
-                        Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyValueError::new_err(format!(
-                            "Invalid PIN, {} attempts remaining",
-                            retries
-                        )),
-                    },
-                    Err(_) => PyValueError::new_err(format!(
-                        "Invalid PIN, {} attempts remaining",
-                        retries
-                    )),
-                },
-                Err(_) => {
-                    PyValueError::new_err(format!("Invalid PIN, {} attempts remaining", retries))
-                }
-            })
-        }
-        piv::PivError::NotSupported(msg) => Python::attach(|py| match py.import("yubikit.core") {
-            Ok(module) => match module.getattr("NotSupportedError") {
-                Ok(cls) => match cls.call1((msg.clone(),)) {
-                    Ok(exc) => PyErr::from_value(exc),
-                    Err(_) => PyRuntimeError::new_err(msg),
-                },
-                Err(_) => PyRuntimeError::new_err(msg),
-            },
-            Err(_) => PyRuntimeError::new_err(msg),
-        }),
-        piv::PivError::InvalidData(msg) => Python::attach(|py| match py.import("yubikit.core") {
-            Ok(module) => match module.getattr("BadResponseError") {
-                Ok(cls) => match cls.call1((msg.clone(),)) {
-                    Ok(exc) => PyErr::from_value(exc),
-                    Err(_) => PyRuntimeError::new_err(msg),
-                },
-                Err(_) => PyRuntimeError::new_err(msg),
-            },
-            Err(_) => PyRuntimeError::new_err(msg),
-        }),
+        piv::PivError::InvalidPin(retries) => invalid_pin_err(retries),
+        piv::PivError::NotSupported(msg) => not_supported_err(msg),
+        piv::PivError::InvalidData(msg) => bad_response_err(msg),
         other => PyRuntimeError::new_err(other.to_string()),
     }
 }
@@ -178,6 +141,24 @@ impl PivSession {
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PivSession {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -213,11 +194,7 @@ impl PivSession {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(session) = self.inner.take() {
-            let conn = session.into_connection();
-            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     #[getter]

@@ -82,6 +82,24 @@ impl PyYubiOtpSessionCcid {
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.session.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PyYubiOtpSessionCcid {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -118,11 +136,7 @@ impl PyYubiOtpSessionCcid {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(session) = self.session.take() {
-            let conn = session.into_connection();
-            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     #[getter]
@@ -246,6 +260,24 @@ impl PyYubiOtpSessionOtp {
             .as_mut()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
     }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.session.take() {
+            let conn = session.into_connection();
+            restore_otp_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PyYubiOtpSessionOtp {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -254,7 +286,10 @@ impl PyYubiOtpSessionOtp {
     fn new(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_otp_connection(connection)?;
-        let session = YubiOtpSession::new_otp(conn).map_err(|(e, _)| yubiotp_err(e))?;
+        let session = YubiOtpSession::new_otp(conn).map_err(|(e, conn)| {
+            let _ = restore_otp_connection(connection, conn);
+            yubiotp_err(e)
+        })?;
         Ok(Self {
             session: Some(session),
             py_connection,
@@ -262,11 +297,7 @@ impl PyYubiOtpSessionOtp {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(session) = self.session.take() {
-            let conn = session.into_connection();
-            restore_otp_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 
     #[getter]

@@ -127,6 +127,27 @@ pub struct PyWebAuthnClientFido {
     py_connection: Py<PyAny>,
 }
 
+impl PyWebAuthnClientFido {
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(client) = self.client.take() {
+            let session = client.into_session();
+            let conn = session.into_session().into_connection();
+            restore_fido_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PyWebAuthnClientFido {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
+}
+
 #[pymethods]
 impl PyWebAuthnClientFido {
     #[new]
@@ -137,13 +158,18 @@ impl PyWebAuthnClientFido {
     ) -> PyResult<Self> {
         let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_fido_connection(connection)?;
-        let ctap = yubikit::ctap::CtapSession::new_fido(conn)
-            .map_err(|(e, _)| PyOSError::new_err(e.to_string()))?;
+        let ctap = yubikit::ctap::CtapSession::new_fido(conn).map_err(|(e, conn)| {
+            let _ = restore_fido_connection(connection, conn);
+            PyOSError::new_err(e.to_string())
+        })?;
         if !ctap.has_ctap2() {
             return Err(PyRuntimeError::new_err("Device does not support CTAP2"));
         }
-        let session = Ctap2Session::new(ctap)
-            .map_err(|(e, _)| PyOSError::new_err(format!("CTAP2 init failed: {e}")))?;
+        let session = Ctap2Session::new(ctap).map_err(|(e, ctap)| {
+            let conn = ctap.into_connection();
+            let _ = restore_fido_connection(connection, conn);
+            PyOSError::new_err(format!("CTAP2 init failed: {e}"))
+        })?;
 
         let interaction = PyUserInteraction {
             obj: user_interaction,
@@ -215,12 +241,7 @@ impl PyWebAuthnClientFido {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(client) = self.client.take() {
-            let session = client.into_session();
-            let conn = session.into_session().into_connection();
-            restore_fido_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 }
 
@@ -231,6 +252,27 @@ type SmartCardWebAuthnClientInner =
 pub struct PyWebAuthnClientCcid {
     client: Option<SmartCardWebAuthnClientInner>,
     py_connection: Py<PyAny>,
+}
+
+impl PyWebAuthnClientCcid {
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(client) = self.client.take() {
+            let session = client.into_session();
+            let conn = session.into_session().into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PyWebAuthnClientCcid {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
 }
 
 #[pymethods]
@@ -247,17 +289,24 @@ impl PyWebAuthnClientCcid {
         let conn = extract_smartcard_connection(connection)?;
         let ctap = if let Some(params) = scp_key_params {
             let scp_params = crate::py_bridge::scp_key_params_from_py(params)?;
-            yubikit::ctap::CtapSession::new_with_scp(conn, &scp_params)
-                .map_err(|(e, _)| PyOSError::new_err(e.to_string()))?
+            yubikit::ctap::CtapSession::new_with_scp(conn, &scp_params).map_err(|(e, conn)| {
+                let _ = restore_smartcard_connection(connection, conn);
+                PyOSError::new_err(e.to_string())
+            })?
         } else {
-            yubikit::ctap::CtapSession::new(conn)
-                .map_err(|(e, _)| PyOSError::new_err(e.to_string()))?
+            yubikit::ctap::CtapSession::new(conn).map_err(|(e, conn)| {
+                let _ = restore_smartcard_connection(connection, conn);
+                PyOSError::new_err(e.to_string())
+            })?
         };
         if !ctap.has_ctap2() {
             return Err(PyRuntimeError::new_err("Device does not support CTAP2"));
         }
-        let session = Ctap2Session::new(ctap)
-            .map_err(|(e, _)| PyOSError::new_err(format!("CTAP2 init failed: {e}")))?;
+        let session = Ctap2Session::new(ctap).map_err(|(e, ctap)| {
+            let conn = ctap.into_connection();
+            let _ = restore_smartcard_connection(connection, conn);
+            PyOSError::new_err(format!("CTAP2 init failed: {e}"))
+        })?;
 
         let interaction = PyUserInteraction {
             obj: user_interaction,
@@ -329,11 +378,6 @@ impl PyWebAuthnClientCcid {
     }
 
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if let Some(client) = self.client.take() {
-            let session = client.into_session();
-            let conn = session.into_session().into_connection();
-            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
-        }
-        Ok(())
+        self.close_inner(py)
     }
 }

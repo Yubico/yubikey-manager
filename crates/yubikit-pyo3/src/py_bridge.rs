@@ -37,6 +37,60 @@ use yubikit::smartcard::{SmartCardConnection, SmartCardError, SmartCardProtocol}
 
 use crate::py_pcsc::PcscConnection;
 
+pub fn not_supported_err(msg: String) -> PyErr {
+    python_exception_or_runtime("yubikit.core", "NotSupportedError", msg)
+}
+
+pub fn bad_response_err(msg: String) -> PyErr {
+    python_exception_or_runtime("yubikit.core", "BadResponseError", msg)
+}
+
+pub fn invalid_pin_err(retries: u32) -> PyErr {
+    Python::attach(|py| {
+        match py
+            .import("yubikit.core")
+            .and_then(|module| module.getattr("InvalidPinError"))
+        {
+            Ok(cls) => match cls.call1((retries,)) {
+                Ok(exc) => PyErr::from_value(exc),
+                Err(_) => pyo3::exceptions::PyValueError::new_err(format!(
+                    "Invalid PIN, {retries} attempts remaining"
+                )),
+            },
+            Err(_) => pyo3::exceptions::PyValueError::new_err(format!(
+                "Invalid PIN, {retries} attempts remaining"
+            )),
+        }
+    })
+}
+
+pub fn application_not_available_err() -> PyErr {
+    Python::attach(|py| {
+        match py
+            .import("yubikit.core")
+            .and_then(|module| module.getattr("ApplicationNotAvailableError"))
+        {
+            Ok(cls) => match cls.call0() {
+                Ok(exc) => PyErr::from_value(exc),
+                Err(_) => pyo3::exceptions::PyRuntimeError::new_err("Application not available"),
+            },
+            Err(_) => pyo3::exceptions::PyRuntimeError::new_err("Application not available"),
+        }
+    })
+}
+
+fn python_exception_or_runtime(module: &str, class_name: &str, msg: String) -> PyErr {
+    Python::attach(
+        |py| match py.import(module).and_then(|m| m.getattr(class_name)) {
+            Ok(cls) => match cls.call1((msg.clone(),)) {
+                Ok(exc) => PyErr::from_value(exc),
+                Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
+            },
+            Err(_) => pyo3::exceptions::PyRuntimeError::new_err(msg),
+        },
+    )
+}
+
 // ---------------------------------------------------------------------------
 // SmartCard connection enum
 // ---------------------------------------------------------------------------
@@ -63,7 +117,7 @@ impl yubikit::core::Connection for PySmartCardConn {
 impl SmartCardConnection for PySmartCardConn {
     fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
         match self {
-            Self::Native(c) => c.send_and_receive(apdu),
+            Self::Native(c) => Python::attach(|py| py.detach(|| c.send_and_receive(apdu))),
             Self::Bridge(c) => c.send_and_receive(apdu),
         }
     }
@@ -89,11 +143,6 @@ pub struct PythonSmartCardConnection {
     send_fn: Py<PyAny>,
     transport: Transport,
 }
-
-/// `Py<PyAny>` / `Py<PyAny>` is Send+Sync by design in pyo3 ≥0.21 — it's a
-/// GIL-independent handle. We only touch the Python object while holding the GIL.
-unsafe impl Send for PythonSmartCardConnection {}
-unsafe impl Sync for PythonSmartCardConnection {}
 
 impl PythonSmartCardConnection {
     fn from_py(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
@@ -199,6 +248,9 @@ impl FidoConnectionTrait for PyFidoConn {
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, FidoError> {
         match self {
+            Self::Native(c) if on_keepalive.is_none() && cancel.is_none() => {
+                Python::attach(|py| py.detach(|| c.call(cmd, data, None, None)))
+            }
             Self::Native(c) => c.call(cmd, data, on_keepalive, cancel),
             Self::Bridge(c) => c.call(cmd, data, on_keepalive, cancel),
         }
@@ -231,8 +283,6 @@ pub struct PythonFidoConnection {
     device_version: (u8, u8, u8),
     capabilities: CtapHidCapability,
 }
-
-unsafe impl Send for PythonFidoConnection {}
 
 impl PythonFidoConnection {
     fn from_py(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
@@ -397,13 +447,13 @@ impl yubikit::core::Connection for PyOtpConn {
 impl OtpConnectionTrait for PyOtpConn {
     fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
         match self {
-            Self::Native(c) => c.otp_receive(),
+            Self::Native(c) => Python::attach(|py| py.detach(|| c.otp_receive())),
             Self::Bridge(c) => c.otp_receive(),
         }
     }
     fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
         match self {
-            Self::Native(c) => c.otp_send(data),
+            Self::Native(c) => Python::attach(|py| py.detach(|| c.otp_send(data))),
             Self::Bridge(c) => c.otp_send(data),
         }
     }
@@ -417,9 +467,6 @@ pub struct PythonOtpConnection {
     receive_fn: Py<PyAny>,
     send_fn: Py<PyAny>,
 }
-
-unsafe impl Send for PythonOtpConnection {}
-unsafe impl Sync for PythonOtpConnection {}
 
 impl PythonOtpConnection {
     fn from_py(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
@@ -529,7 +576,6 @@ pub fn fido_err(e: FidoError) -> PyErr {
 /// - `SmartCardError::ApplicationNotAvailable` → `yubikit.core.ApplicationNotAvailableError`
 /// - Others → `RuntimeError`
 pub fn smartcard_err(e: SmartCardError) -> PyErr {
-    use pyo3::exceptions::*;
     Python::attach(|py| match &e {
         SmartCardError::Apdu { data, sw } => match py.import("yubikit.core.smartcard") {
             Ok(module) => match module.getattr("ApduError") {
@@ -537,54 +583,19 @@ pub fn smartcard_err(e: SmartCardError) -> PyErr {
                     let data_bytes = PyBytes::new(py, data);
                     match cls.call1((data_bytes, *sw)) {
                         Ok(exc) => PyErr::from_value(exc),
-                        Err(_) => PyRuntimeError::new_err(e.to_string()),
+                        Err(_) => pyo3::exceptions::PyRuntimeError::new_err(e.to_string()),
                     }
                 }
-                Err(_) => PyRuntimeError::new_err(e.to_string()),
+                Err(_) => pyo3::exceptions::PyRuntimeError::new_err(e.to_string()),
             },
-            Err(_) => PyRuntimeError::new_err(e.to_string()),
+            Err(_) => pyo3::exceptions::PyRuntimeError::new_err(e.to_string()),
         },
-        SmartCardError::NotSupported(msg) => match py.import("yubikit.core") {
-            Ok(module) => match module.getattr("NotSupportedError") {
-                Ok(cls) => match cls.call1((msg.clone(),)) {
-                    Ok(exc) => PyErr::from_value(exc),
-                    Err(_) => PyRuntimeError::new_err(msg.clone()),
-                },
-                Err(_) => PyRuntimeError::new_err(msg.clone()),
-            },
-            Err(_) => PyRuntimeError::new_err(msg.clone()),
-        },
-        SmartCardError::InvalidData(msg) => match py.import("yubikit.core") {
-            Ok(module) => match module.getattr("BadResponseError") {
-                Ok(cls) => match cls.call1((msg.clone(),)) {
-                    Ok(exc) => PyErr::from_value(exc),
-                    Err(_) => PyRuntimeError::new_err(msg.clone()),
-                },
-                Err(_) => PyRuntimeError::new_err(msg.clone()),
-            },
-            Err(_) => PyRuntimeError::new_err(msg.clone()),
-        },
-        SmartCardError::InvalidState(msg) => match py.import("yubikit.core") {
-            Ok(module) => match module.getattr("BadResponseError") {
-                Ok(cls) => match cls.call1((msg.clone(),)) {
-                    Ok(exc) => PyErr::from_value(exc),
-                    Err(_) => PyRuntimeError::new_err(msg.clone()),
-                },
-                Err(_) => PyRuntimeError::new_err(msg.clone()),
-            },
-            Err(_) => PyRuntimeError::new_err(msg.clone()),
-        },
-        SmartCardError::ApplicationNotAvailable => match py.import("yubikit.core") {
-            Ok(module) => match module.getattr("ApplicationNotAvailableError") {
-                Ok(cls) => match cls.call0() {
-                    Ok(exc) => PyErr::from_value(exc),
-                    Err(_) => PyRuntimeError::new_err("Application not available"),
-                },
-                Err(_) => PyRuntimeError::new_err("Application not available"),
-            },
-            Err(_) => PyRuntimeError::new_err("Application not available"),
-        },
-        _ => PyRuntimeError::new_err(e.to_string()),
+        SmartCardError::NotSupported(msg) => not_supported_err(msg.clone()),
+        SmartCardError::InvalidData(msg) | SmartCardError::InvalidState(msg) => {
+            bad_response_err(msg.clone())
+        }
+        SmartCardError::ApplicationNotAvailable => application_not_available_err(),
+        _ => pyo3::exceptions::PyRuntimeError::new_err(e.to_string()),
     })
 }
 
@@ -731,107 +742,7 @@ pub fn init_scp_from_py<C: SmartCardConnection>(
     protocol: &mut SmartCardProtocol<C>,
     params: &Bound<'_, PyAny>,
 ) -> PyResult<()> {
-    let class_name = params.get_type().name()?.to_string();
-
-    if class_name.contains("Scp03KeyParams") {
-        init_scp03_from_py(protocol, params)
-    } else if class_name.contains("Scp11KeyParams") {
-        init_scp11_from_py(protocol, params)
-    } else {
-        Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Unsupported SCP key params type: {class_name}"
-        )))
-    }
-}
-
-fn init_scp03_from_py<C: SmartCardConnection>(
-    protocol: &mut SmartCardProtocol<C>,
-    params: &Bound<'_, PyAny>,
-) -> PyResult<()> {
-    let key_ref = params.getattr("ref")?;
-    let kvn: u8 = key_ref.getattr("kvn")?.extract()?;
-    let keys = params.getattr("keys")?;
-    let key_enc: Vec<u8> = keys
-        .getattr("key_enc")?
-        .call_method0("__bytes__")?
-        .extract()?;
-    let key_mac: Vec<u8> = keys
-        .getattr("key_mac")?
-        .call_method0("__bytes__")?
-        .extract()?;
-    let key_dek_obj = keys.getattr("key_dek")?;
-    let key_dek: Option<Vec<u8>> = if key_dek_obj.is_none() {
-        None
-    } else {
-        Some(key_dek_obj.call_method0("__bytes__")?.extract()?)
-    };
-
-    protocol
-        .init_scp03(kvn, &key_enc, &key_mac, key_dek.as_deref())
-        .map_err(smartcard_err)?;
-    Ok(())
-}
-
-fn init_scp11_from_py<C: SmartCardConnection>(
-    protocol: &mut SmartCardProtocol<C>,
-    params: &Bound<'_, PyAny>,
-) -> PyResult<()> {
-    let key_ref = params.getattr("ref")?;
-    let kid: u8 = key_ref.getattr("kid")?.extract()?;
-    let kvn: u8 = key_ref.getattr("kvn")?.extract()?;
-
-    // pk_sd_ecka: ec.EllipticCurvePublicKey → uncompressed point bytes
-    let pk = params.getattr("pk_sd_ecka")?;
-    let serialization = pk
-        .py()
-        .import("cryptography.hazmat.primitives.serialization")?;
-    let encoding_x962 = serialization.getattr("Encoding")?.getattr("X962")?;
-    let format_uncompressed = serialization
-        .getattr("PublicFormat")?
-        .getattr("UncompressedPoint")?;
-    let pk_bytes: Vec<u8> = pk
-        .call_method1("public_bytes", (encoding_x962, format_uncompressed))?
-        .extract()?;
-
-    // sk_oce_ecka: optional ec.EllipticCurvePrivateKey → raw scalar bytes
-    let sk_oce_obj = params.getattr("sk_oce_ecka")?;
-    let sk_oce: Option<Vec<u8>> = if sk_oce_obj.is_none() {
-        None
-    } else {
-        let numbers = sk_oce_obj.call_method0("private_numbers")?;
-        let private_value = numbers.getattr("private_value")?;
-        let bytes: Vec<u8> = private_value
-            .call_method1("to_bytes", (32usize, "big"))?
-            .extract()?;
-        Some(bytes)
-    };
-
-    // certificates: list[x509.Certificate] → Vec<DER bytes>
-    let certs_list = params.getattr("certificates")?;
-    let certs_len: usize = certs_list.len()?;
-    let encoding_der = serialization.getattr("Encoding")?.getattr("DER")?;
-    let mut cert_ders: Vec<Vec<u8>> = Vec::with_capacity(certs_len);
-    for i in 0..certs_len {
-        let cert = certs_list.get_item(i)?;
-        let der: Vec<u8> = cert
-            .call_method1("public_bytes", (encoding_der.clone(),))?
-            .extract()?;
-        cert_ders.push(der);
-    }
-    let cert_refs: Vec<&[u8]> = cert_ders.iter().map(|c| c.as_slice()).collect();
-
-    // oce_ref: optional KeyRef → (kid, kvn)
-    let oce_ref_obj = params.getattr("oce_ref")?;
-    let oce_ref: Option<(u8, u8)> = if oce_ref_obj.is_none() {
-        None
-    } else {
-        let oce_kid: u8 = oce_ref_obj.getattr("kid")?.extract()?;
-        let oce_kvn: u8 = oce_ref_obj.getattr("kvn")?.extract()?;
-        Some((oce_kid, oce_kvn))
-    };
-
-    protocol
-        .init_scp11(kid, kvn, &pk_bytes, sk_oce.as_deref(), &cert_refs, oce_ref)
-        .map_err(smartcard_err)?;
+    let params = scp_key_params_from_py(params)?;
+    protocol.init_scp(&params).map_err(smartcard_err)?;
     Ok(())
 }
