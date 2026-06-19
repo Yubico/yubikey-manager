@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 
+use clap::Subcommand;
 use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
 use yubikit::securitydomain::{KeyRef, ScpKid, SecurityDomainSession};
@@ -7,9 +8,138 @@ use yubikit::securitydomain::{KeyRef, ScpKid, SecurityDomainSession};
 use crate::cli_enums::CliSdKeyType;
 use crate::scp::{self, ScpParams};
 use crate::util::{
-    CliError, format_session_error, format_smartcard_connection_error, read_file_or_stdin,
-    write_file_or_stdout,
+    CliError, format_session_error, format_smartcard_connection_error, parse_hex_u8,
+    read_file_or_stdin, write_file_or_stdout,
 };
+
+#[derive(Subcommand)]
+pub enum SecurityDomainAction {
+    /// Display Security Domain info
+    Info,
+    /// Reset Security Domain
+    Reset {
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Manage keys
+    #[command(subcommand)]
+    Keys(SecurityDomainKeysAction),
+}
+
+#[derive(Subcommand)]
+pub enum SecurityDomainKeysAction {
+    /// Generate EC key pair
+    Generate {
+        /// Key ID (hex)
+        kid: String,
+        /// Key Version Number (hex)
+        kvn: String,
+        /// Output file for public key
+        output: String,
+        /// Replace existing KVN
+        #[arg(long)]
+        replace_kvn: Option<String>,
+    },
+    /// Export certificate bundle
+    Export {
+        kid: String,
+        kvn: String,
+        output: String,
+    },
+    /// Delete a key
+    Delete {
+        kid: String,
+        kvn: String,
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Import a key (SCP03 static keys or SCP11 certificate/private key)
+    Import {
+        /// Key ID (hex)
+        kid: String,
+        /// Key Version Number (hex)
+        kvn: String,
+        /// Key type
+        #[arg(short = 't', long, default_value = "scp11")]
+        key_type: CliSdKeyType,
+        /// For SCP03: K-ENC:K-MAC:K-DEK hex keys. For SCP11: PEM file with certificate(s) and/or private key
+        input: String,
+        /// Replace existing KVN
+        #[arg(long)]
+        replace_kvn: Option<String>,
+        /// Password for decrypting private key files
+        #[arg(short = 'p', long)]
+        password: Option<String>,
+    },
+    /// Set certificate serial number allowlist
+    SetAllowlist {
+        /// Key ID (hex)
+        kid: String,
+        /// Key Version Number (hex)
+        kvn: String,
+        /// Certificate serial numbers (hex)
+        serials: Vec<String>,
+    },
+}
+
+impl SecurityDomainAction {
+    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+        match self {
+            Self::Info => run_info(dev, scp_params),
+            Self::Reset { force } => run_reset(dev, scp_params, force),
+            Self::Keys(keys) => match keys {
+                SecurityDomainKeysAction::Generate {
+                    kid,
+                    kvn,
+                    output,
+                    replace_kvn,
+                } => {
+                    let kid = parse_hex_u8(&kid)?;
+                    let kvn = parse_hex_u8(&kvn)?;
+                    let rkvn = replace_kvn.as_deref().map(parse_hex_u8).transpose()?;
+                    run_keys_generate(dev, scp_params, kid, kvn, &output, rkvn)
+                }
+                SecurityDomainKeysAction::Export { kid, kvn, output } => {
+                    let kid = parse_hex_u8(&kid)?;
+                    let kvn = parse_hex_u8(&kvn)?;
+                    run_keys_export(dev, scp_params, kid, kvn, &output)
+                }
+                SecurityDomainKeysAction::Delete { kid, kvn, force } => {
+                    let kid = parse_hex_u8(&kid)?;
+                    let kvn = parse_hex_u8(&kvn)?;
+                    run_keys_delete(dev, scp_params, kid, kvn, force)
+                }
+                SecurityDomainKeysAction::Import {
+                    kid,
+                    kvn,
+                    key_type,
+                    input,
+                    replace_kvn,
+                    password,
+                } => {
+                    let kid = parse_hex_u8(&kid)?;
+                    let kvn = parse_hex_u8(&kvn)?;
+                    let rkvn = replace_kvn.as_deref().map(parse_hex_u8).transpose()?;
+                    run_keys_import(
+                        dev,
+                        scp_params,
+                        kid,
+                        kvn,
+                        key_type,
+                        &input,
+                        rkvn,
+                        password.as_deref(),
+                    )
+                }
+                SecurityDomainKeysAction::SetAllowlist { kid, kvn, serials } => {
+                    let kid = parse_hex_u8(&kid)?;
+                    let kvn = parse_hex_u8(&kvn)?;
+                    run_keys_set_allowlist(dev, scp_params, kid, kvn, &serials)
+                }
+            },
+        }
+    }
+}
 
 fn open_session<'a>(
     dev: &'a dyn YubiKeyDevice,

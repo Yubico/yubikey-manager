@@ -32,7 +32,7 @@ use cli_enums::*;
 
 use context::CommandContext;
 use scp::{ScpInputs, ScpParams};
-use util::{CliError, parse_hex_u8};
+use util::CliError;
 
 #[derive(Parser)]
 #[command(
@@ -277,7 +277,7 @@ enum Commands {
     #[command(name = "sd")]
     SecurityDomain {
         #[command(subcommand)]
-        action: SecurityDomainAction,
+        action: securitydomain::SecurityDomainAction,
     },
     /// Send raw APDUs to the YubiKey
     #[command(after_help = "Examples:\n\
@@ -957,76 +957,6 @@ enum OpenpgpCertAction {
     },
 }
 
-#[derive(Subcommand)]
-enum SecurityDomainAction {
-    /// Display Security Domain info
-    Info,
-    /// Reset Security Domain
-    Reset {
-        #[arg(short = 'f', long)]
-        force: bool,
-    },
-    /// Manage keys
-    #[command(subcommand)]
-    Keys(SecurityDomainKeysAction),
-}
-
-#[derive(Subcommand)]
-enum SecurityDomainKeysAction {
-    /// Generate EC key pair
-    Generate {
-        /// Key ID (hex)
-        kid: String,
-        /// Key Version Number (hex)
-        kvn: String,
-        /// Output file for public key
-        output: String,
-        /// Replace existing KVN
-        #[arg(long)]
-        replace_kvn: Option<String>,
-    },
-    /// Export certificate bundle
-    Export {
-        kid: String,
-        kvn: String,
-        output: String,
-    },
-    /// Delete a key
-    Delete {
-        kid: String,
-        kvn: String,
-        #[arg(short = 'f', long)]
-        force: bool,
-    },
-    /// Import a key (SCP03 static keys or SCP11 certificate/private key)
-    Import {
-        /// Key ID (hex)
-        kid: String,
-        /// Key Version Number (hex)
-        kvn: String,
-        /// Key type
-        #[arg(short = 't', long, default_value = "scp11")]
-        key_type: CliSdKeyType,
-        /// For SCP03: K-ENC:K-MAC:K-DEK hex keys. For SCP11: PEM file with certificate(s) and/or private key
-        input: String,
-        /// Replace existing KVN
-        #[arg(long)]
-        replace_kvn: Option<String>,
-        /// Password for decrypting private key files
-        #[arg(short = 'p', long)]
-        password: Option<String>,
-    },
-    /// Set certificate serial number allowlist
-    SetAllowlist {
-        /// Key ID (hex)
-        kid: String,
-        /// Key Version Number (hex)
-        kvn: String,
-        /// Certificate serial numbers (hex)
-        serials: Vec<String>,
-    },
-}
-
 fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
 
@@ -1631,62 +1561,7 @@ fn run_command(
         }
         Commands::SecurityDomain { action } => {
             let dev = ctx.device_with_min_version(Version(5, 3, 0), "Security Domain")?;
-            match action {
-                SecurityDomainAction::Info => securitydomain::run_info(&dev, scp_params),
-                SecurityDomainAction::Reset { force } => {
-                    securitydomain::run_reset(&dev, scp_params, force)
-                }
-                SecurityDomainAction::Keys(keys) => match keys {
-                    SecurityDomainKeysAction::Generate {
-                        kid,
-                        kvn,
-                        output,
-                        replace_kvn,
-                    } => {
-                        let kid = parse_hex_u8(&kid)?;
-                        let kvn = parse_hex_u8(&kvn)?;
-                        let rkvn = replace_kvn.as_deref().map(parse_hex_u8).transpose()?;
-                        securitydomain::run_keys_generate(&dev, scp_params, kid, kvn, &output, rkvn)
-                    }
-                    SecurityDomainKeysAction::Export { kid, kvn, output } => {
-                        let kid = parse_hex_u8(&kid)?;
-                        let kvn = parse_hex_u8(&kvn)?;
-                        securitydomain::run_keys_export(&dev, scp_params, kid, kvn, &output)
-                    }
-                    SecurityDomainKeysAction::Delete { kid, kvn, force } => {
-                        let kid = parse_hex_u8(&kid)?;
-                        let kvn = parse_hex_u8(&kvn)?;
-                        securitydomain::run_keys_delete(&dev, scp_params, kid, kvn, force)
-                    }
-                    SecurityDomainKeysAction::Import {
-                        kid,
-                        kvn,
-                        key_type,
-                        input,
-                        replace_kvn,
-                        password,
-                    } => {
-                        let kid = parse_hex_u8(&kid)?;
-                        let kvn = parse_hex_u8(&kvn)?;
-                        let rkvn = replace_kvn.as_deref().map(parse_hex_u8).transpose()?;
-                        securitydomain::run_keys_import(
-                            &dev,
-                            scp_params,
-                            kid,
-                            kvn,
-                            key_type,
-                            &input,
-                            rkvn,
-                            password.as_deref(),
-                        )
-                    }
-                    SecurityDomainKeysAction::SetAllowlist { kid, kvn, serials } => {
-                        let kid = parse_hex_u8(&kid)?;
-                        let kvn = parse_hex_u8(&kvn)?;
-                        securitydomain::run_keys_set_allowlist(&dev, scp_params, kid, kvn, &serials)
-                    }
-                },
-            }
+            action.run(dev.as_ref(), scp_params)
         }
         Commands::Apdu {
             apdus,
