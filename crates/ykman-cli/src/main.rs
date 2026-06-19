@@ -3,7 +3,7 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 use yubikit::core::Version;
-use yubikit::management::{Capability, UsbInterface};
+use yubikit::management::Capability;
 
 mod apdu;
 mod cli_enums;
@@ -127,34 +127,6 @@ fn command_or_help(command: Option<Commands>) -> Commands {
             cmd.print_help().ok();
             println!();
             std::process::exit(0);
-        }
-    }
-}
-
-#[derive(Clone, clap::ValueEnum)]
-enum CliAppName {
-    Otp,
-    Management,
-    Openpgp,
-    Oath,
-    Piv,
-    Fido,
-    Hsmauth,
-    #[value(name = "secure-domain")]
-    SecureDomain,
-}
-
-impl CliAppName {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Otp => "otp",
-            Self::Management => "management",
-            Self::Openpgp => "openpgp",
-            Self::Oath => "oath",
-            Self::Piv => "piv",
-            Self::Fido => "fido",
-            Self::Hsmauth => "hsmauth",
-            Self::SecureDomain => "secure-domain",
         }
     }
 }
@@ -295,20 +267,8 @@ enum Commands {
       \n  Get 8 random bytes from the OpenPGP application:\
       \n  $ ykman apdu -a openpgp 84/08=")]
     Apdu {
-        /// APDUs to send (format: `[CLA]INS[P1P2][:DATA][/LE][=EXPECTED_SW]`)
-        apdus: Vec<String>,
-        /// Print only hex output
-        #[arg(short = 'x', long)]
-        no_pretty: bool,
-        /// Select application before sending APDUs
-        #[arg(short = 'a', long)]
-        app: Option<CliAppName>,
-        /// Force short APDUs
-        #[arg(long)]
-        short: bool,
-        /// Send full hex APDU strings (alternative to positional)
-        #[arg(short = 's', long = "send-apdu")]
-        send_apdu: Vec<String>,
+        #[command(flatten)]
+        args: apdu::ApduArgs,
     },
 }
 
@@ -392,28 +352,9 @@ fn run_command(
             let dev = ctx.device_with_min_version(Version(5, 3, 0), "Security Domain")?;
             action.run(dev.as_ref(), scp_params)
         }
-        Commands::Apdu {
-            apdus,
-            no_pretty,
-            app,
-            short,
-            send_apdu,
-        } => {
+        Commands::Apdu { args } => {
             let dev = ctx.device()?;
-            if !dev.usb_interfaces().contains(UsbInterface::CCID) {
-                return Err(CliError(
-                    "The apdu command requires a CCID (smart card) connection.".into(),
-                ));
-            }
-            apdu::run_apdu(
-                &*dev,
-                scp_params,
-                &apdus,
-                no_pretty,
-                app.map(|a| a.as_str()),
-                short,
-                &send_apdu,
-            )
+            args.run(dev.as_ref(), scp_params)
         }
     }
 }

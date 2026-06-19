@@ -1,10 +1,77 @@
+use clap::{Args, ValueEnum};
 use yubikit::core::Version;
 use yubikit::device::YubiKeyDevice;
-use yubikit::management::Capability;
+use yubikit::management::{Capability, UsbInterface};
 use yubikit::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 
 use crate::scp::{self, ScpParams};
 use crate::util::{CliError, format_smartcard_connection_error};
+
+#[derive(Clone, ValueEnum)]
+enum CliAppName {
+    Otp,
+    Management,
+    Openpgp,
+    Oath,
+    Piv,
+    Fido,
+    Hsmauth,
+    #[value(name = "secure-domain")]
+    SecureDomain,
+}
+
+impl CliAppName {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Otp => "otp",
+            Self::Management => "management",
+            Self::Openpgp => "openpgp",
+            Self::Oath => "oath",
+            Self::Piv => "piv",
+            Self::Fido => "fido",
+            Self::Hsmauth => "hsmauth",
+            Self::SecureDomain => "secure-domain",
+        }
+    }
+}
+
+#[derive(Args)]
+pub struct ApduArgs {
+    /// APDUs to send (format: `[CLA]INS[P1P2][:DATA][/LE][=EXPECTED_SW]`)
+    apdus: Vec<String>,
+    /// Print only hex output
+    #[arg(short = 'x', long)]
+    no_pretty: bool,
+    /// Select application before sending APDUs
+    #[arg(short = 'a', long)]
+    app: Option<CliAppName>,
+    /// Force short APDUs
+    #[arg(long)]
+    short: bool,
+    /// Send full hex APDU strings (alternative to positional)
+    #[arg(short = 's', long = "send-apdu")]
+    send_apdu: Vec<String>,
+}
+
+impl ApduArgs {
+    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+        if !dev.usb_interfaces().contains(UsbInterface::CCID) {
+            return Err(CliError(
+                "The apdu command requires a CCID (smart card) connection.".into(),
+            ));
+        }
+
+        run_apdu(
+            dev,
+            scp_params,
+            &self.apdus,
+            self.no_pretty,
+            self.app.as_ref().map(CliAppName::as_str),
+            self.short,
+            &self.send_apdu,
+        )
+    }
+}
 
 /// Format a case-1 or case-3 APDU (no LE byte).
 fn format_apdu_no_le(cla: u8, ins: u8, p1: u8, p2: u8, data: &[u8]) -> Vec<u8> {
