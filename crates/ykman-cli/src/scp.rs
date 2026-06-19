@@ -145,8 +145,6 @@ pub fn resolve_scp_for_app(
     }
 }
 
-/// Apply SCP configuration to a SmartCardProtocol.
-/// The AID must already be selected before calling this.
 /// Convert an `ScpConfig` into `ScpKeyParams`, returning `None` for
 /// `ScpConfig::None`.
 pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit::smartcard::ScpKeyParams> {
@@ -201,6 +199,8 @@ pub fn to_scp_key_params(config: &ScpConfig) -> Option<yubikit::smartcard::ScpKe
     }
 }
 
+/// Apply SCP configuration to a SmartCardProtocol.
+/// The AID must already be selected before calling this.
 pub fn apply_scp<C: SmartCardConnection>(
     protocol: &mut SmartCardProtocol<C>,
     config: &ScpConfig,
