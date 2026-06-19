@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 
+use clap::Subcommand;
 use yubikit::core::Connection;
 use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
@@ -10,6 +11,211 @@ use crate::util::{
     CliError, format_session_error, format_smartcard_connection_error, prompt_new_secret,
     prompt_secret,
 };
+
+#[derive(Subcommand)]
+pub enum ConfigAction {
+    /// Configure USB applications
+    Usb {
+        /// Enable an application (can be repeated)
+        #[arg(short = 'e', long = "enable", action = clap::ArgAction::Append)]
+        enable: Vec<CliCapability>,
+        /// Disable an application (can be repeated)
+        #[arg(long = "disable", action = clap::ArgAction::Append)]
+        disable: Vec<CliCapability>,
+        /// Enable all supported applications
+        #[arg(short = 'a', long)]
+        enable_all: bool,
+        /// List enabled applications
+        #[arg(short = 'l', long)]
+        list: bool,
+        /// Current lock code as 32 hex characters (16 bytes)
+        #[arg(short = 'L', long = "lock-code", value_name = "HEX")]
+        lock_code: Option<String>,
+        /// Enable touch-eject
+        #[arg(long)]
+        touch_eject: bool,
+        /// Disable touch-eject
+        #[arg(long)]
+        no_touch_eject: bool,
+        /// Auto-eject timeout in seconds
+        #[arg(long)]
+        autoeject_timeout: Option<u16>,
+        /// Challenge-response timeout in seconds
+        #[arg(long)]
+        chalresp_timeout: Option<u8>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Configure NFC applications
+    Nfc {
+        /// Enable an application (can be repeated)
+        #[arg(short = 'e', long = "enable", action = clap::ArgAction::Append)]
+        enable: Vec<CliCapability>,
+        /// Disable an application (can be repeated)
+        #[arg(long = "disable", action = clap::ArgAction::Append)]
+        disable: Vec<CliCapability>,
+        /// Enable all supported applications
+        #[arg(short = 'a', long)]
+        enable_all: bool,
+        /// Disable all supported applications
+        #[arg(short = 'D', long)]
+        disable_all: bool,
+        /// List enabled applications
+        #[arg(short = 'l', long)]
+        list: bool,
+        /// Current lock code as 32 hex characters (16 bytes)
+        #[arg(short = 'L', long = "lock-code", value_name = "HEX")]
+        lock_code: Option<String>,
+        /// Disable NFC until next USB power cycle
+        #[arg(short = 'R', long)]
+        restrict: bool,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Set or change the configuration lock code
+    ///
+    /// A lock code may be used to protect the application configuration. It must be exactly
+    /// 32 hexadecimal characters, representing 16 bytes.
+    SetLockCode {
+        /// Current lock code as 32 hex characters (16 bytes)
+        #[arg(short = 'l', long = "lock-code", value_name = "HEX")]
+        lock_code: Option<String>,
+        /// New lock code as 32 hex characters (16 bytes)
+        #[arg(
+            short = 'n',
+            long = "new-lock-code",
+            value_name = "HEX",
+            conflicts_with = "generate"
+        )]
+        new_lock_code: Option<String>,
+        /// Clear the lock code
+        #[arg(short = 'c', long, conflicts_with_all = ["new_lock_code", "generate"])]
+        clear: bool,
+        /// Generate a random 32-character hex lock code
+        #[arg(short = 'g', long, conflicts_with = "new_lock_code")]
+        generate: bool,
+        /// Confirm the action without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Manage connection modes (USB Interfaces).
+    ///
+    /// This command is generally used with YubiKeys prior to the 5 series.
+    /// Use "ykman config usb" for more granular control on YubiKey 5 and later.
+    ///
+    /// MODE can be a string, such as "OTP+FIDO+CCID", or a shortened form: "o+f+c".
+    /// It can also be a mode number.
+    #[command(after_help = "Examples:\n\
+      \n  Set the OTP and FIDO mode:\
+      \n  $ ykman config mode OTP+FIDO\
+      \n\
+      \n  Set the CCID only mode and use touch to eject the smart card:\
+      \n  $ ykman config mode CCID --touch-eject")]
+    Mode {
+        /// Mode string (e.g., OTP+FIDO+CCID) or number (0-6)
+        mode: String,
+        /// Enable touch-eject (CCID mode)
+        #[arg(long)]
+        touch_eject: bool,
+        /// Auto-eject timeout in seconds
+        #[arg(long)]
+        autoeject_timeout: Option<u16>,
+        /// Challenge-response timeout in seconds
+        #[arg(long)]
+        chalresp_timeout: Option<u8>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Factory reset the YubiKey (Bio only)
+    Reset {
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+}
+
+impl ConfigAction {
+    pub fn run(self, dev: &dyn YubiKeyDevice) -> Result<(), CliError> {
+        match self {
+            Self::Usb {
+                enable,
+                disable,
+                enable_all,
+                list,
+                lock_code,
+                touch_eject,
+                no_touch_eject,
+                autoeject_timeout,
+                chalresp_timeout,
+                force,
+            } => run_usb(
+                dev,
+                &enable,
+                &disable,
+                enable_all,
+                list,
+                lock_code.as_deref(),
+                touch_eject,
+                no_touch_eject,
+                autoeject_timeout,
+                chalresp_timeout,
+                force,
+            ),
+            Self::Nfc {
+                enable,
+                disable,
+                enable_all,
+                disable_all,
+                list,
+                lock_code,
+                restrict,
+                force,
+            } => run_nfc(
+                dev,
+                &enable,
+                &disable,
+                enable_all,
+                disable_all,
+                list,
+                lock_code.as_deref(),
+                restrict,
+                force,
+            ),
+            Self::SetLockCode {
+                lock_code,
+                new_lock_code,
+                clear,
+                generate,
+                force,
+            } => run_set_lock_code(
+                dev,
+                lock_code.as_deref(),
+                new_lock_code.as_deref(),
+                clear,
+                generate,
+                force,
+            ),
+            Self::Mode {
+                mode,
+                touch_eject,
+                autoeject_timeout,
+                chalresp_timeout,
+                force,
+            } => run_mode(
+                dev,
+                &mode,
+                touch_eject,
+                autoeject_timeout,
+                chalresp_timeout,
+                force,
+            ),
+            Self::Reset { force } => run_reset(dev, force),
+        }
+    }
+}
 
 /// Open a management session on any available transport and run a generic function.
 ///
