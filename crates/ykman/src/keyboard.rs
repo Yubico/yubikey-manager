@@ -4,6 +4,7 @@
 //! programming static passwords or calculating OTP codes.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 /// Modifier flag indicating the Shift key is held.
 pub const SHIFT: u8 = 0x80;
@@ -77,17 +78,30 @@ impl std::fmt::Display for KeyboardLayout {
 }
 
 /// Returns the USB HID scancode mapping for the given keyboard layout.
-pub fn scancodes(layout: KeyboardLayout) -> HashMap<char, u8> {
-    match layout {
-        KeyboardLayout::Modhex => modhex_scancodes(),
-        KeyboardLayout::Us => us_scancodes(),
-        KeyboardLayout::Uk => uk_scancodes(),
-        KeyboardLayout::De => de_scancodes(),
-        KeyboardLayout::Fr => fr_scancodes(),
-        KeyboardLayout::It => it_scancodes(),
-        KeyboardLayout::Bepo => bepo_scancodes(),
-        KeyboardLayout::Norman => norman_scancodes(),
-    }
+pub fn scancodes(layout: KeyboardLayout) -> &'static HashMap<char, u8> {
+    static MAPS: OnceLock<[HashMap<char, u8>; 8]> = OnceLock::new();
+    let maps = MAPS.get_or_init(|| {
+        [
+            modhex_scancodes(),
+            us_scancodes(),
+            uk_scancodes(),
+            de_scancodes(),
+            fr_scancodes(),
+            it_scancodes(),
+            bepo_scancodes(),
+            norman_scancodes(),
+        ]
+    });
+    &maps[match layout {
+        KeyboardLayout::Modhex => 0,
+        KeyboardLayout::Us => 1,
+        KeyboardLayout::Uk => 2,
+        KeyboardLayout::De => 3,
+        KeyboardLayout::Fr => 4,
+        KeyboardLayout::It => 5,
+        KeyboardLayout::Bepo => 6,
+        KeyboardLayout::Norman => 7,
+    }]
 }
 
 fn us_scancodes() -> HashMap<char, u8> {

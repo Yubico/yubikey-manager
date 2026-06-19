@@ -91,7 +91,8 @@ struct Cli {
 
 fn init_logging(cli: &Cli) -> Result<(), CliError> {
     if let Some(level) = cli.log_level {
-        logging::init_logging(level, cli.log_file.as_deref()).map_err(CliError)?;
+        logging::init_logging(level, cli.log_file.as_deref())
+            .map_err(|e| CliError(e.to_string()))?;
         log::info!(
             "System info:\n  ykman:  {}\n  Platform:  {}\n  Arch:      {}",
             env!("CARGO_PKG_VERSION"),

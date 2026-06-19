@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod appdata;
 pub mod cancel;
 pub mod device;

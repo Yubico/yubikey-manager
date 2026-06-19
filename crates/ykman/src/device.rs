@@ -4,8 +4,7 @@
 //! (via the ykman-svc service). Use [`get_device_source`] to get the best
 //! available source for the platform.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
@@ -93,13 +92,13 @@ impl DeviceSource for NoDeviceSource {
 /// Device source using the ykman-svc service (Named Pipe on Windows, Unix
 /// socket in debug builds).
 pub struct RpcDeviceSource {
-    client: Rc<RefCell<RpcClient>>,
+    client: Arc<Mutex<RpcClient>>,
 }
 
 impl RpcDeviceSource {
     fn new(client: RpcClient) -> Self {
         Self {
-            client: Rc::new(RefCell::new(client)),
+            client: Arc::new(Mutex::new(client)),
         }
     }
 
@@ -107,7 +106,7 @@ impl RpcDeviceSource {
     ///
     /// Useful for callers that need to perform additional operations on the
     /// same connection (e.g., opening a specific device by name).
-    pub fn client(&self) -> Rc<RefCell<RpcClient>> {
+    pub fn client(&self) -> Arc<Mutex<RpcClient>> {
         self.client.clone()
     }
 }
@@ -116,7 +115,8 @@ impl DeviceSource for RpcDeviceSource {
     fn list_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError> {
         let root = self
             .client
-            .borrow_mut()
+            .lock()
+            .map_err(|_| rpc_poisoned_device_error())?
             .get(&[] as &[&str])
             .map_err(rpc_to_device_error)?;
 
@@ -144,7 +144,8 @@ impl DeviceSource for RpcDeviceSource {
     ) -> Result<Box<dyn YubiKeyDevice>, DeviceError> {
         let result = self
             .client
-            .borrow_mut()
+            .lock()
+            .map_err(|_| rpc_poisoned_device_error())?
             .call("select_fido", &[] as &[&str], json!({}), None, true)
             .map_err(rpc_to_device_error)?;
 
@@ -166,7 +167,13 @@ impl DeviceSource for RpcDeviceSource {
 
 fn rpc_to_device_error(e: RpcCallError) -> DeviceError {
     log::warn!("Service error: {e}");
-    DeviceError::NoDeviceFound
+    DeviceError::Transport(Box::new(e))
+}
+
+fn rpc_poisoned_device_error() -> DeviceError {
+    DeviceError::Transport(Box::new(RpcCallError::Transport(
+        "RPC client lock poisoned".into(),
+    )))
 }
 
 /// Get the best available device source for the current platform.

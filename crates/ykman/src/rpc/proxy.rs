@@ -4,7 +4,7 @@
 //! connection, transparently proxying raw commands to the server subprocess.
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use hex::{FromHex, ToHex};
 use serde_json::{Value, json};
@@ -19,7 +19,7 @@ use yubikit::smartcard::{SmartCardConnection, SmartCardError};
 
 use super::client::{RpcCallError, RpcClient};
 
-type SharedClient = Rc<RefCell<RpcClient>>;
+type SharedClient = Arc<Mutex<RpcClient>>;
 
 /// Build a full target path from a device prefix and a sub-path.
 fn target(prefix: &[String], path: &[&str]) -> Vec<String> {
@@ -135,11 +135,6 @@ pub struct RpcSmartCardConnection {
     device_prefix: Vec<String>,
 }
 
-// SAFETY: RpcSmartCardConnection is only used on the main thread.
-// The Send bound is required by the Device trait signature but all RPC proxy
-// usage is single-threaded.
-unsafe impl Send for RpcSmartCardConnection {}
-
 impl Connection for RpcSmartCardConnection {
     type Error = SmartCardError;
     fn close(&mut self) {
@@ -152,7 +147,12 @@ impl SmartCardConnection for RpcSmartCardConnection {
         yubikit::log_traffic!(">> {}", apdu.encode_hex::<String>());
         let result = self
             .client
-            .borrow_mut()
+            .lock()
+            .map_err(|_| {
+                SmartCardError::Transport(Box::new(RpcTransportError(
+                    "RPC client lock poisoned".into(),
+                )))
+            })?
             .call(
                 "send_and_receive",
                 &target(&self.device_prefix, &["ccid"]),
@@ -194,13 +194,11 @@ pub struct RpcFidoConnection {
     device_prefix: Vec<String>,
 }
 
-// SAFETY: same as RpcSmartCardConnection
-unsafe impl Send for RpcFidoConnection {}
-
 impl RpcFidoConnection {
     fn from_client(client: SharedClient, device_prefix: Vec<String>) -> Result<Self, RpcCallError> {
         let info = client
-            .borrow_mut()
+            .lock()
+            .map_err(|_| RpcCallError::Transport("RPC client lock poisoned".into()))?
             .get(&target(&device_prefix, &["ctap"]))
             .map_err(|e| RpcCallError::Transport(format!("{e}")))?;
         let data = required_field(&info.body, "data")?;
@@ -253,7 +251,8 @@ impl FidoConnection for RpcFidoConnection {
 
         let result = self
             .client
-            .borrow_mut()
+            .lock()
+            .map_err(|_| FidoError::Other("RPC client lock poisoned".into()))?
             .call(
                 "call",
                 &target(&self.device_prefix, &["ctap"]),
@@ -292,9 +291,6 @@ pub struct RpcOtpConnection {
     device_prefix: Vec<String>,
 }
 
-// SAFETY: same as RpcSmartCardConnection
-unsafe impl Send for RpcOtpConnection {}
-
 impl Connection for RpcOtpConnection {
     type Error = OtpError;
     fn close(&mut self) {
@@ -306,7 +302,8 @@ impl OtpConnection for RpcOtpConnection {
     fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
         let result = self
             .client
-            .borrow_mut()
+            .lock()
+            .map_err(|_| OtpError::CommandRejected("RPC client lock poisoned".into()))?
             .call(
                 "otp_receive",
                 &target(&self.device_prefix, &["otp"]),
@@ -327,7 +324,8 @@ impl OtpConnection for RpcOtpConnection {
     fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
         yubikit::log_traffic!("otp_send >> {}", data.encode_hex::<String>());
         self.client
-            .borrow_mut()
+            .lock()
+            .map_err(|_| OtpError::CommandRejected("RPC client lock poisoned".into()))?
             .call(
                 "otp_send",
                 &target(&self.device_prefix, &["otp"]),
@@ -365,7 +363,7 @@ impl RpcDevice {
     /// targeting a specific device by name.
     pub fn from_client_at(client: RpcClient, device_name: &str) -> Result<Self, RpcCallError> {
         let prefix = vec![device_name.to_string()];
-        Self::from_shared_inner(Rc::new(RefCell::new(client)), prefix)
+        Self::from_shared_inner(Arc::new(Mutex::new(client)), prefix)
     }
 
     /// Create an RPC device from an already-shared client, targeting a specific
@@ -374,7 +372,7 @@ impl RpcDevice {
     /// Stores the prefix in the device and passes it to every RPC call,
     /// so concurrent use of the shared client for different devices is safe.
     pub fn from_shared_at(
-        client: Rc<RefCell<RpcClient>>,
+        client: Arc<Mutex<RpcClient>>,
         device_name: &str,
     ) -> Result<Self, RpcCallError> {
         let prefix = vec![device_name.to_string()];
@@ -404,17 +402,14 @@ impl RpcDevice {
         Self::read_device_info(data)
     }
 
-    fn from_client(client: RpcClient) -> Result<Self, RpcCallError> {
-        Self::from_shared_inner(Rc::new(RefCell::new(client)), vec![])
-    }
-
     fn from_shared_inner(
-        client: Rc<RefCell<RpcClient>>,
+        client: Arc<Mutex<RpcClient>>,
         prefix: Vec<String>,
     ) -> Result<Self, RpcCallError> {
         log::debug!("Initializing RPC device");
         let root = client
-            .borrow_mut()
+            .lock()
+            .map_err(|_| RpcCallError::Transport("RPC client lock poisoned".into()))?
             .get(&prefix)
             .map_err(|e| RpcCallError::Transport(format!("Failed to get root node: {e}")))?;
         let data = required_field(&root.body, "data")?;
@@ -659,7 +654,12 @@ impl YubiKeyDevice for RpcDevice {
         };
 
         self.client
-            .borrow_mut()
+            .lock()
+            .map_err(|_| {
+                DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(
+                    "RPC client lock poisoned".into(),
+                ))))
+            })?
             .call(
                 "reinsert",
                 &self.prefix,

@@ -35,10 +35,6 @@ pub struct RpcClient {
 /// Thread-safe writer handle for sending cancel signals from the Ctrl+C handler.
 struct CancelWriter(Arc<Mutex<Box<dyn Write + Send>>>);
 
-// SAFETY: Box<dyn Write + Send> is Send; Arc<Mutex<>> ensures thread-safe access.
-unsafe impl Send for CancelWriter {}
-unsafe impl Sync for CancelWriter {}
-
 impl CancelWriter {
     fn send_cancel(&self, data: &[u8]) {
         if let Ok(mut w) = self.0.lock() {
@@ -92,7 +88,8 @@ impl RpcClient {
         {
             use std::os::unix::net::UnixStream;
 
-            let socket_path = super::socket_path().map_err(RpcCallError::Transport)?;
+            let socket_path =
+                super::socket_path().map_err(|e| RpcCallError::Transport(e.to_string()))?;
             log::debug!("Connecting to Unix socket: {}", socket_path.display());
 
             let stream = UnixStream::connect(&socket_path).map_err(|e| {

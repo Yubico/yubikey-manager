@@ -11,6 +11,7 @@ use std::sync::Mutex;
 
 use chrono::Local;
 use log::{Level, LevelFilter, Log, Metadata, Record};
+use thiserror::Error;
 
 use yubikit::logging::TRAFFIC_TARGET_PREFIX;
 
@@ -22,6 +23,17 @@ pub enum LogLevel {
     Info,
     Debug,
     Traffic,
+}
+
+#[derive(Debug, Error)]
+pub enum LoggingError {
+    #[error("Failed to open log file '{path}': {source}")]
+    OpenFile {
+        path: String,
+        source: std::io::Error,
+    },
+    #[error("Failed to set logger: {0}")]
+    SetLogger(#[from] log::SetLoggerError),
 }
 
 impl std::str::FromStr for LogLevel {
@@ -179,17 +191,19 @@ impl Log for YkmanLogger {
 }
 
 /// Initialize logging with the given level and optional log file.
-pub fn init_logging(level: LogLevel, log_file: Option<&str>) -> Result<(), String> {
+pub fn init_logging(level: LogLevel, log_file: Option<&str>) -> Result<(), LoggingError> {
     let output = if let Some(path) = log_file {
-        let file =
-            File::create(path).map_err(|e| format!("Failed to open log file '{path}': {e}"))?;
+        let file = File::create(path).map_err(|source| LoggingError::OpenFile {
+            path: path.to_string(),
+            source,
+        })?;
         Output::File(Mutex::new(file))
     } else {
         Output::Stderr
     };
 
     let logger = YkmanLogger { level, output };
-    log::set_boxed_logger(Box::new(logger)).map_err(|e| format!("Failed to set logger: {e}"))?;
+    log::set_boxed_logger(Box::new(logger))?;
     log::set_max_level(level.to_level_filter());
 
     if let Some(file) = &log_file {
@@ -202,12 +216,12 @@ pub fn init_logging(level: LogLevel, log_file: Option<&str>) -> Result<(), Strin
 
 /// Initialize logging to stdout (for standalone service mode).
 #[allow(dead_code)]
-pub fn init_logging_stdout(level: LogLevel) -> Result<(), String> {
+pub fn init_logging_stdout(level: LogLevel) -> Result<(), LoggingError> {
     let logger = YkmanLogger {
         level,
         output: Output::Stdout,
     };
-    log::set_boxed_logger(Box::new(logger)).map_err(|e| format!("Failed to set logger: {e}"))?;
+    log::set_boxed_logger(Box::new(logger))?;
     log::set_max_level(level.to_level_filter());
     Ok(())
 }
