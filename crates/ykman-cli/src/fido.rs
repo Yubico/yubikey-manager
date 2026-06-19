@@ -14,6 +14,7 @@
 
 //! FIDO CLI commands.
 
+use clap::Subcommand;
 use yubikit::core::{Connection, Transport};
 use yubikit::ctap::CtapSession;
 use yubikit::ctap2::{
@@ -24,11 +25,273 @@ use yubikit::device::{ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
 
 use crate::cancel;
+use crate::context;
 use crate::scp::{self, ScpParams};
 use crate::util::{CliError, format_smartcard_connection_error};
 
 const KEEPALIVE_PROCESSING: u8 = 1;
 const KEEPALIVE_UPNEEDED: u8 = 2;
+
+#[derive(Subcommand)]
+pub enum FidoAction {
+    /// Display general status of the FIDO2 application
+    Info,
+    /// Reset all FIDO applications
+    Reset {
+        /// Confirm the action without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Manage FIDO2 PIN
+    #[command(subcommand)]
+    Access(FidoAccessAction),
+    /// Manage discoverable credentials
+    #[command(subcommand)]
+    Credentials(FidoCredentialAction),
+    /// Manage fingerprints
+    #[command(subcommand)]
+    Fingerprints(FidoFingerprintAction),
+    /// Manage configuration options
+    #[command(subcommand)]
+    Config(FidoConfigAction),
+}
+
+#[derive(Subcommand)]
+pub enum FidoAccessAction {
+    /// Set or change the PIN code
+    #[command(name = "change-pin")]
+    ChangePin {
+        /// Current PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// New PIN code
+        #[arg(short = 'n', long = "new-pin")]
+        new_pin: Option<String>,
+    },
+    /// Verify the PIN (and unblock if needed)
+    #[command(name = "verify-pin")]
+    VerifyPin {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Force the PIN to be changed before use
+    #[command(name = "force-change")]
+    ForceChange {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Set the minimum length allowed for PIN
+    #[command(name = "set-min-length")]
+    SetMinLength {
+        /// New minimum PIN length (4-63)
+        length: u32,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// RP ID to allow (can be repeated)
+        #[arg(short = 'R', long = "rp-id", action = clap::ArgAction::Append)]
+        rp_id: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum FidoCredentialAction {
+    /// List stored credentials
+    List {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Output full credential information as CSV
+        #[arg(short = 'c', long)]
+        csv: bool,
+    },
+    /// Delete a credential
+    Delete {
+        /// Credential ID (hex prefix)
+        credential_id: String,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Confirm deletion without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Update user information for a credential
+    Update {
+        /// Credential ID (hex prefix)
+        credential_id: String,
+        /// New user name
+        #[arg(short = 'n', long)]
+        name: Option<String>,
+        /// New display name
+        #[arg(long)]
+        display_name: Option<String>,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum FidoFingerprintAction {
+    /// List registered fingerprints
+    List {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Add a new fingerprint
+    Add {
+        /// Name for the fingerprint
+        name: String,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Rename a fingerprint
+    Rename {
+        /// Fingerprint template ID (hex)
+        template_id: String,
+        /// New name
+        name: String,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Delete a fingerprint
+    Delete {
+        /// Fingerprint template ID (hex) or name
+        template_id: String,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Confirm deletion without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum FidoConfigAction {
+    /// Toggle the Always Require UV setting
+    #[command(name = "toggle-always-uv")]
+    ToggleAlwaysUv {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Enable Enterprise Attestation
+    #[command(name = "enable-ep-attestation")]
+    EnableEpAttestation {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+}
+
+impl FidoAction {
+    pub fn run(self, dev: &mut dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+        match self {
+            Self::Info => run_info(dev, scp_params),
+            Self::Reset { force } => run_reset(dev, scp_params, force),
+            Self::Access(access) => {
+                context::check_capability(dev, Capability::FIDO2)?;
+                match access {
+                    FidoAccessAction::ChangePin { pin, new_pin } => {
+                        run_access_change_pin(dev, scp_params, pin.as_deref(), new_pin.as_deref())
+                    }
+                    FidoAccessAction::VerifyPin { pin } => {
+                        run_access_verify_pin(dev, scp_params, pin.as_deref())
+                    }
+                    FidoAccessAction::ForceChange { pin } => {
+                        run_access_force_change(dev, scp_params, pin.as_deref())
+                    }
+                    FidoAccessAction::SetMinLength { length, pin, rp_id } => {
+                        run_access_set_min_length(dev, scp_params, length, pin.as_deref(), &rp_id)
+                    }
+                }
+            }
+            Self::Credentials(cred) => {
+                context::check_capability(dev, Capability::FIDO2)?;
+                match cred {
+                    FidoCredentialAction::List { pin, csv } => {
+                        run_credentials_list(dev, scp_params, pin.as_deref(), csv)
+                    }
+                    FidoCredentialAction::Delete {
+                        credential_id,
+                        pin,
+                        force,
+                    } => run_credentials_delete(
+                        dev,
+                        scp_params,
+                        &credential_id,
+                        pin.as_deref(),
+                        force,
+                    ),
+                    FidoCredentialAction::Update {
+                        credential_id,
+                        name,
+                        display_name,
+                        pin,
+                    } => run_credentials_update(
+                        dev,
+                        scp_params,
+                        &credential_id,
+                        name.as_deref(),
+                        display_name.as_deref(),
+                        pin.as_deref(),
+                    ),
+                }
+            }
+            Self::Fingerprints(fp) => {
+                context::check_capability(dev, Capability::FIDO2)?;
+                match fp {
+                    FidoFingerprintAction::List { pin } => {
+                        run_fingerprints_list(dev, scp_params, pin.as_deref())
+                    }
+                    FidoFingerprintAction::Add { name, pin } => {
+                        run_fingerprints_add(dev, scp_params, &name, pin.as_deref())
+                    }
+                    FidoFingerprintAction::Rename {
+                        template_id,
+                        name,
+                        pin,
+                    } => run_fingerprints_rename(
+                        dev,
+                        scp_params,
+                        &template_id,
+                        &name,
+                        pin.as_deref(),
+                    ),
+                    FidoFingerprintAction::Delete {
+                        template_id,
+                        pin,
+                        force,
+                    } => run_fingerprints_delete(
+                        dev,
+                        scp_params,
+                        &template_id,
+                        pin.as_deref(),
+                        force,
+                    ),
+                }
+            }
+            Self::Config(cfg) => {
+                context::check_capability(dev, Capability::FIDO2)?;
+                match cfg {
+                    FidoConfigAction::ToggleAlwaysUv { pin } => {
+                        run_config_toggle_always_uv(dev, scp_params, pin.as_deref())
+                    }
+                    FidoConfigAction::EnableEpAttestation { pin } => {
+                        run_config_enable_ep_attestation(dev, scp_params, pin.as_deref())
+                    }
+                }
+            }
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Session opening — macro to handle HID vs SmartCard generics
