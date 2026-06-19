@@ -2,6 +2,7 @@ use std::io::{self, Write};
 use std::str::FromStr;
 use std::time::Duration;
 
+use clap::Subcommand;
 use x509_cert::Certificate;
 use x509_cert::builder::{Builder, CertificateBuilder, Profile, RequestBuilder};
 use x509_cert::der::{self, Decode, Encode, EncodePem, pem::LineEnding};
@@ -28,6 +29,564 @@ use crate::util::{
     CliError, format_session_error, format_smartcard_connection_error, read_file_or_stdin,
     write_file_or_stdout,
 };
+
+#[derive(Subcommand)]
+pub enum PivAction {
+    /// Display PIV status
+    Info,
+    /// Reset the PIV application
+    Reset {
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Manage PIV access (PIN, PUK, management key)
+    #[command(subcommand)]
+    Access(PivAccessAction),
+    /// Manage PIV keys
+    #[command(subcommand)]
+    Keys(PivKeysAction),
+    /// Manage PIV certificates
+    #[command(subcommand)]
+    Certificates(PivCertAction),
+    /// Manage PIV data objects
+    #[command(
+        subcommand,
+        after_help = "Examples:\n\
+      \n  Write the contents of a file to data object with ID abc123:\
+      \n  $ ykman piv objects import abc123 myfile.txt\
+      \n\
+      \n  Read the contents of the data object with ID abc123 into a file:\
+      \n  $ ykman piv objects export abc123 myfile.txt\
+      \n\
+      \n  Generate a random value for CHUID:\
+      \n  $ ykman piv objects generate chuid"
+    )]
+    Objects(PivObjectAction),
+}
+
+#[derive(Subcommand)]
+pub enum PivAccessAction {
+    /// Change the PIV PIN
+    ChangePin {
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        #[arg(short, long)]
+        new_pin: Option<String>,
+    },
+    /// Change the PIV PUK
+    ChangePuk {
+        #[arg(short, long)]
+        puk: Option<String>,
+        #[arg(short, long)]
+        new_puk: Option<String>,
+    },
+    /// Unblock the PIN using PUK
+    UnblockPin {
+        #[arg(short, long)]
+        puk: Option<String>,
+        #[arg(short, long)]
+        new_pin: Option<String>,
+    },
+    /// Set PIN and PUK retry counts
+    SetRetries {
+        /// PIN retry count
+        pin_retries: u8,
+        /// PUK retry count
+        puk_retries: u8,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Change the management key
+    ChangeManagementKey {
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short, long)]
+        new_management_key: Option<String>,
+        #[arg(short, long, default_value = "tdes")]
+        algorithm: CliMgmtKeyType,
+        #[arg(short, long)]
+        touch: bool,
+        #[arg(short, long)]
+        generate: bool,
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Verify PIN before changing management key
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Store management key on YubiKey, protected by PIN
+        #[arg(short = 'p', long)]
+        protect: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PivKeysAction {
+    /// Generate an asymmetric key pair
+    Generate {
+        /// PIV slot
+        slot: String,
+        /// Output file for public key
+        output: String,
+        #[arg(short, long, default_value = "eccp256")]
+        algorithm: CliKeyType,
+        #[arg(long, default_value = "default")]
+        pin_policy: CliPinPolicy,
+        #[arg(long, default_value = "default")]
+        touch_policy: CliTouchPolicy,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        #[arg(short = 'F', long, default_value = "pem")]
+        format: CliFormat,
+    },
+    /// Import a private key
+    Import {
+        /// PIV slot
+        slot: String,
+        /// Private key file
+        key_file: String,
+        #[arg(long, default_value = "default")]
+        pin_policy: CliPinPolicy,
+        #[arg(long, default_value = "default")]
+        touch_policy: CliTouchPolicy,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Password for decrypting password-protected key files
+        #[arg(short = 'p', long)]
+        password: Option<String>,
+    },
+    /// Show key metadata
+    Info {
+        /// PIV slot
+        slot: String,
+    },
+    /// Generate attestation certificate
+    Attest {
+        /// PIV slot
+        slot: String,
+        /// Output certificate file
+        output: String,
+        #[arg(short = 'F', long, default_value = "pem")]
+        format: CliFormat,
+    },
+    /// Export public key
+    Export {
+        /// PIV slot
+        slot: String,
+        /// Output file
+        output: String,
+        #[arg(short = 'F', long, default_value = "pem")]
+        format: CliFormat,
+        /// Verify public key against slot certificate
+        #[arg(short = 'v', long)]
+        verify: bool,
+        /// PIN for verification
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Move key between slots
+    Move {
+        /// Source slot
+        source: String,
+        /// Destination slot
+        dest: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Delete key in slot
+    Delete {
+        /// PIV slot
+        slot: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PivCertAction {
+    /// Export certificate from slot
+    Export {
+        /// PIV slot
+        slot: String,
+        /// Output file
+        output: String,
+        #[arg(short = 'F', long, default_value = "pem")]
+        format: CliFormat,
+    },
+    /// Import certificate to slot
+    Import {
+        /// PIV slot
+        slot: String,
+        /// Certificate file
+        cert_file: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        #[arg(short, long)]
+        compress: bool,
+        /// Password for decrypting the certificate file
+        #[arg(short = 'p', long)]
+        password: Option<String>,
+        /// Verify certificate against slot key
+        #[arg(short = 'v', long)]
+        verify: bool,
+        /// Don't update CHUID after importing certificate
+        #[arg(long)]
+        no_update_chuid: bool,
+    },
+    /// Delete certificate from slot
+    Delete {
+        /// PIV slot
+        slot: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Don't update CHUID after deleting certificate
+        #[arg(long)]
+        no_update_chuid: bool,
+    },
+    /// Generate a self-signed certificate
+    Generate {
+        /// PIV slot
+        slot: String,
+        /// File containing a public key (use '-' for stdin). Optional if YubiKey >= 5.4.
+        #[arg(value_name = "PUBLIC-KEY")]
+        public_key: Option<String>,
+        /// Subject common name
+        #[arg(short, long)]
+        subject: String,
+        /// Validity period in days
+        #[arg(long, default_value_t = 365)]
+        valid_days: u32,
+        /// Hash algorithm
+        #[arg(short = 'a', long, default_value = "sha256")]
+        hash_algorithm: CliHashAlgorithm,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Don't update CHUID after generating certificate
+        #[arg(long)]
+        no_update_chuid: bool,
+    },
+    /// Generate a Certificate Signing Request (CSR)
+    Request {
+        /// PIV slot
+        slot: String,
+        /// File containing a public key (use '-' for stdin)
+        #[arg(value_name = "PUBLIC-KEY")]
+        public_key: String,
+        /// Output file (use '-' for stdout)
+        output: String,
+        /// Subject common name
+        #[arg(short, long)]
+        subject: String,
+        /// Hash algorithm
+        #[arg(short = 'a', long, default_value = "sha256")]
+        hash_algorithm: CliHashAlgorithm,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PivObjectAction {
+    /// Export a PIV data object
+    Export {
+        /// Object ID (CHUID, CCC, etc.)
+        object: String,
+        /// Output file (- for stdout)
+        output: String,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Import a PIV data object
+    Import {
+        /// Object ID
+        object: String,
+        /// Data file
+        data: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Generate a data object (CHUID or CCC)
+    Generate {
+        /// Object type: CHUID or CCC
+        object: String,
+        #[arg(short, long)]
+        management_key: Option<String>,
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+}
+
+impl PivAction {
+    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+        match self {
+            Self::Info => run_info(dev, scp_params),
+            Self::Reset { force } => run_reset(dev, scp_params, force),
+            Self::Access(access) => match access {
+                PivAccessAction::ChangePin { pin, new_pin } => {
+                    run_change_pin(dev, scp_params, pin.as_deref(), new_pin.as_deref())
+                }
+                PivAccessAction::ChangePuk { puk, new_puk } => {
+                    run_change_puk(dev, scp_params, puk.as_deref(), new_puk.as_deref())
+                }
+                PivAccessAction::UnblockPin { puk, new_pin } => {
+                    run_unblock_pin(dev, scp_params, puk.as_deref(), new_pin.as_deref())
+                }
+                PivAccessAction::SetRetries {
+                    pin_retries,
+                    puk_retries,
+                    management_key,
+                    pin,
+                    force,
+                } => run_set_retries(
+                    dev,
+                    scp_params,
+                    pin_retries,
+                    puk_retries,
+                    management_key.as_deref(),
+                    pin.as_deref(),
+                    force,
+                ),
+                PivAccessAction::ChangeManagementKey {
+                    management_key,
+                    new_management_key,
+                    algorithm,
+                    touch,
+                    generate,
+                    force,
+                    pin,
+                    protect,
+                } => run_change_management_key(
+                    dev,
+                    scp_params,
+                    management_key.as_deref(),
+                    new_management_key.as_deref(),
+                    algorithm,
+                    touch,
+                    generate,
+                    force,
+                    pin.as_deref(),
+                    protect,
+                ),
+            },
+            Self::Keys(keys) => match keys {
+                PivKeysAction::Generate {
+                    slot,
+                    output,
+                    algorithm,
+                    pin_policy,
+                    touch_policy,
+                    management_key,
+                    pin,
+                    format,
+                } => run_keys_generate(
+                    dev,
+                    scp_params,
+                    &slot,
+                    &output,
+                    algorithm,
+                    pin_policy,
+                    touch_policy,
+                    management_key.as_deref(),
+                    pin.as_deref(),
+                    format,
+                ),
+                PivKeysAction::Import {
+                    slot,
+                    key_file,
+                    pin_policy,
+                    touch_policy,
+                    management_key,
+                    pin,
+                    password,
+                } => run_keys_import(
+                    dev,
+                    scp_params,
+                    &slot,
+                    &key_file,
+                    pin_policy,
+                    touch_policy,
+                    management_key.as_deref(),
+                    pin.as_deref(),
+                    password.as_deref(),
+                ),
+                PivKeysAction::Info { slot } => run_keys_info(dev, scp_params, &slot),
+                PivKeysAction::Attest {
+                    slot,
+                    output,
+                    format,
+                } => run_keys_attest(dev, scp_params, &slot, &output, format),
+                PivKeysAction::Export {
+                    slot,
+                    output,
+                    format,
+                    verify,
+                    pin,
+                } => run_keys_export(
+                    dev,
+                    scp_params,
+                    &slot,
+                    &output,
+                    format,
+                    verify,
+                    pin.as_deref(),
+                ),
+                PivKeysAction::Move {
+                    source,
+                    dest,
+                    management_key,
+                    pin,
+                } => run_keys_move(
+                    dev,
+                    scp_params,
+                    &source,
+                    &dest,
+                    management_key.as_deref(),
+                    pin.as_deref(),
+                ),
+                PivKeysAction::Delete {
+                    slot,
+                    management_key,
+                    pin,
+                } => run_keys_delete(
+                    dev,
+                    scp_params,
+                    &slot,
+                    management_key.as_deref(),
+                    pin.as_deref(),
+                ),
+            },
+            Self::Certificates(certs) => match certs {
+                PivCertAction::Export {
+                    slot,
+                    output,
+                    format,
+                } => run_certificates_export(dev, scp_params, &slot, &output, format),
+                PivCertAction::Import {
+                    slot,
+                    cert_file,
+                    management_key,
+                    pin,
+                    compress,
+                    password,
+                    verify,
+                    no_update_chuid,
+                } => run_certificates_import(
+                    dev,
+                    scp_params,
+                    &slot,
+                    &cert_file,
+                    management_key.as_deref(),
+                    pin.as_deref(),
+                    compress,
+                    !no_update_chuid,
+                    password.as_deref(),
+                    verify,
+                ),
+                PivCertAction::Delete {
+                    slot,
+                    management_key,
+                    pin,
+                    no_update_chuid,
+                } => run_certificates_delete(
+                    dev,
+                    scp_params,
+                    &slot,
+                    management_key.as_deref(),
+                    pin.as_deref(),
+                    !no_update_chuid,
+                ),
+                PivCertAction::Generate {
+                    slot,
+                    public_key,
+                    subject,
+                    valid_days,
+                    hash_algorithm,
+                    management_key,
+                    pin,
+                    no_update_chuid,
+                } => run_certificates_generate(
+                    dev,
+                    scp_params,
+                    &slot,
+                    &subject,
+                    valid_days,
+                    hash_algorithm,
+                    management_key.as_deref(),
+                    pin.as_deref(),
+                    public_key.as_deref(),
+                    !no_update_chuid,
+                ),
+                PivCertAction::Request {
+                    slot,
+                    public_key,
+                    subject,
+                    hash_algorithm,
+                    output,
+                    pin,
+                } => run_certificates_request(
+                    dev,
+                    scp_params,
+                    &slot,
+                    &subject,
+                    hash_algorithm,
+                    &output,
+                    pin.as_deref(),
+                    Some(&public_key),
+                ),
+            },
+            Self::Objects(objs) => match objs {
+                PivObjectAction::Export {
+                    object,
+                    output,
+                    pin,
+                } => run_objects_export(dev, scp_params, &object, &output, pin.as_deref()),
+                PivObjectAction::Import {
+                    object,
+                    data,
+                    management_key,
+                    pin,
+                } => run_objects_import(
+                    dev,
+                    scp_params,
+                    &object,
+                    &data,
+                    management_key.as_deref(),
+                    pin.as_deref(),
+                ),
+                PivObjectAction::Generate {
+                    object,
+                    management_key,
+                    pin,
+                } => run_objects_generate(
+                    dev,
+                    scp_params,
+                    &object,
+                    management_key.as_deref(),
+                    pin.as_deref(),
+                ),
+            },
+        }
+    }
+}
 
 fn open_session<'a>(
     dev: &'a dyn YubiKeyDevice,
