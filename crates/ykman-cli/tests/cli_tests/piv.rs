@@ -42,6 +42,9 @@ fn test_piv_reset() {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_piv_change_pin(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     let _guard = PivResetGuard::reset();
 
@@ -78,6 +81,9 @@ fn test_piv_change_pin(#[case] mode: InputMode) {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_piv_change_puk(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     let _guard = PivResetGuard::reset();
 
@@ -107,6 +113,9 @@ fn test_piv_change_puk(#[case] mode: InputMode) {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_piv_change_management_key(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     piv_reset();
 
@@ -189,6 +198,9 @@ fn test_piv_change_management_key(#[case] mode: InputMode) {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_piv_generate_self_signed(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     piv_reset();
 
@@ -761,6 +773,9 @@ fn test_piv_objects_export_chuid() {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_piv_unblock_pin(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     let _guard = PivResetGuard::reset();
 

@@ -108,6 +108,12 @@ fn test_sd_keys_delete() {
     }
     sd_reset();
 
+    let output_dir = tempfile::tempdir().expect("failed to create temporary output directory");
+    let output_path = output_dir.path().join("scp11b.pem");
+    let output_path = output_path
+        .to_str()
+        .expect("temporary output path is not UTF-8");
+
     // Generate a key (replace pre-installed KVN=0x01 with KVN=0x7F)
     ykman_dev_scp()
         .args([
@@ -116,7 +122,7 @@ fn test_sd_keys_delete() {
             "generate",
             "13",
             "7f",
-            "/dev/null",
+            output_path,
             "--replace-kvn",
             "01",
         ])

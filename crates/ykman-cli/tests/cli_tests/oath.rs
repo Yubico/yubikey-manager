@@ -201,6 +201,9 @@ fn test_oath_rename() {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_oath_password_set_and_clear(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     oath_reset();
 

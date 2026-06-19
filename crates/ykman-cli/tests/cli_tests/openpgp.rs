@@ -48,6 +48,9 @@ fn test_openpgp_reset() {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_openpgp_change_pin(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     let _guard = OpenPgpResetGuard::reset();
 
@@ -82,6 +85,9 @@ fn test_openpgp_change_pin(#[case] mode: InputMode) {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_openpgp_change_admin_pin(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     let _guard = OpenPgpResetGuard::reset();
 
@@ -116,6 +122,9 @@ fn test_openpgp_change_admin_pin(#[case] mode: InputMode) {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_openpgp_set_pin_retries(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     openpgp_reset();
 
@@ -151,6 +160,9 @@ fn test_openpgp_set_pin_retries(#[case] mode: InputMode) {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_openpgp_keys_set_touch(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     openpgp_reset();
 
@@ -210,6 +222,9 @@ fn test_openpgp_keys_set_touch(#[case] mode: InputMode) {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_openpgp_certificates_import_export(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     openpgp_reset();
 
@@ -255,6 +270,9 @@ fn test_openpgp_certificates_import_export(#[case] mode: InputMode) {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_openpgp_certificates_delete(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     openpgp_reset();
 
@@ -299,6 +317,9 @@ fn test_openpgp_certificates_delete(#[case] mode: InputMode) {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_openpgp_change_reset_code(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("CCID");
     openpgp_reset();
 

@@ -237,8 +237,26 @@ pub enum InputMode {
 }
 
 impl InputMode {
+    pub fn skip_if_windows(self) -> bool {
+        if cfg!(windows) && self == Self::Interactive {
+            eprintln!("SKIP: interactive CLI tests are not supported on Windows");
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_interactive(self) -> bool {
         matches!(self, Self::Interactive)
+    }
+}
+
+pub fn skip_interactive_on_windows() -> bool {
+    if cfg!(windows) {
+        eprintln!("SKIP: interactive CLI tests are not supported on Windows");
+        true
+    } else {
+        false
     }
 }
 

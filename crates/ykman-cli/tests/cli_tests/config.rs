@@ -1,4 +1,4 @@
-use super::common::{skip_if_fips, ykman_dev, ykman_dev_tty};
+use super::common::{skip_if_fips, skip_interactive_on_windows, ykman_dev, ykman_dev_tty};
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::thread;
@@ -269,6 +269,9 @@ fn test_config_set_lock_code() {
 #[test]
 fn test_config_set_lock_code_prompts_for_current_code() {
     require_interface!("CCID");
+    if skip_interactive_on_windows() {
+        return;
+    }
     if configuration_is_locked() {
         eprintln!("SKIP: configuration is already locked with an unknown code");
         return;
@@ -292,6 +295,9 @@ fn test_config_set_lock_code_prompts_for_current_code() {
 #[test]
 fn test_config_usb_lock_code_prompt_and_explicit_code() {
     require_interface!("CCID");
+    if skip_interactive_on_windows() {
+        return;
+    }
     if configuration_is_locked() {
         eprintln!("SKIP: configuration is already locked with an unknown code");
         return;
@@ -346,6 +352,9 @@ fn test_config_usb_lock_code_prompt_and_explicit_code() {
 #[test]
 fn test_config_nfc_lock_code_prompt_and_explicit_code() {
     require_interface!("CCID");
+    if skip_interactive_on_windows() {
+        return;
+    }
     if skip_if_fips("mutable NFC configuration lock-code prompt test") {
         return;
     }

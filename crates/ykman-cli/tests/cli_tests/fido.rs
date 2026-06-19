@@ -261,6 +261,9 @@ fn test_fido_info() {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_fido_verify_pin(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("FIDO");
     require_pin_set();
     if mode.is_interactive() {
@@ -297,6 +300,9 @@ fn test_fido_verify_pin_wrong() {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_fido_change_pin(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("FIDO");
     require_pin_set();
     let _guard = fido_pin_guard();
@@ -379,6 +385,9 @@ fn test_fido_set_pin_too_short() {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_fido_credentials_list_empty(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("FIDO");
     require_pin_set();
     if mode.is_interactive() {
@@ -466,6 +475,9 @@ fn test_fido_config_toggle_always_uv() {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_fido_access_set_min_pin_length(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("FIDO");
     require_pin_set();
 
@@ -532,6 +544,9 @@ fn test_fido_access_set_min_pin_length(#[case] mode: InputMode) {
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
 fn test_fido_access_force_change(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
     require_interface!("FIDO");
     require_pin_set();
     let _guard = fido_pin_guard();
