@@ -185,7 +185,6 @@ impl RpcClient {
         });
         self.write_message(&request)?;
 
-        #[cfg(target_os = "windows")]
         if cancellable {
             cancel::clear();
         }
@@ -202,8 +201,10 @@ impl RpcClient {
             None
         };
 
+        #[cfg(target_os = "windows")]
         let mut cancel_sent = false;
         loop {
+            #[cfg(target_os = "windows")]
             if cancellable && !cancel_sent && cancel::is_cancelled() {
                 self.write_message(&json!({"kind": "signal", "status": "cancel"}))?;
                 cancel_sent = true;
