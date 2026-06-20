@@ -3443,6 +3443,7 @@ dependencies = [
  "ctrlc",
  "hex",
  "log",
+ "serde",
  "serde_json",
  "windows-service",
  "windows-sys 0.61.2",

@@ -16,17 +16,23 @@ pub fn run_standalone() {
     ctrlc::set_handler(move || {
         log::info!("Ctrl+C received, shutting down");
         stop_clone.store(true, Ordering::Relaxed);
-        // Unblock the blocking ConnectNamedPipe call by briefly connecting to the pipe.
-        #[cfg(target_os = "windows")]
+        poke_server();
+    })
+    .unwrap_or_else(|e| log::error!("Failed to set Ctrl+C handler: {e}"));
+
+    let manager = DeviceManager::new();
+    run_server(manager, &stop);
+}
+
+/// Wake a blocking server accept/connect operation after setting the stop flag.
+pub fn poke_server() {
+    #[cfg(target_os = "windows")]
+    {
         let _ = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(crate::PIPE_NAME);
-    })
-    .expect("Failed to set Ctrl+C handler");
-
-    let manager = DeviceManager::new();
-    run_server(manager, &stop);
+    }
 }
 
 /// Run the pipe server, blocking until `stop` is set.
@@ -57,9 +63,55 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
     use windows_sys::Win32::Security::{SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR};
     use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
     use windows_sys::Win32::System::Pipes::{
-        ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
-        PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+        ConnectNamedPipe, CreateNamedPipeW, PIPE_NOWAIT, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
+        PIPE_UNLIMITED_INSTANCES, PIPE_WAIT, SetNamedPipeHandleState,
     };
+
+    struct PipeHandle(windows_sys::Win32::Foundation::HANDLE);
+
+    impl PipeHandle {
+        fn as_raw(&self) -> windows_sys::Win32::Foundation::HANDLE {
+            self.0
+        }
+
+        fn into_raw_addr(mut self) -> usize {
+            let handle = self.0 as usize;
+            self.0 = std::ptr::null_mut();
+            handle
+        }
+    }
+
+    impl Drop for PipeHandle {
+        fn drop(&mut self) {
+            if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE {
+                unsafe { CloseHandle(self.0) };
+            }
+        }
+    }
+
+    struct LocalSecurityDescriptor(*mut SECURITY_DESCRIPTOR);
+
+    impl LocalSecurityDescriptor {
+        fn as_security_attributes_ptr(
+            &mut self,
+            sa: &mut SECURITY_ATTRIBUTES,
+        ) -> *mut SECURITY_ATTRIBUTES {
+            if self.0.is_null() {
+                std::ptr::null_mut()
+            } else {
+                sa.lpSecurityDescriptor = self.0 as *mut core::ffi::c_void;
+                sa as *mut SECURITY_ATTRIBUTES
+            }
+        }
+    }
+
+    impl Drop for LocalSecurityDescriptor {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { LocalFree(self.0 as *mut core::ffi::c_void) };
+            }
+        }
+    }
 
     let pipe_name = crate::PIPE_NAME;
     let pipe_name_w: Vec<u16> = pipe_name.encode_utf16().chain(std::iter::once(0)).collect();
@@ -93,16 +145,13 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
             std::io::Error::last_os_error()
         );
     }
+    let mut sd = LocalSecurityDescriptor(sd_ptr);
     let mut sa = SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-        lpSecurityDescriptor: sd_ptr as *mut core::ffi::c_void,
+        lpSecurityDescriptor: std::ptr::null_mut(),
         bInheritHandle: 0,
     };
-    let sa_ptr = if sd_ptr.is_null() {
-        std::ptr::null()
-    } else {
-        &mut sa as *mut SECURITY_ATTRIBUTES
-    };
+    let sa_ptr = sd.as_security_attributes_ptr(&mut sa);
 
     log::info!("Listening on {pipe_name}");
 
@@ -129,52 +178,61 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
             std::thread::sleep(std::time::Duration::from_secs(1));
             continue;
         }
+        let handle = PipeHandle(handle);
 
         // Wait for a client to connect
-        let connected = unsafe { ConnectNamedPipe(handle, std::ptr::null_mut()) };
+        let connected = unsafe { ConnectNamedPipe(handle.as_raw(), std::ptr::null_mut()) };
         if connected == 0 {
             let err = std::io::Error::last_os_error();
             // ERROR_PIPE_CONNECTED means client connected between Create and Connect
             if err.raw_os_error() != Some(535) {
                 log::error!("ConnectNamedPipe failed: {err}");
-                unsafe { CloseHandle(handle) };
                 continue;
             }
         }
 
         if stop.load(Ordering::Relaxed) {
-            unsafe { CloseHandle(handle) };
             break;
+        }
+
+        let mut pipe_mode = PIPE_READMODE_BYTE | PIPE_NOWAIT;
+        let mode_set = unsafe {
+            SetNamedPipeHandleState(
+                handle.as_raw(),
+                &mut pipe_mode,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if mode_set == 0 {
+            log::error!(
+                "SetNamedPipeHandleState failed: {}",
+                std::io::Error::last_os_error()
+            );
+            continue;
         }
 
         log::info!("Client connected");
 
         // Verify client signing if applicable
-        if let Err(e) = crate::signing::verify_client(handle) {
+        if let Err(e) = crate::signing::verify_client(handle.as_raw()) {
             log::warn!("Client verification failed: {e}");
-            unsafe { CloseHandle(handle) };
             continue;
         }
 
         let manager = manager.clone();
         // SAFETY: We own this handle exclusively; HANDLEs are safe to send across threads.
-        let handle_addr = handle as usize;
+        let handle_addr = handle.into_raw_addr();
         std::thread::spawn(move || {
             let handle = handle_addr as *mut core::ffi::c_void;
             // SAFETY: handle is a valid pipe handle that we own exclusively in this thread.
-            // The sequential session loop never has concurrent ReadFile + WriteFile
-            // pending on the same endpoint, so no synchronous I/O deadlock can occur.
+            // ClientSession owns all I/O for the endpoint.
             let file = unsafe { File::from_raw_handle(handle) };
 
-            let session = ClientSession::new(manager);
-            session.run(file);
+            if let Some(session) = ClientSession::new(manager) {
+                session.run(file);
+            }
         });
-    }
-
-    // Free the LocalAlloc'd security descriptor returned by
-    // ConvertStringSecurityDescriptorToSecurityDescriptorW.
-    if !sd_ptr.is_null() {
-        unsafe { LocalFree(sd_ptr as *mut core::ffi::c_void) };
     }
 
     log::info!("Pipe server stopped");
@@ -200,7 +258,13 @@ fn run_unix_socket_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
     // Remove stale socket
     let _ = std::fs::remove_file(&socket_path);
 
-    let listener = UnixListener::bind(&socket_path).expect("Failed to bind Unix socket");
+    let listener = match UnixListener::bind(&socket_path) {
+        Ok(listener) => listener,
+        Err(e) => {
+            log::error!("Failed to bind Unix socket {}: {e}", socket_path.display());
+            return;
+        }
+    };
     if let Err(e) = std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600)) {
         log::error!(
             "Failed to set socket permissions {}: {e}",
@@ -209,9 +273,11 @@ fn run_unix_socket_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         let _ = std::fs::remove_file(&socket_path);
         return;
     }
-    listener
-        .set_nonblocking(true)
-        .expect("set_nonblocking failed");
+    if let Err(e) = listener.set_nonblocking(true) {
+        log::error!("Failed to set listener nonblocking: {e}");
+        let _ = std::fs::remove_file(&socket_path);
+        return;
+    }
 
     log::info!("Listening on {}", socket_path.display());
 
@@ -219,10 +285,15 @@ fn run_unix_socket_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         match listener.accept() {
             Ok((stream, _addr)) => {
                 log::info!("Client connected");
+                if let Err(e) = stream.set_nonblocking(true) {
+                    log::error!("Failed to set client socket nonblocking: {e}");
+                    continue;
+                }
                 let manager = manager.clone();
                 std::thread::spawn(move || {
-                    let session = ClientSession::new(manager);
-                    session.run(stream);
+                    if let Some(session) = ClientSession::new(manager) {
+                        session.run(stream);
+                    }
                 });
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {

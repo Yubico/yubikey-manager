@@ -100,7 +100,9 @@ fn service_main(_arguments: Vec<OsString>) {
 
 #[cfg(target_os = "windows")]
 fn run_service_inner() -> Result<(), Box<dyn std::error::Error>> {
-    let _ = ykman::logging::init_logging(ykman::logging::LogLevel::Warning, None);
+    if let Err(e) = ykman::logging::init_logging(ykman::logging::LogLevel::Warning, None) {
+        eprintln!("Failed to initialize service logging: {e}");
+    }
 
     let stop = Arc::new(AtomicBool::new(false));
     let stop_clone = stop.clone();
@@ -109,6 +111,7 @@ fn run_service_inner() -> Result<(), Box<dyn std::error::Error>> {
         service_control_handler::register(SERVICE_NAME, move |control| match control {
             ServiceControl::Stop | ServiceControl::Shutdown => {
                 stop_clone.store(true, Ordering::Relaxed);
+                crate::pipe_server::poke_server();
                 ServiceControlHandlerResult::NoError
             }
             ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,

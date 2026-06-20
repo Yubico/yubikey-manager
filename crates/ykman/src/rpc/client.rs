@@ -24,6 +24,8 @@ enum Transport {
     Stream {
         reader: BufReader<Box<dyn Read + Send>>,
         writer: Arc<Mutex<Box<dyn Write + Send>>>,
+        #[cfg(target_os = "windows")]
+        reader_handle: windows_sys::Win32::Foundation::HANDLE,
     },
 }
 
@@ -71,9 +73,12 @@ impl RpcClient {
             // Verify the server is signed with the same certificate as us
             Self::verify_pipe_server(file.as_raw_handle() as _)?;
 
-            let reader: Box<dyn Read + Send> = Box::new(file.try_clone().map_err(|e| {
+            let reader_file = file.try_clone().map_err(|e| {
                 RpcCallError::Transport(format!("Failed to clone pipe handle: {e}"))
-            })?);
+            })?;
+            let reader_handle = reader_file.as_raw_handle() as _;
+
+            let reader: Box<dyn Read + Send> = Box::new(reader_file);
             let writer: Box<dyn Write + Send> = Box::new(file);
 
             log::debug!("Connected to ykman-svc pipe");
@@ -81,6 +86,7 @@ impl RpcClient {
                 transport: Transport::Stream {
                     reader: BufReader::new(reader),
                     writer: Arc::new(Mutex::new(writer)),
+                    reader_handle,
                 },
             })
         }
@@ -179,7 +185,12 @@ impl RpcClient {
         });
         self.write_message(&request)?;
 
-        // Register a cancel callback that sends cancel signal
+        #[cfg(target_os = "windows")]
+        if cancellable {
+            cancel::clear();
+        }
+
+        #[cfg(not(target_os = "windows"))]
         let _guard = if cancellable {
             let writer = self.cancel_writer();
             Some(cancel::on_cancel(move || {
@@ -191,11 +202,36 @@ impl RpcClient {
             None
         };
 
+        let mut cancel_sent = false;
         loop {
+            if cancellable && !cancel_sent && cancel::is_cancelled() {
+                self.write_message(&json!({"kind": "signal", "status": "cancel"}))?;
+                cancel_sent = true;
+            }
+
+            #[cfg(target_os = "windows")]
+            match self.windows_read_state()? {
+                PipeReadState::NoData => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                }
+                PipeReadState::Disconnected => {
+                    return Err(RpcCallError::Transport(
+                        "RPC subprocess closed unexpectedly".into(),
+                    ));
+                }
+                PipeReadState::DataAvailable => {}
+            }
+
             let mut buf = String::new();
-            let n = self
-                .read_line(&mut buf)
-                .map_err(|e| RpcCallError::Transport(format!("Failed to read from RPC: {e}")))?;
+            let n = match self.read_line(&mut buf) {
+                Ok(n) => n,
+                Err(e) => {
+                    return Err(RpcCallError::Transport(format!(
+                        "Failed to read from RPC: {e}"
+                    )));
+                }
+            };
             if n == 0 {
                 return Err(RpcCallError::Transport(
                     "RPC subprocess closed unexpectedly".into(),
@@ -275,6 +311,39 @@ impl RpcClient {
         let Transport::Stream { reader, .. } = &mut self.transport;
         reader.read_line(buf)
     }
+
+    #[cfg(target_os = "windows")]
+    fn windows_read_state(&self) -> Result<PipeReadState, RpcCallError> {
+        use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+
+        let Transport::Stream { reader_handle, .. } = &self.transport;
+        let mut available = 0u32;
+        let ok = unsafe {
+            PeekNamedPipe(
+                *reader_handle,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Ok(PipeReadState::Disconnected);
+        }
+        if available == 0 {
+            Ok(PipeReadState::NoData)
+        } else {
+            Ok(PipeReadState::DataAvailable)
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+enum PipeReadState {
+    DataAvailable,
+    NoData,
+    Disconnected,
 }
 
 impl Drop for RpcClient {

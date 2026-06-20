@@ -19,6 +19,7 @@ yubikit = { workspace = true, default-features = true }
 ykman = { workspace = true, default-features = true }
 clap.workspace = true
 log = { workspace = true, features = ["std"] }
+serde.workspace = true
 serde_json.workspace = true
 hex.workspace = true
 ctrlc.workspace = true

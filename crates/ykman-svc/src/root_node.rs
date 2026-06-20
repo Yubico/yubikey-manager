@@ -95,27 +95,51 @@ impl RpcNode for ServiceRootNode {
                 // Find the device name in our inventory
                 let devices = self.manager.update_devices();
                 let info = device.info();
-                let name = devices
+                let matches = devices
                     .iter()
-                    .find(|(_name, data)| {
-                        data.get("serial")
-                            .and_then(|v| v.as_u64())
-                            .map(|s| s as u32)
-                            == info.serial
-                            && data
-                                .get("version")
-                                .and_then(|v| v.as_array())
-                                .is_some_and(|arr| {
-                                    arr.len() == 3
-                                        && arr[0].as_u64() == Some(info.version.0 as u64)
-                                        && arr[1].as_u64() == Some(info.version.1 as u64)
-                                        && arr[2].as_u64() == Some(info.version.2 as u64)
-                                })
+                    .filter(|(_name, data)| {
+                        let version_matches = data
+                            .get("version")
+                            .and_then(|v| v.as_array())
+                            .is_some_and(|arr| {
+                                arr.len() == 3
+                                    && arr[0].as_u64() == Some(info.version.0 as u64)
+                                    && arr[1].as_u64() == Some(info.version.1 as u64)
+                                    && arr[2].as_u64() == Some(info.version.2 as u64)
+                            });
+                        if !version_matches {
+                            return false;
+                        }
+                        match info.serial {
+                            Some(serial) => {
+                                data.get("serial").and_then(|v| v.as_u64()) == Some(serial as u64)
+                            }
+                            None => {
+                                data.get("serial").is_none_or(Value::is_null)
+                                    && data.get("pid").and_then(|v| v.as_u64())
+                                        == device.pid().map(u64::from)
+                                    && data.get("name").and_then(|v| v.as_str())
+                                        == Some(device.name().as_str())
+                            }
+                        }
                     })
                     .map(|(name, _)| name.clone())
-                    .ok_or_else(|| {
-                        RpcError::new("device-error", "Selected device not found in inventory")
-                    })?;
+                    .collect::<Vec<_>>();
+                let name = match matches.as_slice() {
+                    [name] => name.clone(),
+                    [] => {
+                        return Err(RpcError::new(
+                            "device-error",
+                            "Selected device not found in inventory",
+                        ));
+                    }
+                    _ => {
+                        return Err(RpcError::new(
+                            "device-error",
+                            "Selected device is ambiguous in service inventory",
+                        ));
+                    }
+                };
 
                 Ok(RpcResponse::new(json!({"name": name})))
             }

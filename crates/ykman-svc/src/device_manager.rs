@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -26,6 +26,8 @@ use ykman::rpc::error::RpcError;
 use ykman::rpc::node::RpcNode;
 
 use crate::device::DeviceNode;
+
+const MAX_CLIENTS: usize = 16;
 
 /// Manages device inventory and exclusive access.
 pub struct DeviceManager {
@@ -71,9 +73,9 @@ impl DeviceManager {
             loop {
                 // Wait until there are clients
                 {
-                    let mut started = lock.lock().unwrap();
+                    let mut started = recover_lock(lock.lock(), "scanner wake lock");
                     while !*started {
-                        started = cvar.wait(started).unwrap();
+                        started = recover_lock(cvar.wait(started), "scanner wake wait");
                     }
                 }
 
@@ -84,14 +86,14 @@ impl DeviceManager {
                     };
                     if mgr.client_count.load(Ordering::Relaxed) == 0 {
                         // No clients, go back to waiting
-                        let mut started = lock.lock().unwrap();
+                        let mut started = recover_lock(lock.lock(), "scanner wake lock");
                         *started = false;
                         break;
                     }
 
                     let (_, fingerprint) = scan_usb_devices();
                     {
-                        let mut state = mgr.state.lock().unwrap();
+                        let mut state = mgr.lock_state();
                         if fingerprint != state.last_fingerprint {
                             state.last_fingerprint = fingerprint;
                             drop(state);
@@ -109,24 +111,50 @@ impl DeviceManager {
     }
 
     /// Notify that a client has connected. Sets dirty immediately.
-    pub fn client_connected(&self) {
-        let prev = self.client_count.fetch_add(1, Ordering::Relaxed);
+    pub fn client_connected(&self) -> bool {
+        let mut current = self.client_count.load(Ordering::Relaxed);
+        loop {
+            if current >= MAX_CLIENTS {
+                log::warn!("Rejecting client; maximum client count ({MAX_CLIENTS}) reached");
+                return false;
+            }
+            match self.client_count.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(prev) => {
+                    current = prev;
+                    break;
+                }
+                Err(actual) => current = actual,
+            }
+        }
         self.dirty.store(true, Ordering::Relaxed);
-        log::debug!("Client connected (count: {})", prev + 1);
+        log::debug!("Client connected (count: {})", current + 1);
 
-        if prev == 0 {
+        if current == 0 {
             // Wake the scanner thread
             let (lock, cvar) = &*self.wake;
-            let mut started = lock.lock().unwrap();
+            let mut started = recover_lock(lock.lock(), "scanner wake lock");
             *started = true;
             cvar.notify_one();
         }
+        true
     }
 
     /// Notify that a client has disconnected.
     pub fn client_disconnected(&self) {
-        let prev = self.client_count.fetch_sub(1, Ordering::Relaxed);
-        log::debug!("Client disconnected (count: {})", prev - 1);
+        let prev = self
+            .client_count
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                count.checked_sub(1)
+            });
+        match prev {
+            Ok(count) => log::debug!("Client disconnected (count: {})", count - 1),
+            Err(_) => log::warn!("Client disconnect observed with count already at zero"),
+        }
     }
 
     /// Scan for device changes and update the inventory.
@@ -134,11 +162,10 @@ impl DeviceManager {
     /// fingerprint check to see if a rescan is needed.
     /// Returns the current device map.
     pub fn update_devices(&self) -> BTreeMap<String, Value> {
-        let mut state = self.state.lock().unwrap();
-
         if !self.dirty.load(Ordering::Relaxed) {
             // Quick check: has anything changed since last full scan?
             let (_, fingerprint) = scan_usb_devices();
+            let state = self.lock_state();
             if fingerprint == state.last_fingerprint && !state.devices.is_empty() {
                 log::debug!("No device changes detected");
                 return state.devices.clone();
@@ -149,14 +176,13 @@ impl DeviceManager {
         log::info!("Device state changed, rescanning");
 
         let (_, fingerprint) = scan_usb_devices();
-        state.last_fingerprint = fingerprint;
-
         // Full enumeration
         let interfaces = UsbInterface::CCID | UsbInterface::FIDO | UsbInterface::OTP;
         let devices = match list_devices(interfaces) {
             Ok(devs) => devs,
             Err(e) => {
                 log::error!("list_devices failed: {e}");
+                let state = self.lock_state();
                 return state.devices.clone();
             }
         };
@@ -236,6 +262,9 @@ impl DeviceManager {
             true
         });
 
+        let mut state = self.lock_state();
+        state.last_fingerprint = fingerprint;
+
         // Remove locks for devices that are no longer present
         state
             .locked_devices
@@ -248,13 +277,13 @@ impl DeviceManager {
 
     /// Check if a device name is still in the current inventory.
     pub fn is_device_present(&self, name: &str) -> bool {
-        let state = self.state.lock().unwrap();
+        let state = self.lock_state();
         state.devices.contains_key(name)
     }
 
     /// Try to open a device exclusively for a client session.
     pub fn open_device(&self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state();
 
         if !state.devices.contains_key(name) {
             return Err(RpcError::no_such_node(name));
@@ -280,7 +309,7 @@ impl DeviceManager {
 
     /// Release a device lock when a client disconnects or closes the device.
     pub fn release_device(&self, name: &str) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state();
         state.locked_devices.remove(name);
         log::debug!("Released device lock: {name}");
     }
@@ -288,7 +317,24 @@ impl DeviceManager {
     /// Get the set of currently locked device names.
     #[allow(dead_code)]
     pub fn locked_devices(&self) -> HashSet<String> {
-        self.state.lock().unwrap().locked_devices.clone()
+        self.lock_state().locked_devices.clone()
+    }
+
+    fn lock_state(&self) -> MutexGuard<'_, ManagerState> {
+        recover_lock(self.state.lock(), "device manager state")
+    }
+}
+
+fn recover_lock<'a, T>(
+    result: std::sync::LockResult<MutexGuard<'a, T>>,
+    name: &str,
+) -> MutexGuard<'a, T> {
+    match result {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::error!("Recovering poisoned {name}");
+            poisoned.into_inner()
+        }
     }
 }
 

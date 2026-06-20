@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use hex::{self, FromHex, ToHex};
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 use yubikit::core::Connection;
@@ -18,6 +19,10 @@ use ykman::rpc::node::{RpcNode, SignalFn};
 /// Connection shared between ConnectionNode and its session children.
 pub(super) type SharedConn<T> = Arc<Mutex<Option<T>>>;
 
+const MAX_APDU_LEN: usize = 65_544;
+const MAX_CTAP_DATA_LEN: usize = 1_048_576;
+const MAX_OTP_DATA_LEN: usize = 64;
+
 /// Connection node wrapping either a SmartCard or FIDO HID connection.
 pub(super) struct ConnectionNode {
     conn_type: ConnType,
@@ -28,6 +33,26 @@ enum ConnType {
     SmartCard(SharedConn<PcscSmartCardConnection>),
     Fido(SharedConn<HidFidoConnection>),
     Otp(SharedConn<HidOtpConnection>),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SendAndReceiveParams {
+    apdu: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CtapCallParams {
+    cmd: u8,
+    #[serde(default)]
+    data: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OtpSendParams {
+    data: String,
 }
 
 impl ConnectionNode {
@@ -53,11 +78,8 @@ impl ConnectionNode {
     }
 
     fn do_send_and_receive(&self, params: Value) -> Result<RpcResponse, RpcError> {
-        let apdu_hex = params
-            .get("apdu")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| RpcError::invalid_params("missing 'apdu' (hex string)"))?;
-        let apdu = Vec::from_hex(apdu_hex).map_err(|e| RpcError::invalid_params(format!("{e}")))?;
+        let params: SendAndReceiveParams = parse_params(params)?;
+        let apdu = decode_hex_param("apdu", &params.apdu, MAX_APDU_LEN)?;
 
         let ConnType::SmartCard(conn) = &self.conn_type else {
             return Err(RpcError::new(
@@ -65,7 +87,7 @@ impl ConnectionNode {
                 "send_and_receive is only available on ccid connections",
             ));
         };
-        let mut guard = conn.lock().unwrap();
+        let mut guard = lock_conn(conn)?;
         let c = guard
             .as_mut()
             .ok_or_else(|| RpcError::new("connection-error", "Connection in use"))?;
@@ -86,12 +108,12 @@ impl ConnectionNode {
         signal: SignalFn,
         cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError> {
-        let cmd = params
-            .get("cmd")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| RpcError::invalid_params("missing 'cmd' (u8)"))? as u8;
-        let data_hex = params.get("data").and_then(|v| v.as_str()).unwrap_or("");
-        let data = Vec::from_hex(data_hex).map_err(|e| RpcError::invalid_params(format!("{e}")))?;
+        let params: CtapCallParams = parse_params(params)?;
+        let data = decode_hex_param(
+            "data",
+            params.data.as_deref().unwrap_or(""),
+            MAX_CTAP_DATA_LEN,
+        )?;
 
         let ConnType::Fido(conn) = &self.conn_type else {
             return Err(RpcError::new(
@@ -99,7 +121,7 @@ impl ConnectionNode {
                 "call is only available on ctap connections",
             ));
         };
-        let mut guard = conn.lock().unwrap();
+        let mut guard = lock_conn(conn)?;
         let c = guard
             .as_mut()
             .ok_or_else(|| RpcError::new("connection-error", "Connection in use"))?;
@@ -110,7 +132,12 @@ impl ConnectionNode {
         };
 
         let response = c
-            .call(cmd, &data, Some(&mut on_keepalive), Some(&is_cancelled))
+            .call(
+                params.cmd,
+                &data,
+                Some(&mut on_keepalive),
+                Some(&is_cancelled),
+            )
             .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
 
         Ok(RpcResponse::new(json!({
@@ -125,7 +152,7 @@ impl ConnectionNode {
                 "otp_receive is only available on otp connections",
             ));
         };
-        let mut guard = conn.lock().unwrap();
+        let mut guard = lock_conn(conn)?;
         let c = guard
             .as_mut()
             .ok_or_else(|| RpcError::new("connection-error", "Connection in use"))?;
@@ -140,11 +167,8 @@ impl ConnectionNode {
     }
 
     fn do_otp_send(&self, params: Value) -> Result<RpcResponse, RpcError> {
-        let data_hex = params
-            .get("data")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| RpcError::invalid_params("missing 'data' (hex string)"))?;
-        let data = Vec::from_hex(data_hex).map_err(|e| RpcError::invalid_params(format!("{e}")))?;
+        let params: OtpSendParams = parse_params(params)?;
+        let data = decode_hex_param("data", &params.data, MAX_OTP_DATA_LEN)?;
 
         let ConnType::Otp(conn) = &self.conn_type else {
             return Err(RpcError::new(
@@ -152,7 +176,7 @@ impl ConnectionNode {
                 "otp_send is only available on otp connections",
             ));
         };
-        let mut guard = conn.lock().unwrap();
+        let mut guard = lock_conn(conn)?;
         let c = guard
             .as_mut()
             .ok_or_else(|| RpcError::new("connection-error", "Connection in use"))?;
@@ -177,7 +201,19 @@ impl RpcNode for ConnectionNode {
                 })
             }
             ConnType::Fido(conn) => {
-                let guard = conn.lock().unwrap();
+                let guard = match lock_conn(conn) {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        log::error!("{e}");
+                        return json!({
+                            "version": [version.0, version.1, version.2],
+                            "serial": info.serial,
+                            "transport": "ctap",
+                            "device_version": [version.0, version.1, version.2],
+                            "capabilities": 0u8,
+                        });
+                    }
+                };
                 let (device_version, capabilities) = if let Some(c) = guard.as_ref() {
                     let v = c.device_version();
                     (json!([v.0, v.1, v.2]), c.capabilities().raw())
@@ -230,22 +266,52 @@ impl RpcNode for ConnectionNode {
         match &self.conn_type {
             ConnType::SmartCard(conn) => {
                 log::debug!("Closing CCID connection");
-                let mut guard = conn.lock().unwrap();
+                let Ok(mut guard) = lock_conn(conn) else {
+                    return;
+                };
                 if let Some(mut c) = guard.take() {
                     c.close();
                 }
             }
             ConnType::Fido(conn) => {
                 log::debug!("Closing CTAP connection");
-                let _ = conn.lock().unwrap().take();
+                if let Ok(mut guard) = lock_conn(conn) {
+                    let _ = guard.take();
+                }
             }
             ConnType::Otp(conn) => {
                 log::debug!("Closing OTP connection");
-                let mut guard = conn.lock().unwrap();
+                let Ok(mut guard) = lock_conn(conn) else {
+                    return;
+                };
                 if let Some(mut c) = guard.take() {
                     c.close();
                 }
             }
         }
     }
+}
+
+fn parse_params<T: for<'de> Deserialize<'de>>(params: Value) -> Result<T, RpcError> {
+    serde_json::from_value(params).map_err(|e| RpcError::invalid_params(e.to_string()))
+}
+
+fn decode_hex_param(name: &str, hex: &str, max_len: usize) -> Result<Vec<u8>, RpcError> {
+    if hex.len() % 2 != 0 {
+        return Err(RpcError::invalid_params(format!(
+            "'{name}' must contain an even number of hex digits"
+        )));
+    }
+    let len = hex.len() / 2;
+    if len > max_len {
+        return Err(RpcError::invalid_params(format!(
+            "'{name}' is too large: {len} > {max_len} bytes"
+        )));
+    }
+    Vec::from_hex(hex).map_err(|e| RpcError::invalid_params(format!("invalid '{name}': {e}")))
+}
+
+fn lock_conn<T>(conn: &SharedConn<T>) -> Result<std::sync::MutexGuard<'_, Option<T>>, RpcError> {
+    conn.lock()
+        .map_err(|_| RpcError::new("connection-error", "Connection lock poisoned"))
 }

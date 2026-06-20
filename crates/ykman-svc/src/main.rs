@@ -51,14 +51,21 @@ fn main() {
             log_file,
         } => {
             let level = log_level.unwrap_or(ykman::logging::LogLevel::Info);
-            if let Some(path) = log_file {
-                let _ = ykman::logging::init_logging(level, Some(path.as_str()));
+            let result = if let Some(path) = log_file {
+                ykman::logging::init_logging(level, Some(path.as_str()))
             } else {
-                let _ = ykman::logging::init_logging_stdout(level);
+                ykman::logging::init_logging_stdout(level)
+            };
+            if let Err(e) = result {
+                eprintln!("Failed to initialize logging: {e}");
+                std::process::exit(1);
             }
         }
         _ => {
-            let _ = ykman::logging::init_logging(ykman::logging::LogLevel::Warning, None);
+            if let Err(e) = ykman::logging::init_logging(ykman::logging::LogLevel::Warning, None) {
+                eprintln!("Failed to initialize logging: {e}");
+                std::process::exit(1);
+            }
         }
     }
 

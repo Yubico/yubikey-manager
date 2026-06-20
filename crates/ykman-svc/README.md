@@ -26,6 +26,19 @@ exists for development and testing purposes only.
 | Windows | Named pipes + Windows Service |
 | Linux/macOS | Unix domain sockets |
 
+## Security model
+
+The service exposes raw YubiKey transports (APDU, CTAP HID, and OTP HID) to
+authorized local clients. On Windows, the named pipe is accessible to
+authenticated users so non-elevated clients can connect, but both peers verify
+that the other process is signed with the same Authenticode certificate. Unsigned
+debug builds skip peer verification for development only and should not be used
+as a production service.
+
+The service limits concurrent clients and validates raw transport request sizes,
+but callers should still treat access to the service as equivalent to direct
+access to the connected YubiKey interfaces.
+
 ## License
 
 Apache-2.0
