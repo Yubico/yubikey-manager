@@ -19,8 +19,8 @@ use ykman::rpc::node::{RpcNode, SignalFn};
 /// Connection shared between ConnectionNode and its session children.
 pub(super) type SharedConn<T> = Arc<Mutex<Option<T>>>;
 
-const MAX_APDU_LEN: usize = 65_544;
-const MAX_CTAP_DATA_LEN: usize = 1_048_576;
+const MAX_APDU_LEN: usize = 8192; // Larger than required by any YubiKey currently.
+const MAX_CTAP_DATA_LEN: usize = 8192;
 const MAX_OTP_DATA_LEN: usize = 64;
 
 /// Connection node wrapping either a SmartCard or FIDO HID connection.
