@@ -81,7 +81,7 @@ impl RpcNode for ServiceRootNode {
     fn call_action(
         &mut self,
         action: &str,
-        _params: Value,
+        _params: &Value,
         _signal: SignalFn,
         cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError> {

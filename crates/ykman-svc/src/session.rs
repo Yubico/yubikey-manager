@@ -21,9 +21,7 @@ use yubikit::__internal::SecretValue;
 use zeroize::Zeroize;
 
 use ykman::rpc::node::NodeHost;
-use ykman::rpc::protocol::{
-    ClientMessage, CommandMessage, ServerMessage, SignalMessage, zeroize_value,
-};
+use ykman::rpc::protocol::{ClientMessage, CommandMessage, ServerMessage, SignalMessage};
 
 use crate::device_manager::DeviceManager;
 use crate::root_node::ServiceRootNode;
@@ -360,7 +358,7 @@ fn run_worker(
         let response_json = match host.call(
             &command.action,
             &command.target,
-            std::mem::take(&mut params),
+            &params,
             &signal_fn,
             &command.cancel,
         ) {
@@ -389,5 +387,22 @@ fn run_worker(
         if event_tx.send(WorkerEvent::Response(response_json)).is_err() {
             break;
         }
+    }
+}
+
+pub fn zeroize_value(value: &mut Value) {
+    match value {
+        Value::String(s) => s.zeroize(),
+        Value::Array(values) => {
+            for value in values {
+                zeroize_value(value);
+            }
+        }
+        Value::Object(values) => {
+            for value in values.values_mut() {
+                zeroize_value(value);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
 }

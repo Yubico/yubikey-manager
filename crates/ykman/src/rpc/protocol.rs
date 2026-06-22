@@ -2,7 +2,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use serde_json::value::RawValue;
 use yubikit::__internal::SecretValue;
-use zeroize::Zeroize;
 
 /// Opaque JSON stored as zeroizing text.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -151,23 +150,6 @@ pub struct ErrorMessage {
     pub message: String,
     #[serde(default)]
     pub body: RawJson,
-}
-
-pub fn zeroize_value(value: &mut Value) {
-    match value {
-        Value::String(s) => s.zeroize(),
-        Value::Array(values) => {
-            for value in values {
-                zeroize_value(value);
-            }
-        }
-        Value::Object(values) => {
-            for value in values.values_mut() {
-                zeroize_value(value);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) => {}
-    }
 }
 
 #[cfg(test)]

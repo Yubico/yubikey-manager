@@ -81,7 +81,7 @@ impl ConnectionNode {
         }
     }
 
-    fn do_send_and_receive(&self, params: Value) -> Result<RpcResponse, RpcError> {
+    fn do_send_and_receive(&self, params: &Value) -> Result<RpcResponse, RpcError> {
         let params: SendAndReceiveParams = parse_params(params)?;
         let apdu = decode_hex_param("apdu", &params.apdu, MAX_APDU_LEN)?;
 
@@ -110,7 +110,7 @@ impl ConnectionNode {
 
     fn do_call(
         &self,
-        params: Value,
+        params: &Value,
         signal: SignalFn,
         cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError> {
@@ -175,7 +175,7 @@ impl ConnectionNode {
         })))
     }
 
-    fn do_otp_send(&self, params: Value) -> Result<RpcResponse, RpcError> {
+    fn do_otp_send(&self, params: &Value) -> Result<RpcResponse, RpcError> {
         let params: OtpSendParams = parse_params(params)?;
         let data = decode_hex_param("data", &params.data, MAX_OTP_DATA_LEN)?;
 
@@ -258,7 +258,7 @@ impl RpcNode for ConnectionNode {
     fn call_action(
         &mut self,
         action: &str,
-        params: Value,
+        params: &Value,
         signal: SignalFn,
         cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError> {
@@ -301,8 +301,8 @@ impl RpcNode for ConnectionNode {
     }
 }
 
-fn parse_params<T: for<'de> Deserialize<'de>>(params: Value) -> Result<T, RpcError> {
-    serde_json::from_value(params).map_err(|e| RpcError::invalid_params(e.to_string()))
+fn parse_params<'de, T: Deserialize<'de>>(params: &'de Value) -> Result<T, RpcError> {
+    T::deserialize(params).map_err(|e| RpcError::invalid_params(e.to_string()))
 }
 
 fn deserialize_secret_string<'de, D>(deserializer: D) -> Result<SecretValue<String>, D::Error>

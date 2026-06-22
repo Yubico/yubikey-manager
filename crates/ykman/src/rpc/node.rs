@@ -4,7 +4,6 @@ use std::sync::atomic::AtomicBool;
 use serde_json::{Value, json};
 
 use super::error::{ChildResetException, RpcError, RpcResponse};
-use super::protocol::zeroize_value;
 
 /// Signal callback type.
 pub type SignalFn<'a> = &'a dyn Fn(&str, Value);
@@ -30,7 +29,7 @@ pub trait RpcNode {
     fn call_action(
         &mut self,
         action: &str,
-        params: Value,
+        params: &Value,
         signal: SignalFn,
         cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError>;
@@ -171,7 +170,7 @@ impl NodeHost {
         &mut self,
         action: &str,
         target: &[String],
-        params: Value,
+        params: &Value,
         signal: SignalFn,
         cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError> {
@@ -183,7 +182,7 @@ impl NodeHost {
         &mut self,
         action: &str,
         target: &[String],
-        mut params: Value,
+        params: &Value,
         signal: SignalFn,
         cancel: &AtomicBool,
         traversed: &mut Vec<String>,
@@ -202,13 +201,9 @@ impl NodeHost {
                     }
                     result
                 }
-                Err(e) => {
-                    zeroize_value(&mut params);
-                    Err(e)
-                }
+                Err(e) => Err(e),
             }
         } else if action == "get" {
-            zeroize_value(&mut params);
             // Built-in get action
             let data = self.node.get_data();
             let mut actions = self.node.list_actions();
@@ -235,7 +230,6 @@ impl NodeHost {
                     RpcError::new("invalid-params", "close requires a 'child' parameter")
                 })?;
             self.close_named_child(child_name);
-            zeroize_value(&mut params);
             Ok(RpcResponse::new(json!({})))
         } else if self.node.list_actions().contains(&action) {
             // Check if action should close child
@@ -248,13 +242,9 @@ impl NodeHost {
             traversed.push(action.to_string());
             match self.get_or_create_child(action) {
                 Ok(child) => child.call_inner("get", &[], params, signal, cancel, traversed),
-                Err(e) => {
-                    zeroize_value(&mut params);
-                    Err(e)
-                }
+                Err(e) => Err(e),
             }
         } else {
-            zeroize_value(&mut params);
             Err(RpcError::no_such_action(action))
         };
 

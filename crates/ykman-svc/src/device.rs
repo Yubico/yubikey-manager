@@ -136,7 +136,7 @@ impl RpcNode for DeviceNode {
     fn call_action(
         &mut self,
         action: &str,
-        _params: Value,
+        _params: &Value,
         signal: SignalFn,
         cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError> {
