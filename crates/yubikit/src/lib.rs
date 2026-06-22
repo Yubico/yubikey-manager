@@ -90,6 +90,8 @@
 //! - [`cbor`] — CBOR encoding/decoding helpers for CTAP2
 //! - [`tlv`] — TLV (Tag-Length-Value) encoding/decoding for SmartCard APDUs
 
+#[doc(hidden)]
+pub mod __internal;
 /// CBOR encoding and decoding utilities.
 pub mod cbor;
 /// Core types shared across all YubiKey applications.
@@ -123,8 +125,6 @@ pub mod piv;
 /// This module is available when the `pcsc` and/or `hid` features are enabled.
 #[cfg(any(feature = "pcsc", feature = "hid"))]
 pub mod platform;
-/// Internal secret value wrapper — not part of the public API.
-pub(crate) mod secret;
 /// Security Domain operations for managing SCP keys and certificates.
 pub mod securitydomain;
 /// Smart card communication primitives — APDUs, status words, ISO 7816-4, and SCP.

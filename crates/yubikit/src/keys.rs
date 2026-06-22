@@ -29,7 +29,7 @@ use x509_cert::der::{Decode, Encode};
 use x509_cert::spki::{AlgorithmIdentifierOwned, ObjectIdentifier, SubjectPublicKeyInfoOwned};
 use zeroize::Zeroizing;
 
-use crate::secret::SecretValue;
+use crate::__internal::SecretValue;
 use crate::tlv::tlv_parse;
 
 // ---------------------------------------------------------------------------

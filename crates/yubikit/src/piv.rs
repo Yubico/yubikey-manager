@@ -691,7 +691,7 @@ pub struct BioMetadata {
 /// let pin = PivPin::new("123456").unwrap();
 /// ```
 #[derive(Clone)]
-pub struct PivPin(crate::secret::SecretValue<Vec<u8>>);
+pub struct PivPin(crate::__internal::SecretValue<Vec<u8>>);
 
 impl PivPin {
     /// Create a new PIV PIN/PUK from a string value.
@@ -702,7 +702,7 @@ impl PivPin {
         if bytes.is_empty() || bytes.len() > PIN_LEN {
             return Err(PivError::InvalidData("PIN/PUK must be 1-8 bytes".into()));
         }
-        Ok(Self(crate::secret::SecretValue::new(bytes.to_vec())))
+        Ok(Self(crate::__internal::SecretValue::new(bytes.to_vec())))
     }
 
     /// Returns the PIN bytes, padded to 8 bytes with 0xFF.
@@ -715,7 +715,7 @@ impl PivPin {
 
     /// Create from raw bytes without validation (internal use only).
     fn from_raw(bytes: Vec<u8>) -> Self {
-        Self(crate::secret::SecretValue::new(bytes))
+        Self(crate::__internal::SecretValue::new(bytes))
     }
 }
 
@@ -742,7 +742,7 @@ impl fmt::Debug for PivPin {
 /// ```
 #[derive(Clone)]
 pub struct ManagementKey {
-    inner: crate::secret::SecretValue<Vec<u8>>,
+    inner: crate::__internal::SecretValue<Vec<u8>>,
     key_type: ManagementKeyType,
 }
 
@@ -759,7 +759,7 @@ impl ManagementKey {
             )));
         }
         Ok(Self {
-            inner: crate::secret::SecretValue::new(key.to_vec()),
+            inner: crate::__internal::SecretValue::new(key.to_vec()),
             key_type,
         })
     }

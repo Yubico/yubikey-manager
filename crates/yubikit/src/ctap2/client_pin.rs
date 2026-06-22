@@ -37,7 +37,7 @@ use super::{Ctap2Error, Info, build_args_map, ctap2_cmd};
 /// let pin = Ctap2Pin::new("1234").unwrap();
 /// ```
 #[derive(Clone)]
-pub struct Ctap2Pin(crate::secret::SecretValue<Vec<u8>>);
+pub struct Ctap2Pin(crate::__internal::SecretValue<Vec<u8>>);
 
 impl Ctap2Pin {
     /// Create a new CTAP2 PIN from a string value.
@@ -53,7 +53,7 @@ impl Ctap2Pin {
         if padded_len > 255 {
             return Err("PIN must be at most 255 bytes when padded".into());
         }
-        Ok(Self(crate::secret::SecretValue::new(
+        Ok(Self(crate::__internal::SecretValue::new(
             pin.as_bytes().to_vec(),
         )))
     }

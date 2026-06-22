@@ -586,12 +586,12 @@ const PKCS1_SHA512: &[u8] = &[
 /// let pin = OpenPgpPin::new("123456");
 /// ```
 #[derive(Clone)]
-pub struct OpenPgpPin(crate::secret::SecretValue<Vec<u8>>);
+pub struct OpenPgpPin(crate::__internal::SecretValue<Vec<u8>>);
 
 impl OpenPgpPin {
     /// Create a new OpenPGP PIN from a string value.
     pub fn new(pin: &str) -> Self {
-        Self(crate::secret::SecretValue::new(pin.as_bytes().to_vec()))
+        Self(crate::__internal::SecretValue::new(pin.as_bytes().to_vec()))
     }
 
     /// Access the raw PIN bytes (internal use only).

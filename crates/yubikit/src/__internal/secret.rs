@@ -12,27 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Internal secret value wrapper for zeroization of sensitive data.
-//!
-//! This module provides [`SecretValue`], a generic wrapper that ensures its
-//! contents are zeroized on drop and cannot be accidentally logged or displayed.
-//! It is not part of the public API — public newtypes in each application module
-//! wrap this type to provide domain-specific secret handling.
-//! It is not part of the public API — public newtypes in each application module
-//! wrap this type to provide domain-specific secret handling.
-
 use std::fmt;
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-/// A wrapper around a secret value that ensures it is zeroized on drop.
-///
-/// - Implements [`ZeroizeOnDrop`] to clear memory when the value goes out of scope.
-/// - [`Debug`] and [`Display`] print `[REDACTED]` to prevent accidental logging.
-/// - Does **not** implement [`Deref`] to prevent accidental exposure.
-/// - Access the inner value via [`expose_secret()`](SecretValue::expose_secret).
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
-pub(crate) struct SecretValue<T: Zeroize>(T);
+pub struct SecretValue<T: Zeroize>(T);
 
 impl<T: Zeroize> SecretValue<T> {
     /// Create a new `SecretValue` wrapping the given value.

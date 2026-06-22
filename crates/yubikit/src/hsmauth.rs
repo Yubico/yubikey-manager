@@ -116,7 +116,7 @@ const INITIAL_RETRY_COUNTER: u32 = 8;
 /// let key = HsmAuthManagementKey::new(DEFAULT_MANAGEMENT_KEY).unwrap();
 /// ```
 #[derive(Clone)]
-pub struct HsmAuthManagementKey(crate::secret::SecretValue<[u8; MANAGEMENT_KEY_LEN]>);
+pub struct HsmAuthManagementKey(crate::__internal::SecretValue<[u8; MANAGEMENT_KEY_LEN]>);
 
 impl HsmAuthManagementKey {
     /// Create a new management key from a 16-byte slice.
@@ -128,7 +128,7 @@ impl HsmAuthManagementKey {
                 "Management key must be {MANAGEMENT_KEY_LEN} bytes long"
             ))
         })?;
-        Ok(Self(crate::secret::SecretValue::new(arr)))
+        Ok(Self(crate::__internal::SecretValue::new(arr)))
     }
 
     /// Access the raw key bytes.
@@ -156,7 +156,7 @@ impl fmt::Debug for HsmAuthManagementKey {
 /// let pw_from_str = CredentialPassword::from_password("my-password");
 /// ```
 #[derive(Clone)]
-pub struct CredentialPassword(crate::secret::SecretValue<[u8; CREDENTIAL_PASSWORD_LEN]>);
+pub struct CredentialPassword(crate::__internal::SecretValue<[u8; CREDENTIAL_PASSWORD_LEN]>);
 
 impl CredentialPassword {
     /// Create a credential password from a 16-byte slice.
@@ -168,7 +168,7 @@ impl CredentialPassword {
                 "Credential password must be {CREDENTIAL_PASSWORD_LEN} bytes long"
             ))
         })?;
-        Ok(Self(crate::secret::SecretValue::new(arr)))
+        Ok(Self(crate::__internal::SecretValue::new(arr)))
     }
 
     /// Create a credential password from a string, padding with zeros or
@@ -178,7 +178,7 @@ impl CredentialPassword {
         let bytes = password.as_bytes();
         let len = bytes.len().min(CREDENTIAL_PASSWORD_LEN);
         pw[..len].copy_from_slice(&bytes[..len]);
-        Self(crate::secret::SecretValue::new(pw))
+        Self(crate::__internal::SecretValue::new(pw))
     }
 
     /// Access the raw password bytes.

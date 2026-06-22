@@ -117,7 +117,7 @@ type HmacSha1 = Hmac<Sha1>;
 /// let key = OathAccessKey::new(&[0u8; 16]).unwrap();
 /// ```
 #[derive(Clone)]
-pub struct OathAccessKey(crate::secret::SecretValue<[u8; ACCESS_KEY_LEN]>);
+pub struct OathAccessKey(crate::__internal::SecretValue<[u8; ACCESS_KEY_LEN]>);
 
 impl OathAccessKey {
     /// Create an access key from a 16-byte slice.
@@ -127,12 +127,12 @@ impl OathAccessKey {
         let arr: [u8; ACCESS_KEY_LEN] = key.try_into().map_err(|_| {
             OathError::InvalidData(format!("Access key must be {ACCESS_KEY_LEN} bytes"))
         })?;
-        Ok(Self(crate::secret::SecretValue::new(arr)))
+        Ok(Self(crate::__internal::SecretValue::new(arr)))
     }
 
     /// Create an access key from raw bytes (internal, already validated).
     fn from_array(key: [u8; ACCESS_KEY_LEN]) -> Self {
-        Self(crate::secret::SecretValue::new(key))
+        Self(crate::__internal::SecretValue::new(key))
     }
 
     /// Access the raw key bytes.

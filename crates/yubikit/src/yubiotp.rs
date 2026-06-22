@@ -194,7 +194,7 @@ const NDEF_URL_PREFIXES: &[&str] = &[
 /// let key = HmacKey::new(b"my-secret-key-material").unwrap();
 /// ```
 #[derive(Clone)]
-pub struct HmacKey(crate::secret::SecretValue<Vec<u8>>);
+pub struct HmacKey(crate::__internal::SecretValue<Vec<u8>>);
 
 impl HmacKey {
     /// Create a new HMAC key from raw bytes.
@@ -209,7 +209,7 @@ impl HmacKey {
             // Per HMAC spec, keys longer than block size are hashed
             let mut hasher = Sha1::new();
             Digest::update(&mut hasher, key);
-            Ok(Self(crate::secret::SecretValue::new(
+            Ok(Self(crate::__internal::SecretValue::new(
                 hasher.finalize().to_vec(),
             )))
         } else if key.len() > HMAC_KEY_SIZE {
@@ -217,7 +217,7 @@ impl HmacKey {
                 "Key lengths > {HMAC_KEY_SIZE} bytes not supported"
             )))
         } else {
-            Ok(Self(crate::secret::SecretValue::new(key.to_vec())))
+            Ok(Self(crate::__internal::SecretValue::new(key.to_vec())))
         }
     }
 
@@ -245,7 +245,7 @@ impl fmt::Debug for HmacKey {
 /// let code = AccessCode::new(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]).unwrap();
 /// ```
 #[derive(Clone)]
-pub struct AccessCode(crate::secret::SecretValue<[u8; ACC_CODE_SIZE]>);
+pub struct AccessCode(crate::__internal::SecretValue<[u8; ACC_CODE_SIZE]>);
 
 impl AccessCode {
     /// Create a new access code from a 6-byte slice.
@@ -257,7 +257,7 @@ impl AccessCode {
         }
         let mut arr = [0u8; ACC_CODE_SIZE];
         arr.copy_from_slice(code);
-        Ok(Self(crate::secret::SecretValue::new(arr)))
+        Ok(Self(crate::__internal::SecretValue::new(arr)))
     }
 
     /// Access the raw code bytes.
