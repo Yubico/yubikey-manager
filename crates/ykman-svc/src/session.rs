@@ -15,9 +15,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
+use serde::Serialize;
 use serde_json::{Value, json};
+use yubikit::__internal::SecretValue;
+use zeroize::Zeroize;
 
 use ykman::rpc::node::NodeHost;
+use ykman::rpc::protocol::{
+    ClientMessage, CommandMessage, ServerMessage, SignalMessage, zeroize_value,
+};
 
 use crate::device_manager::DeviceManager;
 use crate::root_node::ServiceRootNode;
@@ -52,7 +58,7 @@ impl ClientSession {
         let manager = self.manager.clone();
         let worker = std::thread::spawn(move || run_worker(manager, command_rx, event_tx));
         let mut active_cancel: Option<Arc<AtomicBool>> = None;
-        let mut pending_line = Vec::new();
+        let mut pending_line = SecretValue::new(Vec::new());
 
         log::debug!("Client session started");
 
@@ -67,6 +73,12 @@ impl ClientSession {
                             &command_tx,
                             &mut active_cancel,
                         ) {
+                            disconnected = true;
+                            break;
+                        }
+                    }
+                    ReadRequest::Invalid(message) => {
+                        if !write_invalid_request(reader.get_mut(), message) {
                             disconnected = true;
                             break;
                         }
@@ -130,15 +142,15 @@ impl Drop for ClientSession {
     }
 }
 
-/// Serialize `data` as JSON followed by a newline and write it to `w`.
-fn write_response<W: Write>(w: &mut W, data: &Value) -> std::io::Result<()> {
-    let mut bytes = serde_json::to_vec(data).map_err(std::io::Error::other)?;
-    bytes.push(b'\n');
-    w.write_all(&bytes)
+fn write_response<W: Write>(w: &mut W, data: &impl Serialize) -> std::io::Result<()> {
+    let mut bytes = SecretValue::new(serde_json::to_vec(data).map_err(std::io::Error::other)?);
+    bytes.expose_secret_mut().push(b'\n');
+    w.write_all(bytes.expose_secret())
 }
 
 enum ReadRequest {
-    Request(Value),
+    Request(ClientMessage),
+    Invalid(&'static str),
     WouldBlock,
     Disconnected,
 }
@@ -146,18 +158,18 @@ enum ReadRequest {
 struct WorkerCommand {
     action: String,
     target: Vec<String>,
-    params: Value,
+    body: ykman::rpc::protocol::RawJson,
     cancel: Arc<AtomicBool>,
 }
 
 enum WorkerEvent {
-    Signal(Value),
-    Response(Value),
+    Signal(ServerMessage),
+    Response(ServerMessage),
 }
 
 fn read_request<T: SessionIo>(
     reader: &mut BufReader<T>,
-    pending_line: &mut Vec<u8>,
+    pending_line: &mut SecretValue<Vec<u8>>,
 ) -> ReadRequest {
     loop {
         #[cfg(target_os = "windows")]
@@ -180,25 +192,28 @@ fn read_request<T: SessionIo>(
         };
 
         if let Some(pos) = available.iter().position(|&b| b == b'\n') {
-            pending_line.extend_from_slice(&available[..pos]);
+            pending_line
+                .expose_secret_mut()
+                .extend_from_slice(&available[..pos]);
             reader.consume(pos + 1);
-            if pending_line.is_empty() {
+            if pending_line.expose_secret().is_empty() {
                 return ReadRequest::Disconnected;
             }
-            let request = parse_pending_request(pending_line);
-            pending_line.clear();
+            let request = parse_pending_request(pending_line.expose_secret());
+            pending_line.expose_secret_mut().zeroize();
+            pending_line.expose_secret_mut().clear();
             return request;
         }
 
         let len = available.len();
-        pending_line.extend_from_slice(available);
+        pending_line
+            .expose_secret_mut()
+            .extend_from_slice(available);
         reader.consume(len);
-        if pending_line.len() > MAX_RPC_LINE_LEN {
-            pending_line.clear();
-            return ReadRequest::Request(json!({
-                "kind": "invalid",
-                "message": "RPC request is too large"
-            }));
+        if pending_line.expose_secret().len() > MAX_RPC_LINE_LEN {
+            pending_line.expose_secret_mut().zeroize();
+            pending_line.expose_secret_mut().clear();
+            return ReadRequest::Invalid("RPC request is too large");
         }
     }
 
@@ -240,10 +255,7 @@ fn parse_pending_request(pending_line: &[u8]) -> ReadRequest {
     let line = match std::str::from_utf8(pending_line) {
         Ok(line) => line.trim(),
         Err(_) => {
-            return ReadRequest::Request(json!({
-                "kind": "invalid",
-                "message": "Invalid UTF-8"
-            }));
+            return ReadRequest::Invalid("Invalid UTF-8");
         }
     };
     if line.is_empty() {
@@ -251,23 +263,20 @@ fn parse_pending_request(pending_line: &[u8]) -> ReadRequest {
     } else {
         match serde_json::from_str(line) {
             Ok(v) => ReadRequest::Request(v),
-            Err(_) => ReadRequest::Request(json!({
-                "kind": "invalid",
-                "message": "Invalid JSON"
-            })),
+            Err(_) => ReadRequest::Invalid("Invalid JSON"),
         }
     }
 }
 
 fn handle_request<T: Write>(
-    request: Value,
+    request: ClientMessage,
     writer: &mut T,
     command_tx: &mpsc::Sender<WorkerCommand>,
     active_cancel: &mut Option<Arc<AtomicBool>>,
 ) -> bool {
-    match request.get("kind").and_then(|v| v.as_str()) {
-        Some("signal") => {
-            if request.get("status").and_then(|v| v.as_str()) == Some("cancel") {
+    match request {
+        ClientMessage::Signal(signal) => {
+            if signal.status == "cancel" {
                 log::debug!("Got cancel signal");
                 if let Some(cancel) = active_cancel {
                     cancel.store(true, Ordering::Relaxed);
@@ -275,65 +284,45 @@ fn handle_request<T: Write>(
             }
             true
         }
-        Some("command") => {
-            if active_cancel.is_some() {
-                let err = json!({"kind":"error","status":"invalid-command","message":"Another command is already running","body":{}});
-                return write_response(writer, &err).is_ok();
-            }
-            let Some(action) = request.get("action").and_then(|v| v.as_str()) else {
-                let err = json!({"kind":"error","status":"invalid-command","message":"Missing action","body":{}});
-                return write_response(writer, &err).is_ok();
-            };
-            let target = match parse_target(&request) {
-                Ok(target) => target,
-                Err(message) => {
-                    let err = json!({"kind":"error","status":"invalid-command","message":message,"body":{}});
-                    return write_response(writer, &err).is_ok();
-                }
-            };
-            let cancel = Arc::new(AtomicBool::new(false));
-            let command = WorkerCommand {
-                action: action.to_string(),
-                target,
-                params: request.get("body").cloned().unwrap_or_else(|| json!({})),
-                cancel: cancel.clone(),
-            };
-            if command_tx.send(command).is_err() {
-                return false;
-            }
-            *active_cancel = Some(cancel);
-            true
-        }
-        Some("invalid") => {
-            let message = request
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Invalid request");
-            let err =
-                json!({"kind":"error","status":"invalid-command","message":message,"body":{}});
-            write_response(writer, &err).is_ok()
-        }
-        _ => {
-            let err = json!({"kind":"error","status":"invalid-command","message":"Unsupported request type","body":{}});
-            write_response(writer, &err).is_ok()
+        ClientMessage::Command(command) => {
+            handle_command(command, writer, command_tx, active_cancel)
         }
     }
 }
 
-fn parse_target(request: &Value) -> Result<Vec<String>, &'static str> {
-    let Some(target) = request.get("target") else {
-        return Ok(Vec::new());
+fn handle_command<T: Write>(
+    command: CommandMessage,
+    writer: &mut T,
+    command_tx: &mpsc::Sender<WorkerCommand>,
+    active_cancel: &mut Option<Arc<AtomicBool>>,
+) -> bool {
+    if active_cancel.is_some() {
+        let err = ServerMessage::error(
+            "invalid-command",
+            "Another command is already running",
+            json!({}),
+        )
+        .expect("empty error body is valid JSON");
+        return write_response(writer, &err).is_ok();
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    let worker_command = WorkerCommand {
+        action: command.action,
+        target: command.target,
+        body: command.body,
+        cancel: cancel.clone(),
     };
-    let Some(arr) = target.as_array() else {
-        return Err("Target must be an array");
-    };
-    arr.iter()
-        .map(|v| {
-            v.as_str()
-                .map(String::from)
-                .ok_or("Target entries must be strings")
-        })
-        .collect()
+    if command_tx.send(worker_command).is_err() {
+        return false;
+    }
+    *active_cancel = Some(cancel);
+    true
+}
+
+fn write_invalid_request<T: Write>(writer: &mut T, message: &'static str) -> bool {
+    let err = ServerMessage::error("invalid-command", message, json!({}))
+        .expect("empty error body is valid JSON");
+    write_response(writer, &err).is_ok()
 }
 
 fn run_worker(
@@ -347,14 +336,31 @@ fn run_worker(
     for command in command_rx {
         let signal_tx = event_tx.clone();
         let signal_fn = move |status: &str, body: Value| {
-            let signal = json!({"kind":"signal","status":status,"body":body});
+            let signal = SignalMessage::new(status, body)
+                .map(ServerMessage::Signal)
+                .expect("signal body serializes to valid JSON");
             let _ = signal_tx.send(WorkerEvent::Signal(signal));
         };
 
+        let mut params = match command.body.to_value() {
+            Ok(params) => params,
+            Err(e) => {
+                let response = ServerMessage::error(
+                    "invalid-command",
+                    format!("Invalid parameters: {e}"),
+                    json!({}),
+                )
+                .expect("empty error body is valid JSON");
+                if event_tx.send(WorkerEvent::Response(response)).is_err() {
+                    break;
+                }
+                continue;
+            }
+        };
         let response_json = match host.call(
             &command.action,
             &command.target,
-            command.params,
+            std::mem::take(&mut params),
             &signal_fn,
             &command.cancel,
         ) {
@@ -364,7 +370,8 @@ fn run_worker(
                     command.action,
                     command.target.join("/")
                 );
-                json!({"kind":"success","body":response.body,"flags":response.flags})
+                ServerMessage::success(response.body, response.flags)
+                    .expect("RPC success body serializes to valid JSON")
             }
             Err(e) => {
                 log::debug!(
@@ -374,9 +381,11 @@ fn run_worker(
                     e.status,
                     e.message
                 );
-                json!({"kind":"error","status":e.status,"message":e.message,"body":e.body})
+                ServerMessage::error(e.status, e.message, e.body)
+                    .expect("RPC error body serializes to valid JSON")
             }
         };
+        zeroize_value(&mut params);
         if event_tx.send(WorkerEvent::Response(response_json)).is_err() {
             break;
         }

@@ -3397,6 +3397,7 @@ dependencies = [
  "windows-native-keyring-store",
  "windows-sys 0.61.2",
  "yubikit",
+ "zeroize",
 ]
 
 [[package]]
@@ -3449,6 +3450,7 @@ dependencies = [
  "windows-sys 0.61.2",
  "ykman",
  "yubikit",
+ "zeroize",
 ]
 
 [[package]]

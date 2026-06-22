@@ -27,10 +27,11 @@ hex.workspace = true
 log = { workspace = true, features = ["std"] }
 sha2.workspace = true
 serde.workspace = true
-serde_json = { workspace = true, features = ["preserve_order"] }
+serde_json = { workspace = true, features = ["preserve_order", "raw_value"] }
 dirs.workspace = true
 fernet.workspace = true
 thiserror.workspace = true
+zeroize.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring-core.workspace = true

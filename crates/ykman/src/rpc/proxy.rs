@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use hex::{FromHex, ToHex};
 use serde_json::{Value, json};
 
+use yubikit::__internal::SecretValue;
 use yubikit::core::{Connection, Transport};
 use yubikit::device::{DeviceError, ReinsertStatus, YubiKeyDevice};
 use yubikit::fido::FidoConnection;
@@ -144,7 +145,8 @@ impl Connection for RpcSmartCardConnection {
 
 impl SmartCardConnection for RpcSmartCardConnection {
     fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
-        yubikit::log_traffic!(">> {}", apdu.encode_hex::<String>());
+        let apdu_hex = SecretValue::new(apdu.encode_hex::<String>());
+        yubikit::log_traffic!(">> {}", apdu_hex.expose_secret());
         let result = self
             .client
             .lock()
@@ -156,15 +158,18 @@ impl SmartCardConnection for RpcSmartCardConnection {
             .call(
                 "send_and_receive",
                 &target(&self.device_prefix, &["ccid"]),
-                json!({"apdu": apdu.encode_hex::<String>()}),
+                json!({"apdu": apdu_hex.expose_secret()}),
                 None,
                 false,
             )
             .map_err(|e| SmartCardError::Transport(Box::new(RpcTransportError(format!("{e}")))))?;
 
-        let data_hex = required_str(&result.body, "data")
-            .map_err(|e| SmartCardError::InvalidData(e.to_string()))?;
-        let data = Vec::from_hex(data_hex)
+        let data_hex = SecretValue::new(
+            required_str(&result.body, "data")
+                .map_err(|e| SmartCardError::InvalidData(e.to_string()))?
+                .to_string(),
+        );
+        let data = Vec::from_hex(data_hex.expose_secret())
             .map_err(|e| SmartCardError::InvalidData(format!("bad hex from RPC: {e}")))?;
         let sw = as_u16(
             required_u64(&result.body, "sw")
@@ -173,7 +178,7 @@ impl SmartCardConnection for RpcSmartCardConnection {
         )
         .map_err(|e| SmartCardError::InvalidData(e.to_string()))?;
 
-        yubikit::log_traffic!("<< {} {:04x}", data_hex, sw);
+        yubikit::log_traffic!("<< {} {:04x}", data_hex.expose_secret(), sw);
         Ok((data, sw))
     }
 
@@ -249,6 +254,7 @@ impl FidoConnection for RpcFidoConnection {
                 })
             });
 
+        let data_hex = SecretValue::new(data.encode_hex::<String>());
         let result = self
             .client
             .lock()
@@ -256,7 +262,7 @@ impl FidoConnection for RpcFidoConnection {
             .call(
                 "call",
                 &target(&self.device_prefix, &["ctap"]),
-                json!({"cmd": cmd, "data": data.encode_hex::<String>()}),
+                json!({"cmd": cmd, "data": data_hex.expose_secret()}),
                 signal_handler
                     .as_ref()
                     .map(|h| h.as_ref() as &dyn Fn(&str, &Value)),
@@ -264,11 +270,15 @@ impl FidoConnection for RpcFidoConnection {
             )
             .map_err(|e| FidoError::Other(format!("{e}")))?;
 
-        let data_hex =
-            required_str(&result.body, "data").map_err(|e| FidoError::Other(e.to_string()))?;
-        yubikit::log_traffic!("CTAP cmd={:02x} >> {}", cmd, data.encode_hex::<String>());
-        yubikit::log_traffic!("CTAP cmd={:02x} << {}", cmd, data_hex);
-        Vec::from_hex(data_hex).map_err(|e| FidoError::Other(format!("bad hex from RPC: {e}")))
+        let response_hex = SecretValue::new(
+            required_str(&result.body, "data")
+                .map_err(|e| FidoError::Other(e.to_string()))?
+                .to_string(),
+        );
+        yubikit::log_traffic!("CTAP cmd={:02x} >> {}", cmd, data_hex.expose_secret());
+        yubikit::log_traffic!("CTAP cmd={:02x} << {}", cmd, response_hex.expose_secret());
+        Vec::from_hex(response_hex.expose_secret())
+            .map_err(|e| FidoError::Other(format!("bad hex from RPC: {e}")))
     }
 
     fn device_version(&self) -> (u8, u8, u8) {
@@ -313,23 +323,27 @@ impl OtpConnection for RpcOtpConnection {
             )
             .map_err(|e| OtpError::CommandRejected(format!("{e}")))?;
 
-        let data_hex = required_str(&result.body, "data")
-            .map_err(|e| OtpError::CommandRejected(e.to_string()))?;
-        let data = Vec::from_hex(data_hex)
+        let data_hex = SecretValue::new(
+            required_str(&result.body, "data")
+                .map_err(|e| OtpError::CommandRejected(e.to_string()))?
+                .to_string(),
+        );
+        let data = Vec::from_hex(data_hex.expose_secret())
             .map_err(|e| OtpError::CommandRejected(format!("bad hex from RPC: {e}")))?;
-        yubikit::log_traffic!("otp_receive << {}", data_hex);
+        yubikit::log_traffic!("otp_receive << {}", data_hex.expose_secret());
         Ok(data)
     }
 
     fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
-        yubikit::log_traffic!("otp_send >> {}", data.encode_hex::<String>());
+        let data_hex = SecretValue::new(data.encode_hex::<String>());
+        yubikit::log_traffic!("otp_send >> {}", data_hex.expose_secret());
         self.client
             .lock()
             .map_err(|_| OtpError::CommandRejected("RPC client lock poisoned".into()))?
             .call(
                 "otp_send",
                 &target(&self.device_prefix, &["otp"]),
-                json!({"data": data.encode_hex::<String>()}),
+                json!({"data": data_hex.expose_secret()}),
                 None,
                 false,
             )

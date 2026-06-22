@@ -3,20 +3,13 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::{Arc, Mutex};
 
+use serde::Serialize;
 use serde_json::{Value, json};
+use yubikit::__internal::SecretValue;
 
 use crate::cancel;
 
-fn field<'a>(data: &'a Value, key: &str) -> Result<&'a Value, RpcCallError> {
-    data.get(key)
-        .ok_or_else(|| RpcCallError::Transport(format!("Malformed RPC response: missing {key}")))
-}
-
-fn str_field(data: &Value, key: &str) -> Result<String, RpcCallError> {
-    field(data, key)?.as_str().map(String::from).ok_or_else(|| {
-        RpcCallError::Transport(format!("Malformed RPC response: {key} is not a string"))
-    })
-}
+use super::protocol::{ClientMessage, CommandMessage, ServerMessage, SignalMessage};
 
 /// Transport abstraction for the RPC client's read/write streams.
 enum Transport {
@@ -140,14 +133,14 @@ impl RpcClient {
             .map_err(|e| RpcCallError::Transport(format!("Server verification failed: {e}")))
     }
 
-    fn write_message(&self, msg: &Value) -> Result<(), RpcCallError> {
-        let json_str = serde_json::to_string(msg).map_err(|e| {
+    fn write_message(&self, msg: &impl Serialize) -> Result<(), RpcCallError> {
+        let json_str = SecretValue::new(serde_json::to_string(msg).map_err(|e| {
             RpcCallError::Transport(format!("Failed to serialize RPC message: {e}"))
-        })?;
+        })?);
         let Transport::Stream { writer, .. } = &self.transport;
         let mut writer = writer.lock().unwrap();
         writer
-            .write_all(json_str.as_bytes())
+            .write_all(json_str.expose_secret().as_bytes())
             .map_err(|e| RpcCallError::Transport(format!("Failed to write to RPC: {e}")))?;
         writer
             .write_all(b"\n")
@@ -176,13 +169,10 @@ impl RpcClient {
         signal_handler: Option<&dyn Fn(&str, &Value)>,
         cancellable: bool,
     ) -> Result<RpcResult, RpcCallError> {
-        let target_strs: Vec<&str> = target.iter().map(|s| s.as_ref()).collect();
-        let request = json!({
-            "kind": "command",
-            "action": action,
-            "target": target_strs,
-            "body": body,
-        });
+        let request =
+            ClientMessage::Command(CommandMessage::new(action, target, body).map_err(|e| {
+                RpcCallError::Transport(format!("Failed to build RPC request: {e}"))
+            })?);
         self.write_message(&request)?;
 
         if cancellable {
@@ -193,9 +183,12 @@ impl RpcClient {
         let _guard = if cancellable {
             let writer = self.cancel_writer();
             Some(cancel::on_cancel(move || {
-                let signal = json!({"kind": "signal", "status": "cancel"});
-                let json_str = serde_json::to_string(&signal).unwrap();
-                writer.send_cancel(json_str.as_bytes());
+                if let Ok(json_str) =
+                    serde_json::to_string(&ClientMessage::Signal(SignalMessage::cancel()))
+                {
+                    let json_str = SecretValue::new(json_str);
+                    writer.send_cancel(json_str.expose_secret().as_bytes());
+                }
             }))
         } else {
             None
@@ -206,7 +199,7 @@ impl RpcClient {
         loop {
             #[cfg(target_os = "windows")]
             if cancellable && !cancel_sent && cancel::is_cancelled() {
-                self.write_message(&json!({"kind": "signal", "status": "cancel"}))?;
+                self.write_message(&ClientMessage::Signal(SignalMessage::cancel()))?;
                 cancel_sent = true;
             }
 
@@ -224,8 +217,8 @@ impl RpcClient {
                 PipeReadState::DataAvailable => {}
             }
 
-            let mut buf = String::new();
-            let n = match self.read_line(&mut buf) {
+            let mut buf = SecretValue::new(String::new());
+            let n = match self.read_line(buf.expose_secret_mut()) {
                 Ok(n) => n,
                 Err(e) => {
                     return Err(RpcCallError::Transport(format!(
@@ -239,65 +232,42 @@ impl RpcClient {
                 ));
             }
 
-            let line = buf.trim();
+            let line = buf.expose_secret().trim();
             if line.is_empty() {
                 continue;
             }
 
-            let resp: Value = serde_json::from_str(line).map_err(|e| {
+            let resp: ServerMessage = serde_json::from_str(line).map_err(|e| {
                 RpcCallError::Transport(format!("Invalid JSON from RPC subprocess: {e}"))
             })?;
 
-            match resp.get("kind").and_then(|v| v.as_str()) {
-                Some("success") => {
-                    let body = field(&resp, "body")?.clone();
-                    let flags = match resp.get("flags") {
-                        Some(Value::Null) | None => Vec::new(),
-                        Some(v) => v
-                            .as_array()
-                            .ok_or_else(|| {
-                                RpcCallError::Transport(
-                                    "Malformed RPC response: flags is not an array".into(),
-                                )
-                            })?
-                            .iter()
-                            .map(|v| {
-                                v.as_str().map(String::from).ok_or_else(|| {
-                                    RpcCallError::Transport(
-                                        "Malformed RPC response: flags contains non-string".into(),
-                                    )
-                                })
-                            })
-                            .collect::<Result<Vec<_>, _>>()?,
-                    };
-                    return Ok(RpcResult { body, flags });
+            match resp {
+                ServerMessage::Success(success) => {
+                    let body = success.body.to_value().map_err(|e| {
+                        RpcCallError::Transport(format!("Malformed RPC success body: {e}"))
+                    })?;
+                    return Ok(RpcResult {
+                        body,
+                        flags: success.flags,
+                    });
                 }
-                Some("error") => {
-                    let status = str_field(&resp, "status")?;
-                    let message = str_field(&resp, "message")?;
-                    let body = field(&resp, "body")?.clone();
+                ServerMessage::Error(error) => {
+                    let body = error.body.to_value().map_err(|e| {
+                        RpcCallError::Transport(format!("Malformed RPC error body: {e}"))
+                    })?;
                     return Err(RpcCallError::Rpc(RpcClientError {
-                        status,
-                        message,
+                        status: error.status,
+                        message: error.message,
                         body,
                     }));
                 }
-                Some("signal") => {
+                ServerMessage::Signal(signal) => {
                     if let Some(handler) = signal_handler {
-                        let status = field(&resp, "status")?.as_str().ok_or_else(|| {
-                            RpcCallError::Transport(
-                                "Malformed RPC response: status is not a string".into(),
-                            )
+                        let body = signal.body.to_value().map_err(|e| {
+                            RpcCallError::Transport(format!("Malformed RPC signal body: {e}"))
                         })?;
-                        let body = field(&resp, "body")?;
-                        handler(status, body);
+                        handler(&signal.status, &body);
                     }
-                }
-                _ => {
-                    return Err(RpcCallError::Transport(format!(
-                        "Unexpected RPC response kind: {}",
-                        resp.get("kind").unwrap_or(&json!(null))
-                    )));
                 }
             }
         }

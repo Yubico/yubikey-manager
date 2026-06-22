@@ -2,9 +2,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use hex::{self, FromHex, ToHex};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 
+use yubikit::__internal::SecretValue;
 use yubikit::core::Connection;
 use yubikit::fido::FidoConnection;
 use yubikit::otp::OtpConnection;
@@ -38,7 +39,8 @@ enum ConnType {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SendAndReceiveParams {
-    apdu: String,
+    #[serde(deserialize_with = "deserialize_secret_string")]
+    apdu: SecretValue<String>,
 }
 
 #[derive(Deserialize)]
@@ -46,13 +48,15 @@ struct SendAndReceiveParams {
 struct CtapCallParams {
     cmd: u8,
     #[serde(default)]
-    data: Option<String>,
+    #[serde(deserialize_with = "deserialize_optional_secret_string")]
+    data: Option<SecretValue<String>>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OtpSendParams {
-    data: String,
+    #[serde(deserialize_with = "deserialize_secret_string")]
+    data: SecretValue<String>,
 }
 
 impl ConnectionNode {
@@ -93,11 +97,13 @@ impl ConnectionNode {
             .ok_or_else(|| RpcError::new("connection-error", "Connection in use"))?;
 
         let (data, sw) = c
-            .send_and_receive(&apdu)
+            .send_and_receive(apdu.expose_secret())
             .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
+        let data = SecretValue::new(data);
+        let data_hex = SecretValue::new(data.expose_secret().encode_hex::<String>());
 
         Ok(RpcResponse::new(json!({
-            "data": data.encode_hex::<String>(),
+            "data": data_hex.expose_secret(),
             "sw": sw,
         })))
     }
@@ -109,11 +115,10 @@ impl ConnectionNode {
         cancel: &AtomicBool,
     ) -> Result<RpcResponse, RpcError> {
         let params: CtapCallParams = parse_params(params)?;
-        let data = decode_hex_param(
-            "data",
-            params.data.as_deref().unwrap_or(""),
-            MAX_CTAP_DATA_LEN,
-        )?;
+        let data = match &params.data {
+            Some(data) => decode_hex_param("data", data, MAX_CTAP_DATA_LEN)?,
+            None => SecretValue::new(Vec::new()),
+        };
 
         let ConnType::Fido(conn) = &self.conn_type else {
             return Err(RpcError::new(
@@ -134,14 +139,16 @@ impl ConnectionNode {
         let response = c
             .call(
                 params.cmd,
-                &data,
+                data.expose_secret(),
                 Some(&mut on_keepalive),
                 Some(&is_cancelled),
             )
             .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
+        let response = SecretValue::new(response);
+        let response_hex = SecretValue::new(response.expose_secret().encode_hex::<String>());
 
         Ok(RpcResponse::new(json!({
-            "data": response.encode_hex::<String>(),
+            "data": response_hex.expose_secret(),
         })))
     }
 
@@ -160,9 +167,11 @@ impl ConnectionNode {
         let data = c
             .otp_receive()
             .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
+        let data = SecretValue::new(data);
+        let data_hex = SecretValue::new(data.expose_secret().encode_hex::<String>());
 
         Ok(RpcResponse::new(json!({
-            "data": data.encode_hex::<String>(),
+            "data": data_hex.expose_secret(),
         })))
     }
 
@@ -181,7 +190,7 @@ impl ConnectionNode {
             .as_mut()
             .ok_or_else(|| RpcError::new("connection-error", "Connection in use"))?;
 
-        c.otp_send(&data)
+        c.otp_send(data.expose_secret())
             .map_err(|e| RpcError::new("device-error", format!("{e}")))?;
 
         Ok(RpcResponse::new(json!({})))
@@ -296,7 +305,28 @@ fn parse_params<T: for<'de> Deserialize<'de>>(params: Value) -> Result<T, RpcErr
     serde_json::from_value(params).map_err(|e| RpcError::invalid_params(e.to_string()))
 }
 
-fn decode_hex_param(name: &str, hex: &str, max_len: usize) -> Result<Vec<u8>, RpcError> {
+fn deserialize_secret_string<'de, D>(deserializer: D) -> Result<SecretValue<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    String::deserialize(deserializer).map(SecretValue::new)
+}
+
+fn deserialize_optional_secret_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<SecretValue<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(|value| value.map(SecretValue::new))
+}
+
+fn decode_hex_param(
+    name: &str,
+    hex: &SecretValue<String>,
+    max_len: usize,
+) -> Result<SecretValue<Vec<u8>>, RpcError> {
+    let hex = hex.expose_secret();
     if hex.len() % 2 != 0 {
         return Err(RpcError::invalid_params(format!(
             "'{name}' must contain an even number of hex digits"
@@ -308,7 +338,9 @@ fn decode_hex_param(name: &str, hex: &str, max_len: usize) -> Result<Vec<u8>, Rp
             "'{name}' is too large: {len} > {max_len} bytes"
         )));
     }
-    Vec::from_hex(hex).map_err(|e| RpcError::invalid_params(format!("invalid '{name}': {e}")))
+    Vec::from_hex(hex)
+        .map(SecretValue::new)
+        .map_err(|e| RpcError::invalid_params(format!("invalid '{name}': {e}")))
 }
 
 fn lock_conn<T>(conn: &SharedConn<T>) -> Result<std::sync::MutexGuard<'_, Option<T>>, RpcError> {
