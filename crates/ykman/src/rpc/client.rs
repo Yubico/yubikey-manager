@@ -18,7 +18,7 @@ enum Transport {
         reader: BufReader<Box<dyn Read + Send>>,
         writer: Arc<Mutex<Box<dyn Write + Send>>>,
         #[cfg(target_os = "windows")]
-        reader_handle: windows_sys::Win32::Foundation::HANDLE,
+        reader_handle: usize,
     },
 }
 
@@ -28,8 +28,10 @@ pub struct RpcClient {
 }
 
 /// Thread-safe writer handle for sending cancel signals from the Ctrl+C handler.
+#[cfg(not(target_os = "windows"))]
 struct CancelWriter(Arc<Mutex<Box<dyn Write + Send>>>);
 
+#[cfg(not(target_os = "windows"))]
 impl CancelWriter {
     fn send_cancel(&self, data: &[u8]) {
         if let Ok(mut w) = self.0.lock() {
@@ -69,7 +71,7 @@ impl RpcClient {
             let reader_file = file.try_clone().map_err(|e| {
                 RpcCallError::Transport(format!("Failed to clone pipe handle: {e}"))
             })?;
-            let reader_handle = reader_file.as_raw_handle() as _;
+            let reader_handle = reader_file.as_raw_handle() as usize;
 
             let reader: Box<dyn Read + Send> = Box::new(reader_file);
             let writer: Box<dyn Write + Send> = Box::new(file);
@@ -151,6 +153,7 @@ impl RpcClient {
         Ok(())
     }
 
+    #[cfg(not(target_os = "windows"))]
     fn cancel_writer(&self) -> CancelWriter {
         let Transport::Stream { writer, .. } = &self.transport;
         CancelWriter(writer.clone())
@@ -291,7 +294,7 @@ impl RpcClient {
         let mut available = 0u32;
         let ok = unsafe {
             PeekNamedPipe(
-                *reader_handle,
+                *reader_handle as windows_sys::Win32::Foundation::HANDLE,
                 std::ptr::null_mut(),
                 0,
                 std::ptr::null_mut(),
