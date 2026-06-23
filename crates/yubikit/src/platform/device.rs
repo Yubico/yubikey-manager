@@ -10,17 +10,20 @@ use std::thread;
 use std::time::Duration;
 
 use crate::core::Transport;
-#[cfg(any(test, not(feature = "hid")))]
+#[cfg(test)]
 use crate::core::Version;
-use crate::device::{
-    DeviceError, ReinsertStatus, YubiKeyDevice, apply_device_info_fixups, read_info_ccid,
-    read_info_fido, read_info_otp,
-};
+#[cfg(feature = "pcsc")]
+use crate::device::read_info_ccid;
+use crate::device::{DeviceError, ReinsertStatus, YubiKeyDevice};
+#[cfg(feature = "hid")]
+use crate::device::{read_info_fido, read_info_otp};
 
 #[cfg(test)]
-use crate::device::{fido_only, is_preview};
+use crate::device::{apply_device_info_fixups, fido_only, is_preview};
 use crate::fido::FidoConnection;
-use crate::management::{Capability, DeviceInfo, FormFactor, UsbInterface};
+#[cfg(test)]
+use crate::management::FormFactor;
+use crate::management::{Capability, DeviceInfo, UsbInterface};
 use crate::otp::OtpConnection;
 use crate::smartcard::SmartCardConnection;
 
@@ -39,17 +42,13 @@ use super::setupdi::list_setupdi_devices;
 #[cfg(not(feature = "hid"))]
 #[derive(Debug, Clone)]
 struct HidDeviceInfo {
-    path: String,
     pid: u16,
-    version: Version,
 }
 
 #[cfg(not(feature = "hid"))]
 #[derive(Debug, Clone)]
 struct FidoDeviceInfo {
-    path: String,
     pid: u16,
-    version: Version,
 }
 
 // From conversions for platform-specific errors into DeviceError
@@ -204,6 +203,7 @@ impl LocalYubiKeyDevice {
 
     /// Absorb transport paths from another `LocalYubiKeyDevice` representing the
     /// same physical key. Fills in any `None` fields from `other`.
+    #[cfg(any(feature = "hid", test))]
     fn merge_from(&mut self, other: LocalYubiKeyDevice) {
         if self.reader_name.is_none() {
             self.reader_name = other.reader_name;
@@ -218,8 +218,7 @@ impl LocalYubiKeyDevice {
             self.pid = other.pid;
         }
         // Prefer the info with a serial number, or with a higher firmware
-        // version (synthesized info from OTP may report 3.0.0 instead of the
-        // real version).
+        // version.
         if self.info.serial.is_none() && other.info.serial.is_some()
             || self.info.serial == other.info.serial && other.info.version > self.info.version
         {
@@ -778,7 +777,7 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<LocalYubiKeyDevice>,
     for (&pid, &count) in &pid_counts {
         if count <= 1 {
             // Single device for this PID — open one connection only.
-            if let Some(dev) = open_single_usb(pid, &usb_readers, &otp_devs, &fido_devs) {
+            if let Some(dev) = open_single_usb(pid, &usb_readers, &otp_devs, &fido_devs)? {
                 devices.push(dev);
             }
         } else {
@@ -804,11 +803,12 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<LocalYubiKeyDevice>,
                 }
             }
 
+            #[cfg(feature = "hid")]
             if want_otp {
                 let mut otp_group = Vec::new();
                 for hid in &otp_devs {
                     if hid.pid == pid {
-                        let info = read_info_otp_device(hid);
+                        let info = read_info_otp_device(hid)?;
                         otp_group.push(LocalYubiKeyDevice {
                             reader_name: None,
                             hid_path: Some(hid.path.clone()),
@@ -826,11 +826,12 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<LocalYubiKeyDevice>,
                 }
             }
 
+            #[cfg(feature = "hid")]
             if want_fido {
                 let mut fido_group = Vec::new();
                 for fido in &fido_devs {
                     if fido.pid == pid {
-                        let info = read_info_fido_device(fido);
+                        let info = read_info_fido_device(fido)?;
                         fido_group.push(LocalYubiKeyDevice {
                             reader_name: None,
                             hid_path: None,
@@ -884,60 +885,99 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<LocalYubiKeyDevice>,
 fn open_single_usb(
     pid: u16,
     _usb_readers: &[(u16, String)],
-    otp_devs: &[HidDeviceInfo],
-    fido_devs: &[FidoDeviceInfo],
-) -> Option<LocalYubiKeyDevice> {
+    _otp_devs: &[HidDeviceInfo],
+    _fido_devs: &[FidoDeviceInfo],
+) -> Result<Option<LocalYubiKeyDevice>, DeviceError> {
     #[cfg(feature = "pcsc")]
     let reader = _usb_readers.iter().find(|(p, _)| *p == pid).map(|(_, r)| r);
-    let otp = otp_devs.iter().find(|h| h.pid == pid);
-    let fido = fido_devs.iter().find(|f| f.pid == pid);
+    #[cfg(feature = "hid")]
+    let otp = _otp_devs.iter().find(|h| h.pid == pid);
+    #[cfg(feature = "hid")]
+    let fido = _fido_devs.iter().find(|f| f.pid == pid);
+    let mut last_err = None;
 
     // Try CCID first (gives the most complete info).
     #[cfg(feature = "pcsc")]
-    if let Some(reader_name) = reader
-        && let Ok((info, transport)) = read_info_reader(reader_name)
-    {
-        return Some(LocalYubiKeyDevice {
-            reader_name: Some(reader_name.clone()),
-            hid_path: otp.map(|h| h.path.clone()),
-            fido_path: fido.map(|f| f.path.clone()),
-            pid: Some(pid),
-            transport,
-            info,
-        });
+    if let Some(reader_name) = reader {
+        match read_info_reader(reader_name) {
+            Ok((info, transport)) => {
+                return Ok(Some(LocalYubiKeyDevice {
+                    reader_name: Some(reader_name.clone()),
+                    hid_path: {
+                        #[cfg(feature = "hid")]
+                        {
+                            otp.map(|h| h.path.clone())
+                        }
+                        #[cfg(not(feature = "hid"))]
+                        {
+                            None
+                        }
+                    },
+                    fido_path: {
+                        #[cfg(feature = "hid")]
+                        {
+                            fido.map(|f| f.path.clone())
+                        }
+                        #[cfg(not(feature = "hid"))]
+                        {
+                            None
+                        }
+                    },
+                    pid: Some(pid),
+                    transport,
+                    info,
+                }));
+            }
+            Err(e) => last_err = Some(e),
+        }
     }
 
     // Fall back to OTP HID.
+    #[cfg(feature = "hid")]
     if let Some(hid) = otp {
-        let info = read_info_otp_device(hid);
-        return Some(LocalYubiKeyDevice {
-            reader_name: None,
-            hid_path: Some(hid.path.clone()),
-            fido_path: fido.map(|f| f.path.clone()),
-            pid: Some(pid),
-            transport: Transport::Usb,
-            info,
-        });
+        match read_info_otp_device(hid) {
+            Ok(info) => {
+                return Ok(Some(LocalYubiKeyDevice {
+                    reader_name: None,
+                    hid_path: Some(hid.path.clone()),
+                    fido_path: fido.map(|f| f.path.clone()),
+                    pid: Some(pid),
+                    transport: Transport::Usb,
+                    info,
+                }));
+            }
+            Err(e) => last_err = Some(e),
+        }
     }
 
     // Fall back to FIDO HID.
+    #[cfg(feature = "hid")]
     if let Some(f) = fido {
-        let info = read_info_fido_device(f);
-        return Some(LocalYubiKeyDevice {
-            reader_name: None,
-            hid_path: None,
-            fido_path: Some(f.path.clone()),
-            pid: Some(pid),
-            transport: Transport::Usb,
-            info,
-        });
+        match read_info_fido_device(f) {
+            Ok(info) => {
+                return Ok(Some(LocalYubiKeyDevice {
+                    reader_name: None,
+                    hid_path: None,
+                    fido_path: Some(f.path.clone()),
+                    pid: Some(pid),
+                    transport: Transport::Usb,
+                    info,
+                }));
+            }
+            Err(e) => last_err = Some(e),
+        }
     }
 
-    None
+    if let Some(e) = last_err {
+        Err(e)
+    } else {
+        Ok(None)
+    }
 }
 
 /// Merge `incoming` partial devices into `base`, combining entries that
 /// represent the same physical YubiKey.
+#[cfg(any(feature = "hid", test))]
 fn merge_devices(base: &mut Vec<LocalYubiKeyDevice>, incoming: Vec<LocalYubiKeyDevice>) {
     // Count how many devices per PID across both sets.
     let mut pid_counts: HashMap<u16, usize> = HashMap::new();
@@ -995,82 +1035,6 @@ pub fn name_from_pid(pid: u16) -> &'static str {
     }
 }
 
-/// Build a minimal synthetic [`DeviceInfo`] for an OTP HID device.
-fn synthesize_info_otp(hid: &HidDeviceInfo) -> DeviceInfo {
-    use std::collections::HashMap;
-
-    let version = hid.version;
-    let mut supported = HashMap::new();
-    supported.insert(Transport::Usb, Capability::OTP);
-
-    let mut info = DeviceInfo {
-        config: crate::management::DeviceConfig {
-            enabled_capabilities: HashMap::new(),
-            auto_eject_timeout: None,
-            challenge_response_timeout: None,
-            device_flags: None,
-            nfc_restricted: None,
-        },
-        serial: None,
-        version,
-        form_factor: FormFactor::Unknown,
-        supported_capabilities: supported,
-        is_locked: false,
-        is_fips: false,
-        is_sky: is_sky_pid(hid.pid),
-        part_number: None,
-        fips_capable: Capability::NONE,
-        fips_approved: Capability::NONE,
-        pin_complexity: false,
-        reset_blocked: Capability::NONE,
-        fps_version: None,
-        stm_version: None,
-        version_qualifier: crate::management::VersionQualifier::final_release(version),
-    };
-    apply_device_info_fixups(&mut info);
-    info
-}
-
-/// Build a minimal synthetic [`DeviceInfo`] for a FIDO HID device.
-///
-/// Used when reading DeviceInfo over CTAP fails (e.g. CTAP1-only devices).
-fn synthesize_info_fido(fido: &FidoDeviceInfo) -> DeviceInfo {
-    use std::collections::HashMap;
-
-    let version = fido.version;
-    let mut supported = HashMap::new();
-    // Only U2F is guaranteed; if CTAP2 were available, read_info_fido would
-    // have succeeded and this function wouldn't be called.
-    supported.insert(Transport::Usb, Capability::U2F);
-
-    let mut info = DeviceInfo {
-        config: crate::management::DeviceConfig {
-            enabled_capabilities: HashMap::new(),
-            auto_eject_timeout: None,
-            challenge_response_timeout: None,
-            device_flags: None,
-            nfc_restricted: None,
-        },
-        serial: None,
-        version,
-        form_factor: FormFactor::Unknown,
-        supported_capabilities: supported,
-        is_locked: false,
-        is_fips: false,
-        is_sky: is_sky_pid(fido.pid),
-        part_number: None,
-        fips_capable: Capability::NONE,
-        fips_approved: Capability::NONE,
-        pin_complexity: false,
-        reset_blocked: Capability::NONE,
-        fps_version: None,
-        stm_version: None,
-        version_qualifier: crate::management::VersionQualifier::final_release(version),
-    };
-    apply_device_info_fixups(&mut info);
-    info
-}
-
 // ---------------------------------------------------------------------------
 // read_info_reader
 // ---------------------------------------------------------------------------
@@ -1090,45 +1054,21 @@ fn read_info_reader(reader_name: &str) -> Result<(DeviceInfo, Transport), Device
 }
 
 /// Open an OTP HID device and read [`DeviceInfo`].
-///
-/// Falls back to synthetic info on failure.
-fn read_info_otp_device(hid: &HidDeviceInfo) -> DeviceInfo {
-    #[cfg(not(feature = "hid"))]
-    {
-        synthesize_info_otp(hid)
-    }
-    #[cfg(feature = "hid")]
-    {
-        HidOtpConnection::new(&hid.path)
-            .ok()
-            .and_then(|conn| read_info_otp(conn).ok())
-            .map(|(info, _)| info)
-            .unwrap_or_else(|| {
-                log::debug!("OTP read_info failed for {}, synthesizing", hid.path);
-                synthesize_info_otp(hid)
-            })
-    }
+#[cfg(feature = "hid")]
+fn read_info_otp_device(hid: &HidDeviceInfo) -> Result<DeviceInfo, DeviceError> {
+    let conn = HidOtpConnection::new(&hid.path)?;
+    read_info_otp(conn)
+        .map(|(info, _)| info)
+        .map_err(|(e, _)| e)
 }
 
 /// Open a FIDO HID device and read [`DeviceInfo`].
-///
-/// Falls back to synthetic info on failure.
-fn read_info_fido_device(fido: &FidoDeviceInfo) -> DeviceInfo {
-    #[cfg(not(feature = "hid"))]
-    {
-        synthesize_info_fido(fido)
-    }
-    #[cfg(feature = "hid")]
-    {
-        HidFidoConnection::open(fido)
-            .ok()
-            .and_then(|conn| read_info_fido(conn).ok())
-            .map(|(info, _)| info)
-            .unwrap_or_else(|| {
-                log::debug!("FIDO read_info failed for {}, synthesizing", fido.path);
-                synthesize_info_fido(fido)
-            })
-    }
+#[cfg(feature = "hid")]
+fn read_info_fido_device(fido: &FidoDeviceInfo) -> Result<DeviceInfo, DeviceError> {
+    let conn = HidFidoConnection::open(fido)?;
+    read_info_fido(conn)
+        .map(|(info, _)| info)
+        .map_err(|(e, _)| e)
 }
 
 /// Select a YubiKey by touch via CTAP2 authenticator selection.
@@ -1139,111 +1079,104 @@ fn read_info_fido_device(fido: &FidoDeviceInfo) -> DeviceInfo {
 ///
 /// The returned [`LocalYubiKeyDevice`] includes full device info from all
 /// available transports (CCID, OTP, FIDO), merged as in [`list_devices`].
+#[cfg(feature = "hid")]
 pub fn select_fido(cancel: Option<&dyn Fn() -> bool>) -> Result<LocalYubiKeyDevice, DeviceError> {
-    #[cfg(not(feature = "hid"))]
-    {
-        let _ = cancel;
-        Err(DeviceError::UnsupportedFeature("hid"))
-    }
-    #[cfg(feature = "hid")]
-    {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
 
-        use crate::ctap::CtapSession;
-        use crate::ctap2::Ctap2Session;
+    use crate::ctap::CtapSession;
+    use crate::ctap2::Ctap2Session;
 
-        let is_cancelled = || cancel.is_some_and(|f| f());
+    let is_cancelled = || cancel.is_some_and(|f| f());
 
-        let fido_devs = list_fido_devices()?;
+    let fido_devs = list_fido_devices()?;
 
-        let done = Arc::new(AtomicBool::new(false));
-        let selected_path: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let mut active: Vec<(String, thread::JoinHandle<()>)> = Vec::new();
+    let done = Arc::new(AtomicBool::new(false));
+    let selected_path: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let mut active: Vec<(String, thread::JoinHandle<()>)> = Vec::new();
 
-        let spawn_select = |info: FidoDeviceInfo,
-                            done: Arc<AtomicBool>,
-                            selected: Arc<Mutex<Option<String>>>|
-         -> thread::JoinHandle<()> {
-            thread::spawn(move || {
-                let Ok(conn) = HidFidoConnection::open(&info) else {
-                    return;
-                };
-                let Ok(ctap) = CtapSession::new_fido(conn) else {
-                    return;
-                };
-                let Ok(mut session) = Ctap2Session::new(ctap) else {
-                    return;
-                };
-                let d = done.clone();
-                if session
-                    .selection(None, Some(&move || d.load(Ordering::Relaxed)))
-                    .is_ok()
-                    && !done.swap(true, Ordering::Relaxed)
-                {
-                    *selected.lock().unwrap() = Some(info.path);
-                }
-            })
-        };
-
-        for dev in fido_devs {
-            let path = dev.path.clone();
-            let handle = spawn_select(dev, done.clone(), selected_path.clone());
-            active.push((path, handle));
-        }
-
-        while !done.load(Ordering::Relaxed) && !is_cancelled() {
-            thread::sleep(Duration::from_millis(250));
-
-            // Remove finished threads so their paths can be re-used
-            active.retain(|(_, h)| !h.is_finished());
-
-            if let Ok(devs) = list_fido_devices() {
-                for dev in devs {
-                    if !active.iter().any(|(p, _)| *p == dev.path) {
-                        let path = dev.path.clone();
-                        let handle = spawn_select(dev, done.clone(), selected_path.clone());
-                        active.push((path, handle));
-                    }
-                }
-            }
-        }
-
-        done.store(true, Ordering::Relaxed);
-
-        for (_, h) in active {
-            let _ = h.join();
-        }
-
-        if is_cancelled() {
-            return Err(DeviceError::Cancelled);
-        }
-
-        let path = selected_path
-            .lock()
-            .unwrap()
-            .take()
-            .ok_or(DeviceError::NoDeviceFound)?;
-
-        // Find the selected device in a full enumeration
-        let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
-        let devices = list_devices(all)?;
-
-        // Read device info from the selected FIDO path to identify it
-        let fido_devs = list_fido_devices()?;
-        if let Some(fido_info) = fido_devs.iter().find(|d| d.path == path) {
-            let info = read_info_fido_device(fido_info);
-            // Match by serial and version
-            if let Some(dev) = devices
-                .into_iter()
-                .find(|d| d.info().serial == info.serial && d.info().version == info.version)
+    let spawn_select = |info: FidoDeviceInfo,
+                        done: Arc<AtomicBool>,
+                        selected: Arc<Mutex<Option<String>>>|
+     -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            let Ok(conn) = HidFidoConnection::open(&info) else {
+                return;
+            };
+            let Ok(ctap) = CtapSession::new_fido(conn) else {
+                return;
+            };
+            let Ok(mut session) = Ctap2Session::new(ctap) else {
+                return;
+            };
+            let d = done.clone();
+            if session
+                .selection(None, Some(&move || d.load(Ordering::Relaxed)))
+                .is_ok()
+                && !done.swap(true, Ordering::Relaxed)
             {
-                return Ok(dev);
+                *selected.lock().unwrap() = Some(info.path);
+            }
+        })
+    };
+
+    for dev in fido_devs {
+        let path = dev.path.clone();
+        let handle = spawn_select(dev, done.clone(), selected_path.clone());
+        active.push((path, handle));
+    }
+
+    while !done.load(Ordering::Relaxed) && !is_cancelled() {
+        thread::sleep(Duration::from_millis(250));
+
+        // Remove finished threads so their paths can be re-used
+        active.retain(|(_, h)| !h.is_finished());
+
+        if let Ok(devs) = list_fido_devices() {
+            for dev in devs {
+                if !active.iter().any(|(p, _)| *p == dev.path) {
+                    let path = dev.path.clone();
+                    let handle = spawn_select(dev, done.clone(), selected_path.clone());
+                    active.push((path, handle));
+                }
             }
         }
-
-        Err(DeviceError::NoDeviceFound)
     }
+
+    done.store(true, Ordering::Relaxed);
+
+    for (_, h) in active {
+        let _ = h.join();
+    }
+
+    if is_cancelled() {
+        return Err(DeviceError::Cancelled);
+    }
+
+    let path = selected_path
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or(DeviceError::NoDeviceFound)?;
+
+    // Find the selected device in a full enumeration
+    let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
+    let devices = list_devices(all)?;
+
+    // Read device info from the selected FIDO path to identify it
+    let fido_devs = list_fido_devices()?;
+    if let Some(fido_info) = fido_devs.iter().find(|d| d.path == path) {
+        let info = read_info_fido_device(fido_info)?;
+        // Match by serial and version
+        if let Some(dev) = devices
+            .into_iter()
+            .find(|d| d.info().serial == info.serial && d.info().version == info.version)
+        {
+            return Ok(dev);
+        }
+    }
+
+    Err(DeviceError::NoDeviceFound)
 }
 
 // ---------------------------------------------------------------------------

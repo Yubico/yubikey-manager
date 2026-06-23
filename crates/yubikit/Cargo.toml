@@ -98,46 +98,57 @@ required-features = ["hid"]
 [[example]]
 name = "ctap2_selection"
 path = "examples/ctap2_selection.rs"
+required-features = ["pcsc", "hid"]
 
 [[example]]
 name = "device_info"
 path = "examples/device_info.rs"
+required-features = ["pcsc", "hid"]
 
 [[example]]
 name = "list_devices"
 path = "examples/list_devices.rs"
+required-features = ["pcsc", "hid"]
 
 [[example]]
 name = "oath_list"
 path = "examples/oath_list.rs"
+required-features = ["pcsc", "hid"]
 
 [[example]]
 name = "reinsert"
 path = "examples/reinsert.rs"
+required-features = ["pcsc", "hid"]
 
 [[example]]
 name = "webauthn"
 path = "examples/webauthn.rs"
+required-features = ["hid"]
 
 [[example]]
 name = "webauthn_cred_blob"
 path = "examples/webauthn_cred_blob.rs"
+required-features = ["hid"]
 
 [[example]]
 name = "webauthn_cred_protect"
 path = "examples/webauthn_cred_protect.rs"
+required-features = ["hid"]
 
 [[example]]
 name = "webauthn_cred_props"
 path = "examples/webauthn_cred_props.rs"
+required-features = ["hid"]
 
 [[example]]
 name = "webauthn_large_blob"
 path = "examples/webauthn_large_blob.rs"
+required-features = ["hid"]
 
 [[example]]
 name = "webauthn_prf"
 path = "examples/webauthn_prf.rs"
+required-features = ["hid"]
 
 [lints]
 workspace = true
