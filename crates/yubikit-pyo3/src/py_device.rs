@@ -37,7 +37,7 @@ fn device_err(e: device::DeviceError) -> PyErr {
 pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     // Try OTP connection
     if let Ok(native) = extract_otp_connection(connection) {
-        match platform_device::read_info_otp(native) {
+        match device::read_info_otp(native) {
             Ok((info, conn)) => {
                 restore_otp_connection(connection, conn)?;
                 return device_info_to_dict(py, &info);
@@ -53,7 +53,7 @@ pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<Py<P
 
     // Try FIDO connection
     if let Ok(native) = extract_fido_connection(connection) {
-        match platform_device::read_info_fido(native) {
+        match device::read_info_fido(native) {
             Ok((info, conn)) => {
                 restore_fido_connection(connection, conn)?;
                 return device_info_to_dict(py, &info);
@@ -73,7 +73,7 @@ pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<Py<P
             "Expected a SmartCardConnection, OtpConnection, or FidoConnection",
         )
     })?;
-    match platform_device::read_info_ccid(conn) {
+    match device::read_info_ccid(conn) {
         Ok((info, conn)) => {
             restore_smartcard_connection(connection, conn)?;
             device_info_to_dict(py, &info)
