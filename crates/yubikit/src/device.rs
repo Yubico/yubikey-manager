@@ -596,3 +596,336 @@ pub(crate) fn apply_device_info_fixups(info: &mut DeviceInfo) {
             .insert(Transport::Usb, usb_sup);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn make_info(
+        version: Version,
+        form_factor: FormFactor,
+        is_sky: bool,
+        is_fips: bool,
+        serial: Option<u32>,
+        nfc: bool,
+        usb_cap: Capability,
+        pin_complexity: bool,
+    ) -> DeviceInfo {
+        let mut supported = HashMap::new();
+        supported.insert(Transport::Usb, usb_cap);
+        if nfc {
+            supported.insert(Transport::Nfc, usb_cap);
+        }
+        DeviceInfo {
+            config: DeviceConfig {
+                enabled_capabilities: HashMap::new(),
+                auto_eject_timeout: None,
+                challenge_response_timeout: None,
+                device_flags: None,
+                nfc_restricted: None,
+            },
+            serial,
+            version,
+            form_factor,
+            supported_capabilities: supported,
+            is_locked: false,
+            is_fips,
+            is_sky,
+            part_number: None,
+            fips_capable: Capability::NONE,
+            fips_approved: Capability::NONE,
+            pin_complexity,
+            reset_blocked: Capability::NONE,
+            fps_version: None,
+            stm_version: None,
+            version_qualifier: crate::management::VersionQualifier::final_release(version),
+        }
+    }
+
+    #[test]
+    fn test_neo() {
+        let info = make_info(
+            Version(3, 5, 0),
+            FormFactor::Unknown,
+            false,
+            false,
+            Some(123),
+            true,
+            Capability(Capability::OTP.0 | Capability::OATH.0),
+            false,
+        );
+        assert_eq!(get_name(&info), "YubiKey NEO");
+    }
+
+    #[test]
+    fn test_yk4() {
+        let info = make_info(
+            Version(4, 3, 7),
+            FormFactor::UsbAKeychain,
+            false,
+            false,
+            Some(456),
+            false,
+            Capability(Capability::OTP.0 | Capability::PIV.0 | Capability::OATH.0),
+            false,
+        );
+        assert_eq!(get_name(&info), "YubiKey 4");
+    }
+
+    #[test]
+    fn test_yk4_fips() {
+        let info = make_info(
+            Version(4, 4, 5),
+            FormFactor::UsbAKeychain,
+            false,
+            true,
+            Some(789),
+            false,
+            Capability(Capability::OTP.0 | Capability::PIV.0),
+            false,
+        );
+        assert_eq!(get_name(&info), "YubiKey FIPS (4 Series)");
+    }
+
+    #[test]
+    fn test_yk5_nfc() {
+        let info = make_info(
+            Version(5, 2, 4),
+            FormFactor::UsbAKeychain,
+            false,
+            false,
+            Some(100),
+            true,
+            Capability(Capability::OTP.0 | Capability::PIV.0 | Capability::FIDO2.0),
+            false,
+        );
+        assert_eq!(get_name(&info), "YubiKey 5 NFC");
+    }
+
+    #[test]
+    fn test_yk5c_nano() {
+        let info = make_info(
+            Version(5, 4, 3),
+            FormFactor::UsbCNano,
+            false,
+            false,
+            Some(200),
+            false,
+            Capability(Capability::OTP.0 | Capability::PIV.0),
+            false,
+        );
+        assert_eq!(get_name(&info), "YubiKey 5C Nano");
+    }
+
+    #[test]
+    fn test_yk5ci() {
+        let info = make_info(
+            Version(5, 2, 4),
+            FormFactor::UsbCLightning,
+            false,
+            false,
+            Some(300),
+            false,
+            Capability(Capability::OTP.0 | Capability::PIV.0),
+            false,
+        );
+        assert_eq!(get_name(&info), "YubiKey 5Ci");
+    }
+
+    #[test]
+    fn test_security_key_nfc() {
+        let info = make_info(
+            Version(5, 2, 8),
+            FormFactor::UsbAKeychain,
+            true,
+            false,
+            None,
+            true,
+            Capability(Capability::U2F.0 | Capability::FIDO2.0),
+            false,
+        );
+        assert_eq!(get_name(&info), "Security Key NFC");
+    }
+
+    #[test]
+    fn test_bio_fido() {
+        let info = make_info(
+            Version(5, 5, 6),
+            FormFactor::UsbABio,
+            false,
+            false,
+            Some(400),
+            false,
+            Capability(Capability::U2F.0 | Capability::FIDO2.0),
+            false,
+        );
+        assert_eq!(get_name(&info), "YubiKey Bio - FIDO Edition");
+    }
+
+    #[test]
+    fn test_bio_multi_protocol() {
+        let info = make_info(
+            Version(5, 6, 0),
+            FormFactor::UsbCBio,
+            false,
+            false,
+            Some(500),
+            false,
+            Capability(Capability::PIV.0 | Capability::FIDO2.0),
+            false,
+        );
+        assert_eq!(get_name(&info), "YubiKey C Bio - Multi-protocol Edition");
+    }
+
+    #[test]
+    fn test_preview() {
+        let info = make_info(
+            Version(5, 0, 1),
+            FormFactor::UsbAKeychain,
+            false,
+            false,
+            Some(600),
+            false,
+            Capability(Capability::OTP.0 | Capability::PIV.0),
+            false,
+        );
+        assert_eq!(get_name(&info), "YubiKey Preview");
+    }
+
+    #[test]
+    fn test_sky_enterprise() {
+        let info = make_info(
+            Version(5, 4, 3),
+            FormFactor::UsbAKeychain,
+            true,
+            false,
+            Some(700),
+            false,
+            Capability(Capability::U2F.0 | Capability::FIDO2.0),
+            false,
+        );
+        assert_eq!(get_name(&info), "Security Key A - Enterprise Edition");
+    }
+
+    #[test]
+    fn test_sky_nfc_inferred() {
+        let mut info = make_info(
+            Version(5, 1, 2),
+            FormFactor::UsbAKeychain,
+            false,
+            false,
+            None,
+            true,
+            Capability(Capability::U2F.0 | Capability::FIDO2.0),
+            false,
+        );
+        apply_device_info_fixups(&mut info);
+        assert!(info.is_sky);
+        assert_eq!(get_name(&info), "Security Key NFC");
+    }
+
+    #[test]
+    fn test_sky_inference_not_applied_with_serial() {
+        let mut info = make_info(
+            Version(5, 1, 2),
+            FormFactor::UsbAKeychain,
+            false,
+            false,
+            Some(123),
+            true,
+            Capability(Capability::U2F.0 | Capability::FIDO2.0),
+            false,
+        );
+        apply_device_info_fixups(&mut info);
+        assert!(!info.is_sky);
+    }
+
+    #[test]
+    fn test_yk5a() {
+        let info = make_info(
+            Version(5, 2, 4),
+            FormFactor::UsbAKeychain,
+            false,
+            false,
+            Some(800),
+            false,
+            Capability(Capability::OTP.0 | Capability::PIV.0),
+            false,
+        );
+        assert_eq!(get_name(&info), "YubiKey 5A");
+    }
+
+    #[test]
+    fn test_fido_only() {
+        assert!(fido_only(Capability(
+            Capability::U2F.0 | Capability::FIDO2.0
+        )));
+        assert!(fido_only(Capability::FIDO2));
+        assert!(!fido_only(Capability(
+            Capability::FIDO2.0 | Capability::PIV.0
+        )));
+        assert!(!fido_only(Capability::NONE));
+    }
+
+    #[test]
+    fn test_is_preview() {
+        assert!(is_preview(Version(5, 0, 0)));
+        assert!(is_preview(Version(5, 0, 1)));
+        assert!(!is_preview(Version(5, 1, 0)));
+        assert!(is_preview(Version(5, 2, 0)));
+        assert!(is_preview(Version(5, 2, 2)));
+        assert!(!is_preview(Version(5, 2, 3)));
+        assert!(is_preview(Version(5, 5, 0)));
+        assert!(is_preview(Version(5, 5, 1)));
+        assert!(!is_preview(Version(5, 5, 2)));
+        assert!(!is_preview(Version(5, 4, 0)));
+    }
+
+    #[test]
+    fn test_enhanced_pin() {
+        let info = make_info(
+            Version(5, 7, 0),
+            FormFactor::UsbCKeychain,
+            false,
+            false,
+            Some(900),
+            false,
+            Capability(Capability::OTP.0 | Capability::PIV.0),
+            true,
+        );
+        assert_eq!(get_name(&info), "YubiKey 5C - Enhanced PIN");
+    }
+
+    #[test]
+    fn test_sky_preview_firmware() {
+        let mut info = make_info(
+            Version(5, 0, 2),
+            FormFactor::UsbAKeychain,
+            false,
+            false,
+            None,
+            false,
+            Capability(Capability::U2F.0 | Capability::FIDO2.0),
+            false,
+        );
+        apply_device_info_fixups(&mut info);
+        assert!(info.is_sky);
+        assert_eq!(get_name(&info), "Security Key by Yubico");
+    }
+
+    #[test]
+    fn test_sky_u2f_only() {
+        let info = make_info(
+            Version(0, 0, 0),
+            FormFactor::Unknown,
+            true,
+            false,
+            None,
+            false,
+            Capability::U2F,
+            false,
+        );
+        assert_eq!(get_name(&info), "FIDO U2F Security Key");
+    }
+}

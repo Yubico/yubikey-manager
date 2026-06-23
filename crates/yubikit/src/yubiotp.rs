@@ -49,8 +49,6 @@ use std::fmt;
 use crate::core::Connection;
 use crate::otp::OtpError;
 use crate::otp::calculate_crc;
-#[cfg(test)]
-use crate::otp::check_crc;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 
 /// Re-export of OTP transport types.
@@ -1610,6 +1608,7 @@ impl<T: OtpConnection + Send + 'static> YubiOtpOps<OtpError> for OtpYubiOtp<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::otp::check_crc;
 
     #[test]
     fn test_build_config_size() {
