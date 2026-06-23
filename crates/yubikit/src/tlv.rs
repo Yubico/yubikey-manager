@@ -23,6 +23,9 @@ use thiserror::Error;
 
 use crate::core::int2bytes;
 
+const MAX_TLV_DEPTH: usize = 32;
+const MAX_TAG_BYTES: usize = 4;
+
 /// Error type for TLV parsing operations.
 #[derive(Debug, Error)]
 pub enum TlvError {
@@ -44,10 +47,14 @@ pub enum TlvError {
 
 /// Parsed TLV boundaries: (tag, value_offset, value_length, end_offset).
 pub fn tlv_parse(data: &[u8], offset: usize) -> Result<(u32, usize, usize, usize), TlvError> {
-    tlv_parse_inner(data, offset)
+    tlv_parse_inner(data, offset, 0)
 }
 
-fn tlv_parse_inner(data: &[u8], mut offset: usize) -> Result<(u32, usize, usize, usize), TlvError> {
+fn tlv_parse_inner(
+    data: &[u8],
+    mut offset: usize,
+    depth: usize,
+) -> Result<(u32, usize, usize, usize), TlvError> {
     fn checked_add(a: usize, b: usize) -> Result<usize, TlvError> {
         a.checked_add(b).ok_or(TlvError::InvalidEncoding)
     }
@@ -59,11 +66,18 @@ fn tlv_parse_inner(data: &[u8], mut offset: usize) -> Result<(u32, usize, usize,
     let mut tag = get(offset)? as u32;
     offset += 1;
     if tag & 0x1F == 0x1F {
-        tag = (tag << 8) | get(offset)? as u32;
-        offset += 1;
-        while tag & 0x80 == 0x80 {
-            tag = (tag << 8) | get(offset)? as u32;
+        let mut tag_bytes = 1;
+        loop {
+            if tag_bytes >= MAX_TAG_BYTES {
+                return Err(TlvError::InvalidEncoding);
+            }
+            let next = get(offset)?;
+            tag = (tag << 8) | next as u32;
+            tag_bytes += 1;
             offset += 1;
+            if next & 0x80 == 0 {
+                break;
+            }
         }
     }
 
@@ -71,10 +85,13 @@ fn tlv_parse_inner(data: &[u8], mut offset: usize) -> Result<(u32, usize, usize,
     offset += 1;
 
     let (ln, end) = if ln_byte == 0x80 {
+        if depth >= MAX_TLV_DEPTH {
+            return Err(TlvError::InvalidEncoding);
+        }
         // Indefinite length: scan for 0x0000 terminator
         let mut end = offset;
         while get(end)? != 0 || get(checked_add(end, 1)?)? != 0 {
-            let (_, _, _, next_end) = tlv_parse_inner(data, end)?;
+            let (_, _, _, next_end) = tlv_parse_inner(data, end, depth + 1)?;
             if next_end <= end {
                 return Err(TlvError::InvalidEncoding);
             }
@@ -217,6 +234,31 @@ mod tests {
         assert!(matches!(
             parse_tlv_list(&encoded),
             Err(TlvError::InvalidEncoding | TlvError::IncorrectLength)
+        ));
+    }
+
+    #[test]
+    fn test_tlv_rejects_too_deep_indefinite_nesting() {
+        let mut encoded = Vec::new();
+        for _ in 0..=MAX_TLV_DEPTH {
+            encoded.extend_from_slice(&[0xE0, 0x80]);
+        }
+        for _ in 0..=MAX_TLV_DEPTH {
+            encoded.extend_from_slice(&[0x00, 0x00]);
+        }
+
+        assert!(matches!(
+            tlv_parse(&encoded, 0),
+            Err(TlvError::InvalidEncoding)
+        ));
+    }
+
+    #[test]
+    fn test_tlv_rejects_tags_larger_than_u32() {
+        let encoded = [0x1F, 0x81, 0x82, 0x83, 0x04, 0x00];
+        assert!(matches!(
+            tlv_parse(&encoded, 0),
+            Err(TlvError::InvalidEncoding)
         ));
     }
 

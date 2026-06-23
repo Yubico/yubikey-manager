@@ -22,6 +22,8 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
 
+use zeroize::{Zeroize, Zeroizing};
+
 /// CBOR value type supporting the subset used by CTAP2.
 #[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -55,6 +57,16 @@ impl fmt::Debug for Value {
                 }
                 m.finish()
             }
+        }
+    }
+}
+
+impl Drop for Value {
+    fn drop(&mut self) {
+        match self {
+            Value::Bytes(data) => data.zeroize(),
+            Value::Text(text) => text.zeroize(),
+            Value::Int(_) | Value::Bool(_) | Value::Array(_) | Value::Map(_) => {}
         }
     }
 }
@@ -164,9 +176,9 @@ impl Value {
             }
             Value::Map(entries) => {
                 buf.extend_from_slice(&encode_head(5, entries.len() as u64));
-                let mut encoded: Vec<(Vec<u8>, Vec<u8>)> = entries
+                let mut encoded: Vec<(Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>)> = entries
                     .iter()
-                    .map(|(k, v)| (k.encode(), v.encode()))
+                    .map(|(k, v)| (Zeroizing::new(k.encode()), Zeroizing::new(v.encode())))
                     .collect();
                 encoded.sort_by(|(a, _), (b, _)| canonical_cmp(a, b));
                 for (k, v) in &encoded {

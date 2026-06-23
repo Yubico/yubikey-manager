@@ -196,13 +196,15 @@ impl<C: Connection + 'static> LargeBlobs<C> {
     ) -> Result<Option<Vec<u8>>, Ctap2Error<C::Error>> {
         log::debug!("Reading large blob");
         let array_data = self.read_blob_array()?;
-        let array = parse_blob_array(&array_data)?;
-        for entry in &array {
-            if let Ok(data) = lb_unpack(large_blob_key, entry) {
-                return Ok(Some(data));
+        let blob = with_blob_array(&array_data, |array| {
+            for entry in array {
+                if let Ok(data) = lb_unpack(large_blob_key, entry) {
+                    return Ok(Some(data));
+                }
             }
-        }
-        Ok(None)
+            Ok(None)
+        })?;
+        Ok(blob)
     }
 
     /// Store a blob for a single credential.
@@ -216,9 +218,13 @@ impl<C: Connection + 'static> LargeBlobs<C> {
     ) -> Result<(), Ctap2Error<C::Error>> {
         log::debug!("Writing large blob");
         let array_data = self.read_blob_array()?;
-        let mut entries = parse_blob_array(&array_data)?;
-        // Remove existing entries for this key
-        entries.retain(|entry| lb_unpack(large_blob_key, entry).is_err());
+        let mut entries = with_blob_array(&array_data, |array| {
+            Ok(array
+                .iter()
+                .filter(|entry| lb_unpack(large_blob_key, entry).is_err())
+                .cloned()
+                .collect::<Vec<_>>())
+        })?;
         entries.push(lb_pack(large_blob_key, data)?);
         let encoded = cbor::encode(&Value::Array(entries));
         self.write_blob_array(&encoded)?;
@@ -233,9 +239,16 @@ impl<C: Connection + 'static> LargeBlobs<C> {
     pub fn delete_blob(&mut self, large_blob_key: &[u8]) -> Result<(), Ctap2Error<C::Error>> {
         log::debug!("Deleting large blob");
         let array_data = self.read_blob_array()?;
-        let mut entries = parse_blob_array(&array_data)?;
-        let orig_len = entries.len();
-        entries.retain(|entry| lb_unpack(large_blob_key, entry).is_err());
+        let (entries, orig_len) = with_blob_array(&array_data, |array| {
+            Ok((
+                array
+                    .iter()
+                    .filter(|entry| lb_unpack(large_blob_key, entry).is_err())
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                array.len(),
+            ))
+        })?;
         if entries.len() != orig_len {
             let encoded = cbor::encode(&Value::Array(entries));
             self.write_blob_array(&encoded)?;
@@ -245,21 +258,20 @@ impl<C: Connection + 'static> LargeBlobs<C> {
     }
 }
 
-/// Parse the raw blob array data (CBOR bytes) into a Vec of CBOR Values.
-fn parse_blob_array<E: std::error::Error + Send + Sync + 'static>(
+/// Parse the raw blob array data (CBOR bytes) and borrow the array entries.
+fn with_blob_array<E: std::error::Error + Send + Sync + 'static, T>(
     data: &[u8],
-) -> Result<Vec<Value>, Ctap2Error<E>> {
+    f: impl FnOnce(&[Value]) -> Result<T, Ctap2Error<E>>,
+) -> Result<T, Ctap2Error<E>> {
     if data.is_empty() {
-        return Ok(Vec::new());
+        return f(&[]);
     }
     let value =
         cbor::decode(data).map_err(|e| Ctap2Error::InvalidResponse(format!("CBOR error: {e}")))?;
-    match value {
-        Value::Array(arr) => Ok(arr),
-        _ => Err(Ctap2Error::InvalidResponse(
-            "Large blob array is not a CBOR array".into(),
-        )),
-    }
+    let array = value.as_array().ok_or_else(|| {
+        Ctap2Error::InvalidResponse("Large blob array is not a CBOR array".into())
+    })?;
+    f(array)
 }
 
 /// Associated data for AES-256-GCM: `"blob" || uint64le(orig_size)`.
