@@ -96,6 +96,7 @@ pub struct RpcDeviceSource {
 }
 
 impl RpcDeviceSource {
+    #[cfg(any(target_os = "windows", debug_assertions))]
     fn new(client: RpcClient) -> Self {
         Self {
             client: Arc::new(Mutex::new(client)),

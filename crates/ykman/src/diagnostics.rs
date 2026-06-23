@@ -1094,11 +1094,16 @@ pub fn run_diagnostics() -> DiagnosticsReport {
 // Generic read_info helpers (no platform dependency)
 // ---------------------------------------------------------------------------
 
+#[cfg(any(target_os = "windows", debug_assertions))]
 use yubikit::fido::FidoConnection;
+#[cfg(any(target_os = "windows", debug_assertions))]
 use yubikit::management::ManagementSession;
+#[cfg(any(target_os = "windows", debug_assertions))]
 use yubikit::otp::OtpConnection;
+#[cfg(any(target_os = "windows", debug_assertions))]
 use yubikit::smartcard::SmartCardConnection;
 
+#[cfg(any(target_os = "windows", debug_assertions))]
 fn read_info_ccid_generic<C: SmartCardConnection + Send + 'static>(
     conn: C,
 ) -> Result<(DeviceInfo, C), String> {
@@ -1110,6 +1115,7 @@ fn read_info_ccid_generic<C: SmartCardConnection + Send + 'static>(
     }
 }
 
+#[cfg(any(target_os = "windows", debug_assertions))]
 fn read_info_fido_generic<C: FidoConnection + 'static>(conn: C) -> Result<(DeviceInfo, C), String> {
     let mut session = ManagementSession::new_fido(conn)
         .map_err(|(e, _)| format!("Management session failed: {e}"))?;
@@ -1119,6 +1125,7 @@ fn read_info_fido_generic<C: FidoConnection + 'static>(conn: C) -> Result<(Devic
     }
 }
 
+#[cfg(any(target_os = "windows", debug_assertions))]
 fn read_info_otp_generic<T: OtpConnection + 'static>(
     conn: T,
 ) -> Result<(DeviceInfo, T), Option<T>> {
@@ -1133,6 +1140,7 @@ fn read_info_otp_generic<T: OtpConnection + 'static>(
 // ykman-svc probe
 // ---------------------------------------------------------------------------
 
+#[cfg(any(target_os = "windows", debug_assertions))]
 fn probe_svc() -> ResultOrError<SvcDiag> {
     let mut client = match crate::rpc::client::RpcClient::connect_pipe() {
         Ok(c) => c,
@@ -1160,6 +1168,7 @@ fn probe_svc() -> ResultOrError<SvcDiag> {
     ResultOrError::Ok(SvcDiag { devices })
 }
 
+#[cfg(any(target_os = "windows", debug_assertions))]
 fn probe_svc_device(name: &str, info: &serde_json::Value) -> SvcDeviceDiag {
     use crate::rpc::proxy::RpcDevice;
 
@@ -1206,6 +1215,7 @@ fn probe_svc_device(name: &str, info: &serde_json::Value) -> SvcDeviceDiag {
     }
 }
 
+#[cfg(any(target_os = "windows", debug_assertions))]
 fn parse_svc_management(info: &serde_json::Value) -> ResultOrError<ManagementDiag> {
     let dev_info = match crate::rpc::proxy::RpcDevice::parse_device_info(info) {
         Ok(dev_info) => dev_info,
@@ -1214,6 +1224,7 @@ fn parse_svc_management(info: &serde_json::Value) -> ResultOrError<ManagementDia
     ResultOrError::Ok(management_diag(&dev_info))
 }
 
+#[cfg(any(target_os = "windows", debug_assertions))]
 fn probe_svc_ccid(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcCcidDiag> {
     use yubikit::device::YubiKeyDevice;
 
@@ -1255,6 +1266,7 @@ fn probe_svc_ccid(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcCcidDi
     })
 }
 
+#[cfg(any(target_os = "windows", debug_assertions))]
 fn probe_svc_ctap(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcFidoDiag> {
     use yubikit::device::YubiKeyDevice;
     use yubikit::fido::FidoConnection;
@@ -1316,6 +1328,7 @@ fn probe_svc_ctap(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcFidoDi
     }
 }
 
+#[cfg(any(target_os = "windows", debug_assertions))]
 fn probe_svc_otp(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<OtpDeviceDiag> {
     use yubikit::device::YubiKeyDevice;
 
