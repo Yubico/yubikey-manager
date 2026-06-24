@@ -118,13 +118,13 @@ pub enum OtpAction {
         #[arg(short = 'k', long)]
         key: Option<String>,
         /// Use serial number as public ID
-        #[arg(short = 'S', long)]
+        #[arg(short = 'S', long, conflicts_with = "public_id")]
         serial_public_id: bool,
         /// Generate random private ID
-        #[arg(short = 'g', long)]
+        #[arg(short = 'g', long, conflicts_with = "private_id")]
         generate_private_id: bool,
         /// Generate random key
-        #[arg(short = 'G', long)]
+        #[arg(short = 'G', long, conflicts_with = "key")]
         generate_key: bool,
         #[command(flatten)]
         enter: EnterArgs,
@@ -145,7 +145,7 @@ pub enum OtpAction {
         /// Password to store
         password: Option<String>,
         /// Generate a random password
-        #[arg(short = 'g', long)]
+        #[arg(short = 'g', long, conflicts_with = "password")]
         generate: bool,
         /// Length of generated password
         #[arg(short = 'L', long, default_value_t = 38)]
@@ -175,7 +175,7 @@ pub enum OtpAction {
         #[arg(short = 'T', long)]
         touch: bool,
         /// Generate random key
-        #[arg(short = 'g', long)]
+        #[arg(short = 'g', long, conflicts_with = "key")]
         generate: bool,
         /// Access code (hex)
         #[arg(short = 'A', long)]
@@ -240,7 +240,7 @@ pub enum OtpAction {
         #[arg(long)]
         new_access_code: Option<String>,
         /// Delete access code
-        #[arg(long)]
+        #[arg(long, conflicts_with = "new_access_code", requires = "access_code")]
         delete_access_code: bool,
         /// Current access code (hex)
         #[arg(short = 'A', long)]
@@ -767,22 +767,6 @@ pub fn run_yubiotp(
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
-    if public_id.is_some() && serial_public_id {
-        return Err(CliError(
-            "Invalid options: --public-id conflicts with --serial-public-id.".into(),
-        ));
-    }
-    if private_id.is_some() && generate_private_id {
-        return Err(CliError(
-            "Invalid options: --private-id conflicts with --generate-private-id.".into(),
-        ));
-    }
-    if key.is_some() && generate_key {
-        return Err(CliError(
-            "Invalid options: --key conflicts with --generate-key.".into(),
-        ));
-    }
-
     // Resolve public ID
     let pub_id_bytes: Vec<u8> = if serial_public_id {
         struct GetSerial;
@@ -1062,11 +1046,6 @@ pub fn run_chalresp(
     let acc = access_code.map(parse_access_code).transpose()?;
 
     let key_bytes: Vec<u8> = if let Some(k) = key {
-        if generate {
-            return Err(CliError(
-                "Invalid options: --generate conflicts with KEY argument.".into(),
-            ));
-        }
         if totp {
             parse_b32_key(k).map_err(|_| CliError("Invalid Base32-encoded key.".into()))?
         } else {
@@ -1415,12 +1394,6 @@ pub fn run_settings(
     } = options;
     let slot: Slot = slot.into();
     let cur_acc = access_code.map(parse_access_code).transpose()?;
-
-    if new_access_code.is_some() && delete_access_code {
-        return Err(CliError(
-            "--new-access-code conflicts with --delete-access-code.".into(),
-        ));
-    }
 
     if delete_access_code && access_code.is_none() {
         return Err(CliError(
