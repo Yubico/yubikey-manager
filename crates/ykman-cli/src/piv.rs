@@ -27,7 +27,8 @@ use crate::cli_enums::{
 };
 use crate::scp::ScpParams;
 use crate::util::{
-    CliError, confirm, open_smartcard_session, read_file_or_stdin, write_file_or_stdout,
+    CliError, confirm, open_smartcard_session, print_table, read_file_or_stdin,
+    write_file_or_stdout,
 };
 
 #[derive(Subcommand)]
@@ -765,24 +766,24 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
     let mut session = open_session(dev, scp_params)?;
     let reset_blocked = dev.info().reset_blocked.contains(Capability::PIV);
     let version = session.version();
-    println!("PIV version:              {version}");
 
     let mut warnings = Vec::new();
+    let mut rows = vec![("PIV version", version.to_string())];
 
     // PIN metadata
     match session.get_pin_metadata() {
         Ok(meta) => {
-            println!(
-                "PIN tries remaining:      {}/{}",
-                meta.attempts_remaining, meta.total_attempts
-            );
+            rows.push((
+                "PIN tries remaining",
+                format!("{}/{}", meta.attempts_remaining, meta.total_attempts),
+            ));
             if meta.default_value {
                 warnings.push("WARNING: Using default PIN!");
             }
         }
         Err(_) => {
             if let Ok(n) = session.get_pin_attempts() {
-                println!("PIN tries remaining:      {n}")
+                rows.push(("PIN tries remaining", n.to_string()));
             }
         }
     }
@@ -792,20 +793,20 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
     match session.get_bio_metadata() {
         Ok(meta) => {
             if meta.configured {
-                println!(
-                    "Biometrics:               Configured, {} attempts remaining",
-                    meta.attempts_remaining
-                );
+                rows.push((
+                    "Biometrics",
+                    format!("Configured, {} attempts remaining", meta.attempts_remaining),
+                ));
             } else {
-                println!("Biometrics:               Not configured");
+                rows.push(("Biometrics", "Not configured".to_string()));
             }
         }
         Err(PivError::NotSupported(_)) => {
             if let Ok(meta) = session.get_puk_metadata() {
-                println!(
-                    "PUK tries remaining:      {}/{}",
-                    meta.attempts_remaining, meta.total_attempts
-                );
+                rows.push((
+                    "PUK tries remaining",
+                    format!("{}/{}", meta.attempts_remaining, meta.total_attempts),
+                ));
                 if meta.default_value {
                     warnings.push("WARNING: Using default PUK!");
                 }
@@ -817,28 +818,35 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
     // Management key metadata
     if let Ok(meta) = session.get_management_key_metadata() {
         let algo = format!("{}", meta.key_type);
-        println!("Management key algorithm: {algo}");
+        rows.push(("Management key algorithm", algo));
         if meta.default_value {
             warnings.push("WARNING: Using default Management key!");
         }
     }
+
+    print_table(rows);
 
     // Print collected warnings
     for w in &warnings {
         println!("{w}");
     }
 
-    // CHUID
-    match session.get_object(ObjectId::Chuid) {
-        Ok(data) => println!("CHUID: {}", hex::encode(&data)),
-        Err(_) => println!("CHUID: No data available"),
-    }
-
-    // CCC
-    match session.get_object(ObjectId::Capability) {
-        Ok(data) => println!("CCC:   {}", hex::encode(&data)),
-        Err(_) => println!("CCC:   No data available"),
-    }
+    print_table([
+        (
+            "CHUID",
+            session
+                .get_object(ObjectId::Chuid)
+                .map(|data| hex::encode(&data))
+                .unwrap_or_else(|_| "No data available".to_string()),
+        ),
+        (
+            "CCC",
+            session
+                .get_object(ObjectId::Capability)
+                .map(|data| hex::encode(&data))
+                .unwrap_or_else(|_| "No data available".to_string()),
+        ),
+    ]);
 
     // Slot details
     let slots = [
@@ -858,24 +866,28 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
 
         println!("\nSlot {hex_id} ({name}):");
 
+        let mut rows = Vec::new();
         if let Some(ref meta) = has_key {
-            println!("  Private key type: {}", meta.key_type);
+            rows.push(("  Private key type", meta.key_type.to_string()));
         }
 
         if let Some(ref cert_der) = has_cert {
             // Parse certificate to show details
             if let Some(info) = parse_cert_info(cert_der) {
                 if has_key.is_some() {
-                    println!("  Public key type:  {}", info.key_type);
+                    rows.push(("  Public key type", info.key_type));
                 }
-                println!("  Subject DN:       {}", info.subject);
-                println!("  Issuer DN:        {}", info.issuer);
-                println!("  Serial:           {}", info.serial);
-                println!("  Fingerprint:      {}", info.fingerprint);
-                println!("  Not before:       {}", info.not_before);
-                println!("  Not after:        {}", info.not_after);
+                rows.extend([
+                    ("  Subject DN", info.subject),
+                    ("  Issuer DN", info.issuer),
+                    ("  Serial", info.serial),
+                    ("  Fingerprint", info.fingerprint),
+                    ("  Not before", info.not_before),
+                    ("  Not after", info.not_after),
+                ]);
             }
         }
+        print_table(rows);
     }
 
     if reset_blocked {

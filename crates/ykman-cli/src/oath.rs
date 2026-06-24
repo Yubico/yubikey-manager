@@ -12,7 +12,9 @@ use yubikit::oath::{
 use crate::appdata::AppData;
 use crate::cli_enums::{CliOathAlgorithm, CliOathDigits, CliOathType};
 use crate::scp::{self, ScpParams};
-use crate::util::{CliError, confirm, format_session_error, format_smartcard_connection_error};
+use crate::util::{
+    CliError, confirm, format_session_error, format_smartcard_connection_error, print_table,
+};
 
 #[derive(Subcommand)]
 pub enum OathAction {
@@ -485,15 +487,17 @@ pub fn run_info(
     let session = new_oath_session(dev, &scp_config)?;
     let _ = password; // Not needed for info
     let keys = oath_keys()?;
-    println!("OATH version: {}", session.version());
-    println!(
-        "Password protection: {}",
-        if session.has_key() {
-            "enabled"
-        } else {
-            "disabled"
-        }
-    );
+    print_table([
+        ("OATH version", session.version().to_string()),
+        (
+            "Password protection",
+            if session.has_key() {
+                "enabled".to_string()
+            } else {
+                "disabled".to_string()
+            },
+        ),
+    ]);
     if session.has_key() && keys.contains(session.device_id()) {
         println!("The password for this YubiKey is remembered by ykman.");
     }

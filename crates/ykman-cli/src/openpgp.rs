@@ -6,7 +6,7 @@ use yubikit::openpgp::{KeyRef, KeyStatus, OpenPgpPin, OpenPgpSession, PinPolicy,
 use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
 use crate::scp::ScpParams;
 use crate::util::{
-    CliError, confirm, format_smartcard_connection_error, open_smartcard_session,
+    CliError, confirm, format_smartcard_connection_error, open_smartcard_session, print_table,
     read_file_or_stdin, write_file_or_stdout,
 };
 
@@ -284,29 +284,39 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
     let aid = session.aid().clone();
     let (major, minor) = aid.version();
     // OpenPGP spec version is from the AID, application version is firmware
-    println!("OpenPGP version:            {major}.{minor}");
-    println!("Application version:        {}", session.version());
+    let mut rows = vec![
+        ("OpenPGP version", format!("{major}.{minor}")),
+        ("Application version", session.version().to_string()),
+    ];
 
     if let Ok(pw_status) = session.get_pin_status() {
-        println!(
-            "PIN tries remaining:        {}",
-            pw_status.get_attempts(yubikit::openpgp::Pw::User),
-        );
-        println!(
-            "Reset code tries remaining: {}",
-            pw_status.get_attempts(yubikit::openpgp::Pw::Reset),
-        );
-        println!(
-            "Admin PIN tries remaining:  {}",
-            pw_status.get_attempts(yubikit::openpgp::Pw::Admin),
-        );
+        rows.extend([
+            (
+                "PIN tries remaining",
+                pw_status
+                    .get_attempts(yubikit::openpgp::Pw::User)
+                    .to_string(),
+            ),
+            (
+                "Reset code tries remaining",
+                pw_status
+                    .get_attempts(yubikit::openpgp::Pw::Reset)
+                    .to_string(),
+            ),
+            (
+                "Admin PIN tries remaining",
+                pw_status
+                    .get_attempts(yubikit::openpgp::Pw::Admin)
+                    .to_string(),
+            ),
+        ]);
 
         let pin_policy = match pw_status.pin_policy_user {
             PinPolicy::Once => "Once",
             PinPolicy::Always => "Always",
             _ => "Unknown",
         };
-        println!("Require PIN for signature:  {pin_policy}");
+        rows.push(("Require PIN for signature", pin_policy.to_string()));
     }
 
     if let Ok(kdf) = session.get_kdf() {
@@ -315,10 +325,11 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
         } else {
             "True"
         };
-        println!("KDF enabled:                {enabled}");
+        rows.push(("KDF enabled", enabled.to_string()));
     } else {
-        println!("KDF enabled:                False");
+        rows.push(("KDF enabled", "False".to_string()));
     }
+    print_table(rows);
 
     // Show key information
     if let Ok(data) = session.get_application_related_data() {
@@ -353,8 +364,7 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
             let touch = disc.get_uif(*key_ref).map_or("N/A".to_string(), format_uif);
 
             println!("{name}:");
-            println!("  Fingerprint:  {fp_str}");
-            println!("  Touch policy: {touch}");
+            print_table([("  Fingerprint", fp_str), ("  Touch policy", touch)]);
         }
     }
 
@@ -588,29 +598,30 @@ pub fn run_keys_info(
     }
 
     let name = format_key_ref(key_ref);
-    println!("Key slot:     {name}");
+    let mut rows = vec![("Key slot", name.to_string())];
 
     let fp = disc.fingerprints.get(&key_ref);
-    println!(
-        "Fingerprint:  {}",
-        format_fingerprint(fp.map(|v| v.as_slice()).unwrap_or(&[]))
-    );
+    rows.push((
+        "Fingerprint",
+        format_fingerprint(fp.map(|v| v.as_slice()).unwrap_or(&[])),
+    ));
 
     if let Ok(attrs) = session.get_algorithm_attributes(key_ref) {
-        println!("Algorithm:    {}", format_algorithm(&attrs));
+        rows.push(("Algorithm", format_algorithm(&attrs)));
     }
 
     if let Some(s) = status {
-        println!("Origin:       {}", format_key_status(*s));
+        rows.push(("Origin", format_key_status(*s).to_string()));
     }
 
     if let Some(t) = disc.generation_times.get(&key_ref) {
-        println!("Created:      {}", format_timestamp(*t));
+        rows.push(("Created", format_timestamp(*t)));
     }
 
     if let Ok(uif) = session.get_uif(key_ref) {
-        println!("Touch policy: {}", format_uif(uif));
+        rows.push(("Touch policy", format_uif(uif)));
     }
+    print_table(rows);
 
     Ok(())
 }

@@ -27,7 +27,7 @@ use yubikit::management::Capability;
 use crate::cancel;
 use crate::context;
 use crate::scp::{self, ScpParams};
-use crate::util::{CliError, format_smartcard_connection_error};
+use crate::util::{CliError, format_smartcard_connection_error, print_table};
 
 const KEEPALIVE_PROCESSING: u8 = 1;
 const KEEPALIVE_UPNEEDED: u8 = 2;
@@ -492,20 +492,21 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
 
     if fido2_enabled {
         with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+            let mut rows = Vec::new();
             // FIPS status
             if dev_info.fips_capable.contains(Capability::FIDO2) {
-                println!(
-                    "FIPS approved:  {}",
+                rows.push((
+                    "FIPS approved",
                     if dev_info.fips_approved.contains(Capability::FIDO2) {
-                        "Yes"
+                        "Yes".to_string()
                     } else {
-                        "No"
-                    }
-                );
+                        "No".to_string()
+                    },
+                ));
             }
 
             // AAGUID
-            println!("AAGUID:         {}", ctap_info.aaguid);
+            rows.push(("AAGUID", ctap_info.aaguid.to_string()));
 
             // PIN status
             let mut client_pin = ClientPin::new(ctap2)
@@ -519,26 +520,26 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
                 match client_pin.get_pin_retries() {
                     Ok((retries, power_cycle)) => {
                         if retries > 0 {
-                            print!("PIN:            {retries} attempt(s) remaining");
+                            let mut status = format!("{retries} attempt(s) remaining");
                             if power_cycle.is_some_and(|pc| pc > 0) {
-                                print!(
+                                status.push_str(
                                     "\nPIN is temporarily blocked. \
-                                     Remove and re-insert the YubiKey to unblock."
+                                     Remove and re-insert the YubiKey to unblock.",
                                 );
                             }
-                            println!();
+                            rows.push(("PIN", status));
                         } else {
-                            println!("PIN:            Blocked");
+                            rows.push(("PIN", "Blocked".to_string()));
                         }
                     }
-                    Err(e) => println!("PIN:            Error: {e}"),
+                    Err(e) => rows.push(("PIN", format!("Error: {e}"))),
                 }
             } else {
-                println!("PIN:            Not set");
+                rows.push(("PIN", "Not set".to_string()));
             }
 
             // Minimum PIN length
-            println!("Minimum PIN length: {}", ctap_info.min_pin_length);
+            rows.push(("Minimum PIN length", ctap_info.min_pin_length.to_string()));
 
             // Fingerprint status
             let bio_enroll = ctap_info.options.get("bioEnroll");
@@ -546,38 +547,53 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
                 Some(true) => match client_pin.get_uv_retries() {
                     Ok(retries) => {
                         if retries > 0 {
-                            println!("Fingerprints:   Registered, {retries} attempt(s) remaining");
+                            rows.push((
+                                "Fingerprints",
+                                format!("Registered, {retries} attempt(s) remaining"),
+                            ));
                         } else {
-                            println!("Fingerprints:   Registered, blocked until PIN is verified");
+                            rows.push((
+                                "Fingerprints",
+                                "Registered, blocked until PIN is verified".to_string(),
+                            ));
                         }
                     }
-                    Err(e) => println!("Fingerprints:   Error: {e}"),
+                    Err(e) => rows.push(("Fingerprints", format!("Error: {e}"))),
                 },
-                Some(false) => println!("Fingerprints:   Not registered"),
+                Some(false) => rows.push(("Fingerprints", "Not registered".to_string())),
                 None => {}
             }
 
             // Always Require UV
             if let Some(&always_uv) = ctap_info.options.get("alwaysUv") {
-                println!(
-                    "Always Require UV: {}",
-                    if always_uv { "On" } else { "Off" }
-                );
+                rows.push((
+                    "Always Require UV",
+                    if always_uv {
+                        "On".to_string()
+                    } else {
+                        "Off".to_string()
+                    },
+                ));
             }
 
             // Remaining discoverable credentials
             if let Some(remaining) = ctap_info.remaining_disc_creds {
-                println!("Credential storage remaining: {remaining}");
+                rows.push(("Credential storage remaining", remaining.to_string()));
             }
 
             // Enterprise Attestation
             if let Some(&ep) = ctap_info.options.get("ep") {
-                println!(
-                    "Enterprise Attestation: {}",
-                    if ep { "Enabled" } else { "Disabled" }
-                );
+                rows.push((
+                    "Enterprise Attestation",
+                    if ep {
+                        "Enabled".to_string()
+                    } else {
+                        "Disabled".to_string()
+                    },
+                ));
             }
 
+            print_table(rows);
             if reset_blocked {
                 println!("Factory reset is blocked");
             }
@@ -591,11 +607,15 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
             .get(&transport)
             .is_some_and(|caps: &Capability| caps.contains(Capability::FIDO2));
         if fido2_supported {
-            println!("CTAP2:          Disabled");
-            println!("PIN:            Disabled");
+            print_table([
+                ("CTAP2", "Disabled".to_string()),
+                ("PIN", "Disabled".to_string()),
+            ]);
         } else {
-            println!("CTAP2:          Not supported");
-            println!("PIN:            Not supported");
+            print_table([
+                ("CTAP2", "Not supported".to_string()),
+                ("PIN", "Not supported".to_string()),
+            ]);
         }
         if reset_blocked {
             println!("Factory reset is blocked");

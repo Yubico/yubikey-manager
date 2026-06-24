@@ -2,22 +2,25 @@ use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 
-use crate::util::CliError;
+use crate::util::{CliError, print_table};
 
 pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
     let info = dev.info();
 
-    println!("Device type: {}", dev.name());
+    let mut rows = vec![("Device type", dev.name())];
     if let Some(serial) = info.serial {
-        println!("Serial number: {serial}");
+        rows.push(("Serial number", serial.to_string()));
     }
     if info.version != yubikit::core::Version(0, 0, 0) {
-        println!("Firmware version: {}", info.version_name());
+        rows.push(("Firmware version", info.version_name()));
     } else {
-        println!("Firmware version: Uncertain, re-run with only one YubiKey connected");
+        rows.push((
+            "Firmware version",
+            "Uncertain, re-run with only one YubiKey connected".to_string(),
+        ));
     }
     if info.form_factor != yubikit::management::FormFactor::Unknown {
-        println!("Form factor: {}", info.form_factor);
+        rows.push(("Form factor", info.form_factor.to_string()));
     }
 
     // Show USB interfaces only when connected via USB
@@ -25,9 +28,10 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
     if is_usb {
         let usb_ifaces = dev.usb_interfaces();
         if usb_ifaces.0 != 0 {
-            println!("Enabled USB interfaces: {usb_ifaces}");
+            rows.push(("Enabled USB interfaces", usb_ifaces.to_string()));
         }
     }
+    print_table(rows);
 
     // NFC status
     if info.supported_capabilities.contains_key(&Transport::Nfc) {
@@ -64,16 +68,21 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
     if !info.fips_capable.is_empty() {
         println!();
         println!("FIPS approved applications");
+        let mut rows = Vec::new();
         for &cap in Capability::ALL {
             if info.fips_capable.contains(cap) {
                 let approved = info.fips_approved.contains(cap);
-                println!(
-                    "  {}: {}",
-                    cap.display_name(),
-                    if approved { "Yes" } else { "No" }
-                );
+                rows.push((
+                    format!("  {}", cap.display_name()),
+                    if approved {
+                        "Yes".to_string()
+                    } else {
+                        "No".to_string()
+                    },
+                ));
             }
         }
+        print_table(rows);
     }
 
     if check_fips {
@@ -84,10 +93,10 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
             let all_approved = Capability::ALL
                 .iter()
                 .all(|&cap| !info.fips_capable.contains(cap) || info.fips_approved.contains(cap));
-            println!(
-                "FIPS approved mode: {}",
-                if all_approved { "Yes" } else { "No" }
-            );
+            print_table([(
+                "FIPS approved mode",
+                if all_approved { "Yes" } else { "No" }.to_string(),
+            )]);
         }
     }
 
@@ -115,16 +124,13 @@ fn print_app_status_table(
     let has_nfc = nfc_supported.is_some();
     let nfc_supported = nfc_supported.unwrap_or(Capability::NONE);
 
-    // Build rows
-    struct Row {
-        app: &'static str,
-        usb: &'static str,
-        nfc: &'static str,
-    }
-
     let mut rows = Vec::new();
+    if has_nfc {
+        rows.push(vec!["Applications", "USB", "NFC"]);
+    } else {
+        rows.push(vec!["Applications", "USB"]);
+    }
     for &cap in Capability::ALL {
-        // FIDO_CCID is USB-only; show "N/A" for NFC
         let usb_status = if usb_supported.contains(cap) {
             if usb_enabled.contains(cap) {
                 // FIDO_CCID is "Inactive" when FIDO2 is not also enabled
@@ -139,6 +145,7 @@ fn print_app_status_table(
         } else {
             "Not available"
         };
+        // FIDO_CCID is USB-only; show "N/A" for NFC
         let nfc_status = if cap == Capability::FIDOCCID {
             "N/A"
         } else if nfc_supported.contains(cap) {
@@ -152,34 +159,13 @@ fn print_app_status_table(
         };
         // Only show capabilities that are supported on at least one transport
         if usb_supported.contains(cap) || (has_nfc && nfc_supported.contains(cap)) {
-            rows.push(Row {
-                app: cap.display_name(),
-                usb: usb_status,
-                nfc: nfc_status,
-            });
+            if has_nfc {
+                rows.push(vec![cap.display_name(), usb_status, nfc_status]);
+            } else {
+                rows.push(vec![cap.display_name(), usb_status]);
+            }
         }
     }
 
-    // Calculate column widths
-    let app_w = rows.iter().map(|r| r.app.len()).max().unwrap_or(12).max(12);
-    let usb_w = rows.iter().map(|r| r.usb.len()).max().unwrap_or(3).max(3);
-
-    if has_nfc {
-        let nfc_w = rows.iter().map(|r| r.nfc.len()).max().unwrap_or(3).max(3);
-        println!(
-            "{:<app_w$}\t{:<usb_w$}\t{:<nfc_w$}",
-            "Applications", "USB", "NFC"
-        );
-        for row in &rows {
-            println!(
-                "{:<app_w$}\t{:<usb_w$}\t{:<nfc_w$}",
-                row.app, row.usb, row.nfc
-            );
-        }
-    } else {
-        println!("{:<app_w$}", "Applications");
-        for row in &rows {
-            println!("{:<app_w$}\t{:<usb_w$}", row.app, row.usb);
-        }
-    }
+    print_table(rows);
 }

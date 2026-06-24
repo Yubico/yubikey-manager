@@ -5,7 +5,7 @@ use yubikit::management::Capability;
 
 use crate::cli_enums::CliFormat;
 use crate::scp::ScpParams;
-use crate::util::{CliError, confirm, open_smartcard_session, write_file_or_stdout};
+use crate::util::{CliError, confirm, open_smartcard_session, print_table, write_file_or_stdout};
 
 const MANAGEMENT_KEY_LEN: usize = 16;
 
@@ -341,10 +341,11 @@ fn format_credential_error(e: &yubikit::hsmauth::HsmAuthError, default_msg: &str
 
 pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
-    println!("YubiHSM Auth version:             {}", session.version());
+    let mut rows = vec![("YubiHSM Auth version", session.version().to_string())];
     if let Ok(retries) = session.get_management_key_retries() {
-        println!("Management key retries remaining: {retries}/8")
+        rows.push(("Management key retries remaining", format!("{retries}/8")));
     }
+    print_table(rows);
     Ok(())
 }
 

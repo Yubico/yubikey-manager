@@ -120,6 +120,68 @@ pub fn confirm(msg: &str) -> bool {
     matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
+pub(crate) trait TableRow {
+    fn into_table_row(self) -> Vec<String>;
+}
+
+impl<L, V> TableRow for (L, V)
+where
+    L: Into<String>,
+    V: Into<String>,
+{
+    fn into_table_row(self) -> Vec<String> {
+        vec![format!("{}:", self.0.into()), self.1.into()]
+    }
+}
+
+impl<T, const N: usize> TableRow for [T; N]
+where
+    T: Into<String>,
+{
+    fn into_table_row(self) -> Vec<String> {
+        self.into_iter().map(Into::into).collect()
+    }
+}
+
+impl<T> TableRow for Vec<T>
+where
+    T: Into<String>,
+{
+    fn into_table_row(self) -> Vec<String> {
+        self.into_iter().map(Into::into).collect()
+    }
+}
+
+/// Print rows with columns aligned to the widest cell in each column.
+pub(crate) fn print_table<R>(rows: impl IntoIterator<Item = R>)
+where
+    R: TableRow,
+{
+    let rows: Vec<Vec<String>> = rows.into_iter().map(TableRow::into_table_row).collect();
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let mut widths = vec![0; columns];
+    for row in &rows {
+        for (i, cell) in row.iter().enumerate() {
+            widths[i] = widths[i].max(cell.len());
+        }
+    }
+
+    for row in rows {
+        print_table_row(&row, &widths);
+    }
+}
+
+fn print_table_row(row: &[String], widths: &[usize]) {
+    for (i, width) in widths.iter().enumerate() {
+        if i > 0 {
+            print!(" ");
+        }
+        let cell = row.get(i).map(String::as_str).unwrap_or("");
+        print!("{cell:<width$}");
+    }
+    println!();
+}
+
 /// Write to a file, or to stdout if path is "-".
 pub fn write_file_or_stdout(path: &str, data: &[u8]) -> Result<(), CliError> {
     if path == "-" {
