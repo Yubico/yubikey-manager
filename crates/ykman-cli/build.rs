@@ -32,15 +32,15 @@ fn generate_licenses() {
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest = Path::new(&out_dir).join("licenses.deflate");
 
-    // Find workspace root (where about.toml and about-cli.hbs live)
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let workspace_root = Path::new(&manifest_dir)
+    let manifest_dir = Path::new(&manifest_dir);
+    let workspace_root = manifest_dir
         .parent()
         .and_then(|p| p.parent())
         .expect("cannot find workspace root");
 
-    let template = workspace_root.join("about-cli.hbs");
-    let config = workspace_root.join("about.toml");
+    let template = manifest_dir.join("about-cli.hbs");
+    let config = manifest_dir.join("about.toml");
     let lockfile = workspace_root.join("Cargo.lock");
 
     println!("cargo:rerun-if-changed={}", template.display());
