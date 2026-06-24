@@ -841,7 +841,7 @@ dev = [
 
 [[package]]
 name = "yubikit"
-version = "6.0.0.dev0"
+version = "0.1.0.dev0"
 source = { editable = "packages/yubikit" }
 dependencies = [
     { name = "cryptography" },

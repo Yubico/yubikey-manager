@@ -1,6 +1,6 @@
 [project]
 name = "yubikit"
-version = "6.0.0-dev.0"
+version = "0.1.0-dev.0"
 description = "Python library for managing YubiKey configuration."
 authors = [
   { name = "Dain Nilsson", email = "dain@yubico.com" }

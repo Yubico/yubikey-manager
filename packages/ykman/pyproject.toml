@@ -15,7 +15,7 @@ classifiers = [
   "Topic :: Utilities"
 ]
 dependencies = [
-  "yubikit>=6.0.0.dev0",
+  "yubikit>=0.1.0.dev0",
   "cryptography>=2.1",
 ]
 
