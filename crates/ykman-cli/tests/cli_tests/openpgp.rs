@@ -22,7 +22,7 @@ impl Drop for OpenPgpResetGuard {
 
 #[test]
 fn test_openpgp_info() {
-    require_interface!("CCID");
+    require_capability!("OpenPGP");
     openpgp_reset();
     ykman_dev()
         .args(["openpgp", "info"])
@@ -36,7 +36,7 @@ fn test_openpgp_info() {
 
 #[test]
 fn test_openpgp_reset() {
-    require_interface!("CCID");
+    require_capability!("OpenPGP");
     ykman_dev()
         .args(["openpgp", "reset", "-f"])
         .assert()
@@ -51,7 +51,7 @@ fn test_openpgp_change_pin(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("CCID");
+    require_capability!("OpenPGP");
     let _guard = OpenPgpResetGuard::reset();
 
     if mode.is_interactive() {
@@ -88,7 +88,7 @@ fn test_openpgp_change_admin_pin(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("CCID");
+    require_capability!("OpenPGP");
     let _guard = OpenPgpResetGuard::reset();
 
     if mode.is_interactive() {
@@ -125,7 +125,7 @@ fn test_openpgp_set_pin_retries(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("CCID");
+    require_capability!("OpenPGP");
     openpgp_reset();
 
     if mode.is_interactive() {
@@ -163,7 +163,7 @@ fn test_openpgp_keys_set_touch(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("CCID");
+    require_capability!("OpenPGP");
     openpgp_reset();
 
     // Set touch on aut key to "on"
@@ -225,7 +225,7 @@ fn test_openpgp_certificates_import_export(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("CCID");
+    require_capability!("OpenPGP");
     openpgp_reset();
 
     let cert_file = fixture_path("ec_p256_cert.pem");
@@ -273,7 +273,7 @@ fn test_openpgp_certificates_delete(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("CCID");
+    require_capability!("OpenPGP");
     openpgp_reset();
 
     let cert_file = fixture_path("ec_p256_cert.pem");
@@ -320,7 +320,7 @@ fn test_openpgp_change_reset_code(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("CCID");
+    require_capability!("OpenPGP");
     openpgp_reset();
 
     // Set a reset code (requires admin PIN)

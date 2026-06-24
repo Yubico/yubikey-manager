@@ -21,6 +21,7 @@ mod controller;
 
 use rstest::{fixture, rstest};
 use std::sync::{Mutex, OnceLock, RwLock, RwLockReadGuard};
+use std::time::{Duration, Instant};
 use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
 use yubikit::device::ReinsertStatus;
@@ -128,6 +129,39 @@ fn get_device() -> RwLockReadGuard<'static, LocalYubiKeyDevice> {
         })
         .read()
         .unwrap()
+}
+
+fn refresh_device_after_reset() {
+    let serial = required_serial();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
+            .unwrap_or_default();
+        let found = match serial {
+            Some(s) => devices.into_iter().find(|d| d.info().serial == Some(s)),
+            None => {
+                let mut devs: Vec<_> = devices
+                    .into_iter()
+                    .filter(|d| d.info().serial.is_none())
+                    .collect();
+                (devs.len() == 1).then(|| devs.remove(0))
+            }
+        };
+        if let Some(dev) = found
+            && dev.open_smartcard().is_ok()
+        {
+            if let Some(lock) = DEVICE.get() {
+                *lock.write().unwrap() = dev;
+            }
+            invalidate_scp11b_params();
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "YubiKey did not reappear after device reset"
+        );
+        std::thread::sleep(Duration::from_millis(250));
+    }
 }
 
 fn set_touch_threshold(dev: &LocalYubiKeyDevice) {

@@ -481,6 +481,7 @@ fn map_enroll_error<E: std::error::Error + Send + Sync + 'static>(
 pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
     let dev_info = dev.info();
     let transport = dev.transport();
+    let reset_blocked = dev_info.reset_blocked.contains(Capability::FIDO2);
 
     // Check if FIDO2 is enabled
     let fido2_enabled = dev_info
@@ -577,6 +578,10 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
                 );
             }
 
+            if reset_blocked {
+                println!("Factory reset is blocked");
+            }
+
             Ok(())
         })
     } else {
@@ -591,6 +596,9 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
         } else {
             println!("CTAP2:          Not supported");
             println!("PIN:            Not supported");
+        }
+        if reset_blocked {
+            println!("Factory reset is blocked");
         }
         Ok(())
     }

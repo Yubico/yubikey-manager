@@ -62,6 +62,36 @@ pub fn device_without_serial() -> bool {
     test_device().no_serial
 }
 
+fn wait_for_piv_info() {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if ykman_dev()
+            .args(["piv", "info"])
+            .output()
+            .is_ok_and(|output| output.status.success())
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "YubiKey did not reappear after device reset"
+        );
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+pub fn reset_blocked(capability: &str) -> bool {
+    let args = match capability {
+        "PIV" => ["piv", "info"],
+        "FIDO" | "FIDO2" => ["fido", "info"],
+        _ => return false,
+    };
+    ykman_dev().args(args).output().is_ok_and(|output| {
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout).contains("Factory reset is blocked")
+    })
+}
+
 // PIV defaults
 pub const DEFAULT_PIN: &str = "123456";
 pub const NON_DEFAULT_PIN: &str = "12341235";
@@ -348,6 +378,28 @@ pub fn app_is_fips_capable(app: &str) -> bool {
         .any(|line| line.starts_with(&marker))
 }
 
+pub fn piv_has_puk() -> bool {
+    let output = ykman_dev()
+        .args(["piv", "info"])
+        .output()
+        .expect("failed to run ykman piv info");
+    if !output.status.success() {
+        panic!(
+            "failed to run ykman piv info: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("PUK tries remaining:"))
+        .and_then(|tries| {
+            let (_, total) = tries.trim().split_once('/')?;
+            total.trim().parse::<u8>().ok()
+        })
+        .is_some_and(|total| total > 0)
+}
+
 pub fn piv_pin() -> &'static str {
     if app_is_fips_capable("PIV") {
         FIPS_PIV_PIN
@@ -466,8 +518,8 @@ pub fn skip_before_version(required: (u8, u8, u8), feature: &str) -> bool {
     }
 }
 
-/// Returns true if the selected test device has the given interface/application enabled.
-pub fn has_interface(name: &str) -> bool {
+/// Returns true if the selected test device has the given capability enabled.
+pub fn has_capability(name: &str) -> bool {
     let stdout = device_info();
     if stdout
         .lines()
@@ -489,15 +541,15 @@ pub fn has_interface(name: &str) -> bool {
         .any(|line| line.split_whitespace().any(|field| field == "Enabled"))
 }
 
-/// Skip the test if the device does not have the given interface/application enabled.
+/// Skip the test if the device does not have the given capability enabled.
 #[macro_export]
-macro_rules! require_interface {
+macro_rules! require_capability {
     ($name:expr) => {
         if !$crate::common::device_configured() {
             eprintln!("SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
             return;
         }
-        if !$crate::common::has_interface($name) {
+        if !$crate::common::has_capability($name) {
             eprintln!("SKIP: {} not enabled on device", $name);
             return;
         }
@@ -517,6 +569,14 @@ macro_rules! require_device_configured {
 
 /// Reset PIV to factory defaults (force, no prompt).
 pub fn piv_reset_raw() {
+    if reset_blocked("PIV") {
+        ykman_dev()
+            .args(["config", "reset", "-f"])
+            .ok()
+            .expect("YubiKey reset failed");
+        wait_for_piv_info();
+        return;
+    }
     ykman_dev()
         .args(["piv", "reset", "-f"])
         .ok()
@@ -540,18 +600,20 @@ pub fn piv_reset() {
             ])
             .assert()
             .success();
-        ykman_dev()
-            .args([
-                "piv",
-                "access",
-                "change-puk",
-                "--puk",
-                DEFAULT_PUK,
-                "--new-puk",
-                FIPS_PIV_PUK,
-            ])
-            .assert()
-            .success();
+        if piv_has_puk() {
+            ykman_dev()
+                .args([
+                    "piv",
+                    "access",
+                    "change-puk",
+                    "--puk",
+                    DEFAULT_PUK,
+                    "--new-puk",
+                    FIPS_PIV_PUK,
+                ])
+                .assert()
+                .success();
+        }
         ykman_dev()
             .args([
                 "piv",

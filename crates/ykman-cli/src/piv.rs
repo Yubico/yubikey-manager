@@ -14,7 +14,7 @@ use yubikit::keys::{PrivateKey, PublicKey};
 use yubikit::management::Capability;
 use yubikit::piv::{
     DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, ManagementKey, ManagementKeyType, ObjectId,
-    PinPolicy, PivPin, PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
+    PinPolicy, PivError, PivPin, PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
 };
 
 use ykman::piv::{
@@ -763,6 +763,7 @@ fn parse_object_id(s: &str) -> Result<ObjectId, CliError> {
 
 pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
     let mut session = open_session(dev, scp_params)?;
+    let reset_blocked = dev.info().reset_blocked.contains(Capability::PIV);
     let version = session.version();
     println!("PIV version:              {version}");
 
@@ -786,15 +787,31 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
         }
     }
 
-    // PUK metadata
-    if let Ok(meta) = session.get_puk_metadata() {
-        println!(
-            "PUK tries remaining:      {}/{}",
-            meta.attempts_remaining, meta.total_attempts
-        );
-        if meta.default_value {
-            warnings.push("WARNING: Using default PUK!");
+    // Bio metadata is only available on biometric-capable PIV devices. Those
+    // devices do not expose a PUK, so only show PUK metadata when bio is absent.
+    match session.get_bio_metadata() {
+        Ok(meta) => {
+            if meta.configured {
+                println!(
+                    "Biometrics:               Configured, {} attempts remaining",
+                    meta.attempts_remaining
+                );
+            } else {
+                println!("Biometrics:               Not configured");
+            }
         }
+        Err(PivError::NotSupported(_)) => {
+            if let Ok(meta) = session.get_puk_metadata() {
+                println!(
+                    "PUK tries remaining:      {}/{}",
+                    meta.attempts_remaining, meta.total_attempts
+                );
+                if meta.default_value {
+                    warnings.push("WARNING: Using default PUK!");
+                }
+            }
+        }
+        Err(_) => {}
     }
 
     // Management key metadata
@@ -861,6 +878,10 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
         }
     }
 
+    if reset_blocked {
+        println!("Factory reset is blocked");
+    }
+
     Ok(())
 }
 
@@ -914,6 +935,14 @@ pub fn run_reset(
     scp_params: &ScpParams,
     force: bool,
 ) -> Result<(), CliError> {
+    if dev.info().reset_blocked.contains(Capability::PIV) {
+        return Err(CliError(
+            "Cannot perform PIV reset when FIDO is configured, \
+             use 'ykman config reset' for full factory reset."
+                .to_string(),
+        ));
+    }
+
     if !force {
         eprintln!("WARNING! This will delete all stored PIV data and restore factory settings.");
         if !confirm("Proceed?") {

@@ -27,7 +27,7 @@ fn add_password<'a>(args: &mut Vec<&'a str>, password: Option<&'a str>) {
 
 #[test]
 fn test_oath_info() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     oath_reset();
     ykman_dev()
         .args(["oath", "info"])
@@ -38,13 +38,13 @@ fn test_oath_info() {
 
 #[test]
 fn test_oath_reset() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     ykman_dev().args(["oath", "reset", "-f"]).assert().success();
 }
 
 #[test]
 fn test_oath_add_and_list() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     let mut args = vec![
@@ -91,7 +91,7 @@ fn test_oath_add_and_list() {
 
 #[test]
 fn test_oath_add_totp_and_code() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     let mut args = vec![
@@ -124,7 +124,7 @@ fn test_oath_add_totp_and_code() {
 
 #[test]
 fn test_oath_add_hotp_and_code() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     let mut args = vec![
@@ -157,7 +157,7 @@ fn test_oath_add_hotp_and_code() {
 
 #[test]
 fn test_oath_rename() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     let mut args = vec![
@@ -204,7 +204,7 @@ fn test_oath_password_set_and_clear(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("CCID");
+    require_capability!("OATH");
     oath_reset();
 
     if mode.is_interactive() {
@@ -262,7 +262,7 @@ fn test_oath_password_set_and_clear(#[case] mode: InputMode) {
 }
 #[test]
 fn test_oath_add_totp_sha256_7digits() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     let mut args = vec![
@@ -296,7 +296,7 @@ fn test_oath_add_totp_sha256_7digits() {
 
 #[test]
 fn test_oath_add_with_issuer() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     let mut args = vec![
@@ -327,7 +327,7 @@ fn test_oath_add_with_issuer() {
 
 #[test]
 fn test_oath_add_totp_touch() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     // Just verify the --touch flag is accepted
@@ -358,7 +358,7 @@ fn test_oath_add_totp_touch() {
 
 #[test]
 fn test_oath_import_pskc() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     let pskc = fixture_path("pskc_totp.xml");
@@ -379,7 +379,7 @@ fn test_oath_import_pskc() {
 
 #[test]
 fn test_oath_import_pskc_multi() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     let pskc = fixture_path("pskc_multi.xml");
@@ -400,7 +400,7 @@ fn test_oath_import_pskc_multi() {
 
 #[test]
 fn test_oath_list_oath_type() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     let mut args = vec![
@@ -429,7 +429,7 @@ fn test_oath_list_oath_type() {
 
 #[test]
 fn test_oath_accounts_code_totp_single() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     let mut args = vec![
@@ -461,7 +461,7 @@ fn test_oath_accounts_code_totp_single() {
 
 #[test]
 fn test_oath_import_pskc_hotp() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     let pskc = fixture_path("pskc_hotp.xml");
@@ -491,7 +491,7 @@ fn test_oath_import_pskc_hotp() {
 
 #[test]
 fn test_oath_import_pskc_sha256() {
-    require_interface!("CCID");
+    require_capability!("OATH");
     let password = prepare_oath_for_credentials();
 
     let pskc = fixture_path("pskc_sha256.xml");

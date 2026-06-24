@@ -24,7 +24,7 @@ fn prepare_hsmauth_for_credentials() -> &'static str {
 
 #[test]
 fn test_hsmauth_info() {
-    require_interface!("CCID");
+    require_capability!("YubiHSM Auth");
     hsmauth_reset();
     ykman_dev()
         .args(["hsmauth", "info"])
@@ -35,7 +35,7 @@ fn test_hsmauth_info() {
 
 #[test]
 fn test_hsmauth_reset() {
-    require_interface!("CCID");
+    require_capability!("YubiHSM Auth");
     ykman_dev()
         .args(["hsmauth", "reset", "-f"])
         .assert()
@@ -44,7 +44,7 @@ fn test_hsmauth_reset() {
 
 #[test]
 fn test_hsmauth_add_symmetric_and_list() {
-    require_interface!("CCID");
+    require_capability!("YubiHSM Auth");
     let management_key = prepare_hsmauth_for_credentials();
 
     ykman_dev()
@@ -92,7 +92,7 @@ fn test_hsmauth_add_symmetric_and_list() {
 
 #[test]
 fn test_hsmauth_add_derive_and_list() {
-    require_interface!("CCID");
+    require_capability!("YubiHSM Auth");
     let management_key = prepare_hsmauth_for_credentials();
 
     ykman_dev()
@@ -121,7 +121,7 @@ fn test_hsmauth_add_derive_and_list() {
 
 #[test]
 fn test_hsmauth_credential_import() {
-    require_interface!("CCID");
+    require_capability!("YubiHSM Auth");
     let management_key = prepare_hsmauth_for_credentials();
 
     let key_file = fixture_path("ec_p256_key.pem");
@@ -155,7 +155,7 @@ fn test_hsmauth_credential_import() {
 
 #[test]
 fn test_hsmauth_change_management_password() {
-    require_interface!("CCID");
+    require_capability!("YubiHSM Auth");
     hsmauth_reset();
 
     // Change management password to non-default

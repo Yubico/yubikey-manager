@@ -3,7 +3,7 @@ use predicates::prelude::*;
 
 #[test]
 fn test_otp_info() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     ykman_dev()
         .args(["otp", "info"])
         .assert()
@@ -13,7 +13,7 @@ fn test_otp_info() {
 
 #[test]
 fn test_otp_static() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     otp_delete_slot2();
 
     ykman_dev()
@@ -35,7 +35,7 @@ fn test_otp_static() {
 
 #[test]
 fn test_otp_chalresp() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     otp_delete_slot2();
 
     ykman_dev()
@@ -57,7 +57,7 @@ fn test_otp_chalresp() {
 
 #[test]
 fn test_otp_swap() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     otp_delete_slot2();
 
     ykman_dev()
@@ -77,7 +77,7 @@ fn test_otp_swap() {
 
 #[test]
 fn test_otp_hotp() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     otp_delete_slot2();
 
     ykman_dev()
@@ -101,7 +101,7 @@ fn test_otp_hotp() {
 
 #[test]
 fn test_otp_yubiotp() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     otp_delete_slot2();
 
     // Program Yubico OTP in slot 2 with auto-generated IDs and key
@@ -132,7 +132,7 @@ fn test_otp_yubiotp() {
 
 #[test]
 fn test_otp_calculate_standalone() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     otp_delete_slot2();
 
     // Program challenge-response in slot 2
@@ -156,7 +156,7 @@ fn test_otp_calculate_standalone() {
 
 #[test]
 fn test_otp_calculate_totp_8digits() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     otp_delete_slot2();
 
     ykman_dev()
@@ -178,7 +178,7 @@ fn test_otp_calculate_totp_8digits() {
 
 #[test]
 fn test_otp_delete() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     otp_delete_slot2();
 
     // Program slot 2
@@ -208,7 +208,7 @@ fn test_otp_delete() {
 
 #[test]
 fn test_otp_static_length() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     otp_delete_slot2();
 
     ykman_dev()
@@ -230,7 +230,7 @@ fn test_otp_static_length() {
 
 #[test]
 fn test_otp_hotp_8digits() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     otp_delete_slot2();
 
     ykman_dev()
@@ -256,7 +256,7 @@ fn test_otp_hotp_8digits() {
 
 #[test]
 fn test_otp_settings_enter() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     otp_delete_slot2();
 
     // Program a static password first
@@ -279,7 +279,7 @@ fn test_otp_settings_enter() {
 
 #[test]
 fn test_otp_ndef() {
-    require_interface!("OTP");
+    require_capability!("OTP");
     otp_delete_slot2();
 
     // Program slot 2

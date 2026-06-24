@@ -1,5 +1,6 @@
 use super::common::{
-    InputMode, app_is_fips_capable, device_serial, device_without_serial, ykman_dev, ykman_dev_tty,
+    InputMode, app_is_fips_capable, device_serial, device_without_serial, reset_blocked, ykman_dev,
+    ykman_dev_tty,
 };
 use predicates::prelude::*;
 use rstest::rstest;
@@ -7,15 +8,15 @@ use std::time::Duration;
 use yubikit::core::Transport;
 use yubikit::ctap::CtapSession;
 use yubikit::ctap2::Ctap2Session;
-use yubikit::management::{Capability, UsbInterface};
+use yubikit::management::UsbInterface;
 use yubikit::platform::device::{LocalYubiKeyDevice, list_devices};
 
 // FIDO PIN-dependent tests reset the FIDO applet into a known state when a
 // controller is configured. If the existing PIN is blocked or unknown and reset
 // cannot be automated, those tests skip instead of consuming retries.
 
-const FIDO_PIN: &str = "FidoPin1!";
-const FIDO_PIN_2: &str = "FidoPin2!";
+const FIDO_PIN: &str = "Z9m$4vQ2";
+const FIDO_PIN_2: &str = "L6r#8tN5";
 
 macro_rules! skip {
     ($($arg:tt)*) => {{
@@ -102,7 +103,7 @@ fn reset_fido_with_controller() -> bool {
         eprintln!("FIDO setup: automated ykman FIDO reset currently requires USB");
         return false;
     }
-    if device.info().reset_blocked.contains(Capability::FIDO2) {
+    if reset_blocked("FIDO2") {
         eprintln!("FIDO setup: FIDO reset is blocked by device configuration");
         return false;
     }
@@ -183,10 +184,12 @@ fn reset_fido_with_controller() -> bool {
     }
 }
 
-fn require_pin_set() {
-    if !ensure_pin_set() {
-        skip!("FIDO PIN setup unavailable");
-    }
+macro_rules! require_pin_set {
+    () => {
+        if !ensure_pin_set() {
+            skip!("FIDO PIN setup unavailable");
+        }
+    };
 }
 
 fn pin_retries() -> Option<u32> {
@@ -243,7 +246,7 @@ fn fido_pin_guard() -> FidoPinGuard {
 
 #[test]
 fn test_fido_info() {
-    require_interface!("FIDO");
+    require_capability!("FIDO");
     ykman_dev()
         .args(["fido", "info"])
         .assert()
@@ -264,8 +267,8 @@ fn test_fido_verify_pin(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("FIDO");
-    require_pin_set();
+    require_capability!("FIDO");
+    require_pin_set!();
     if mode.is_interactive() {
         let output = ykman_dev_tty(&["fido", "access", "verify-pin"], &format!("{FIDO_PIN}\n"));
         assert!(output.status.success(), "{output:?}");
@@ -284,8 +287,8 @@ fn test_fido_verify_pin(#[case] mode: InputMode) {
 
 #[test]
 fn test_fido_verify_pin_wrong() {
-    require_interface!("FIDO");
-    require_pin_set();
+    require_capability!("FIDO");
+    require_pin_set!();
     if pin_retries().is_some_and(|retries| retries <= 1) {
         skip!("not enough FIDO PIN retries for wrong-PIN test");
     }
@@ -303,8 +306,8 @@ fn test_fido_change_pin(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("FIDO");
-    require_pin_set();
+    require_capability!("FIDO");
+    require_pin_set!();
     let _guard = fido_pin_guard();
 
     // Change PIN
@@ -363,8 +366,8 @@ fn test_fido_change_pin(#[case] mode: InputMode) {
 
 #[test]
 fn test_fido_set_pin_too_short() {
-    require_interface!("FIDO");
-    require_pin_set();
+    require_capability!("FIDO");
+    require_pin_set!();
     ykman_dev()
         .args([
             "fido",
@@ -388,8 +391,8 @@ fn test_fido_credentials_list_empty(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("FIDO");
-    require_pin_set();
+    require_capability!("FIDO");
+    require_pin_set!();
     if mode.is_interactive() {
         let output = ykman_dev_tty(&["fido", "credentials", "list"], &format!("{FIDO_PIN}\n"));
         assert!(output.status.success(), "{output:?}");
@@ -410,8 +413,8 @@ fn test_fido_credentials_list_empty(#[case] mode: InputMode) {
 
 #[test]
 fn test_fido_config_toggle_always_uv() {
-    require_interface!("FIDO");
-    require_pin_set();
+    require_capability!("FIDO");
+    require_pin_set!();
 
     // Check initial state
     let output = ykman_dev()
@@ -478,8 +481,8 @@ fn test_fido_access_set_min_pin_length(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("FIDO");
-    require_pin_set();
+    require_capability!("FIDO");
+    require_pin_set!();
 
     // Read current minimum length
     let output = ykman_dev()
@@ -547,8 +550,8 @@ fn test_fido_access_force_change(#[case] mode: InputMode) {
     if mode.skip_if_windows() {
         return;
     }
-    require_interface!("FIDO");
-    require_pin_set();
+    require_capability!("FIDO");
+    require_pin_set!();
     let _guard = fido_pin_guard();
 
     if mode.is_interactive() {

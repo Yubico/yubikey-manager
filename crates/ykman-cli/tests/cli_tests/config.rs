@@ -127,7 +127,12 @@ fn test_config_nfc_list() {
 
 #[test]
 fn test_config_usb_disable_enable_hsmauth() {
-    require_interface!("CCID");
+    require_capability!("CCID");
+    if !config_list_contains(&["config", "usb", "--list"], "YubiHSM Auth:") {
+        eprintln!("SKIP: YubiHSM Auth is not configurable over USB on this YubiKey");
+        return;
+    }
+
     let _ = ykman_dev()
         .args(["config", "usb", "--enable", "hsmauth", "-f"])
         .ok();
@@ -160,7 +165,7 @@ fn test_config_usb_disable_enable_hsmauth() {
 
 #[test]
 fn test_config_nfc_enable_disable() {
-    require_interface!("CCID");
+    require_capability!("CCID");
     // Skip if key has no NFC support
     let output = ykman_dev()
         .args(["config", "nfc", "--list"])
@@ -202,7 +207,12 @@ fn test_config_nfc_enable_disable() {
 
 #[test]
 fn test_config_usb_enable_all() {
-    require_interface!("CCID");
+    require_capability!("CCID");
+    if !config_list_contains(&["config", "usb", "--list"], "YubiHSM Auth:") {
+        eprintln!("SKIP: YubiHSM Auth is not configurable over USB on this YubiKey");
+        return;
+    }
+
     // First disable an app so --enable-all has something to do
     let _ = ykman_dev()
         .args(["config", "usb", "--disable", "hsmauth", "-f"])
@@ -226,7 +236,7 @@ fn test_config_usb_enable_all() {
 
 #[test]
 fn test_config_nfc_disable_all_enable_all() {
-    require_interface!("CCID");
+    require_capability!("CCID");
     // NFC disable-all is safe — USB access can always recover.
     let output = ykman_dev()
         .args(["config", "nfc", "--list"])
@@ -250,7 +260,7 @@ fn test_config_nfc_disable_all_enable_all() {
 
 #[test]
 fn test_config_set_lock_code() {
-    require_interface!("CCID");
+    require_capability!("CCID");
     let lock_code = TEST_LOCK_CODE;
 
     // Set a lock code
@@ -268,7 +278,7 @@ fn test_config_set_lock_code() {
 
 #[test]
 fn test_config_set_lock_code_prompts_for_current_code() {
-    require_interface!("CCID");
+    require_capability!("CCID");
     if skip_interactive_on_windows() {
         return;
     }
@@ -294,7 +304,7 @@ fn test_config_set_lock_code_prompts_for_current_code() {
 
 #[test]
 fn test_config_usb_lock_code_prompt_and_explicit_code() {
-    require_interface!("CCID");
+    require_capability!("CCID");
     if skip_interactive_on_windows() {
         return;
     }
@@ -351,7 +361,7 @@ fn test_config_usb_lock_code_prompt_and_explicit_code() {
 
 #[test]
 fn test_config_nfc_lock_code_prompt_and_explicit_code() {
-    require_interface!("CCID");
+    require_capability!("CCID");
     if skip_interactive_on_windows() {
         return;
     }

@@ -203,11 +203,20 @@ pub struct PivDiag {
     pub version: String,
     pub pin_tries: Option<String>,
     pub puk_tries: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bio_metadata: Option<PivBioMetadataDiag>,
     pub management_key_algorithm: Option<String>,
     pub warnings: Vec<String>,
     pub chuid: Option<String>,
     pub ccc: Option<String>,
     pub slots: BTreeMap<String, PivSlotDiag>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PivBioMetadataDiag {
+    pub configured: bool,
+    pub attempts_remaining: u32,
+    pub temporary_pin: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -491,6 +500,11 @@ fn probe_piv<C: yubikit::smartcard::SmartCardConnection + 'static>(
                 .get_puk_metadata()
                 .ok()
                 .map(|m| format!("{}/{}", m.attempts_remaining, m.total_attempts));
+            let bio_metadata = session.get_bio_metadata().ok().map(|m| PivBioMetadataDiag {
+                configured: m.configured,
+                attempts_remaining: m.attempts_remaining,
+                temporary_pin: m.temporary_pin,
+            });
             let mgmt_algo = session
                 .get_management_key_metadata()
                 .ok()
@@ -553,6 +567,7 @@ fn probe_piv<C: yubikit::smartcard::SmartCardConnection + 'static>(
                     version,
                     pin_tries,
                     puk_tries,
+                    bio_metadata,
                     management_key_algorithm: mgmt_algo,
                     warnings,
                     chuid,

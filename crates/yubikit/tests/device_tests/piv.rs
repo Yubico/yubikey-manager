@@ -73,9 +73,11 @@ fn fips_init_piv(session: &mut PivSession<PcscSmartCardConnection>) {
     session
         .change_pin(&default_piv_pin(), &fips_piv_pin())
         .expect("FIPS: change PIN from default");
-    session
-        .change_puk(&PivPin::new("12345678").unwrap(), &fips_piv_puk())
-        .expect("FIPS: change PUK from default");
+    if piv_has_puk(session) {
+        session
+            .change_puk(&PivPin::new("12345678").unwrap(), &fips_piv_puk())
+            .expect("FIPS: change PUK from default");
+    }
     // Change management key to AES-128
     let new_mgmt =
         ManagementKey::new(yubikit::piv::ManagementKeyType::Aes128, &FIPS_MGMT_KEY).unwrap();
@@ -85,9 +87,33 @@ fn fips_init_piv(session: &mut PivSession<PcscSmartCardConnection>) {
 }
 
 /// Reset PIV and perform FIPS initialization if needed.
-fn reset_piv(session: &mut PivSession<PcscSmartCardConnection>) {
-    session.reset().expect("reset");
-    fips_init_piv(session);
+fn reset_piv(
+    mut session: PivSession<PcscSmartCardConnection>,
+) -> PivSession<PcscSmartCardConnection> {
+    if let Err(e) = session.reset() {
+        if !e.to_string().contains("Cannot perform PIV reset when") && !has_sw(&e, 0x6985) {
+            panic!("reset: {e:?}");
+        }
+
+        drop(session);
+        let conn = get_device().open_smartcard().expect("open smartcard");
+        let mut mgmt = ManagementSession::new(conn)
+            .map_err(|(e, _)| e)
+            .expect("ManagementSession::new");
+        mgmt.device_reset().expect("device reset");
+        drop(mgmt);
+        refresh_device_after_reset();
+        session =
+            PivSession::new(open_smartcard_connection(&TestConnection::SmartCard)).expect("PIV");
+    }
+    fips_init_piv(&mut session);
+    session
+}
+
+fn piv_has_puk(session: &mut PivSession<PcscSmartCardConnection>) -> bool {
+    session
+        .get_puk_metadata()
+        .is_ok_and(|meta| meta.total_attempts > 0)
 }
 
 #[rstest]
@@ -106,8 +132,8 @@ fn test_piv_session_version(#[case] tc: TestConnection) {
 fn test_piv_verify_default_pin(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
 
     session
         .verify_pin(&effective_piv_pin())
@@ -120,8 +146,8 @@ fn test_piv_verify_default_pin(#[case] tc: TestConnection) {
 fn test_piv_pin_attempts(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
 
     let attempts = session.get_pin_attempts().expect("get_pin_attempts");
     assert!(attempts > 0, "Expected positive PIN attempts");
@@ -134,8 +160,8 @@ fn test_piv_generate_key_ec_p256(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(4, 0, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -161,8 +187,8 @@ fn test_piv_generate_key_rsa2048(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(4, 0, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -187,8 +213,8 @@ fn test_piv_sign_ec_p256(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(4, 0, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -236,8 +262,8 @@ fn test_piv_self_signed_cert_ec(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(4, 0, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -326,8 +352,8 @@ fn test_piv_generate_csr(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(4, 0, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -392,8 +418,8 @@ fn test_piv_self_signed_cert_rsa(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(4, 0, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -457,8 +483,8 @@ fn test_piv_decrypt_rsa(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(4, 0, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -505,8 +531,8 @@ fn test_piv_ecdh_p256(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(4, 0, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -567,8 +593,8 @@ fn test_piv_generate_mldsa44(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(6, 0, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -608,8 +634,8 @@ fn test_piv_generate_mlkem768(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(6, 0, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -646,8 +672,8 @@ fn test_piv_mldsa44_verify(#[case] tc: TestConnection) {
     use x509_cert::der::Decode;
     use x509_cert::spki::SubjectPublicKeyInfoRef;
 
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -696,8 +722,8 @@ fn test_piv_mlkem768_decapsulate(#[case] tc: TestConnection) {
     use x509_cert::der::Decode;
     use x509_cert::spki::SubjectPublicKeyInfoRef;
 
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -752,8 +778,8 @@ fn test_piv_mlkem768_decapsulate(#[case] tc: TestConnection) {
 fn test_piv_pin_management(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
 
     let current_pin = effective_piv_pin();
     let current_puk = if device_is_fips() {
@@ -775,10 +801,18 @@ fn test_piv_pin_management(#[case] tc: TestConnection) {
     session.verify_pin(&new_pin).expect("verify new PIN");
 
     // Wrong PIN should decrement attempts
+    let attempts_before = session.get_pin_attempts().expect("get_pin_attempts");
     let wrong = PivPin::new("99887766").unwrap();
     assert!(session.verify_pin(&wrong).is_err());
     let attempts = session.get_pin_attempts().expect("get_pin_attempts");
-    assert!(attempts < 3, "attempts should have decreased from 3");
+    assert!(
+        attempts < attempts_before,
+        "attempts should have decreased from {attempts_before}"
+    );
+
+    if !piv_has_puk(&mut session) {
+        return;
+    }
 
     // Block PIN by exhausting retries
     for _ in 0..attempts {
@@ -807,8 +841,8 @@ fn test_piv_attest_and_metadata(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(5, 3, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -846,8 +880,8 @@ fn test_piv_management_key_and_metadata(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(5, 3, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -866,9 +900,10 @@ fn test_piv_management_key_and_metadata(#[case] tc: TestConnection) {
     let pin_meta = session.get_pin_metadata().expect("get_pin_metadata");
     assert!(pin_meta.attempts_remaining > 0);
 
-    // Get PUK metadata
-    let puk_meta = session.get_puk_metadata().expect("get_puk_metadata");
-    assert!(puk_meta.attempts_remaining > 0);
+    // Get PUK metadata, if supported.
+    if let Ok(puk_meta) = session.get_puk_metadata() {
+        assert_eq!(puk_meta.attempts_remaining > 0, puk_meta.total_attempts > 0);
+    }
 
     // Change management key
     let key_type = session.management_key_type();
@@ -922,8 +957,8 @@ fn test_piv_move_and_delete_key(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(5, 7, 0));
     require_capability!(Capability::PIV);
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
     session
         .authenticate(&effective_management_key(&session))
         .expect("authenticate");
@@ -974,8 +1009,8 @@ fn test_piv_generate_and_sign_ec_p384(#[case] tc: TestConnection) {
     require_capability!(Capability::PIV);
     require_version!(Version(4, 0, 0));
 
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
 
     let mgmt_key = effective_management_key(&session);
     session.authenticate(&mgmt_key).expect("authenticate");
@@ -1029,8 +1064,8 @@ fn test_piv_generate_and_sign_ed25519(#[case] tc: TestConnection) {
     require_capability!(Capability::PIV);
     require_version!(Version(5, 7, 0));
 
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
 
     let mgmt_key = effective_management_key(&session);
     session.authenticate(&mgmt_key).expect("authenticate");
@@ -1087,8 +1122,8 @@ fn test_piv_x25519_key_agreement(#[case] tc: TestConnection) {
         skip!("X25519 is not supported by FIPS-capable PIV");
     }
 
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
 
     let mgmt_key = effective_management_key(&session);
     session.authenticate(&mgmt_key).expect("authenticate");
@@ -1152,8 +1187,8 @@ fn test_piv_pin_policy_always(#[case] tc: TestConnection) {
     require_capability!(Capability::PIV);
     require_version!(Version(4, 0, 0));
 
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
 
     let mgmt_key = effective_management_key(&session);
     session.authenticate(&mgmt_key).expect("authenticate");
@@ -1197,8 +1232,8 @@ fn test_piv_pin_policy_never(#[case] tc: TestConnection) {
         skip!("PinPolicy::Never is not supported by FIPS-capable PIV");
     }
 
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
 
     let mgmt_key = effective_management_key(&session);
     session.authenticate(&mgmt_key).expect("authenticate");
@@ -1254,8 +1289,8 @@ fn test_piv_compressed_cert(#[case] tc: TestConnection) {
     require_capability!(Capability::PIV);
     require_version!(Version(5, 3, 0));
 
-    let mut session = open_piv_session(&tc);
-    reset_piv(&mut session);
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
 
     let mgmt_key = effective_management_key(&session);
     session.authenticate(&mgmt_key).expect("authenticate");
