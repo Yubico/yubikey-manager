@@ -148,7 +148,7 @@ pub enum OtpAction {
         #[arg(short, long)]
         generate: bool,
         /// Length of generated password
-        #[arg(short, long, default_value_t = 38)]
+        #[arg(short = 'L', long, default_value_t = 38)]
         length: usize,
         /// Keyboard layout
         #[arg(short, long, default_value = "modhex")]
