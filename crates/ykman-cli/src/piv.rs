@@ -71,21 +71,21 @@ pub enum PivAccessAction {
     ChangePin {
         #[arg(short = 'P', long)]
         pin: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'n', long)]
         new_pin: Option<String>,
     },
     /// Change the PIV PUK
     ChangePuk {
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         puk: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'n', long)]
         new_puk: Option<String>,
     },
     /// Unblock the PIN using PUK
     UnblockPin {
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         puk: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'n', long)]
         new_pin: Option<String>,
     },
     /// Set PIN and PUK retry counts
@@ -94,7 +94,7 @@ pub enum PivAccessAction {
         pin_retries: u8,
         /// PUK retry count
         puk_retries: u8,
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
@@ -103,15 +103,15 @@ pub enum PivAccessAction {
     },
     /// Change the management key
     ChangeManagementKey {
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_key: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'n', long)]
         new_management_key: Option<String>,
-        #[arg(short, long, default_value = "tdes")]
+        #[arg(short = 'a', long, default_value = "tdes")]
         algorithm: CliMgmtKeyType,
-        #[arg(short, long)]
+        #[arg(short = 't', long)]
         touch: bool,
-        #[arg(short, long)]
+        #[arg(short = 'g', long)]
         generate: bool,
         #[arg(short = 'f', long)]
         force: bool,
@@ -132,13 +132,13 @@ pub enum PivKeysAction {
         slot: String,
         /// Output file for public key
         output: String,
-        #[arg(short, long, default_value = "eccp256")]
+        #[arg(short = 'a', long, default_value = "eccp256")]
         algorithm: CliKeyType,
         #[arg(long, default_value = "default")]
         pin_policy: CliPinPolicy,
         #[arg(long, default_value = "default")]
         touch_policy: CliTouchPolicy,
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
@@ -155,7 +155,7 @@ pub enum PivKeysAction {
         pin_policy: CliPinPolicy,
         #[arg(long, default_value = "default")]
         touch_policy: CliTouchPolicy,
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
@@ -198,7 +198,7 @@ pub enum PivKeysAction {
         source: String,
         /// Destination slot
         dest: String,
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
@@ -207,7 +207,7 @@ pub enum PivKeysAction {
     Delete {
         /// PIV slot
         slot: String,
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
@@ -231,11 +231,11 @@ pub enum PivCertAction {
         slot: String,
         /// Certificate file
         cert_file: String,
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'c', long)]
         compress: bool,
         /// Password for decrypting the certificate file
         #[arg(short = 'p', long)]
@@ -251,7 +251,7 @@ pub enum PivCertAction {
     Delete {
         /// PIV slot
         slot: String,
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
@@ -267,7 +267,7 @@ pub enum PivCertAction {
         #[arg(value_name = "PUBLIC-KEY")]
         public_key: Option<String>,
         /// Subject common name
-        #[arg(short, long)]
+        #[arg(short = 's', long)]
         subject: String,
         /// Validity period in days
         #[arg(long, default_value_t = 365)]
@@ -275,7 +275,7 @@ pub enum PivCertAction {
         /// Hash algorithm
         #[arg(short = 'a', long, default_value = "sha256")]
         hash_algorithm: CliHashAlgorithm,
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
@@ -293,7 +293,7 @@ pub enum PivCertAction {
         /// Output file (use '-' for stdout)
         output: String,
         /// Subject common name
-        #[arg(short, long)]
+        #[arg(short = 's', long)]
         subject: String,
         /// Hash algorithm
         #[arg(short = 'a', long, default_value = "sha256")]
@@ -320,7 +320,7 @@ pub enum PivObjectAction {
         object: String,
         /// Data file
         data: String,
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,
@@ -329,7 +329,7 @@ pub enum PivObjectAction {
     Generate {
         /// Object type: CHUID or CCC
         object: String,
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_key: Option<String>,
         #[arg(short = 'P', long)]
         pin: Option<String>,

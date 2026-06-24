@@ -21,7 +21,7 @@ pub enum OathAction {
     /// Display general status of the OATH application
     Info {
         /// Password to unlock OATH
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         password: Option<String>,
     },
     /// Reset the OATH application
@@ -58,7 +58,7 @@ pub enum OathAccessAction {
     /// Remember the password for the current YubiKey on this computer
     Remember {
         /// Password to store
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         password: Option<String>,
     },
     /// Remove a stored password from this computer
@@ -74,7 +74,7 @@ pub enum OathAccountAction {
     /// List stored OATH accounts
     List {
         /// Password to unlock OATH
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
         #[arg(long)]
@@ -92,7 +92,7 @@ pub enum OathAccountAction {
     /// Calculate OTP codes
     Code {
         /// Password to unlock OATH
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
         #[arg(long)]
@@ -103,7 +103,7 @@ pub enum OathAccountAction {
         #[arg(short = 'H', long)]
         show_hidden: bool,
         /// Output single code (for scripting)
-        #[arg(short, long)]
+        #[arg(short = 's', long)]
         single: bool,
     },
     /// Add an OATH account
@@ -113,13 +113,13 @@ pub enum OathAccountAction {
         /// Secret key (Base32 encoded)
         secret: Option<String>,
         /// Password to unlock OATH
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
         #[arg(long)]
         remember: bool,
         /// Issuer name
-        #[arg(short, long)]
+        #[arg(short = 'i', long)]
         issuer: Option<String>,
         /// Credential type
         #[arg(short = 'o', long, default_value = "totp")]
@@ -128,22 +128,22 @@ pub enum OathAccountAction {
         #[arg(long, default_value = "6")]
         digits: CliOathDigits,
         /// Hash algorithm
-        #[arg(short, long, default_value = "sha1")]
+        #[arg(short = 'a', long, default_value = "sha1")]
         algorithm: CliOathAlgorithm,
         /// Initial counter value for HOTP
-        #[arg(short, long, default_value_t = 0)]
+        #[arg(short = 'c', long, default_value_t = 0)]
         counter: u32,
         /// Time period for TOTP (seconds)
         #[arg(short = 'P', long, default_value_t = 30)]
         period: u32,
         /// Generate a random credential key
-        #[arg(short, long)]
+        #[arg(short = 'g', long)]
         generate: bool,
         /// Require touch for code generation
-        #[arg(short, long)]
+        #[arg(short = 't', long)]
         touch: bool,
         /// Confirm without prompting
-        #[arg(short, long)]
+        #[arg(short = 'f', long)]
         force: bool,
     },
     /// Add new account(s) from a PSKC file
@@ -151,16 +151,16 @@ pub enum OathAccountAction {
         /// PSKC file to import
         file: String,
         /// Password to unlock OATH
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
         #[arg(long)]
         remember: bool,
         /// Require touch for code generation
-        #[arg(short, long)]
+        #[arg(short = 't', long)]
         touch: bool,
         /// Confirm without prompting
-        #[arg(short, long)]
+        #[arg(short = 'f', long)]
         force: bool,
     },
     /// Delete an OATH account
@@ -168,13 +168,13 @@ pub enum OathAccountAction {
         /// Account to delete (search query)
         query: String,
         /// Password to unlock OATH
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
         #[arg(long)]
         remember: bool,
         /// Confirm without prompting
-        #[arg(short, long)]
+        #[arg(short = 'f', long)]
         force: bool,
     },
     /// Rename an OATH account
@@ -184,13 +184,13 @@ pub enum OathAccountAction {
         /// New name (issuer:name or just name)
         new_name: String,
         /// Password to unlock OATH
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
         #[arg(long)]
         remember: bool,
         /// Confirm without prompting
-        #[arg(short, long)]
+        #[arg(short = 'f', long)]
         force: bool,
     },
     /// Add account from otpauth:// URI
@@ -198,16 +198,16 @@ pub enum OathAccountAction {
         /// otpauth:// URI string
         uri: String,
         /// Password to unlock OATH
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
         #[arg(long)]
         remember: bool,
         /// Require touch for code generation
-        #[arg(short, long)]
+        #[arg(short = 't', long)]
         touch: bool,
         /// Confirm without prompting
-        #[arg(short, long)]
+        #[arg(short = 'f', long)]
         force: bool,
     },
 }

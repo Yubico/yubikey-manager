@@ -145,13 +145,13 @@ pub enum OtpAction {
         /// Password to store
         password: Option<String>,
         /// Generate a random password
-        #[arg(short, long)]
+        #[arg(short = 'g', long)]
         generate: bool,
         /// Length of generated password
         #[arg(short = 'L', long, default_value_t = 38)]
         length: usize,
         /// Keyboard layout
-        #[arg(short, long, default_value = "modhex")]
+        #[arg(short = 'k', long, default_value = "modhex")]
         keyboard_layout: CliKeyboardLayout,
         #[command(flatten)]
         enter: EnterArgs,
@@ -169,13 +169,13 @@ pub enum OtpAction {
         /// HMAC-SHA1 key (hex)
         key: Option<String>,
         /// Use TOTP mode
-        #[arg(short, long)]
+        #[arg(short = 't', long)]
         totp: bool,
         /// Require touch
         #[arg(short = 'T', long)]
         touch: bool,
         /// Generate random key
-        #[arg(short, long)]
+        #[arg(short = 'g', long)]
         generate: bool,
         /// Access code (hex)
         #[arg(short = 'A', long)]
@@ -191,7 +191,7 @@ pub enum OtpAction {
         /// Challenge (hex)
         challenge: Option<String>,
         /// Use TOTP mode (time-based challenge)
-        #[arg(short, long)]
+        #[arg(short = 't', long)]
         totp: bool,
         /// Number of digits for TOTP
         #[arg(long, default_value = "6")]

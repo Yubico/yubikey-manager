@@ -37,7 +37,7 @@ pub enum OpenpgpAccessAction {
         pin_retries: u8,
         reset_code_retries: u8,
         admin_pin_retries: u8,
-        #[arg(short, long)]
+        #[arg(short = 'a', long)]
         admin_pin: Option<String>,
         #[arg(short = 'f', long)]
         force: bool,
@@ -46,19 +46,19 @@ pub enum OpenpgpAccessAction {
     ChangePin {
         #[arg(short = 'P', long)]
         pin: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'n', long)]
         new_pin: Option<String>,
     },
     /// Change admin PIN
     ChangeAdminPin {
-        #[arg(short, long)]
+        #[arg(short = 'a', long)]
         admin_pin: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'n', long)]
         new_admin_pin: Option<String>,
     },
     /// Change reset code
     ChangeResetCode {
-        #[arg(short, long)]
+        #[arg(short = 'a', long)]
         admin_pin: Option<String>,
         /// New reset code
         #[arg(short = 'R', long)]
@@ -66,18 +66,18 @@ pub enum OpenpgpAccessAction {
     },
     /// Unblock PIN
     UnblockPin {
-        #[arg(short, long)]
+        #[arg(short = 'a', long)]
         admin_pin: Option<String>,
         #[arg(long)]
         reset_code: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'n', long)]
         new_pin: Option<String>,
     },
     /// Set signature PIN policy
     SetSignaturePolicy {
         /// Policy
         policy: CliOpenpgpPinPolicy,
-        #[arg(short, long)]
+        #[arg(short = 'a', long)]
         admin_pin: Option<String>,
     },
 }
@@ -95,7 +95,7 @@ pub enum OpenpgpKeysAction {
         key: CliKeyRef,
         /// Touch policy
         policy: CliUif,
-        #[arg(short, long)]
+        #[arg(short = 'a', long)]
         admin_pin: Option<String>,
         #[arg(short = 'f', long)]
         force: bool,
@@ -106,7 +106,7 @@ pub enum OpenpgpKeysAction {
         key: CliKeyRef,
         /// Key file
         key_file: String,
-        #[arg(short, long)]
+        #[arg(short = 'a', long)]
         admin_pin: Option<String>,
     },
     /// Generate attestation certificate
@@ -140,14 +140,14 @@ pub enum OpenpgpCertAction {
         key: CliKeyRef,
         /// Certificate file
         cert_file: String,
-        #[arg(short, long)]
+        #[arg(short = 'a', long)]
         admin_pin: Option<String>,
     },
     /// Delete certificate
     Delete {
         /// Key reference
         key: CliKeyRef,
-        #[arg(short, long)]
+        #[arg(short = 'a', long)]
         admin_pin: Option<String>,
     },
 }

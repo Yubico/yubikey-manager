@@ -36,9 +36,9 @@ pub enum HsmauthCredAction {
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_password: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 't', long)]
         touch: bool,
     },
     /// Import symmetric credential
@@ -48,14 +48,14 @@ pub enum HsmauthCredAction {
         enc_key: Option<String>,
         #[arg(short = 'M', long)]
         mac_key: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'g', long)]
         generate: bool,
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_password: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 't', long)]
         touch: bool,
     },
     /// Import credential derived from password
@@ -66,16 +66,16 @@ pub enum HsmauthCredAction {
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_password: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 't', long)]
         touch: bool,
     },
     /// Delete credential
     Delete {
         label: String,
         /// Management password
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_password: Option<String>,
         #[arg(short = 'f', long)]
         force: bool,
@@ -86,7 +86,7 @@ pub enum HsmauthCredAction {
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// New credential password
-        #[arg(short, long)]
+        #[arg(short = 'n', long)]
         new_credential_password: Option<String>,
     },
     /// Import an asymmetric credential
@@ -97,16 +97,16 @@ pub enum HsmauthCredAction {
         #[arg(value_name = "PRIVATE-KEY")]
         private_key: String,
         /// Password to decrypt the private key
-        #[arg(short, long)]
+        #[arg(short = 'p', long)]
         password: Option<String>,
         /// Password to protect credential
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_password: Option<String>,
         /// Require touch
-        #[arg(short, long)]
+        #[arg(short = 't', long)]
         touch: bool,
     },
     /// Export public key for asymmetric credential
@@ -126,11 +126,11 @@ pub enum HsmauthAccessAction {
     /// Change the management key
     #[command(name = "change-management-password")]
     ChangeManagementPassword {
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         management_password: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'n', long)]
         new_management_password: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'g', long)]
         generate: bool,
     },
 }
