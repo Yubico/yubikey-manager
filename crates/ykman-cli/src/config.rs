@@ -15,19 +15,16 @@ pub enum ConfigAction {
     /// Configure USB applications
     Usb {
         /// Enable an application (can be repeated)
-        #[arg(short = 'e', long = "enable", action = clap::ArgAction::Append)]
+        #[arg(short = 'e', long, action = clap::ArgAction::Append)]
         enable: Vec<CliCapability>,
         /// Disable an application (can be repeated)
-        #[arg(long = "disable", action = clap::ArgAction::Append)]
+        #[arg(short = 'x', long, action = clap::ArgAction::Append)]
         disable: Vec<CliCapability>,
         /// Enable all supported applications
         #[arg(short = 'a', long)]
         enable_all: bool,
-        /// List enabled applications
-        #[arg(short = 'l', long)]
-        list: bool,
         /// Current lock code as 32 hex characters (16 bytes)
-        #[arg(short = 'L', long = "lock-code", value_name = "HEX")]
+        #[arg(short = 'L', long, value_name = "HEX")]
         lock_code: Option<String>,
         /// Enable touch-eject
         #[arg(long)]
@@ -48,22 +45,19 @@ pub enum ConfigAction {
     /// Configure NFC applications
     Nfc {
         /// Enable an application (can be repeated)
-        #[arg(short = 'e', long = "enable", action = clap::ArgAction::Append)]
+        #[arg(short = 'e', long, action = clap::ArgAction::Append)]
         enable: Vec<CliCapability>,
         /// Disable an application (can be repeated)
-        #[arg(long = "disable", action = clap::ArgAction::Append)]
+        #[arg(short = 'x', long, action = clap::ArgAction::Append)]
         disable: Vec<CliCapability>,
         /// Enable all supported applications
         #[arg(short = 'a', long)]
         enable_all: bool,
         /// Disable all supported applications
-        #[arg(short = 'D', long)]
+        #[arg(short = 'X', long)]
         disable_all: bool,
-        /// List enabled applications
-        #[arg(short = 'l', long)]
-        list: bool,
         /// Current lock code as 32 hex characters (16 bytes)
-        #[arg(short = 'L', long = "lock-code", value_name = "HEX")]
+        #[arg(short = 'L', long, value_name = "HEX")]
         lock_code: Option<String>,
         /// Disable NFC until next USB power cycle
         #[arg(short = 'R', long)]
@@ -78,15 +72,10 @@ pub enum ConfigAction {
     /// 32 hexadecimal characters, representing 16 bytes.
     SetLockCode {
         /// Current lock code as 32 hex characters (16 bytes)
-        #[arg(short = 'l', long = "lock-code", value_name = "HEX")]
+        #[arg(short = 'L', long, value_name = "HEX")]
         lock_code: Option<String>,
         /// New lock code as 32 hex characters (16 bytes)
-        #[arg(
-            short = 'n',
-            long = "new-lock-code",
-            value_name = "HEX",
-            conflicts_with = "generate"
-        )]
+        #[arg(short = 'n', long, value_name = "HEX", conflicts_with = "generate")]
         new_lock_code: Option<String>,
         /// Clear the lock code
         #[arg(short = 'c', long, conflicts_with_all = ["new_lock_code", "generate"])]
@@ -142,7 +131,6 @@ impl ConfigAction {
                 enable,
                 disable,
                 enable_all,
-                list,
                 lock_code,
                 touch_eject,
                 no_touch_eject,
@@ -154,7 +142,6 @@ impl ConfigAction {
                 &enable,
                 &disable,
                 enable_all,
-                list,
                 lock_code.as_deref(),
                 touch_eject,
                 no_touch_eject,
@@ -167,7 +154,6 @@ impl ConfigAction {
                 disable,
                 enable_all,
                 disable_all,
-                list,
                 lock_code,
                 restrict,
                 force,
@@ -177,7 +163,6 @@ impl ConfigAction {
                 &disable,
                 enable_all,
                 disable_all,
-                list,
                 lock_code.as_deref(),
                 restrict,
                 force,
@@ -396,20 +381,6 @@ fn compute_capability_changes(
     Ok((new_enabled, changes))
 }
 
-/// List capabilities and their enabled/disabled status for a transport.
-fn list_capabilities(supported: Capability, enabled: Capability) {
-    for &cap in Capability::ALL {
-        if supported.contains(cap) {
-            let status = if enabled.contains(cap) {
-                "Enabled"
-            } else {
-                "Disabled"
-            };
-            println!("{}: {status}", cap.display_name());
-        }
-    }
-}
-
 /// Confirm configuration changes with the user, or proceed if `force` is set.
 fn confirm_config_changes(
     transport_name: &str,
@@ -433,7 +404,6 @@ pub fn run_usb(
     enable: &[CliCapability],
     disable: &[CliCapability],
     enable_all: bool,
-    list: bool,
     lock_code: Option<&str>,
     touch_eject: bool,
     no_touch_eject: bool,
@@ -455,11 +425,6 @@ pub fn run_usb(
         .unwrap_or(Capability::NONE);
 
     reject_lock_code_if_unlocked(info.is_locked, lock_code)?;
-
-    if list {
-        list_capabilities(usb_supported, usb_enabled);
-        return Ok(());
-    }
 
     let (new_enabled, mut changes) = compute_capability_changes(
         "USB",
@@ -526,7 +491,6 @@ pub fn run_nfc(
     disable: &[CliCapability],
     enable_all: bool,
     disable_all: bool,
-    list: bool,
     lock_code: Option<&str>,
     restrict: bool,
     force: bool,
@@ -545,11 +509,6 @@ pub fn run_nfc(
         .unwrap_or(Capability::NONE);
 
     reject_lock_code_if_unlocked(info.is_locked, lock_code)?;
-
-    if list {
-        list_capabilities(nfc_supported, nfc_enabled);
-        return Ok(());
-    }
 
     if restrict {
         let config = DeviceConfig {

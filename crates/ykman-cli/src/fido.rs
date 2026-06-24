@@ -65,7 +65,7 @@ pub enum FidoAccessAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// New PIN code
-        #[arg(short = 'n', long = "new-pin")]
+        #[arg(short = 'n', long)]
         new_pin: Option<String>,
     },
     /// Verify the PIN (and unblock if needed)
@@ -91,7 +91,7 @@ pub enum FidoAccessAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// RP ID to allow (can be repeated)
-        #[arg(short = 'R', long = "rp-id", action = clap::ArgAction::Append)]
+        #[arg(short = 'R', long, action = clap::ArgAction::Append)]
         rp_id: Vec<String>,
     },
 }
@@ -425,7 +425,7 @@ fn require_pin_from_info(
 ) -> Result<Ctap2Pin, CliError> {
     if info.options.get("clientPin") != Some(&true) {
         return Err(CliError(format!(
-            "{feature} requires a PIN, but no PIN is currently set. Use 'ykman fido access change-pin --new-pin PIN' to set one."
+            "{feature} requires a PIN, but no PIN is currently set. Use 'ykman fido access change-pin' to set one."
         )));
     }
     let pin = match pin {

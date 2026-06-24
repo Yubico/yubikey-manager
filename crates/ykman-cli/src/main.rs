@@ -46,7 +46,7 @@ use util::CliError;
 )]
 struct Cli {
     /// Specify which YubiKey to interact with by serial number
-    #[arg(short = 'd', long = "device", global = true)]
+    #[arg(short = 'd', long, global = true)]
     device: Option<u32>,
 
     /// SCP credentials: private key and cert files, or SCP03 keys as K-ENC:K-MAC[:K-DEK] hex
@@ -54,35 +54,35 @@ struct Cli {
     scp_cred: Vec<String>,
 
     /// CA certificate for SCP11 card key verification (PEM/DER file)
-    #[arg(long = "scp-ca", global = true)]
+    #[arg(long, global = true)]
     scp_ca: Option<String>,
 
     /// Card key reference for SCP (KID KVN, hex)
-    #[arg(long = "scp-sd", global = true, num_args = 2, value_names = ["KID", "KVN"])]
+    #[arg(long, global = true, num_args = 2, value_names = ["KID", "KVN"])]
     scp_sd: Option<Vec<String>>,
 
     /// OCE key reference for SCP (KID KVN, hex)
-    #[arg(long = "scp-oce", global = true, num_args = 2, value_names = ["KID", "KVN"])]
+    #[arg(long, global = true, num_args = 2, value_names = ["KID", "KVN"])]
     scp_oce: Option<Vec<String>>,
 
     /// Password for SCP credential file
-    #[arg(long = "scp-password", global = true)]
+    #[arg(long, global = true)]
     scp_password: Option<String>,
 
     /// Show diagnostic information
-    #[arg(long = "diagnose")]
+    #[arg(long)]
     diagnose: bool,
 
     /// Show third-party license information
-    #[arg(long = "licenses")]
+    #[arg(long)]
     licenses: bool,
 
     /// Enable logging at given verbosity level
-    #[arg(short = 'l', long = "log-level")]
+    #[arg(short = 'l', long, global = true)]
     log_level: Option<logging::LogLevel>,
 
     /// Write log to FILE instead of printing to stderr (requires --log-level)
-    #[arg(long = "log-file", value_name = "FILE")]
+    #[arg(long, value_name = "FILE", global = true)]
     log_file: Option<String>,
 
     #[command(subcommand)]
@@ -196,7 +196,7 @@ enum Commands {
       \n  $ ykman otp --access-code 0123456789ab settings 2 --delete-access-code")]
     Otp {
         /// 6 byte access code (use "-" to prompt for input)
-        #[arg(long = "access-code")]
+        #[arg(long)]
         access_code: Option<String>,
         #[command(subcommand)]
         action: otp::OtpAction,

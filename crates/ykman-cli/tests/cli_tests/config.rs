@@ -1,4 +1,6 @@
-use super::common::{skip_if_fips, skip_interactive_on_windows, ykman_dev, ykman_dev_tty};
+use super::common::{
+    device_info, skip_if_fips, skip_interactive_on_windows, ykman_dev, ykman_dev_tty,
+};
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::thread;
@@ -34,7 +36,7 @@ impl Drop for LockCodeGuard {
     fn drop(&mut self) {
         if self.armed {
             let _ = ykman_dev()
-                .args(["config", "set-lock-code", "-l", self.code, "--clear", "-f"])
+                .args(["config", "set-lock-code", "-L", self.code, "--clear", "-f"])
                 .ok();
         }
     }
@@ -49,12 +51,29 @@ fn configuration_is_locked() -> bool {
         .contains("Configured capabilities are protected by a lock code")
 }
 
-fn config_list_contains(args: &[&str], needle: &str) -> bool {
+fn fresh_info() -> String {
     let output = ykman_dev()
-        .args(args)
+        .arg("info")
         .output()
-        .expect("failed to run command");
-    output.status.success() && String::from_utf8_lossy(&output.stdout).contains(needle)
+        .expect("failed to run ykman info");
+    assert!(
+        output.status.success(),
+        "ykman info failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn app_is_enabled(info: &str, app: &str, transport: &str) -> Option<bool> {
+    let header = info.lines().find(|l| l.starts_with("Applications"))?;
+    let col = header.find(transport)?;
+    let app_line = info.lines().find(|l| l.starts_with(app))?;
+    let field = app_line.get(col..)?.split_whitespace().next()?;
+    Some(field == "Enabled")
+}
+
+fn has_nfc() -> bool {
+    device_info().contains("NFC transport")
 }
 
 #[test]
@@ -70,7 +89,7 @@ fn test_config_set_lock_code_help() {
         .stdout(predicate::str::contains(
             "32 hexadecimal characters, representing 16 bytes",
         ))
-        .stdout(predicate::str::contains("-l, --lock-code <HEX>"))
+        .stdout(predicate::str::contains("-L, --lock-code <HEX>"))
         .stdout(predicate::str::contains("-n, --new-lock-code <HEX>"));
 }
 
@@ -102,121 +121,89 @@ fn test_config_set_lock_code_conflicts() {
 }
 
 #[test]
-fn test_config_usb_list() {
-    require_device_configured!();
-    ykman_dev()
-        .args(["config", "usb", "--list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty().not());
-}
-
-#[test]
-fn test_config_nfc_list() {
-    require_device_configured!();
-    let output = ykman_dev()
-        .args(["config", "nfc", "--list"])
-        .output()
-        .expect("failed to run command");
-
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(!stdout.is_empty(), "Expected non-empty NFC capability list");
-    }
-}
-
-#[test]
-fn test_config_usb_disable_enable_hsmauth() {
+fn test_config_usb_disable_enable_piv() {
     require_capability!("CCID");
-    if !config_list_contains(&["config", "usb", "--list"], "YubiHSM Auth:") {
-        eprintln!("SKIP: YubiHSM Auth is not configurable over USB on this YubiKey");
+    if app_is_enabled(device_info(), "PIV", "USB") != Some(true) {
+        eprintln!("SKIP: PIV is not enabled over USB on this YubiKey");
         return;
     }
 
-    let _ = ykman_dev()
-        .args(["config", "usb", "--enable", "hsmauth", "-f"])
-        .ok();
-    wait_for_reenumeration();
-
     ykman_dev()
-        .args(["config", "usb", "--disable", "hsmauth", "-f"])
+        .args(["config", "usb", "--disable", "piv", "-f"])
         .assert()
         .success();
     wait_for_reenumeration();
 
-    ykman_dev()
-        .args(["config", "usb", "--list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("YubiHSM Auth: Disabled"));
+    assert_eq!(
+        app_is_enabled(&fresh_info(), "PIV", "USB"),
+        Some(false),
+        "PIV should be disabled after config change"
+    );
 
     ykman_dev()
-        .args(["config", "usb", "--enable", "hsmauth", "-f"])
+        .args(["config", "usb", "--enable", "piv", "-f"])
         .assert()
         .success();
     wait_for_reenumeration();
 
-    ykman_dev()
-        .args(["config", "usb", "--list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("YubiHSM Auth: Enabled"));
+    assert_eq!(
+        app_is_enabled(&fresh_info(), "PIV", "USB"),
+        Some(true),
+        "PIV should be enabled after config change"
+    );
 }
 
 #[test]
 fn test_config_nfc_enable_disable() {
     require_capability!("CCID");
-    // Skip if key has no NFC support
-    let output = ykman_dev()
-        .args(["config", "nfc", "--list"])
-        .output()
-        .expect("failed to run command");
-    if !output.status.success() {
+    if !has_nfc() {
+        eprintln!("SKIP: NFC is not supported on this YubiKey");
         return;
     }
 
-    // Ensure HSMAUTH is enabled over NFC first
+    // Ensure PIV is enabled over NFC first
     let _ = ykman_dev()
-        .args(["config", "nfc", "--enable", "hsmauth", "-f"])
+        .args(["config", "nfc", "--enable", "piv", "-f"])
         .ok();
 
-    // Disable HSMAUTH over NFC
+    // Disable PIV over NFC
     ykman_dev()
-        .args(["config", "nfc", "--disable", "hsmauth", "-f"])
+        .args(["config", "nfc", "--disable", "piv", "-f"])
         .assert()
         .success();
 
-    ykman_dev()
-        .args(["config", "nfc", "--list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("YubiHSM Auth: Disabled"));
+    assert_eq!(
+        app_is_enabled(&fresh_info(), "PIV", "NFC"),
+        Some(false),
+        "PIV should be disabled over NFC after config change"
+    );
 
-    // Re-enable HSMAUTH over NFC
+    // Re-enable PIV over NFC
     ykman_dev()
-        .args(["config", "nfc", "--enable", "hsmauth", "-f"])
+        .args(["config", "nfc", "--enable", "piv", "-f"])
         .assert()
         .success();
 
-    ykman_dev()
-        .args(["config", "nfc", "--list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("YubiHSM Auth: Enabled"));
+    assert_eq!(
+        app_is_enabled(&fresh_info(), "PIV", "NFC"),
+        Some(true),
+        "PIV should be enabled over NFC after config change"
+    );
 }
 
 #[test]
 fn test_config_usb_enable_all() {
     require_capability!("CCID");
-    if !config_list_contains(&["config", "usb", "--list"], "YubiHSM Auth:") {
-        eprintln!("SKIP: YubiHSM Auth is not configurable over USB on this YubiKey");
+    if app_is_enabled(device_info(), "PIV", "USB") != Some(true) {
+        eprintln!("SKIP: PIV is not enabled over USB on this YubiKey");
         return;
     }
 
-    // First disable an app so --enable-all has something to do
-    let _ = ykman_dev()
-        .args(["config", "usb", "--disable", "hsmauth", "-f"])
-        .ok();
+    // First disable PIV so --enable-all has something to do
+    ykman_dev()
+        .args(["config", "usb", "--disable", "piv", "-f"])
+        .assert()
+        .success();
     wait_for_reenumeration();
 
     // Now enable-all should succeed
@@ -226,24 +213,20 @@ fn test_config_usb_enable_all() {
         .success();
     wait_for_reenumeration();
 
-    // Verify everything is enabled
-    ykman_dev()
-        .args(["config", "usb", "--list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("YubiHSM Auth: Enabled"));
+    // Verify PIV is enabled again
+    assert_eq!(
+        app_is_enabled(&fresh_info(), "PIV", "USB"),
+        Some(true),
+        "PIV should be enabled after --enable-all"
+    );
 }
 
 #[test]
 fn test_config_nfc_disable_all_enable_all() {
     require_capability!("CCID");
-    // NFC disable-all is safe — USB access can always recover.
-    let output = ykman_dev()
-        .args(["config", "nfc", "--list"])
-        .output()
-        .expect("failed to run command");
-    if !output.status.success() {
-        return; // NFC not supported on this key
+    if !has_nfc() {
+        eprintln!("SKIP: NFC is not supported on this YubiKey");
+        return;
     }
 
     ykman_dev()
@@ -271,7 +254,7 @@ fn test_config_set_lock_code() {
 
     // Clear the lock code (must supply current code)
     ykman_dev()
-        .args(["config", "set-lock-code", "-l", lock_code, "--clear", "-f"])
+        .args(["config", "set-lock-code", "-L", lock_code, "--clear", "-f"])
         .assert()
         .success();
 }
@@ -312,14 +295,14 @@ fn test_config_usb_lock_code_prompt_and_explicit_code() {
         eprintln!("SKIP: configuration is already locked with an unknown code");
         return;
     }
-    if !config_list_contains(&["config", "usb", "--list"], "YubiHSM Auth:") {
-        eprintln!("SKIP: YubiHSM Auth is not configurable over USB on this YubiKey");
+    if app_is_enabled(device_info(), "PIV", "USB") != Some(true) {
+        eprintln!("SKIP: PIV is not enabled over USB on this YubiKey");
         return;
     }
 
     let guard = LockCodeGuard::set(TEST_LOCK_CODE);
     let output = ykman_dev_tty(
-        &["config", "usb", "--disable", "hsmauth", "-f"],
+        &["config", "usb", "--disable", "piv", "-f"],
         &format!("{TEST_LOCK_CODE}\n"),
     );
     assert!(output.status.success(), "{output:?}");
@@ -336,7 +319,7 @@ fn test_config_usb_lock_code_prompt_and_explicit_code() {
             "config",
             "usb",
             "--enable",
-            "hsmauth",
+            "piv",
             "--lock-code",
             TEST_LOCK_CODE,
             "-f",
@@ -349,7 +332,7 @@ fn test_config_usb_lock_code_prompt_and_explicit_code() {
         .args([
             "config",
             "set-lock-code",
-            "-l",
+            "-L",
             TEST_LOCK_CODE,
             "--clear",
             "-f",
@@ -372,14 +355,14 @@ fn test_config_nfc_lock_code_prompt_and_explicit_code() {
         eprintln!("SKIP: configuration is already locked with an unknown code");
         return;
     }
-    if !config_list_contains(&["config", "nfc", "--list"], "YubiHSM Auth:") {
-        eprintln!("SKIP: YubiHSM Auth is not configurable over NFC on this YubiKey");
+    if !has_nfc() {
+        eprintln!("SKIP: NFC is not supported on this YubiKey");
         return;
     }
 
     let guard = LockCodeGuard::set(TEST_LOCK_CODE);
     let output = ykman_dev_tty(
-        &["config", "nfc", "--disable", "hsmauth", "-f"],
+        &["config", "nfc", "--disable", "piv", "-f"],
         &format!("{TEST_LOCK_CODE}\n"),
     );
     assert!(output.status.success(), "{output:?}");
@@ -395,7 +378,7 @@ fn test_config_nfc_lock_code_prompt_and_explicit_code() {
             "config",
             "nfc",
             "--enable",
-            "hsmauth",
+            "piv",
             "--lock-code",
             TEST_LOCK_CODE,
             "-f",
@@ -407,7 +390,7 @@ fn test_config_nfc_lock_code_prompt_and_explicit_code() {
         .args([
             "config",
             "set-lock-code",
-            "-l",
+            "-L",
             TEST_LOCK_CODE,
             "--clear",
             "-f",
