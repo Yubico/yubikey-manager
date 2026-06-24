@@ -17,8 +17,10 @@ use yubikit::piv::{
     PinPolicy, PivPin, PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
 };
 
+use ykman::piv::{
+    TAG_PIVMAN_KEY, get_pivman_data, get_pivman_protected_data, has_stored_key, pivman_set_mgm_key,
+};
 use yubikit::smartcard::SmartCardConnection;
-use yubikit::tlv::{parse_tlv_list, tlv_encode};
 
 use crate::cli_enums::{
     CliFormat, CliHashAlgorithm, CliKeyType, CliMgmtKeyType, CliPinPolicy, CliTouchPolicy,
@@ -646,158 +648,6 @@ fn to_piv_pin(pin: &str, label: &str) -> Result<PivPin, CliError> {
 }
 
 // ---------------------------------------------------------------------------
-// Pivman data: management key storage on device
-// ---------------------------------------------------------------------------
-
-const PIVMAN_OBJ_ID: u32 = 0x5FFF00;
-const PIVMAN_PROTECTED_OBJ_ID: u32 = ObjectId::Printed as u32;
-
-const TAG_PIVMAN_DATA: u32 = 0x80;
-const TAG_PIVMAN_FLAGS: u32 = 0x81;
-const TAG_PIVMAN_PROTECTED: u32 = 0x88;
-const TAG_PIVMAN_KEY: u32 = 0x89;
-
-const PIVMAN_FLAG_KEY_PROTECTED: u8 = 0x02;
-
-/// Read the pivman public data object. Returns the inner TLV list.
-fn get_pivman_data(session: &mut PivSession<impl SmartCardConnection>) -> Vec<(u32, Vec<u8>)> {
-    session
-        .get_object_raw(PIVMAN_OBJ_ID)
-        .ok()
-        .and_then(|raw| {
-            let inner = yubikit::tlv::tlv_unpack(TAG_PIVMAN_DATA, &raw).ok()?;
-            parse_tlv_list(&inner).ok()
-        })
-        .unwrap_or_default()
-}
-
-/// Check if the management key is stored on device.
-fn has_stored_key(pivman: &[(u32, Vec<u8>)]) -> bool {
-    pivman
-        .iter()
-        .find(|(t, _)| *t == TAG_PIVMAN_FLAGS)
-        .is_some_and(|(_, v)| !v.is_empty() && (v[0] & PIVMAN_FLAG_KEY_PROTECTED) != 0)
-}
-
-/// Write pivman public data. Encodes the TLV list back into the outer tag.
-fn put_pivman_data(
-    session: &mut PivSession<impl SmartCardConnection>,
-    entries: &[(u32, Vec<u8>)],
-) -> Result<(), CliError> {
-    let mut inner = Vec::new();
-    for (tag, val) in entries {
-        inner.extend_from_slice(&tlv_encode(*tag, val));
-    }
-    let outer = if inner.is_empty() {
-        vec![]
-    } else {
-        tlv_encode(TAG_PIVMAN_DATA, &inner)
-    };
-    session
-        .put_object_raw(PIVMAN_OBJ_ID, Some(&outer))
-        .map_err(|e| CliError(format!("Failed to write pivman data: {e}")))
-}
-
-/// Read the pivman protected data. Requires PIN to have been verified.
-fn get_pivman_protected_data(
-    session: &mut PivSession<impl SmartCardConnection>,
-) -> Vec<(u32, Vec<u8>)> {
-    session
-        .get_object_raw(PIVMAN_PROTECTED_OBJ_ID)
-        .ok()
-        .and_then(|raw| {
-            let inner = yubikit::tlv::tlv_unpack(TAG_PIVMAN_PROTECTED, &raw).ok()?;
-            parse_tlv_list(&inner).ok()
-        })
-        .unwrap_or_default()
-}
-
-/// Write pivman protected data. Encodes the TLV list back into the outer tag.
-fn put_pivman_protected_data(
-    session: &mut PivSession<impl SmartCardConnection>,
-    entries: &[(u32, Vec<u8>)],
-) -> Result<(), CliError> {
-    let mut inner = Vec::new();
-    for (tag, val) in entries {
-        inner.extend_from_slice(&tlv_encode(*tag, val));
-    }
-    let outer = if inner.is_empty() {
-        vec![]
-    } else {
-        tlv_encode(TAG_PIVMAN_PROTECTED, &inner)
-    };
-    session
-        .put_object_raw(PIVMAN_PROTECTED_OBJ_ID, Some(&outer))
-        .map_err(|e| CliError(format!("Failed to write pivman protected data: {e}")))
-}
-
-/// Update or remove a TLV entry in a list, preserving all other entries.
-fn set_tlv_entry(entries: &mut Vec<(u32, Vec<u8>)>, tag: u32, value: Option<Vec<u8>>) {
-    entries.retain(|(t, _)| *t != tag);
-    if let Some(v) = value {
-        entries.push((tag, v));
-    }
-}
-
-/// Set the management key and keep pivman data in sync.
-fn pivman_set_mgm_key(
-    session: &mut PivSession<impl SmartCardConnection>,
-    key_type: ManagementKeyType,
-    new_key: &[u8],
-    touch: bool,
-    store_on_device: bool,
-) -> Result<(), CliError> {
-    let mut pivman = get_pivman_data(session);
-    let was_stored = has_stored_key(&pivman);
-
-    // If we need to read/clear protected data, get it now (while PIN is still verified)
-    let mut prot = if store_on_device || was_stored {
-        Some(get_pivman_protected_data(session))
-    } else {
-        None
-    };
-
-    // Set the actual management key on the device
-    let management_key = to_management_key(key_type, new_key)?;
-    session
-        .set_management_key(&management_key, touch)
-        .map_err(|e| CliError(format!("Failed to set management key: {e}")))?;
-
-    // Update the stored-key flag
-    let current_flags = pivman
-        .iter()
-        .find(|(t, _)| *t == TAG_PIVMAN_FLAGS)
-        .map(|(_, v)| if v.is_empty() { 0u8 } else { v[0] })
-        .unwrap_or(0);
-
-    let new_flags = if store_on_device {
-        current_flags | PIVMAN_FLAG_KEY_PROTECTED
-    } else {
-        current_flags & !PIVMAN_FLAG_KEY_PROTECTED
-    };
-
-    if new_flags != 0 {
-        set_tlv_entry(&mut pivman, TAG_PIVMAN_FLAGS, Some(vec![new_flags]));
-    } else {
-        set_tlv_entry(&mut pivman, TAG_PIVMAN_FLAGS, None);
-    }
-
-    put_pivman_data(session, &pivman)?;
-
-    // Update protected data
-    if let Some(ref mut prot_entries) = prot {
-        if store_on_device {
-            set_tlv_entry(prot_entries, TAG_PIVMAN_KEY, Some(new_key.to_vec()));
-        } else {
-            set_tlv_entry(prot_entries, TAG_PIVMAN_KEY, None);
-        }
-        put_pivman_protected_data(session, prot_entries)?;
-    }
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
 
 /// Authenticate the management key. Returns true if PIN was verified as a
 /// side effect (i.e. when using a PIN-protected management key).
@@ -1249,7 +1099,8 @@ pub fn run_change_management_key(
     if protect && !pin_verified {
         ensure_pin(&mut session, pin)?;
     }
-    pivman_set_mgm_key(&mut session, key_type, &new_key, touch, protect)?;
+    pivman_set_mgm_key(&mut session, key_type, &new_key, touch, protect)
+        .map_err(|e| CliError(format!("Failed to set management key: {e}")))?;
 
     if generate {
         eprintln!("Management key set: {}", hex::encode(&new_key));

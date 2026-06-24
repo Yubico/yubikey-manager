@@ -4,4 +4,5 @@ pub mod device;
 pub mod diagnostics;
 pub mod keyboard;
 pub mod logging;
+pub mod piv;
 pub mod rpc;
