@@ -1088,7 +1088,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         certificates: &[&[u8]],
         oce_ref: Option<(u8, u8)>,
     ) -> Result<Option<Dek>, SmartCardError> {
-        use crate::tlv::tlv_encode;
+        use crate::__internal::tlv::tlv_encode;
         use elliptic_curve::sec1::FromEncodedPoint;
         use p256::{
             EncodedPoint, PublicKey, SecretKey,
@@ -1157,7 +1157,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         {
             let mut offset = 0;
             while offset < resp.len() {
-                let (tag, val_off, val_len, end) = crate::tlv::tlv_parse(&resp, offset)
+                let (tag, val_off, val_len, end) = crate::__internal::tlv::tlv_parse(&resp, offset)
                     .map_err(|e| SmartCardError::InvalidData(format!("TLV parse error: {e}")))?;
                 match tag {
                     0x5F49 => {

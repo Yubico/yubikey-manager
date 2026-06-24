@@ -30,7 +30,7 @@ use x509_cert::spki::{AlgorithmIdentifierOwned, ObjectIdentifier, SubjectPublicK
 use zeroize::Zeroizing;
 
 use crate::__internal::SecretValue;
-use crate::tlv::tlv_parse;
+use crate::__internal::tlv::tlv_parse;
 
 // ---------------------------------------------------------------------------
 // Well-known curve OIDs (dotted-decimal strings)

@@ -46,10 +46,10 @@ use zeroize::Zeroize;
 
 use thiserror::Error;
 
+use crate::__internal::tlv::{parse_tlv_list, tlv_encode, tlv_parse, tlv_unpack};
 use crate::core::Version;
 use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
-use crate::tlv::{parse_tlv_list, tlv_encode, tlv_parse, tlv_unpack};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -83,8 +83,8 @@ impl From<SmartCardError> for SecurityDomainError {
     }
 }
 
-impl From<crate::tlv::TlvError> for SecurityDomainError {
-    fn from(e: crate::tlv::TlvError) -> Self {
+impl From<crate::__internal::tlv::TlvError> for SecurityDomainError {
+    fn from(e: crate::__internal::tlv::TlvError) -> Self {
         SecurityDomainError::InvalidData(e.to_string())
     }
 }

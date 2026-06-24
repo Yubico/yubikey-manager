@@ -46,6 +46,9 @@ use sha2::Digest;
 use thiserror::Error;
 use zeroize::Zeroizing;
 
+use crate::__internal::tlv::{
+    TlvError, parse_tlv_dict, parse_tlv_list, tlv_append, tlv_encode, tlv_unpack,
+};
 use crate::core::Version;
 use crate::core::{bytes2int, int2bytes, patch_version};
 use crate::keys::{
@@ -57,7 +60,6 @@ use crate::keys::{
     OID_SECP384R1, OID_SECP521R1,
 };
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
-use crate::tlv::{TlvError, parse_tlv_dict, parse_tlv_list, tlv_append, tlv_encode, tlv_unpack};
 use x509_cert::spki::ObjectIdentifier;
 
 // ---------------------------------------------------------------------------
@@ -1554,9 +1556,9 @@ fn build_private_key_template(
 /// card into a [`PublicKey`].
 fn parse_rsa_public_key(pk_data: &[u8]) -> Result<PublicKey, OpenPgpError> {
     let tlvs = parse_tlv_list(pk_data)?;
-    let n = crate::tlv::tlv_get(&tlvs, 0x81)
+    let n = crate::__internal::tlv::tlv_get(&tlvs, 0x81)
         .ok_or_else(|| OpenPgpError::InvalidData("Missing RSA modulus (tag 0x81)".into()))?;
-    let e = crate::tlv::tlv_get(&tlvs, 0x82)
+    let e = crate::__internal::tlv::tlv_get(&tlvs, 0x82)
         .ok_or_else(|| OpenPgpError::InvalidData("Missing RSA exponent (tag 0x82)".into()))?;
     // Strip leading zero byte from modulus if present
     let n = if !n.is_empty() && n[0] == 0 {
@@ -2651,7 +2653,7 @@ fn require_version(current: Version, required: Version, feature: &str) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tlv::tlv_parse;
+    use crate::__internal::tlv::tlv_parse;
 
     #[test]
     fn test_uif_properties() {

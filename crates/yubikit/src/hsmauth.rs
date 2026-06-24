@@ -42,10 +42,10 @@ use std::fmt;
 use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::__internal::tlv::{parse_tlv_list, tlv_append, tlv_encode};
 use crate::core::Version;
 use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
-use crate::tlv::{parse_tlv_list, tlv_append, tlv_encode};
 
 // ---------------------------------------------------------------------------
 // TLV tags
@@ -325,8 +325,8 @@ impl From<SmartCardError> for HsmAuthError {
     }
 }
 
-impl From<crate::tlv::TlvError> for HsmAuthError {
-    fn from(e: crate::tlv::TlvError) -> Self {
+impl From<crate::__internal::tlv::TlvError> for HsmAuthError {
+    fn from(e: crate::__internal::tlv::TlvError) -> Self {
         HsmAuthError::InvalidData(e.to_string())
     }
 }

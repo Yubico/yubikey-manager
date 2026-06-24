@@ -60,6 +60,7 @@ use x509_cert::spki::{
 };
 use zeroize::Zeroizing;
 
+use crate::__internal::tlv::{parse_tlv_dict, tlv_append, tlv_encode, tlv_unpack};
 use crate::core::{Version, int2bytes, patch_version};
 use crate::keys::{
     EcCurve, EcPublicKey, Ed25519PublicKey, KeyAlgorithm, KeyError, MlDsaParameterSet,
@@ -67,7 +68,6 @@ use crate::keys::{
     RsaPublicKey, X25519PublicKey,
 };
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
-use crate::tlv::{parse_tlv_dict, tlv_append, tlv_encode, tlv_unpack};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -101,8 +101,8 @@ impl From<SmartCardError> for PivError {
     }
 }
 
-impl From<crate::tlv::TlvError> for PivError {
-    fn from(e: crate::tlv::TlvError) -> Self {
+impl From<crate::__internal::tlv::TlvError> for PivError {
+    fn from(e: crate::__internal::tlv::TlvError) -> Self {
         PivError::InvalidData(e.to_string())
     }
 }

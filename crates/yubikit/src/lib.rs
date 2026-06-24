@@ -88,7 +88,6 @@
 //! - [`otp`] — OTP HID framing protocol
 //! - [`core`] — Shared types: [`core::Version`], [`core::Connection`] trait
 //! - [`cbor`] — CBOR encoding/decoding helpers for CTAP2
-//! - [`tlv`] — TLV (Tag-Length-Value) encoding/decoding for SmartCard APDUs
 
 #[doc(hidden)]
 pub mod __internal;
@@ -129,8 +128,6 @@ pub mod platform;
 pub mod securitydomain;
 /// Smart card communication primitives — APDUs, status words, ISO 7816-4, and SCP.
 pub mod smartcard;
-/// TLV (Tag-Length-Value) encoding and decoding.
-pub mod tlv;
 /// WebAuthn client — high-level API for credentials and assertions.
 pub mod webauthn;
 /// YubiOTP application — configuring OTP slots and challenge-response.

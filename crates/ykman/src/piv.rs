@@ -1,6 +1,6 @@
+use yubikit::__internal::tlv::{parse_tlv_list, tlv_encode, tlv_unpack};
 use yubikit::piv::{ManagementKey, ManagementKeyType, ObjectId, PivError, PivSession};
 use yubikit::smartcard::SmartCardConnection;
-use yubikit::tlv::{parse_tlv_list, tlv_encode, tlv_unpack};
 
 const PIVMAN_OBJ_ID: u32 = 0x5FFF00;
 const PIVMAN_PROTECTED_OBJ_ID: u32 = ObjectId::Printed as u32;

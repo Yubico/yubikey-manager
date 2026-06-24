@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use yubikit::{core, otp, tlv};
+use yubikit::{__internal::tlv, core, otp};
 
 #[pyfunction]
 fn calculate_crc(data: &[u8]) -> u16 {

@@ -43,10 +43,12 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::__internal::tlv::{
+    TlvError, parse_tlv_list, tlv_append, tlv_encode, tlv_get, tlv_unpack,
+};
 use crate::core::Version;
 use crate::core::patch_version;
 use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
-use crate::tlv::{TlvError, parse_tlv_list, tlv_append, tlv_encode, tlv_get, tlv_unpack};
 
 // TLV tags
 const TAG_NAME: u32 = 0x71;
