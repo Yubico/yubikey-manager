@@ -9,7 +9,7 @@ Reference documents:
 - `docs/yubikit/HOUSE_STYLE.md`
 - `docs/yubikit/YUBIKIT_HOUSE_STYLE_AUDIT_ISA.md`
 - `docs/yubikit/YUBIKIT_BASELINE_HOUSE_STYLE_AUDIT.md`
-- `.github/skills/yubikit-dev-team-workflow.md`
+- `.github/skills/yubikit-dev-team-workflow/SKILL.md`
 - `.github/agents/yubikit-engineer.md`
 - `.github/agents/yubikit-reviewer.md`
 - `.github/agents/yubikit-cato.md`

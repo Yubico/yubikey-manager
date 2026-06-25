@@ -10,7 +10,7 @@ Cato instruction: audit this artifact as the written artifact under review. Do n
 - `docs/yubikit/YUBIKIT_HOUSE_STYLE_AUDIT_ISA.md`: ISA/PRD for the audit and remediation lifecycle.
 - `docs/yubikit/YUBIKIT_BASELINE_HOUSE_STYLE_AUDIT.md`: baseline findings and prioritized remediation backlog.
 - `docs/yubikit/YUBIKIT_ORCHESTRATOR_META_PROMPT.md`: pasteable prompt for the Operator to start the workflow.
-- `.github/skills/yubikit-dev-team-workflow.md`: Copilot skill describing the operational workflow.
+- `.github/skills/yubikit-dev-team-workflow/SKILL.md`: Copilot skill describing the operational workflow.
 - `.github/agents/yubikit-engineer.md`: implementation agent role.
 - `.github/agents/yubikit-reviewer.md`: phase diff/review agent role.
 - `.github/agents/yubikit-cato.md`: artifact-audit agent role.

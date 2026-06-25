@@ -660,7 +660,7 @@ The final audit synthesizes all phase learning documents plus the updated house-
 
 Copilot skill and agents:
 
-- `.github/skills/yubikit-dev-team-workflow.md`
+- `.github/skills/yubikit-dev-team-workflow/SKILL.md`
 - `.github/agents/yubikit-engineer.md`
 - `.github/agents/yubikit-reviewer.md`
 - `.github/agents/yubikit-cato.md`
