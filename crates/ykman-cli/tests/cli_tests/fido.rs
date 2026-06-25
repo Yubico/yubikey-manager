@@ -18,6 +18,27 @@ use yubikit::platform::device::{LocalYubiKeyDevice, list_devices};
 const FIDO_PIN: &str = "Z9m$4vQ2";
 const FIDO_PIN_2: &str = "L6r#8tN5";
 
+fn info_value<'a>(output: &'a str, label: &str) -> Option<&'a str> {
+    let prefix = format!("{label}:");
+    output
+        .lines()
+        .find_map(|line| line.trim_start().strip_prefix(&prefix).map(str::trim))
+}
+
+fn assert_always_uv(expected: &str) {
+    let output = ykman_dev()
+        .args(["fido", "info"])
+        .output()
+        .expect("failed to run ykman fido info");
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        info_value(&stdout, "Always Require UV"),
+        Some(expected),
+        "{stdout}"
+    );
+}
+
 /// Ensure a PIN is set on the device (idempotent).
 fn ensure_pin_set() -> bool {
     use std::sync::OnceLock;
@@ -415,7 +436,7 @@ fn test_fido_config_toggle_always_uv() {
         .output()
         .expect("failed to run ykman fido info");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let initially_on = stdout.contains("Always Require UV: On");
+    let initially_on = info_value(&stdout, "Always Require UV") == Some("On");
 
     if app_is_fips_capable("FIDO2") && initially_on {
         ykman_dev()
@@ -435,16 +456,8 @@ fn test_fido_config_toggle_always_uv() {
         .success();
 
     // Verify it changed
-    let expected = if initially_on {
-        "Always Require UV: Off"
-    } else {
-        "Always Require UV: On"
-    };
-    ykman_dev()
-        .args(["fido", "info"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(expected));
+    let expected = if initially_on { "Off" } else { "On" };
+    assert_always_uv(expected);
 
     // Toggle back
     ykman_dev()
@@ -453,16 +466,8 @@ fn test_fido_config_toggle_always_uv() {
         .success();
 
     // Verify restored
-    let restored = if initially_on {
-        "Always Require UV: On"
-    } else {
-        "Always Require UV: Off"
-    };
-    ykman_dev()
-        .args(["fido", "info"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(restored));
+    let restored = if initially_on { "On" } else { "Off" };
+    assert_always_uv(restored);
 }
 
 // ── access (advanced, requires setMinPINLength) ───────────────────────
