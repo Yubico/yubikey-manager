@@ -18,13 +18,6 @@ use yubikit::platform::device::{LocalYubiKeyDevice, list_devices};
 const FIDO_PIN: &str = "Z9m$4vQ2";
 const FIDO_PIN_2: &str = "L6r#8tN5";
 
-macro_rules! skip {
-    ($($arg:tt)*) => {{
-        eprintln!("\x1b[1;33mSKIP:\x1b[0m {}", format_args!($($arg)*));
-        return;
-    }};
-}
-
 /// Ensure a PIN is set on the device (idempotent).
 fn ensure_pin_set() -> bool {
     use std::sync::OnceLock;

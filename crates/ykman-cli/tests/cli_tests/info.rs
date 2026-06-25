@@ -27,7 +27,7 @@ fn test_list_devices_serial() {
 
 #[test]
 fn test_list_readers() {
-    require_device_configured!();
+    require_capability!("CCID");
     ykman()
         .args(["list", "--readers"])
         .assert()

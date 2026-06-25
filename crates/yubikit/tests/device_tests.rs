@@ -20,7 +20,8 @@ mod arkg_p256;
 mod controller;
 
 use rstest::{fixture, rstest};
-use std::sync::{Mutex, OnceLock, RwLock, RwLockReadGuard};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, Once, OnceLock, RwLock, RwLockReadGuard};
 use std::time::{Duration, Instant};
 use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
@@ -58,9 +59,32 @@ macro_rules! skip_if_needed {
     };
 }
 
+// ───────────────────────── Skip tracking ─────────────────────────
+
+static SKIP_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+extern "C" fn print_skip_summary() {
+    let count = SKIP_COUNT.load(Ordering::Relaxed);
+    if count > 0 {
+        eprintln!("\x1b[1;33m{count} test(s) skipped\x1b[0m");
+    }
+}
+
+fn record_skip() {
+    static REGISTER: Once = Once::new();
+    SKIP_COUNT.fetch_add(1, Ordering::Relaxed);
+    REGISTER.call_once(|| unsafe {
+        unsafe extern "C" {
+            fn atexit(cb: extern "C" fn()) -> i32;
+        }
+        let _ = atexit(print_skip_summary);
+    });
+}
+
 /// Skip the current test with a printed reason.
 macro_rules! skip {
     ($($arg:tt)*) => {{
+        record_skip();
         eprintln!("\x1b[1;33mSKIP:\x1b[0m {}", format_args!($($arg)*));
         return;
     }};

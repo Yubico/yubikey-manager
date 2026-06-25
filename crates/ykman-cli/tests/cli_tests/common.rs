@@ -5,11 +5,31 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::env;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, Once, OnceLock};
 use std::time::{Duration, Instant};
 
+static SKIP_COUNT: AtomicUsize = AtomicUsize::new(0);
 static PICO_CLEANUP_TARGETS: OnceLock<Mutex<Vec<(String, u8)>>> = OnceLock::new();
 static REGISTER_PICO_CLEANUP: Once = Once::new();
+
+extern "C" fn print_skip_summary() {
+    let count = SKIP_COUNT.load(Ordering::Relaxed);
+    if count > 0 {
+        eprintln!("\x1b[1;33m{count} test(s) skipped\x1b[0m");
+    }
+}
+
+pub fn record_skip() {
+    static REGISTER: Once = Once::new();
+    SKIP_COUNT.fetch_add(1, Ordering::Relaxed);
+    REGISTER.call_once(|| unsafe {
+        unsafe extern "C" {
+            fn atexit(cb: extern "C" fn()) -> i32;
+        }
+        let _ = atexit(print_skip_summary);
+    });
+}
 
 /// Test device configuration, resolved from environment variables.
 ///
@@ -268,6 +288,7 @@ pub enum InputMode {
 impl InputMode {
     pub fn skip_if_windows(self) -> bool {
         if cfg!(windows) && self == Self::Interactive {
+            record_skip();
             eprintln!("\x1b[1;33mSKIP:\x1b[0m interactive CLI tests are not supported on Windows");
             true
         } else {
@@ -282,6 +303,7 @@ impl InputMode {
 
 pub fn skip_interactive_on_windows() -> bool {
     if cfg!(windows) {
+        record_skip();
         eprintln!("\x1b[1;33mSKIP:\x1b[0m interactive CLI tests are not supported on Windows");
         true
     } else {
@@ -497,6 +519,7 @@ pub fn openpgp_reset_code() -> &'static str {
 
 pub fn skip_if_fips(feature: &str) -> bool {
     if is_fips() {
+        record_skip();
         eprintln!("\x1b[1;33mSKIP:\x1b[0m {feature} is restricted or differs on FIPS YubiKeys");
         true
     } else {
@@ -506,10 +529,12 @@ pub fn skip_if_fips(feature: &str) -> bool {
 
 pub fn skip_before_version(required: (u8, u8, u8), feature: &str) -> bool {
     let Some(version) = device_version() else {
+        record_skip();
         eprintln!("\x1b[1;33mSKIP:\x1b[0m could not determine firmware version for {feature}");
         return true;
     };
     if version < required {
+        record_skip();
         eprintln!("\x1b[1;33mSKIP:\x1b[0m {feature} requires {required:?}, device has {version:?}");
         true
     } else {
@@ -528,7 +553,6 @@ pub fn has_capability(name: &str) -> bool {
     }
 
     let app_name = match name {
-        "CCID" => return stdout.contains("Applications"),
         "FIDO" => "FIDO2",
         "OTP" => "Yubico OTP",
         other => other,
@@ -540,17 +564,25 @@ pub fn has_capability(name: &str) -> bool {
         .any(|line| line.split_whitespace().any(|field| field == "Enabled"))
 }
 
+/// Skip the current test with a formatted message.
+#[macro_export]
+macro_rules! skip {
+    ($($arg:tt)*) => {{
+        $crate::common::record_skip();
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m {}", format_args!($($arg)*));
+        return;
+    }};
+}
+
 /// Skip the test if the device does not have the given capability enabled.
 #[macro_export]
 macro_rules! require_capability {
     ($name:expr) => {
         if !$crate::common::device_configured() {
-            eprintln!("\x1b[1;33mSKIP:\x1b[0m YUBIKEY_SERIAL not set");
-            return;
+            skip!("YUBIKEY_SERIAL not set");
         }
         if !$crate::common::has_capability($name) {
-            eprintln!("\x1b[1;33mSKIP:\x1b[0m {} not enabled on device", $name);
-            return;
+            skip!("{} not enabled on device", $name);
         }
     };
 }
@@ -560,8 +592,7 @@ macro_rules! require_capability {
 macro_rules! require_device_configured {
     () => {
         if !$crate::common::device_configured() {
-            eprintln!("\x1b[1;33mSKIP:\x1b[0m YUBIKEY_SERIAL not set");
-            return;
+            skip!("YUBIKEY_SERIAL not set");
         }
     };
 }

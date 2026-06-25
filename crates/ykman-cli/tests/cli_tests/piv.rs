@@ -108,8 +108,7 @@ fn test_piv_change_puk(#[case] mode: InputMode) {
         return;
     }
     if !piv_has_puk() {
-        eprintln!("\x1b[1;33mSKIP:\x1b[0m PUK is not supported on this device");
-        return;
+        skip!("PUK is not supported on this device");
     }
     let _guard = PivResetGuard::reset();
 
@@ -852,8 +851,7 @@ fn test_piv_unblock_pin(#[case] mode: InputMode) {
         return;
     }
     if !piv_has_puk() {
-        eprintln!("\x1b[1;33mSKIP:\x1b[0m PUK is not supported on this device");
-        return;
+        skip!("PUK is not supported on this device");
     }
     let _guard = PivResetGuard::reset();
 
