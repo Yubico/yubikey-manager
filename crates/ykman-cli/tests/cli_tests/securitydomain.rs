@@ -16,7 +16,7 @@ fn selected_over_nfc() -> bool {
 
 fn skip_if_fips_over_nfc(feature: &str) -> bool {
     if is_fips() && selected_over_nfc() {
-        eprintln!("SKIP: {feature} is not safe on FIPS YubiKeys over NFC");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m {feature} is not safe on FIPS YubiKeys over NFC");
         true
     } else {
         false

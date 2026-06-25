@@ -1,13 +1,13 @@
 //! Integration tests for the ykman CLI.
 //!
-//! Hardware tests require a YubiKey to be connected and either `YUBIKEY_SERIAL`
-//! to be set to the device serial number, or `YUBIKEY_NO_SERIAL=1` for devices
-//! without a serial number. Tests that require hardware skip themselves when no
+//! Hardware tests require a YubiKey to be connected and `YUBIKEY_SERIAL` to be
+//! set to the device serial number. For devices without a serial number, use
+//! `YUBIKEY_SERIAL=-1`. Tests that require hardware skip themselves when no
 //! test device is configured.
 //!
 //! ```sh
 //! YUBIKEY_SERIAL=12345678 cargo test -p ykman-cli --test cli_tests
-//! YUBIKEY_NO_SERIAL=1 cargo test -p ykman-cli --test cli_tests
+//! YUBIKEY_SERIAL=-1 cargo test -p ykman-cli --test cli_tests
 //! ```
 //!
 //! **WARNING**: Some tests are destructive and reset or reconfigure

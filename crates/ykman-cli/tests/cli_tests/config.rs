@@ -128,7 +128,7 @@ fn test_config_usb_disable_enable_piv() {
         return;
     }
     if app_is_enabled(device_info(), "PIV", "USB") != Some(true) {
-        eprintln!("SKIP: PIV is not enabled over USB on this YubiKey");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m PIV is not enabled over USB on this YubiKey");
         return;
     }
 
@@ -164,7 +164,7 @@ fn test_config_nfc_enable_disable() {
         return;
     }
     if !has_nfc() {
-        eprintln!("SKIP: NFC is not supported on this YubiKey");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m NFC is not supported on this YubiKey");
         return;
     }
 
@@ -205,7 +205,7 @@ fn test_config_usb_enable_all() {
         return;
     }
     if app_is_enabled(device_info(), "PIV", "USB") != Some(true) {
-        eprintln!("SKIP: PIV is not enabled over USB on this YubiKey");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m PIV is not enabled over USB on this YubiKey");
         return;
     }
 
@@ -238,7 +238,7 @@ fn test_config_nfc_disable_all_enable_all() {
         return;
     }
     if !has_nfc() {
-        eprintln!("SKIP: NFC is not supported on this YubiKey");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m NFC is not supported on this YubiKey");
         return;
     }
 
@@ -285,7 +285,7 @@ fn test_config_set_lock_code_prompts_for_current_code() {
         return;
     }
     if configuration_is_locked() {
-        eprintln!("SKIP: configuration is already locked with an unknown code");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m configuration is already locked with an unknown code");
         return;
     }
 
@@ -314,11 +314,11 @@ fn test_config_usb_lock_code_prompt_and_explicit_code() {
         return;
     }
     if configuration_is_locked() {
-        eprintln!("SKIP: configuration is already locked with an unknown code");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m configuration is already locked with an unknown code");
         return;
     }
     if app_is_enabled(device_info(), "PIV", "USB") != Some(true) {
-        eprintln!("SKIP: PIV is not enabled over USB on this YubiKey");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m PIV is not enabled over USB on this YubiKey");
         return;
     }
 
@@ -377,11 +377,11 @@ fn test_config_nfc_lock_code_prompt_and_explicit_code() {
         return;
     }
     if configuration_is_locked() {
-        eprintln!("SKIP: configuration is already locked with an unknown code");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m configuration is already locked with an unknown code");
         return;
     }
     if !has_nfc() {
-        eprintln!("SKIP: NFC is not supported on this YubiKey");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m NFC is not supported on this YubiKey");
         return;
     }
 

@@ -157,9 +157,9 @@ skipped when the device is connected over NFC.
 
     $ YUBIKEY_SERIAL=123456 cargo test -p yubikit --test device_tests -- --test-threads=1 --no-capture
 
-For devices without a serial number, use `YUBIKEY_NO_SERIAL=1` instead:
+For devices without a serial number, use `YUBIKEY_SERIAL=-1`:
 
-    $ YUBIKEY_NO_SERIAL=1 cargo test -p yubikit --test device_tests -- --test-threads=1  --no-capture
+    $ YUBIKEY_SERIAL=-1 cargo test -p yubikit --test device_tests -- --test-threads=1  --no-capture
 
 The same command works whether the device is connected via USB or via an NFC reader.
 

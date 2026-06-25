@@ -13,35 +13,35 @@ static REGISTER_PICO_CLEANUP: Once = Once::new();
 
 /// Test device configuration, resolved from environment variables.
 ///
-/// Set `YUBIKEY_SERIAL` for testing with a known serial.
-/// Set `YUBIKEY_NO_SERIAL=1` for devices without a serial number.
-/// If neither is set, all device tests abort.
+/// Set `YUBIKEY_SERIAL` to the device serial number.
+/// Set `YUBIKEY_SERIAL=-1` for devices without a serial number.
+/// If not set, all device tests are skipped.
 struct TestDevice {
+    /// The serial string to pass to `--device`, or None for devices without a serial.
     serial: Option<String>,
-    no_serial: bool,
+    /// Whether a test device is configured (`YUBIKEY_SERIAL` is set).
+    configured: bool,
 }
 
 fn test_device() -> &'static TestDevice {
     static DEVICE: OnceLock<TestDevice> = OnceLock::new();
     DEVICE.get_or_init(|| {
         register_pico_cleanup_if_configured();
-        TestDevice {
-            serial: env::var("YUBIKEY_SERIAL")
-                .or_else(|_| env::var("YKMAN_TEST_SERIAL"))
-                .ok(),
-            no_serial: env::var("YUBIKEY_NO_SERIAL").is_ok()
-                || env::var("YKMAN_TEST_NO_SERIAL").is_ok(),
-        }
+        let raw = env::var("YUBIKEY_SERIAL")
+            .or_else(|_| env::var("YKMAN_TEST_SERIAL"))
+            .ok();
+        let configured = raw.is_some();
+        let serial = raw.filter(|s| s != "-1");
+        TestDevice { serial, configured }
     })
 }
 
 /// Abort the test if no device is configured.
 fn require_device() {
-    let dev = test_device();
-    if dev.serial.is_none() && !dev.no_serial {
+    if !test_device().configured {
         panic!(
             "No test device configured. Set YUBIKEY_SERIAL=<serial> \
-             or YUBIKEY_NO_SERIAL=1 to run device tests."
+             or YUBIKEY_SERIAL=-1 for devices without a serial."
         );
     }
 }
@@ -53,13 +53,12 @@ pub fn device_serial() -> Option<&'static str> {
 
 /// Returns true if a test device is configured.
 pub fn device_configured() -> bool {
-    let dev = test_device();
-    dev.serial.is_some() || dev.no_serial
+    test_device().configured
 }
 
 /// Returns true if testing a device without a serial number.
 pub fn device_without_serial() -> bool {
-    test_device().no_serial
+    test_device().configured && test_device().serial.is_none()
 }
 
 fn wait_for_piv_info() {
@@ -269,7 +268,7 @@ pub enum InputMode {
 impl InputMode {
     pub fn skip_if_windows(self) -> bool {
         if cfg!(windows) && self == Self::Interactive {
-            eprintln!("SKIP: interactive CLI tests are not supported on Windows");
+            eprintln!("\x1b[1;33mSKIP:\x1b[0m interactive CLI tests are not supported on Windows");
             true
         } else {
             false
@@ -283,7 +282,7 @@ impl InputMode {
 
 pub fn skip_interactive_on_windows() -> bool {
     if cfg!(windows) {
-        eprintln!("SKIP: interactive CLI tests are not supported on Windows");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m interactive CLI tests are not supported on Windows");
         true
     } else {
         false
@@ -498,7 +497,7 @@ pub fn openpgp_reset_code() -> &'static str {
 
 pub fn skip_if_fips(feature: &str) -> bool {
     if is_fips() {
-        eprintln!("SKIP: {feature} is restricted or differs on FIPS YubiKeys");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m {feature} is restricted or differs on FIPS YubiKeys");
         true
     } else {
         false
@@ -507,11 +506,11 @@ pub fn skip_if_fips(feature: &str) -> bool {
 
 pub fn skip_before_version(required: (u8, u8, u8), feature: &str) -> bool {
     let Some(version) = device_version() else {
-        eprintln!("SKIP: could not determine firmware version for {feature}");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m could not determine firmware version for {feature}");
         return true;
     };
     if version < required {
-        eprintln!("SKIP: {feature} requires {required:?}, device has {version:?}");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m {feature} requires {required:?}, device has {version:?}");
         true
     } else {
         false
@@ -546,11 +545,11 @@ pub fn has_capability(name: &str) -> bool {
 macro_rules! require_capability {
     ($name:expr) => {
         if !$crate::common::device_configured() {
-            eprintln!("SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
+            eprintln!("\x1b[1;33mSKIP:\x1b[0m YUBIKEY_SERIAL not set");
             return;
         }
         if !$crate::common::has_capability($name) {
-            eprintln!("SKIP: {} not enabled on device", $name);
+            eprintln!("\x1b[1;33mSKIP:\x1b[0m {} not enabled on device", $name);
             return;
         }
     };
@@ -561,7 +560,7 @@ macro_rules! require_capability {
 macro_rules! require_device_configured {
     () => {
         if !$crate::common::device_configured() {
-            eprintln!("SKIP: YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
+            eprintln!("\x1b[1;33mSKIP:\x1b[0m YUBIKEY_SERIAL not set");
             return;
         }
     };

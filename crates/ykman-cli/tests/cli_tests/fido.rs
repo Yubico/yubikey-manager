@@ -20,7 +20,7 @@ const FIDO_PIN_2: &str = "L6r#8tN5";
 
 macro_rules! skip {
     ($($arg:tt)*) => {{
-        eprintln!("SKIP: {}", format_args!($($arg)*));
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m {}", format_args!($($arg)*));
         return;
     }};
 }
@@ -72,7 +72,7 @@ fn set_initial_pin() -> bool {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     if stderr.contains("policy") || stderr.contains("complexity") {
-        eprintln!("SKIP: test FIDO PIN rejected by PIN policy: {stderr}");
+        eprintln!("\x1b[1;33mSKIP:\x1b[0m test FIDO PIN rejected by PIN policy: {stderr}");
         return false;
     }
     panic!("Failed to set initial FIDO PIN: {output:?}");

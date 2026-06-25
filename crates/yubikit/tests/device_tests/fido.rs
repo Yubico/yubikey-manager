@@ -274,8 +274,8 @@ fn ensure_fido_pin() -> bool {
 /// Skip the calling test if the global FIDO PIN setup failed.
 macro_rules! require_fido_pin {
     () => {
-        if std::env::var("YUBIKEY_SERIAL").is_err() && std::env::var("YUBIKEY_NO_SERIAL").is_err() {
-            skip!("YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
+        if std::env::var("YUBIKEY_SERIAL").is_err() {
+            skip!("YUBIKEY_SERIAL not set");
         }
         if !ensure_fido_pin() {
             skip!("FIDO reset blocked for current transport (see setup output)");

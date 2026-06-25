@@ -2,13 +2,13 @@
 //!
 //! These tests require a YubiKey to be connected and the `YUBIKEY_SERIAL`
 //! environment variable to be set to the device's serial number.
-//! For devices without a serial, set `YUBIKEY_NO_SERIAL=1` instead.
+//! For devices without a serial, use `YUBIKEY_SERIAL=-1`.
 //!
 //! The device is found automatically whether it is connected over USB or NFC.
 //!
 //! ```sh
 //! YUBIKEY_SERIAL=12345678 cargo test -p yubikit --test device_tests -- --test-threads=1
-//! YUBIKEY_NO_SERIAL=1 cargo test -p yubikit --test device_tests -- --test-threads=1
+//! YUBIKEY_SERIAL=-1 cargo test -p yubikit --test device_tests -- --test-threads=1
 //! ```
 //!
 //! **WARNING**: Some tests are destructive (they reset applications).
@@ -80,14 +80,17 @@ static SCP11B_SUPPORTED: OnceLock<bool> = OnceLock::new();
 static SCP11B_PARAMS: Mutex<Option<Option<(u8, u8, Vec<u8>)>>> = Mutex::new(None);
 
 fn required_serial() -> Option<u32> {
-    if std::env::var("YUBIKEY_NO_SERIAL").is_ok() {
-        return None;
-    }
     let s = std::env::var("YUBIKEY_SERIAL").expect(
-        "Set YUBIKEY_SERIAL to the device serial, or YUBIKEY_NO_SERIAL=1 for devices without one.\n\
+        "Set YUBIKEY_SERIAL to the device serial, or YUBIKEY_SERIAL=-1 for devices without one.\n\
          Example: YUBIKEY_SERIAL=12345678 cargo test -p yubikit --test device_tests",
     );
-    Some(s.parse().expect("YUBIKEY_SERIAL must be a valid integer"))
+    match s.as_str() {
+        "-1" => None,
+        _ => Some(
+            s.parse()
+                .expect("YUBIKEY_SERIAL must be a valid integer or -1"),
+        ),
+    }
 }
 
 fn get_device() -> RwLockReadGuard<'static, LocalYubiKeyDevice> {
@@ -251,8 +254,8 @@ fn scp_params(tc: &TestConnection) -> Option<(u8, u8, Vec<u8>)> {
 }
 
 fn should_skip(tc: &TestConnection) -> Option<String> {
-    if std::env::var("YUBIKEY_SERIAL").is_err() && std::env::var("YUBIKEY_NO_SERIAL").is_err() {
-        return Some("YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set".into());
+    if std::env::var("YUBIKEY_SERIAL").is_err() {
+        return Some("YUBIKEY_SERIAL not set".into());
     }
 
     let dev = get_device();
@@ -386,8 +389,8 @@ macro_rules! require_version {
 
 macro_rules! require_transport {
     ($transport:expr) => {
-        if std::env::var("YUBIKEY_SERIAL").is_err() && std::env::var("YUBIKEY_NO_SERIAL").is_err() {
-            skip!("YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
+        if std::env::var("YUBIKEY_SERIAL").is_err() {
+            skip!("YUBIKEY_SERIAL not set");
         }
         if device_transport() != $transport {
             skip!("test requires {:?}", $transport);
@@ -408,8 +411,8 @@ fn make_scp_key_params(kid: u8, kvn: u8, pk: &[u8]) -> yubikit::smartcard::ScpKe
 
 #[test]
 fn test_list_devices_finds_key() {
-    if std::env::var("YUBIKEY_SERIAL").is_err() && std::env::var("YUBIKEY_NO_SERIAL").is_err() {
-        skip!("YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
+    if std::env::var("YUBIKEY_SERIAL").is_err() {
+        skip!("YUBIKEY_SERIAL not set");
     }
     require_transport!(Transport::Usb);
     let serial = required_serial();
@@ -463,8 +466,8 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
 
 #[test]
 fn test_management_device_info_capabilities() {
-    if std::env::var("YUBIKEY_SERIAL").is_err() && std::env::var("YUBIKEY_NO_SERIAL").is_err() {
-        skip!("YUBIKEY_SERIAL or YUBIKEY_NO_SERIAL not set");
+    if std::env::var("YUBIKEY_SERIAL").is_err() {
+        skip!("YUBIKEY_SERIAL not set");
     }
     let caps = device_capabilities();
     // Every YubiKey has at least one capability on its active transport
