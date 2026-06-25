@@ -190,6 +190,7 @@ fn test_oath_access_key_lifecycle(#[case] tc: TestConnection) {
 fn test_oath_rename_credential(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
+    require_version!(Version(5, 3, 1));
     let mut session = open_oath_session(&tc);
     reset_oath(&mut session);
 
@@ -375,6 +376,7 @@ fn test_oath_totp_sha256_consistency(#[case] tc: TestConnection) {
 fn test_oath_totp_sha512(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
+    require_version!(Version(4, 0, 0));
     let mut session = open_oath_session(&tc);
     reset_oath(&mut session);
 

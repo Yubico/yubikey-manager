@@ -1,5 +1,6 @@
 use super::common::{
-    InputMode, OATH_PASSWORD, fixture_path, is_fips, oath_reset, ykman_dev, ykman_dev_tty,
+    InputMode, OATH_PASSWORD, fixture_path, is_fips, oath_reset, skip_before_version, ykman_dev,
+    ykman_dev_tty,
 };
 use predicates::prelude::*;
 use rstest::rstest;
@@ -158,6 +159,9 @@ fn test_oath_add_hotp_and_code() {
 #[test]
 fn test_oath_rename() {
     require_capability!("OATH");
+    if skip_before_version((5, 3, 1), "OATH rename") {
+        return;
+    }
     let password = prepare_oath_for_credentials();
 
     let mut args = vec![

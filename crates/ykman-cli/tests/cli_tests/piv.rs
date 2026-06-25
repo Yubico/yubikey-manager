@@ -1,7 +1,7 @@
 use super::common::{
     InputMode, fixture_path, piv_has_puk, piv_management_key, piv_management_key_algorithm,
     piv_new_management_key, piv_new_pin, piv_new_puk, piv_pin, piv_puk, piv_reset, reset_blocked,
-    ykman_dev, ykman_dev_tty,
+    skip_before_version, ykman_dev, ykman_dev_tty,
 };
 use predicates::prelude::*;
 use rstest::rstest;
@@ -24,6 +24,9 @@ impl Drop for PivResetGuard {
 #[test]
 fn test_piv_info() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
     ykman_dev().args(["piv", "info"]).assert().success().stdout(
         predicate::str::contains("PIV version:")
@@ -34,6 +37,9 @@ fn test_piv_info() {
 #[test]
 fn test_piv_reset() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     if reset_blocked("PIV") {
         ykman_dev()
             .args(["piv", "reset", "-f"])
@@ -56,6 +62,9 @@ fn test_piv_change_pin(#[case] mode: InputMode) {
         return;
     }
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     let _guard = PivResetGuard::reset();
 
     if mode.is_interactive() {
@@ -95,6 +104,9 @@ fn test_piv_change_puk(#[case] mode: InputMode) {
         return;
     }
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     if !piv_has_puk() {
         eprintln!("SKIP: PUK is not supported on this device");
         return;
@@ -131,6 +143,9 @@ fn test_piv_change_management_key(#[case] mode: InputMode) {
         return;
     }
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     if mode.is_interactive() {
@@ -216,6 +231,9 @@ fn test_piv_generate_self_signed(#[case] mode: InputMode) {
         return;
     }
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     if mode.is_interactive() {
@@ -299,6 +317,9 @@ fn test_piv_generate_self_signed(#[case] mode: InputMode) {
 #[test]
 fn test_piv_export_certificate() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     ykman_dev()
@@ -359,6 +380,9 @@ fn test_piv_export_certificate() {
 #[test]
 fn test_piv_import_key_ec() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("ec_p256_key.pem");
@@ -386,6 +410,9 @@ fn test_piv_import_key_ec() {
 #[test]
 fn test_piv_import_key_rsa() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("rsa_2048_key.pem");
@@ -410,6 +437,9 @@ fn test_piv_import_key_rsa() {
 #[test]
 fn test_piv_import_certificate() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let cert_file = fixture_path("ec_p256_cert.pem");
@@ -440,6 +470,9 @@ fn test_piv_import_certificate() {
 #[test]
 fn test_piv_import_certificate_der() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let cert_file = fixture_path("ec_p256_cert.der");
@@ -464,6 +497,9 @@ fn test_piv_import_certificate_der() {
 #[test]
 fn test_piv_delete_certificate() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     // Generate a key and self-signed cert
@@ -519,6 +555,9 @@ fn test_piv_delete_certificate() {
 #[test]
 fn test_piv_export_key() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     // Generate a key and self-signed cert (cert needed for export)
@@ -566,6 +605,9 @@ fn test_piv_export_key() {
 #[test]
 fn test_piv_export_key_der() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     ykman_dev()
@@ -613,6 +655,9 @@ fn test_piv_export_key_der() {
 #[test]
 fn test_piv_export_key_verify() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     // Generate key and cert so --verify can match them
@@ -668,6 +713,9 @@ fn test_piv_export_key_verify() {
 #[test]
 fn test_piv_key_move() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     // Generate key in 9a
@@ -708,6 +756,9 @@ fn test_piv_key_move() {
 #[test]
 fn test_piv_objects_generate_chuid() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     ykman_dev()
@@ -730,6 +781,9 @@ fn test_piv_objects_generate_chuid() {
 #[test]
 fn test_piv_objects_generate_ccc() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     ykman_dev()
@@ -752,6 +806,9 @@ fn test_piv_objects_generate_ccc() {
 #[test]
 fn test_piv_objects_export_chuid() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     // Generate CHUID first
@@ -791,6 +848,9 @@ fn test_piv_unblock_pin(#[case] mode: InputMode) {
         return;
     }
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     if !piv_has_puk() {
         eprintln!("SKIP: PUK is not supported on this device");
         return;
@@ -838,6 +898,9 @@ fn test_piv_unblock_pin(#[case] mode: InputMode) {
 #[test]
 fn test_piv_generate_rsa2048() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     ykman_dev()
@@ -864,6 +927,9 @@ fn test_piv_generate_rsa2048() {
 #[test]
 fn test_piv_generate_eccp384() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     ykman_dev()
@@ -890,6 +956,9 @@ fn test_piv_generate_eccp384() {
 #[test]
 fn test_piv_key_pin_policy() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     ykman_dev()
@@ -916,6 +985,9 @@ fn test_piv_key_pin_policy() {
 #[test]
 fn test_piv_key_touch_policy() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     ykman_dev()
@@ -944,6 +1016,9 @@ fn test_piv_key_touch_policy() {
 #[test]
 fn test_piv_import_key_ec_der() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("ec_p256_key.der");
@@ -968,6 +1043,9 @@ fn test_piv_import_key_ec_der() {
 #[test]
 fn test_piv_import_key_ec_p384() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("ec_p384_key.pem");
@@ -992,6 +1070,9 @@ fn test_piv_import_key_ec_p384() {
 #[test]
 fn test_piv_import_key_ec_p384_der() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("ec_p384_key.der");
@@ -1016,6 +1097,9 @@ fn test_piv_import_key_ec_p384_der() {
 #[test]
 fn test_piv_import_key_rsa_der() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("rsa_2048_key.der");
@@ -1040,6 +1124,9 @@ fn test_piv_import_key_rsa_der() {
 #[test]
 fn test_piv_import_key_ec_pkcs12() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("ec_p256.p12");
@@ -1066,6 +1153,9 @@ fn test_piv_import_key_ec_pkcs12() {
 #[test]
 fn test_piv_import_key_ec_pkcs12_encrypted() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("ec_p256_enc.p12");
@@ -1092,6 +1182,9 @@ fn test_piv_import_key_ec_pkcs12_encrypted() {
 #[test]
 fn test_piv_import_key_rsa_pkcs12() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("rsa_2048.p12");
@@ -1118,6 +1211,9 @@ fn test_piv_import_key_rsa_pkcs12() {
 #[test]
 fn test_piv_import_key_rsa_pkcs12_encrypted() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("rsa_2048_enc.p12");
@@ -1144,6 +1240,9 @@ fn test_piv_import_key_rsa_pkcs12_encrypted() {
 #[test]
 fn test_piv_import_key_ec_p384_pkcs12() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("ec_p384.p12");
@@ -1170,6 +1269,9 @@ fn test_piv_import_key_ec_p384_pkcs12() {
 #[test]
 fn test_piv_import_key_ec_p256_pkcs12_modern() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("ec_p256_modern.p12");
@@ -1198,6 +1300,9 @@ fn test_piv_import_key_ec_p256_pkcs12_modern() {
 #[test]
 fn test_piv_import_certificate_rsa_pem() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let cert_file = fixture_path("rsa_2048_cert.pem");
@@ -1222,6 +1327,9 @@ fn test_piv_import_certificate_rsa_pem() {
 #[test]
 fn test_piv_import_certificate_rsa_der() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let cert_file = fixture_path("rsa_2048_cert.der");
@@ -1246,6 +1354,9 @@ fn test_piv_import_certificate_rsa_der() {
 #[test]
 fn test_piv_import_certificate_ec_pkcs12() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let cert_file = fixture_path("ec_p256.p12");
@@ -1279,6 +1390,9 @@ fn test_piv_import_certificate_ec_pkcs12() {
 #[test]
 fn test_piv_import_certificate_ec_pkcs12_encrypted() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let cert_file = fixture_path("ec_p256_enc.p12");
@@ -1305,6 +1419,9 @@ fn test_piv_import_certificate_ec_pkcs12_encrypted() {
 #[test]
 fn test_piv_import_certificate_rsa_pkcs12() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let cert_file = fixture_path("rsa_2048.p12");
@@ -1331,6 +1448,9 @@ fn test_piv_import_certificate_rsa_pkcs12() {
 #[test]
 fn test_piv_import_certificate_rsa_pkcs12_encrypted() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let cert_file = fixture_path("rsa_2048_enc.p12");
@@ -1357,6 +1477,9 @@ fn test_piv_import_certificate_rsa_pkcs12_encrypted() {
 #[test]
 fn test_piv_import_certificate_ec_pkcs12_modern() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let cert_file = fixture_path("ec_p256_modern.p12");
@@ -1383,6 +1506,9 @@ fn test_piv_import_certificate_ec_pkcs12_modern() {
 #[test]
 fn test_piv_import_key_and_cert_pkcs12_verify() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let p12_file = fixture_path("ec_p256_enc.p12");
@@ -1430,6 +1556,9 @@ fn test_piv_import_key_and_cert_pkcs12_verify() {
 #[test]
 fn test_piv_import_key_ec_encrypted_pem() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("ec_p256_key_enc.pem");
@@ -1456,6 +1585,9 @@ fn test_piv_import_key_ec_encrypted_pem() {
 #[test]
 fn test_piv_import_key_rsa_encrypted_pem() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("rsa_2048_key_enc.pem");
@@ -1482,6 +1614,9 @@ fn test_piv_import_key_rsa_encrypted_pem() {
 #[test]
 fn test_piv_import_pkcs12_wrong_password() {
     require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
     piv_reset();
 
     let key_file = fixture_path("ec_p256_enc.p12");

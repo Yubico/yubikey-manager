@@ -1,9 +1,12 @@
-use super::common::{otp_delete_slot2, ykman_dev};
+use super::common::{otp_delete_slot2, skip_before_version, ykman_dev};
 use predicates::prelude::*;
 
 #[test]
 fn test_otp_info() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     ykman_dev()
         .args(["otp", "info"])
         .assert()
@@ -14,6 +17,9 @@ fn test_otp_info() {
 #[test]
 fn test_otp_static() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     otp_delete_slot2();
 
     ykman_dev()
@@ -36,6 +42,9 @@ fn test_otp_static() {
 #[test]
 fn test_otp_chalresp() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     otp_delete_slot2();
 
     ykman_dev()
@@ -58,6 +67,9 @@ fn test_otp_chalresp() {
 #[test]
 fn test_otp_swap() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     otp_delete_slot2();
 
     ykman_dev()
@@ -78,6 +90,9 @@ fn test_otp_swap() {
 #[test]
 fn test_otp_hotp() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     otp_delete_slot2();
 
     ykman_dev()
@@ -102,6 +117,9 @@ fn test_otp_hotp() {
 #[test]
 fn test_otp_yubiotp() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     otp_delete_slot2();
 
     // Program Yubico OTP in slot 2 with auto-generated IDs and key
@@ -133,6 +151,9 @@ fn test_otp_yubiotp() {
 #[test]
 fn test_otp_calculate_standalone() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     otp_delete_slot2();
 
     // Program challenge-response in slot 2
@@ -157,6 +178,9 @@ fn test_otp_calculate_standalone() {
 #[test]
 fn test_otp_calculate_totp_8digits() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     otp_delete_slot2();
 
     ykman_dev()
@@ -179,6 +203,9 @@ fn test_otp_calculate_totp_8digits() {
 #[test]
 fn test_otp_delete() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     otp_delete_slot2();
 
     // Program slot 2
@@ -209,6 +236,9 @@ fn test_otp_delete() {
 #[test]
 fn test_otp_static_length() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     otp_delete_slot2();
 
     ykman_dev()
@@ -231,6 +261,9 @@ fn test_otp_static_length() {
 #[test]
 fn test_otp_hotp_8digits() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     otp_delete_slot2();
 
     ykman_dev()
@@ -257,6 +290,9 @@ fn test_otp_hotp_8digits() {
 #[test]
 fn test_otp_settings_enter() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     otp_delete_slot2();
 
     // Program a static password first
@@ -280,6 +316,9 @@ fn test_otp_settings_enter() {
 #[test]
 fn test_otp_ndef() {
     require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
     otp_delete_slot2();
 
     // Program slot 2

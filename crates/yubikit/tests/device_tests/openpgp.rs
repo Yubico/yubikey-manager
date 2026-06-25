@@ -424,6 +424,7 @@ fn setup_for_import(tc: &TestConnection) -> OpenPgpSession<PcscSmartCardConnecti
 fn test_import_rsa(#[case] tc: TestConnection, #[case] bits: usize) {
     skip_if_needed!(tc);
     require_capability!(Capability::OPENPGP);
+    require_version!(Version(4, 0, 0));
     let mut session = setup_for_import(&tc);
 
     let key = generate_rsa_private_key(bits);

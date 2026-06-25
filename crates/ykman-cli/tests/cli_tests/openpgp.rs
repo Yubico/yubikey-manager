@@ -1,6 +1,6 @@
 use super::common::{
     InputMode, fixture_path, openpgp_admin_pin, openpgp_new_admin_pin, openpgp_new_pin,
-    openpgp_pin, openpgp_reset, openpgp_reset_code, ykman_dev, ykman_dev_tty,
+    openpgp_pin, openpgp_reset, openpgp_reset_code, skip_before_version, ykman_dev, ykman_dev_tty,
 };
 use predicates::prelude::*;
 use rstest::rstest;
@@ -164,6 +164,9 @@ fn test_openpgp_keys_set_touch(#[case] mode: InputMode) {
         return;
     }
     require_capability!("OpenPGP");
+    if skip_before_version((4, 2, 0), "OpenPGP touch policy") {
+        return;
+    }
     openpgp_reset();
 
     // Set touch on aut key to "on"
@@ -226,6 +229,9 @@ fn test_openpgp_certificates_import_export(#[case] mode: InputMode) {
         return;
     }
     require_capability!("OpenPGP");
+    if skip_before_version((5, 2, 0), "OpenPGP ATT certificate") {
+        return;
+    }
     openpgp_reset();
 
     let cert_file = fixture_path("ec_p256_cert.pem");
@@ -274,6 +280,9 @@ fn test_openpgp_certificates_delete(#[case] mode: InputMode) {
         return;
     }
     require_capability!("OpenPGP");
+    if skip_before_version((5, 2, 0), "OpenPGP ATT certificate") {
+        return;
+    }
     openpgp_reset();
 
     let cert_file = fixture_path("ec_p256_cert.pem");

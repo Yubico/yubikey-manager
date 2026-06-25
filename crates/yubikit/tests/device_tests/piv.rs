@@ -1262,6 +1262,7 @@ fn test_piv_pin_policy_never(#[case] tc: TestConnection) {
 fn test_piv_auth_required(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::PIV);
+    require_version!(Version(4, 0, 0));
 
     let mut session = open_piv_session(&tc);
     // Don't authenticate — operations should fail

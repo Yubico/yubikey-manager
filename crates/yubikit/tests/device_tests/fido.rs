@@ -138,6 +138,11 @@ fn check_pin_state<C: yubikit::core::Connection + 'static>(
 fn setup_fido_pin() -> bool {
     use yubikit::platform::hidapi::HidFidoConnection;
 
+    if !device_capabilities().contains(Capability::FIDO2) {
+        eprintln!("FIDO setup: device does not support FIDO2, skipping PIN setup");
+        return false;
+    }
+
     eprintln!("FIDO setup: initializing PIN state...");
 
     let is_usb = get_device().transport() == Transport::Usb;

@@ -1,5 +1,6 @@
 use super::common::{
-    device_info, skip_if_fips, skip_interactive_on_windows, ykman_dev, ykman_dev_tty,
+    device_info, skip_before_version, skip_if_fips, skip_interactive_on_windows, ykman_dev,
+    ykman_dev_tty,
 };
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -123,6 +124,9 @@ fn test_config_set_lock_code_conflicts() {
 #[test]
 fn test_config_usb_disable_enable_piv() {
     require_capability!("CCID");
+    if skip_before_version((5, 0, 0), "device configuration") {
+        return;
+    }
     if app_is_enabled(device_info(), "PIV", "USB") != Some(true) {
         eprintln!("SKIP: PIV is not enabled over USB on this YubiKey");
         return;
@@ -156,6 +160,9 @@ fn test_config_usb_disable_enable_piv() {
 #[test]
 fn test_config_nfc_enable_disable() {
     require_capability!("CCID");
+    if skip_before_version((5, 0, 0), "device configuration") {
+        return;
+    }
     if !has_nfc() {
         eprintln!("SKIP: NFC is not supported on this YubiKey");
         return;
@@ -194,6 +201,9 @@ fn test_config_nfc_enable_disable() {
 #[test]
 fn test_config_usb_enable_all() {
     require_capability!("CCID");
+    if skip_before_version((5, 0, 0), "device configuration") {
+        return;
+    }
     if app_is_enabled(device_info(), "PIV", "USB") != Some(true) {
         eprintln!("SKIP: PIV is not enabled over USB on this YubiKey");
         return;
@@ -224,6 +234,9 @@ fn test_config_usb_enable_all() {
 #[test]
 fn test_config_nfc_disable_all_enable_all() {
     require_capability!("CCID");
+    if skip_before_version((5, 0, 0), "device configuration") {
+        return;
+    }
     if !has_nfc() {
         eprintln!("SKIP: NFC is not supported on this YubiKey");
         return;
@@ -244,6 +257,9 @@ fn test_config_nfc_disable_all_enable_all() {
 #[test]
 fn test_config_set_lock_code() {
     require_capability!("CCID");
+    if skip_before_version((5, 0, 0), "device configuration") {
+        return;
+    }
     let lock_code = TEST_LOCK_CODE;
 
     // Set a lock code
@@ -262,6 +278,9 @@ fn test_config_set_lock_code() {
 #[test]
 fn test_config_set_lock_code_prompts_for_current_code() {
     require_capability!("CCID");
+    if skip_before_version((5, 0, 0), "device configuration") {
+        return;
+    }
     if skip_interactive_on_windows() {
         return;
     }
@@ -288,6 +307,9 @@ fn test_config_set_lock_code_prompts_for_current_code() {
 #[test]
 fn test_config_usb_lock_code_prompt_and_explicit_code() {
     require_capability!("CCID");
+    if skip_before_version((5, 0, 0), "device configuration") {
+        return;
+    }
     if skip_interactive_on_windows() {
         return;
     }
@@ -345,6 +367,9 @@ fn test_config_usb_lock_code_prompt_and_explicit_code() {
 #[test]
 fn test_config_nfc_lock_code_prompt_and_explicit_code() {
     require_capability!("CCID");
+    if skip_before_version((5, 0, 0), "device configuration") {
+        return;
+    }
     if skip_interactive_on_windows() {
         return;
     }

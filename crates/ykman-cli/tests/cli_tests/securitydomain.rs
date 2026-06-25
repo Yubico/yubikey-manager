@@ -1,5 +1,6 @@
 use super::common::{
-    DEFAULT_SCP03_KEYS, device_info, fixture_path, is_fips, sd_reset, ykman_dev, ykman_dev_scp,
+    DEFAULT_SCP03_KEYS, device_info, fixture_path, is_fips, sd_reset, skip_before_version,
+    ykman_dev, ykman_dev_scp,
 };
 use predicates::prelude::*;
 use std::fs;
@@ -33,6 +34,9 @@ fn scp_fixture_path(name: &str) -> PathBuf {
 #[test]
 fn test_sd_info() {
     require_capability!("CCID");
+    if skip_before_version((5, 7, 2), "Security Domain") {
+        return;
+    }
     ykman_dev()
         .args(["sd", "info"])
         .assert()
@@ -43,6 +47,9 @@ fn test_sd_info() {
 #[test]
 fn test_sd_reset() {
     require_capability!("CCID");
+    if skip_before_version((5, 7, 2), "Security Domain") {
+        return;
+    }
     if is_fips() && selected_over_nfc() {
         ykman_dev()
             .args(["sd", "reset", "-f"])
@@ -61,6 +68,9 @@ fn test_sd_reset() {
 #[test]
 fn test_sd_keys_generate() {
     require_capability!("CCID");
+    if skip_before_version((5, 7, 2), "Security Domain") {
+        return;
+    }
     if skip_if_fips_over_nfc("Security Domain key generation") {
         return;
     }
@@ -89,6 +99,9 @@ fn test_sd_keys_generate() {
 #[test]
 fn test_sd_keys_import_scp03() {
     require_capability!("CCID");
+    if skip_before_version((5, 7, 2), "Security Domain") {
+        return;
+    }
     if skip_if_fips_over_nfc("Security Domain SCP03 import") {
         return;
     }
@@ -115,6 +128,9 @@ fn test_sd_keys_import_scp03() {
 #[test]
 fn test_sd_keys_delete() {
     require_capability!("CCID");
+    if skip_before_version((5, 7, 2), "Security Domain") {
+        return;
+    }
     if skip_if_fips_over_nfc("Security Domain key deletion") {
         return;
     }
@@ -153,6 +169,9 @@ fn test_sd_keys_delete() {
 #[test]
 fn test_sd_keys_import_scp11() {
     require_capability!("CCID");
+    if skip_before_version((5, 7, 2), "Security Domain") {
+        return;
+    }
     if skip_if_fips_over_nfc("Security Domain SCP11 import") {
         return;
     }
@@ -181,6 +200,9 @@ fn test_sd_keys_import_scp11() {
 #[test]
 fn test_sd_scp11a_with_encrypted_scp_key() {
     require_capability!("CCID");
+    if skip_before_version((5, 7, 2), "Security Domain") {
+        return;
+    }
     if skip_if_fips_over_nfc("Security Domain SCP11a import") {
         return;
     }
