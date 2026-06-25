@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, Once, OnceLock};
 use std::time::{Duration, Instant};
+use yubikit::management::UsbInterface;
+use yubikit::platform::device::list_devices;
 
 static SKIP_COUNT: AtomicUsize = AtomicUsize::new(0);
 static PICO_CLEANUP_TARGETS: OnceLock<Mutex<Vec<(String, u8)>>> = OnceLock::new();
@@ -51,9 +53,41 @@ fn test_device() -> &'static TestDevice {
             .or_else(|_| env::var("YKMAN_TEST_SERIAL"))
             .ok();
         let configured = raw.is_some();
-        let serial = raw.filter(|s| s != "-1");
+        let serial = raw.and_then(resolve_device_serial);
         TestDevice { serial, configured }
     })
+}
+
+/// Validate the configured test device, if any, without requiring one.
+pub fn validate_device_if_configured() {
+    let _ = test_device();
+}
+
+fn resolve_device_serial(raw: String) -> Option<String> {
+    if raw == "-1" {
+        let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
+            .expect("Failed to enumerate YubiKeys");
+        let matching = devices
+            .into_iter()
+            .filter(|d| d.info().serial.is_none())
+            .count();
+        match matching {
+            0 => panic!("No YubiKey without serial found"),
+            1 => None,
+            n => panic!("Multiple YubiKeys without serial found ({n}), cannot disambiguate"),
+        }
+    } else {
+        let serial = raw
+            .parse::<u32>()
+            .expect("YUBIKEY_SERIAL must be a valid integer or -1");
+        let devices = list_devices(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
+            .expect("Failed to enumerate YubiKeys");
+        if devices.into_iter().any(|d| d.info().serial == Some(serial)) {
+            Some(raw)
+        } else {
+            panic!("No YubiKey found with serial {serial}")
+        }
+    }
 }
 
 /// Abort the test if no device is configured.

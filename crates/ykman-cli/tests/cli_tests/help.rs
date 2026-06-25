@@ -2,6 +2,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 
 fn ykman() -> Command {
+    super::common::validate_device_if_configured();
     Command::cargo_bin("ykman").expect("binary 'ykman' not found")
 }
 

@@ -7,6 +7,11 @@ use predicates::prelude::*;
 use std::thread;
 use std::time::Duration;
 
+fn ykman_standalone() -> Command {
+    super::common::validate_device_if_configured();
+    Command::cargo_bin("ykman").expect("binary 'ykman' not found")
+}
+
 /// Wait for the YubiKey to re-enumerate after a USB config change.
 fn wait_for_reenumeration() {
     thread::sleep(Duration::from_secs(3));
@@ -79,8 +84,7 @@ fn has_nfc() -> bool {
 
 #[test]
 fn test_config_set_lock_code_help() {
-    Command::cargo_bin("ykman")
-        .expect("binary 'ykman' not found")
+    ykman_standalone()
         .args(["config", "set-lock-code", "--help"])
         .assert()
         .success()
@@ -96,8 +100,7 @@ fn test_config_set_lock_code_help() {
 
 #[test]
 fn test_config_set_lock_code_conflicts() {
-    Command::cargo_bin("ykman")
-        .expect("binary 'ykman' not found")
+    ykman_standalone()
         .args([
             "config",
             "set-lock-code",
@@ -108,8 +111,7 @@ fn test_config_set_lock_code_conflicts() {
         .assert()
         .failure();
 
-    Command::cargo_bin("ykman")
-        .expect("binary 'ykman' not found")
+    ykman_standalone()
         .args([
             "config",
             "set-lock-code",
