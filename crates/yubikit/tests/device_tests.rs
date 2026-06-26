@@ -20,13 +20,17 @@ mod arkg_p256;
 mod controller;
 
 use rstest::{fixture, rstest};
+use std::cell::Cell;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, Once, OnceLock, RwLock, RwLockReadGuard};
+use std::sync::{Arc, Mutex, Once, OnceLock, RwLock, RwLockReadGuard};
 use std::time::{Duration, Instant};
 use yubikit::core::Transport;
 use yubikit::core::{Version, set_override_version};
 use yubikit::device::ReinsertStatus;
-use yubikit::management::{Capability, DeviceInfo, ManagementSession, ReleaseType, UsbInterface};
+use yubikit::management::{
+    Capability, DeviceConfig, DeviceInfo, ManagementSession, ReleaseType, UsbInterface,
+};
 use yubikit::platform::device::{LocalYubiKeyDevice, list_devices};
 use yubikit::platform::pcsc::PcscSmartCardConnection;
 use yubikit::securitydomain::SecurityDomainSession;
@@ -158,6 +162,7 @@ fn get_device() -> RwLockReadGuard<'static, LocalYubiKeyDevice> {
         .unwrap()
 }
 
+#[allow(dead_code)]
 fn refresh_device_after_reset() {
     let serial = required_serial();
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -177,16 +182,217 @@ fn refresh_device_after_reset() {
         if let Some(dev) = found
             && dev.open_smartcard().is_ok()
         {
-            if let Some(lock) = DEVICE.get() {
-                *lock.write().unwrap() = dev;
-            }
-            invalidate_scp11b_params();
+            replace_cached_device(dev);
             return;
         }
         assert!(
             Instant::now() < deadline,
             "YubiKey did not reappear after device reset"
         );
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+fn replace_cached_device(dev: LocalYubiKeyDevice) {
+    if let Some(lock) = DEVICE.get() {
+        *lock.write().unwrap() = dev;
+    }
+    invalidate_scp11b_params();
+}
+
+fn find_test_device(interfaces: UsbInterface) -> Option<LocalYubiKeyDevice> {
+    let serial = required_serial();
+    let devices = list_devices(interfaces).ok()?;
+    match serial {
+        Some(s) => devices.into_iter().find(|d| d.info().serial == Some(s)),
+        None => {
+            let mut devs: Vec<_> = devices
+                .into_iter()
+                .filter(|d| d.info().serial.is_none())
+                .collect();
+            (devs.len() == 1).then(|| devs.remove(0))
+        }
+    }
+}
+
+fn usb_enabled_capabilities(dev: &LocalYubiKeyDevice) -> Capability {
+    dev.info()
+        .config
+        .enabled_capabilities
+        .get(&Transport::Usb)
+        .copied()
+        .unwrap_or(Capability::NONE)
+}
+
+fn try_wait_for_usb_enabled(
+    enabled: Capability,
+    interfaces: UsbInterface,
+) -> Result<LocalYubiKeyDevice, String> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match find_test_device(interfaces) {
+            Some(dev)
+                if dev.info().version >= Version(5, 0, 0)
+                    && usb_enabled_capabilities(&dev) == enabled =>
+            {
+                return Ok(dev);
+            }
+            Some(dev) => {
+                log::debug!(
+                    "Waiting for USB config {enabled:?}, currently {:?} on version {}",
+                    usb_enabled_capabilities(&dev),
+                    dev.info().version
+                );
+            }
+            None => {}
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "YubiKey did not settle with USB capabilities {enabled:?} and interfaces {interfaces:?}"
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+fn wait_for_usb_enabled(enabled: Capability, interfaces: UsbInterface) -> LocalYubiKeyDevice {
+    try_wait_for_usb_enabled(enabled, interfaces).unwrap_or_else(|e| panic!("{e}"))
+}
+
+fn try_write_usb_enabled_once(dev: &LocalYubiKeyDevice, enabled: Capability) -> Result<(), String> {
+    let config = DeviceConfig {
+        enabled_capabilities: HashMap::from([(Transport::Usb, enabled)]),
+        ..DeviceConfig::default()
+    };
+    let mut errors = Vec::new();
+
+    if dev.reader_name.is_some()
+        && let Ok(conn) = dev.open_smartcard()
+    {
+        match ManagementSession::new(conn) {
+            Ok(mut session) if session.version() >= Version(5, 0, 0) => {
+                return session
+                    .write_device_config(&config, true, None, None)
+                    .map_err(|e| format!("write USB config over CCID: {e}"));
+            }
+            Ok(session) => errors.push(format!(
+                "open management over CCID returned transient version {}",
+                session.version()
+            )),
+            Err((e, _)) => errors.push(format!("open management over CCID: {e}")),
+        }
+    }
+
+    if dev.hid_path.is_some()
+        && let Ok(conn) = dev.open_otp()
+    {
+        match ManagementSession::new_otp(conn) {
+            Ok(mut session) if session.version() >= Version(5, 0, 0) => {
+                return session
+                    .write_device_config(&config, true, None, None)
+                    .map_err(|e| format!("write USB config over OTP: {e}"));
+            }
+            Ok(session) => errors.push(format!(
+                "open management over OTP returned transient version {}",
+                session.version()
+            )),
+            Err((e, _)) => errors.push(format!("open management over OTP: {e}")),
+        }
+    }
+
+    if dev.fido_path.is_some()
+        && let Ok(conn) = dev.open_fido()
+    {
+        match ManagementSession::new_fido(conn) {
+            Ok(mut session) if session.version() >= Version(5, 0, 0) => {
+                return session
+                    .write_device_config(&config, true, None, None)
+                    .map_err(|e| format!("write USB config over FIDO: {e}"));
+            }
+            Ok(session) => errors.push(format!(
+                "open management over FIDO returned transient version {}",
+                session.version()
+            )),
+            Err((e, _)) => errors.push(format!("open management over FIDO: {e}")),
+        }
+    }
+
+    if errors.is_empty() {
+        Err("no usable connection for writing USB config".into())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+fn write_usb_enabled(dev: &LocalYubiKeyDevice, enabled: Capability) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut candidate = Some(dev.clone());
+    let mut last_error = String::new();
+    loop {
+        let current = candidate.take().or_else(|| {
+            find_test_device(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
+        });
+        if let Some(dev) = current {
+            match try_write_usb_enabled_once(&dev, enabled) {
+                Ok(()) => return,
+                Err(e) => last_error = e,
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "write USB config failed after retries: {last_error}"
+        );
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+struct RestoreUsbConfig {
+    enabled: Capability,
+}
+
+impl Drop for RestoreUsbConfig {
+    fn drop(&mut self) {
+        if let Some(dev) =
+            find_test_device(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
+        {
+            write_usb_enabled(&dev, self.enabled);
+            match try_wait_for_usb_enabled(
+                self.enabled,
+                UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO,
+            ) {
+                Ok(dev) => replace_cached_device(dev),
+                Err(e) => eprintln!("Failed to restore USB interfaces: {e}"),
+            }
+        } else {
+            eprintln!("Failed to restore USB interfaces: YubiKey not found");
+        }
+    }
+}
+
+fn read_otp_device_info() -> Result<DeviceInfo, String> {
+    let dev = find_test_device(UsbInterface::OTP).unwrap_or_else(|| get_device().clone());
+    let conn = dev.open_otp().map_err(|e| format!("open OTP: {e}"))?;
+    let mut session = ManagementSession::new_otp(conn)
+        .map_err(|(e, _)| format!("ManagementSession::new_otp: {e}"))?;
+    assert_ne!(session.version(), Version(0, 0, 1));
+    session
+        .read_device_info()
+        .map_err(|e| format!("read_device_info: {e}"))
+}
+
+fn wait_for_otp_device_info() -> Result<DeviceInfo, String> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let last_error = match read_otp_device_info() {
+            Ok(info) => return Ok(info),
+            Err(e) => e,
+        };
+        if last_error.contains("No data") {
+            return Err(last_error);
+        }
+        if Instant::now() >= deadline {
+            return Err(last_error);
+        }
         std::thread::sleep(Duration::from_millis(250));
     }
 }
@@ -454,6 +660,127 @@ fn test_list_devices_finds_key() {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum UsbReinsertCase {
+    Ccid,
+    Otp,
+    Fido,
+}
+
+impl UsbReinsertCase {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Ccid => "CCID",
+            Self::Otp => "OTP",
+            Self::Fido => "FIDO",
+        }
+    }
+
+    fn interface(self) -> UsbInterface {
+        match self {
+            Self::Ccid => UsbInterface::CCID,
+            Self::Otp => UsbInterface::OTP,
+            Self::Fido => UsbInterface::FIDO,
+        }
+    }
+
+    fn capabilities(self, supported: Capability) -> Option<Capability> {
+        match self {
+            Self::Ccid => {
+                let ccid = supported
+                    & (Capability::PIV
+                        | Capability::OATH
+                        | Capability::OPENPGP
+                        | Capability::HSMAUTH);
+                (!ccid.is_empty()).then_some(ccid)
+            }
+            Self::Otp => supported
+                .contains(Capability::OTP)
+                .then_some(Capability::OTP),
+            Self::Fido => {
+                let fido = supported & (Capability::FIDO2 | Capability::U2F);
+                (!fido.is_empty()).then_some(fido)
+            }
+        }
+    }
+}
+
+#[rstest]
+#[case::ccid(UsbReinsertCase::Ccid)]
+#[case::otp(UsbReinsertCase::Otp)]
+#[case::fido(UsbReinsertCase::Fido)]
+fn test_reinsert_usb_single_interface(#[case] case: UsbReinsertCase) {
+    if std::env::var("YUBIKEY_SERIAL").is_err() {
+        skip!("YUBIKEY_SERIAL not set");
+    }
+    require_transport!(Transport::Usb);
+    require_version!(Version(5, 0, 0));
+
+    let Some(ctrl): Option<Arc<dyn controller::Controller>> =
+        controller::get_controller(Transport::Usb, None).map(Arc::from)
+    else {
+        skip!("CONTROLLER not set");
+    };
+
+    let initial = get_device().clone();
+    let supported_usb = initial
+        .info()
+        .supported_capabilities
+        .get(&Transport::Usb)
+        .copied()
+        .unwrap_or(Capability::NONE);
+    let _restore = RestoreUsbConfig {
+        enabled: supported_usb,
+    };
+
+    let Some(enabled) = case.capabilities(supported_usb) else {
+        skip!("{} interface is not supported on this YubiKey", case.name());
+    };
+
+    write_usb_enabled(&initial, enabled);
+    let mut dev = wait_for_usb_enabled(enabled, case.interface());
+
+    assert_eq!(dev.info().serial, required_serial());
+    assert_eq!(dev.transport(), Transport::Usb);
+    match case {
+        UsbReinsertCase::Ccid => {
+            assert!(dev.reader_name.is_some(), "CCID reader missing");
+            assert!(dev.open_smartcard().is_ok(), "open smartcard failed");
+        }
+        UsbReinsertCase::Otp => {
+            assert!(dev.hid_path.is_some(), "OTP HID path missing");
+            assert!(dev.open_otp().is_ok(), "open OTP failed");
+        }
+        UsbReinsertCase::Fido => {
+            assert!(dev.fido_path.is_some(), "FIDO HID path missing");
+            assert!(dev.open_fido().is_ok(), "open FIDO failed");
+        }
+    }
+
+    let saw_remove = Cell::new(false);
+    let saw_reinsert = Cell::new(false);
+    dev.reinsert(
+        &|status| match status {
+            ReinsertStatus::Remove => {
+                saw_remove.set(true);
+                ctrl.remove();
+            }
+            ReinsertStatus::Reinsert => {
+                saw_reinsert.set(true);
+                ctrl.insert();
+            }
+        },
+        &|| false,
+    )
+    .expect("reinsert");
+
+    assert!(saw_remove.get(), "remove status not emitted");
+    assert!(saw_reinsert.get(), "reinsert status not emitted");
+    assert_eq!(dev.info().serial, required_serial());
+    assert_eq!(dev.transport(), Transport::Usb);
+    replace_cached_device(dev);
+}
+
 #[rstest]
 #[case::smart_card(TestConnection::SmartCard)]
 #[case::scp11b(TestConnection::SmartCardScp11b)]
@@ -464,14 +791,12 @@ fn test_management_read_device_info(#[case] tc: TestConnection) {
     match tc {
         TestConnection::UsbHid => {
             require_transport!(Transport::Usb);
-            let conn = get_device().open_otp().expect("open OTP");
-            let mut session = ManagementSession::new_otp(conn).expect("ManagementSession::new_otp");
-            match session.read_device_info() {
+            match wait_for_otp_device_info() {
                 Ok(info) => assert_eq!(info.serial, required_serial()),
-                Err(e) if e.to_string().contains("No data") => {
+                Err(e) if e.contains("No data") => {
                     skip!("Management read_device_info not supported over OTP HID on this key");
                 }
-                Err(e) => panic!("read_device_info: {e}"),
+                Err(e) => panic!("read_device_info over OTP failed after retries: {e}"),
             }
         }
         _ => {

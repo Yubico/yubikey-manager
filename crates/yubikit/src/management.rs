@@ -912,11 +912,42 @@ fn read_device_info_from_config<E: fmt::Debug + fmt::Display>(
 fn resolve_dev_version<E: fmt::Debug + fmt::Display>(
     version: &mut Version,
     read_config: &mut dyn FnMut(u8) -> Result<Vec<u8>, E>,
-) {
+) -> Result<(), ManagementError<E>> {
     if *version == Version(0, 0, 1) {
-        match read_device_info_from_config(*version, read_config) {
-            Ok(info) => *version = info.version_qualifier.version,
-            Err(e) => log::warn!("Failed to read device info for dev version: {e}"),
+        let info = read_device_info_from_config(*version, read_config)?;
+        let resolved_version = info.version_qualifier.version;
+        if resolved_version == Version(0, 0, 1) {
+            return Err(ManagementError::InvalidData(
+                "DeviceInfo did not resolve dev version placeholder".into(),
+            ));
+        }
+        *version = resolved_version;
+    }
+    Ok(())
+}
+
+fn management_to_smartcard_error(error: ManagementError<SmartCardError>) -> SmartCardError {
+    match error {
+        ManagementError::Connection(error) => error,
+        ManagementError::NotSupported(message) => SmartCardError::NotSupported(message),
+        ManagementError::InvalidData(message) => SmartCardError::InvalidData(message),
+    }
+}
+
+fn management_to_otp_error(error: ManagementError<OtpError>) -> OtpError {
+    match error {
+        ManagementError::Connection(error) => error,
+        ManagementError::NotSupported(message) | ManagementError::InvalidData(message) => {
+            OtpError::BadResponse(message)
+        }
+    }
+}
+
+fn management_to_fido_error(error: ManagementError<FidoError>) -> FidoError {
+    match error {
+        ManagementError::Connection(error) => error,
+        ManagementError::NotSupported(message) | ManagementError::InvalidData(message) => {
+            FidoError::Other(message)
         }
     }
 }
@@ -1196,9 +1227,14 @@ impl<C: SmartCardConnection> CcidManagement<C> {
         };
 
         // Dev devices report 0.0.1; read the real version from device info.
-        resolve_dev_version(&mut version, &mut |page| {
+        if let Err(error) = resolve_dev_version(&mut version, &mut |page| {
             Self::ccid_read_config(&mut protocol, page)
-        });
+        }) {
+            return Err((
+                management_to_smartcard_error(error),
+                protocol.into_connection(),
+            ));
+        }
 
         // For YubiKey NEO (v3), switch to OTP applet for further commands
         if version.0 == 3 {
@@ -1299,9 +1335,11 @@ impl<T: OtpConnection> OtpManagement<T> {
         let mut version = protocol.version;
 
         // Dev devices report 0.0.1; read the real version from device info.
-        resolve_dev_version(&mut version, &mut |page| {
+        if let Err(error) = resolve_dev_version(&mut version, &mut |page| {
             Self::otp_read_config(&mut protocol, page)
-        });
+        }) {
+            return Err((management_to_otp_error(error), protocol.into_connection()));
+        }
 
         if version >= Version(1, 0, 0) && version < Version(3, 0, 0) {
             return Err((
@@ -1425,9 +1463,11 @@ impl<C: FidoConnection> FidoManagement<C> {
         }
 
         // Dev devices report 0.0.1; read the real version from device info.
-        resolve_dev_version(&mut version, &mut |page| {
+        if let Err(error) = resolve_dev_version(&mut version, &mut |page| {
             Self::fido_read_config(&mut connection, page)
-        });
+        }) {
+            return Err((management_to_fido_error(error), connection));
+        }
 
         Ok(Self {
             connection,
