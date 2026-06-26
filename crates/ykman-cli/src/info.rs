@@ -1,10 +1,11 @@
+use anyhow::Result;
 use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 
-use crate::util::{CliError, print_table};
+use crate::util::print_table;
 
-pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<(), CliError> {
+pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
     let info = dev.info();
 
     let mut rows = vec![("Device type", dev.name())];

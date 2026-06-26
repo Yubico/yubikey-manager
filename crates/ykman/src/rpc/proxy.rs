@@ -706,13 +706,6 @@ impl Drop for RpcDevice {
 // ---------------------------------------------------------------------------
 
 /// Simple error wrapper for RPC transport errors.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
 struct RpcTransportError(String);
-
-impl std::fmt::Display for RpcTransportError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for RpcTransportError {}

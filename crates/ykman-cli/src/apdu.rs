@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use clap::{Args, ValueEnum};
 use yubikit::core::Version;
 use yubikit::device::YubiKeyDevice;
@@ -5,7 +6,7 @@ use yubikit::management::{Capability, UsbInterface};
 use yubikit::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 
 use crate::scp::{self, ScpParams};
-use crate::util::{CliError, format_smartcard_connection_error};
+use crate::util::format_smartcard_connection_error;
 
 #[derive(Clone, ValueEnum)]
 enum CliAppName {
@@ -54,10 +55,10 @@ pub struct ApduArgs {
 }
 
 impl ApduArgs {
-    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
         if !dev.usb_interfaces().contains(UsbInterface::CCID) {
-            return Err(CliError(
-                "The apdu command requires a CCID (smart card) connection.".into(),
+            return Err(anyhow!(
+                "The apdu command requires a CCID (smart card) connection."
             ));
         }
 
@@ -87,7 +88,7 @@ fn format_apdu_no_le(cla: u8, ins: u8, p1: u8, p2: u8, data: &[u8]) -> Vec<u8> {
 /// Parsed APDU: (cla, ins, p1, p2, data, le), expected_sw
 type ParsedApdu = ((u8, u8, u8, u8, Vec<u8>, Option<u16>), Option<u16>);
 
-fn parse_apdu(s: &str) -> Result<ParsedApdu, CliError> {
+fn parse_apdu(s: &str) -> Result<ParsedApdu> {
     // Format: [CLA]INS[P1P2][:DATA][/LE][=EXPECTED_SW]
     let s = s.trim();
 
@@ -97,8 +98,7 @@ fn parse_apdu(s: &str) -> Result<ParsedApdu, CliError> {
         let sw = if sw_str.is_empty() {
             0x9000
         } else {
-            u16::from_str_radix(sw_str, 16)
-                .map_err(|_| CliError(format!("Invalid expected SW: {sw_str}")))?
+            u16::from_str_radix(sw_str, 16).map_err(|_| anyhow!("Invalid expected SW: {sw_str}"))?
         };
         (&s[..idx], Some(sw))
     } else {
@@ -107,10 +107,8 @@ fn parse_apdu(s: &str) -> Result<ParsedApdu, CliError> {
 
     // Split off LE suffix (/XX)
     let (main_part, le) = if let Some((m, le_str)) = main_str.rsplit_once('/') {
-        let le = u16::from(
-            u8::from_str_radix(le_str, 16)
-                .map_err(|_| CliError(format!("Invalid LE: {le_str}")))?,
-        );
+        let le =
+            u16::from(u8::from_str_radix(le_str, 16).map_err(|_| anyhow!("Invalid LE: {le_str}"))?);
         (m, Some(le))
     } else {
         (main_str, None)
@@ -118,15 +116,14 @@ fn parse_apdu(s: &str) -> Result<ParsedApdu, CliError> {
 
     // Split off DATA
     let (header, data) = if let Some((h, d)) = main_part.split_once(':') {
-        let data = hex::decode(d).map_err(|_| CliError(format!("Invalid hex data: {d}")))?;
+        let data = hex::decode(d).map_err(|_| anyhow!("Invalid hex data: {d}"))?;
         (h, data)
     } else {
         (main_part, Vec::new())
     };
 
     // Parse header bytes
-    let header_bytes =
-        hex::decode(header).map_err(|_| CliError(format!("Invalid hex header: {header}")))?;
+    let header_bytes = hex::decode(header).map_err(|_| anyhow!("Invalid hex header: {header}"))?;
 
     let (cla, ins, p1, p2) = match header_bytes.len() {
         1 => (0x00, header_bytes[0], 0x00, 0x00),
@@ -139,17 +136,17 @@ fn parse_apdu(s: &str) -> Result<ParsedApdu, CliError> {
             header_bytes[3],
         ),
         _ => {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "Invalid APDU header length: {}",
                 header_bytes.len()
-            )));
+            ));
         }
     };
 
     Ok(((cla, ins, p1, p2, data, le), expected_sw))
 }
 
-fn app_to_aid(app: &str) -> Result<&'static [u8], CliError> {
+fn app_to_aid(app: &str) -> Result<&'static [u8]> {
     match app {
         "otp" => Ok(Aid::OTP),
         "management" => Ok(Aid::MANAGEMENT),
@@ -159,7 +156,7 @@ fn app_to_aid(app: &str) -> Result<&'static [u8], CliError> {
         "fido" => Ok(Aid::FIDO),
         "hsmauth" => Ok(Aid::HSMAUTH),
         "secure-domain" => Ok(Aid::SECURE_DOMAIN),
-        _ => Err(CliError(format!("Unknown app: {app}"))),
+        _ => Err(anyhow!("Unknown app: {app}")),
     }
 }
 
@@ -204,22 +201,18 @@ fn run_apdu(
     app: Option<&str>,
     short: bool,
     send_apdu: &[String],
-) -> Result<(), CliError> {
+) -> Result<()> {
     if apdus.is_empty() && send_apdu.is_empty() && app.is_none() {
-        return Err(CliError("No commands provided.".into()));
+        return Err(anyhow!("No commands provided."));
     }
     if (app.is_some() || !apdus.is_empty()) && !send_apdu.is_empty() {
-        return Err(CliError(
-            "Cannot mix positional APDUs and -s/--send-apdu.".into(),
-        ));
+        return Err(anyhow!("Cannot mix positional APDUs and -s/--send-apdu."));
     }
 
     if !send_apdu.is_empty() {
         // Raw send-apdu mode is incompatible with SCP
         if scp_params.is_explicit() {
-            return Err(CliError(
-                "SCP is not compatible with raw send-apdu mode.".into(),
-            ));
+            return Err(anyhow!("SCP is not compatible with raw send-apdu mode."));
         }
         // Raw send-apdu mode: send full hex APDUs directly
         let mut conn = dev
@@ -231,12 +224,12 @@ fn run_apdu(
                 println!();
             }
             is_first = false;
-            let apdu_bytes = hex::decode(apdu_hex)
-                .map_err(|_| CliError(format!("Invalid hex APDU: {apdu_hex}")))?;
+            let apdu_bytes =
+                hex::decode(apdu_hex).map_err(|_| anyhow!("Invalid hex APDU: {apdu_hex}"))?;
             println!("SEND: {}", hex_spaced(&apdu_bytes));
             let (resp, sw) = conn
                 .send_and_receive(&apdu_bytes)
-                .map_err(|e| CliError(format!("APDU error: {e}")))?;
+                .map_err(|e| anyhow!("APDU error: {e}"))?;
             print_response(&resp, sw, no_pretty);
         }
         return Ok(());
@@ -269,7 +262,7 @@ fn run_apdu(
         println!("SELECT AID: {}", hex_spaced(aid));
         let resp = protocol
             .select(aid)
-            .map_err(|e| CliError(format!("Failed to select {app_name}: {e}")))?;
+            .map_err(|e| anyhow!("Failed to select {app_name}: {e}"))?;
         print_response(&resp, 0x9000, no_pretty);
     }
 
@@ -303,14 +296,14 @@ fn run_apdu(
             Some(le) => match protocol.send_apdu_with_le(cla, ins, p1, p2, &data, le) {
                 Ok(resp) => (resp, 0x9000u16),
                 Err(SmartCardError::Apdu { data, sw }) => (data, sw),
-                Err(e) => return Err(CliError(format!("APDU error: {e}"))),
+                Err(e) => return Err(anyhow!("APDU error: {e}")),
             },
             None => {
                 // No LE specified: send without LE byte (case 1 or case 3 APDU)
                 let apdu = format_apdu_no_le(cla, ins, p1, p2, &data);
                 match protocol.send_raw_apdu(&apdu) {
                     Ok((resp, sw)) => (resp, sw),
-                    Err(e) => return Err(CliError(format!("APDU error: {e}"))),
+                    Err(e) => return Err(anyhow!("APDU error: {e}")),
                 }
             }
         };
@@ -320,9 +313,9 @@ fn run_apdu(
         if let Some(expected) = expected_sw
             && sw != expected
         {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "Aborted due to error (expected SW={expected:04X})."
-            )));
+            ));
         }
     }
     Ok(())

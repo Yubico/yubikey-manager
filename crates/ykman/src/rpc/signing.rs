@@ -6,8 +6,6 @@
 //! (dev mode), verification is skipped.
 
 #[cfg(target_os = "windows")]
-use std::fmt;
-#[cfg(target_os = "windows")]
 use std::path::{Path, PathBuf};
 
 /// Verify that a peer process (by PID) has a valid Authenticode signature
@@ -211,15 +209,6 @@ fn get_signing_cert(path: &Path) -> Result<Vec<u8>, SigningError> {
 }
 
 #[cfg(target_os = "windows")]
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
 pub struct SigningError(pub String);
-
-#[cfg(target_os = "windows")]
-impl fmt::Display for SigningError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-#[cfg(target_os = "windows")]
-impl std::error::Error for SigningError {}

@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use yubikit::core::Connection;
 use yubikit::core::Transport;
@@ -6,7 +7,7 @@ use yubikit::management::{Capability, DeviceConfig, DeviceFlag, ManagementSessio
 
 use crate::cli_enums::CliCapability;
 use crate::util::{
-    CliError, confirm, format_session_error, format_smartcard_connection_error, prompt_new_secret,
+    confirm, format_session_error, format_smartcard_connection_error, prompt_new_secret,
     prompt_secret,
 };
 
@@ -125,7 +126,7 @@ pub enum ConfigAction {
 }
 
 impl ConfigAction {
-    pub fn run(self, dev: &dyn YubiKeyDevice) -> Result<(), CliError> {
+    pub fn run(self, dev: &dyn YubiKeyDevice) -> Result<()> {
         match self {
             Self::Usb {
                 enable,
@@ -203,7 +204,7 @@ impl ConfigAction {
 /// Open a management session on any available transport and run a generic function.
 ///
 /// Tries SmartCard first, then OTP HID, then FIDO HID.
-fn with_management_session<F, R>(dev: &dyn YubiKeyDevice, f: F) -> Result<R, CliError>
+fn with_management_session<F, R>(dev: &dyn YubiKeyDevice, f: F) -> Result<R>
 where
     F: ManagementOp<R>,
 {
@@ -222,17 +223,14 @@ where
             .map_err(|(e, _)| format_session_error("management", e))?;
         return f.run(&mut session);
     }
-    Err(CliError(
-        "Couldn't connect to the YubiKey. Command requires CCID, OTP, or FIDO access to be enabled.".into(),
+    Err(anyhow!(
+        "Couldn't connect to the YubiKey. Command requires CCID, OTP, or FIDO access to be enabled."
     ))
 }
 
 /// Trait for operations that can be run on any [`ManagementSession`].
 trait ManagementOp<R> {
-    fn run<C: Connection + 'static>(
-        self,
-        session: &mut ManagementSession<C>,
-    ) -> Result<R, CliError>;
+    fn run<C: Connection + 'static>(self, session: &mut ManagementSession<C>) -> Result<R>;
 }
 
 fn write_config(
@@ -241,7 +239,7 @@ fn write_config(
     reboot: bool,
     lock_code: Option<&[u8]>,
     new_lock_code: Option<&[u8]>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     struct WriteConfig<'a> {
         config: &'a DeviceConfig,
         reboot: bool,
@@ -249,13 +247,10 @@ fn write_config(
         new_lock_code: Option<&'a [u8]>,
     }
     impl ManagementOp<()> for WriteConfig<'_> {
-        fn run<C: Connection + 'static>(
-            self,
-            session: &mut ManagementSession<C>,
-        ) -> Result<(), CliError> {
+        fn run<C: Connection + 'static>(self, session: &mut ManagementSession<C>) -> Result<()> {
             session
                 .write_device_config(self.config, self.reboot, self.lock_code, self.new_lock_code)
-                .map_err(|e| CliError(format!("Failed to write config: {e}")))
+                .map_err(|e| anyhow!("Failed to write config: {e}"))
         }
     }
     with_management_session(
@@ -269,10 +264,10 @@ fn write_config(
     )
 }
 
-fn parse_lock_code(hex: &str) -> Result<Vec<u8>, CliError> {
+fn parse_lock_code(hex: &str) -> Result<Vec<u8>> {
     if hex.len() % 2 != 0 {
-        return Err(CliError(
-            "Lock code has the wrong format. It must be 32 hexadecimal characters.".into(),
+        return Err(anyhow!(
+            "Lock code has the wrong format. It must be 32 hexadecimal characters."
         ));
     }
     let bytes: Result<Vec<u8>, _> = (0..hex.len())
@@ -280,11 +275,11 @@ fn parse_lock_code(hex: &str) -> Result<Vec<u8>, CliError> {
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
         .collect();
     let bytes = bytes.map_err(|_| {
-        CliError("Lock code has the wrong format. It must be 32 hexadecimal characters.".into())
+        anyhow!("Lock code has the wrong format. It must be 32 hexadecimal characters.")
     })?;
     if bytes.len() != 16 {
-        return Err(CliError(
-            "Lock code has the wrong format. It must be 32 hexadecimal characters.".into(),
+        return Err(anyhow!(
+            "Lock code has the wrong format. It must be 32 hexadecimal characters."
         ));
     }
     Ok(bytes)
@@ -294,7 +289,7 @@ fn current_lock_code(
     is_locked: bool,
     lock_code: Option<&str>,
     prompt: &str,
-) -> Result<Option<Vec<u8>>, CliError> {
+) -> Result<Option<Vec<u8>>> {
     if is_locked {
         let code = match lock_code {
             Some(code) => code.to_string(),
@@ -307,10 +302,10 @@ fn current_lock_code(
     }
 }
 
-fn reject_lock_code_if_unlocked(is_locked: bool, lock_code: Option<&str>) -> Result<(), CliError> {
+fn reject_lock_code_if_unlocked(is_locked: bool, lock_code: Option<&str>) -> Result<()> {
     if !is_locked && lock_code.is_some() {
-        Err(CliError(
-            "Lock code provided, but configuration is not locked.".into(),
+        Err(anyhow!(
+            "Lock code provided, but configuration is not locked."
         ))
     } else {
         Ok(())
@@ -330,7 +325,7 @@ fn compute_capability_changes(
     enable_all: bool,
     disable_all: bool,
     allow_disable_all: bool,
-) -> Result<(Capability, Vec<String>), CliError> {
+) -> Result<(Capability, Vec<String>)> {
     let mut new_enabled = enabled;
     let mut changes = Vec::new();
 
@@ -354,10 +349,10 @@ fn compute_capability_changes(
     for name in enable {
         let cap: Capability = (*name).into();
         if !supported.contains(cap) {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "{} is not supported on {transport_name}.",
                 cap.display_name()
-            )));
+            ));
         }
         if !enabled.contains(cap) {
             new_enabled |= cap;
@@ -373,27 +368,21 @@ fn compute_capability_changes(
     }
 
     if !allow_disable_all && new_enabled.is_empty() {
-        return Err(CliError(format!(
-            "Cannot disable all {transport_name} applications."
-        )));
+        return Err(anyhow!("Cannot disable all {transport_name} applications."));
     }
 
     Ok((new_enabled, changes))
 }
 
 /// Confirm configuration changes with the user, or proceed if `force` is set.
-fn confirm_config_changes(
-    transport_name: &str,
-    changes: &[String],
-    force: bool,
-) -> Result<(), CliError> {
+fn confirm_config_changes(transport_name: &str, changes: &[String], force: bool) -> Result<()> {
     if !force {
         eprintln!("{transport_name} configuration changes:");
         for c in changes {
             eprintln!("  {c}");
         }
         if !confirm("Proceed?") {
-            return Err(CliError("Aborted by user.".into()));
+            return Err(anyhow!("Aborted by user."));
         }
     }
     Ok(())
@@ -410,7 +399,7 @@ pub fn run_usb(
     autoeject_timeout: Option<u16>,
     chalresp_timeout: Option<u8>,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let info = dev.info();
     let usb_supported = info
         .supported_capabilities
@@ -451,7 +440,7 @@ pub fn run_usb(
     }
 
     if changes.is_empty() {
-        return Err(CliError("No configuration changes specified.".into()));
+        return Err(anyhow!("No configuration changes specified."));
     }
 
     let reboot = new_enabled != usb_enabled;
@@ -494,13 +483,13 @@ pub fn run_nfc(
     lock_code: Option<&str>,
     restrict: bool,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let info = dev.info();
     let nfc_supported = info
         .supported_capabilities
         .get(&Transport::Nfc)
         .copied()
-        .ok_or_else(|| CliError("NFC is not supported on this YubiKey.".into()))?;
+        .ok_or_else(|| anyhow!("NFC is not supported on this YubiKey."))?;
     let nfc_enabled = info
         .config
         .enabled_capabilities
@@ -544,7 +533,7 @@ pub fn run_nfc(
     )?;
 
     if changes.is_empty() {
-        return Err(CliError("No configuration changes specified.".into()));
+        return Err(anyhow!("No configuration changes specified."));
     }
 
     let lc = current_lock_code(
@@ -572,7 +561,7 @@ pub fn run_set_lock_code(
     clear: bool,
     generate: bool,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let is_locked = dev.info().is_locked;
     if clear && !is_locked {
         eprintln!("No lock code is currently set.");
@@ -589,12 +578,11 @@ pub fn run_set_lock_code(
         Some(vec![0u8; 16])
     } else if generate {
         let mut code = vec![0u8; 16];
-        getrandom::fill(&mut code)
-            .map_err(|e| CliError(format!("Failed to generate random: {e}")))?;
+        getrandom::fill(&mut code).map_err(|e| anyhow!("Failed to generate random: {e}"))?;
         let hex: String = code.iter().map(|b| format!("{b:02x}")).collect();
         eprintln!("Using a randomly generated lock code: {hex}");
         if !force && !confirm("Lock configuration with this lock code?") {
-            return Err(CliError("Aborted by user.".into()));
+            return Err(anyhow!("Aborted by user."));
         }
         Some(code)
     } else {
@@ -614,11 +602,11 @@ pub fn run_set_lock_code(
     Ok(())
 }
 
-pub fn run_reset(dev: &dyn YubiKeyDevice, force: bool) -> Result<(), CliError> {
+pub fn run_reset(dev: &dyn YubiKeyDevice, force: bool) -> Result<()> {
     if !force {
         eprintln!("WARNING! This will delete all stored data and restore factory settings.");
         if !confirm("Proceed?") {
-            return Err(CliError("Aborted by user.".into()));
+            return Err(anyhow!("Aborted by user."));
         }
     }
     eprintln!("Resetting YubiKey data...");
@@ -629,7 +617,7 @@ pub fn run_reset(dev: &dyn YubiKeyDevice, force: bool) -> Result<(), CliError> {
         ManagementSession::new(conn).map_err(|(e, _)| format_session_error("management", e))?;
     session
         .device_reset()
-        .map_err(|e| CliError(format!("Failed to reset device: {e}")))?;
+        .map_err(|e| anyhow!("Failed to reset device: {e}"))?;
 
     eprintln!("Reset complete. All data has been cleared from the YubiKey.");
     Ok(())
@@ -642,20 +630,19 @@ pub fn run_mode(
     autoeject_timeout: Option<u16>,
     chalresp_timeout: Option<u8>,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let info = dev.info();
     if info.version >= yubikit::core::Version(5, 0, 0) && !force {
-        return Err(CliError(
+        return Err(anyhow!(
             "Mode switching is not supported on YubiKey 5 and later.\n\
              Use \"ykman config usb\" for more granular control."
-                .into(),
         ));
     }
 
     // Parse mode string (e.g., "OTP+FIDO+CCID" or number 0-6)
     let mode_code: u8 = if let Ok(n) = mode_str.parse::<u8>() {
         if n > 6 {
-            return Err(CliError(format!("Invalid mode code: {n} (must be 0-6)")));
+            return Err(anyhow!("Invalid mode code: {n} (must be 0-6)"));
         }
         n
     } else {
@@ -666,7 +653,7 @@ pub fn run_mode(
                 "OTP" | "O" => iface |= 0x01,
                 "CCID" | "C" => iface |= 0x02,
                 "FIDO" | "U2F" | "F" => iface |= 0x04,
-                _ => return Err(CliError(format!("Unknown interface: {p}"))),
+                _ => return Err(anyhow!("Unknown interface: {p}")),
             }
         }
         // Map interface flags to mode code
@@ -678,7 +665,7 @@ pub fn run_mode(
             0x05 => 4, // OTP+FIDO
             0x06 => 5, // FIDO+CCID
             0x07 => 6, // OTP+FIDO+CCID
-            _ => return Err(CliError("Invalid mode combination.".into())),
+            _ => return Err(anyhow!("Invalid mode combination.")),
         }
     };
 
@@ -689,7 +676,7 @@ pub fn run_mode(
     };
 
     if !force && !confirm(&format!("Set mode of YubiKey to {mode_str}?")) {
-        return Err(CliError("Aborted by user.".into()));
+        return Err(anyhow!("Aborted by user."));
     }
 
     struct SetMode {
@@ -698,13 +685,10 @@ pub fn run_mode(
         auto_eject_timeout: u16,
     }
     impl ManagementOp<()> for SetMode {
-        fn run<C: Connection + 'static>(
-            self,
-            session: &mut ManagementSession<C>,
-        ) -> Result<(), CliError> {
+        fn run<C: Connection + 'static>(self, session: &mut ManagementSession<C>) -> Result<()> {
             session
                 .set_mode(self.code, self.chalresp_timeout, self.auto_eject_timeout)
-                .map_err(|e| CliError(format!("Failed to set mode: {e}")))
+                .map_err(|e| anyhow!("Failed to set mode: {e}"))
         }
     }
     with_management_session(
@@ -731,7 +715,7 @@ mod tests {
     #[test]
     fn config_lock_code_rejects_code_when_unlocked() {
         let err = current_lock_code(false, Some(LOCK_CODE), "Lock code").unwrap_err();
-        assert!(err.0.contains("configuration is not locked"));
+        assert!(err.to_string().contains("configuration is not locked"));
     }
 
     #[test]

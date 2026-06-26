@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use serde_json::{Value, json};
+use thiserror::Error;
 use yubikit::__internal::SecretValue;
 
 use crate::cancel;
@@ -333,7 +334,8 @@ pub struct RpcResult {
 }
 
 /// Error returned by an RPC call.
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{message}")]
 pub struct RpcClientError {
     /// The RPC error status code (e.g. "pin-validation", "device-error").
     pub status: String,
@@ -343,29 +345,14 @@ pub struct RpcClientError {
     pub body: Value,
 }
 
-impl std::fmt::Display for RpcClientError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
 /// Error from an RPC call — either a transport/protocol failure or a
 /// structured error response from the server.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum RpcCallError {
     /// Transport or protocol error (not from the RPC server).
+    #[error("{0}")]
     Transport(String),
     /// Structured error response from the RPC server.
-    Rpc(RpcClientError),
+    #[error("RPC error ({}): {}", .0.status, .0.message)]
+    Rpc(#[source] RpcClientError),
 }
-
-impl std::fmt::Display for RpcCallError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Transport(e) => write!(f, "{e}"),
-            Self::Rpc(e) => write!(f, "RPC error ({}): {}", e.status, e.message),
-        }
-    }
-}
-
-impl std::error::Error for RpcCallError {}

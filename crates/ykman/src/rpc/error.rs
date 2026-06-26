@@ -1,4 +1,5 @@
 use serde_json::Value;
+use thiserror::Error;
 
 /// An RPC response — body + optional flags.
 pub struct RpcResponse {
@@ -23,7 +24,8 @@ impl RpcResponse {
 }
 
 /// An RPC error returned as the result of a command.
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{status}: {message}")]
 pub struct RpcError {
     pub status: String,
     pub message: String,
@@ -105,14 +107,6 @@ impl RpcError {
         )
     }
 }
-
-impl std::fmt::Display for RpcError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.status, self.message)
-    }
-}
-
-impl std::error::Error for RpcError {}
 
 /// Internal exception to signal that a child node must be closed
 /// and a state-reset error raised with path tracking.

@@ -1,11 +1,10 @@
+use anyhow::{Result, anyhow};
 use yubikit::device::{YubiKeyDevice, get_name};
 use yubikit::management::UsbInterface;
 #[cfg(feature = "hardware")]
 use yubikit::platform::device::{name_from_pid, scan_usb_devices, usb_interfaces_from_pid};
 #[cfg(feature = "hardware")]
 use yubikit::platform::pcsc::list_readers;
-
-use crate::util::CliError;
 
 /// Format a device description like: `YubiKey 5 NFC (5.4.3) [OTP+FIDO+CCID] Serial: 123`
 pub fn describe_device(dev: &dyn YubiKeyDevice) -> String {
@@ -39,12 +38,11 @@ fn format_interfaces(ifaces: UsbInterface) -> String {
     }
 }
 
-pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
+pub fn run(serials: bool, readers: bool) -> Result<()> {
     if readers {
         #[cfg(feature = "hardware")]
         {
-            let reader_list =
-                list_readers().map_err(|e| CliError(format!("Failed to list readers: {e}")))?;
+            let reader_list = list_readers().map_err(|e| anyhow!("Failed to list readers: {e}"))?;
             for r in &reader_list {
                 println!("{r}");
             }
@@ -52,9 +50,8 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
         }
         #[cfg(not(feature = "hardware"))]
         {
-            return Err(CliError(
+            return Err(anyhow!(
                 "Listing readers requires hardware access (built without 'hardware' feature)."
-                    .into(),
             ));
         }
     }
@@ -62,7 +59,7 @@ pub fn run(serials: bool, readers: bool) -> Result<(), CliError> {
     let mut source = ykman::device::get_device_source();
     let devices = source
         .list_devices()
-        .map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
+        .map_err(|e| anyhow!("Failed to list devices: {e}"))?;
 
     if devices.is_empty() && !serials && !source.is_service() {
         // Check for devices that are visible but not accessible

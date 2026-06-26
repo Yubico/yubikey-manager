@@ -1,49 +1,38 @@
+use anyhow::{Error, Result, anyhow};
 use std::fmt;
 use std::io::{self, Read, Write};
 
-use ykman::rpc::client::RpcCallError;
 use yubikit::device::{DeviceError, YubiKeyDevice};
 use yubikit::management::Capability;
 use yubikit::smartcard::{ScpKeyParams, SmartCardConnection, SmartCardError, Sw};
 
 use crate::scp::{self, ScpParams};
 
-/// CLI error type for user-facing error messages.
-#[derive(Debug)]
-pub struct CliError(pub String);
-
-impl From<RpcCallError> for CliError {
-    fn from(e: RpcCallError) -> Self {
-        CliError(format!("{e}"))
-    }
-}
-
 /// Format a failed CCID connection in a way that points at the selected application.
-pub fn format_smartcard_connection_error(app: &str, e: DeviceError) -> CliError {
+pub fn format_smartcard_connection_error(app: &str, e: DeviceError) -> Error {
     match e {
-        DeviceError::NoDeviceFound => CliError("No YubiKey detected!".into()),
-        DeviceError::NotYubiKey => CliError("Connected smart card is not a YubiKey.".into()),
-        DeviceError::Cancelled => CliError("Operation cancelled.".into()),
+        DeviceError::NoDeviceFound => anyhow!("No YubiKey detected!"),
+        DeviceError::NotYubiKey => anyhow!("Connected smart card is not a YubiKey."),
+        DeviceError::Cancelled => anyhow!("Operation cancelled."),
         DeviceError::WrongDevice => {
-            CliError("Inserted YubiKey does not match the one removed.".into())
+            anyhow!("Inserted YubiKey does not match the one removed.")
         }
         DeviceError::SmartCard(SmartCardError::ApplicationNotAvailable) => {
-            CliError(format!("{app} is not available on this YubiKey."))
+            anyhow!("{app} is not available on this YubiKey.")
         }
-        DeviceError::SmartCard(SmartCardError::Apdu { sw, .. }) => CliError(format!(
-            "{app} is not available on this YubiKey: {}",
-            sw_message(sw)
-        )),
-        DeviceError::Transport(e) => CliError(format!(
+        DeviceError::SmartCard(SmartCardError::Apdu { sw, .. }) => {
+            anyhow!("{app} is not available on this YubiKey: {}", sw_message(sw))
+        }
+        DeviceError::Transport(e) => anyhow!(
             "Failed to connect to {app} over CCID: {e}. Make sure the CCID interface is enabled and the YubiKey is accessible."
-        )),
-        other => CliError(format!("Failed to connect to {app} over CCID: {other}")),
+        ),
+        other => anyhow!("Failed to connect to {app} over CCID: {other}"),
     }
 }
 
 /// Format a failed application session open.
-pub fn format_session_error(app: &str, e: impl fmt::Display) -> CliError {
-    CliError(format!("Failed to open {app} session: {e}"))
+pub fn format_session_error(app: &str, e: impl fmt::Display) -> Error {
+    anyhow!("Failed to open {app} session: {e}")
 }
 
 fn sw_message(sw: u16) -> String {
@@ -64,24 +53,24 @@ fn sw_message(sw: u16) -> String {
 }
 
 /// Prompt the user for visible text input.
-pub fn prompt(prompt: &str) -> Result<String, CliError> {
+pub fn prompt(prompt: &str) -> Result<String> {
     eprint!("{prompt}: ");
     io::stderr().flush().ok();
     let mut input = String::new();
     io::stdin()
         .read_line(&mut input)
-        .map_err(|e| CliError(format!("Failed to read input: {e}")))?;
+        .map_err(|e| anyhow!("Failed to read input: {e}"))?;
     Ok(input.trim().to_string())
 }
 
 /// Prompt for a secret value with hidden input.
-pub fn prompt_secret(prompt: &str) -> Result<String, CliError> {
+pub fn prompt_secret(prompt: &str) -> Result<String> {
     rpassword::prompt_password(format!("{prompt}: "))
-        .map_err(|e| CliError(format!("Failed to read input: {e}")))
+        .map_err(|e| anyhow!("Failed to read input: {e}"))
 }
 
 /// Prompt for a new secret value with confirmation. Re-prompts on mismatch.
-pub fn prompt_new_secret(prompt: &str) -> Result<String, CliError> {
+pub fn prompt_new_secret(prompt: &str) -> Result<String> {
     loop {
         let first = prompt_secret(prompt)?;
         let confirm = prompt_secret(&format!("Confirm {}", prompt.to_ascii_lowercase()))?;
@@ -93,22 +82,22 @@ pub fn prompt_new_secret(prompt: &str) -> Result<String, CliError> {
 }
 
 /// Read from a file, or from stdin if path is "-".
-pub fn read_file_or_stdin(path: &str) -> Result<Vec<u8>, CliError> {
+pub fn read_file_or_stdin(path: &str) -> Result<Vec<u8>> {
     if path == "-" {
         let mut buf = Vec::new();
         io::stdin()
             .read_to_end(&mut buf)
-            .map_err(|e| CliError(format!("Failed to read from stdin: {e}")))?;
+            .map_err(|e| anyhow!("Failed to read from stdin: {e}"))?;
         Ok(buf)
     } else {
-        std::fs::read(path).map_err(|e| CliError(format!("Failed to read file '{path}': {e}")))
+        std::fs::read(path).map_err(|e| anyhow!("Failed to read file '{path}': {e}"))
     }
 }
 
 /// Parse a one-byte hexadecimal value, accepting an optional 0x prefix.
-pub fn parse_hex_u8(s: &str) -> Result<u8, CliError> {
+pub fn parse_hex_u8(s: &str) -> Result<u8> {
     u8::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16)
-        .map_err(|_| CliError(format!("Invalid hex value: {s}")))
+        .map_err(|_| anyhow!("Invalid hex value: {s}"))
 }
 
 /// Prompt the user with a yes/no confirmation.
@@ -183,18 +172,17 @@ fn print_table_row(row: &[String], widths: &[usize]) {
 }
 
 /// Write to a file, or to stdout if path is "-".
-pub fn write_file_or_stdout(path: &str, data: &[u8]) -> Result<(), CliError> {
+pub fn write_file_or_stdout(path: &str, data: &[u8]) -> Result<()> {
     if path == "-" {
         io::stdout()
             .write_all(data)
-            .map_err(|e| CliError(format!("Failed to write to stdout: {e}")))?;
+            .map_err(|e| anyhow!("Failed to write to stdout: {e}"))?;
         io::stdout()
             .flush()
-            .map_err(|e| CliError(format!("Failed to flush stdout: {e}")))?;
+            .map_err(|e| anyhow!("Failed to flush stdout: {e}"))?;
         Ok(())
     } else {
-        std::fs::write(path, data)
-            .map_err(|e| CliError(format!("Failed to write file '{path}': {e}")))
+        std::fs::write(path, data).map_err(|e| anyhow!("Failed to write file '{path}': {e}"))
     }
 }
 
@@ -215,7 +203,7 @@ pub fn open_smartcard_session<S, E>(
         Box<dyn SmartCardConnection + Send>,
         &ScpKeyParams,
     ) -> Result<S, (E, Box<dyn SmartCardConnection + Send>)>,
-) -> Result<S, CliError>
+) -> Result<S>
 where
     E: fmt::Display,
 {

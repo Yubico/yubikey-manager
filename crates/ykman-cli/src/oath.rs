@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -12,9 +13,7 @@ use yubikit::oath::{
 use crate::appdata::AppData;
 use crate::cli_enums::{CliOathAlgorithm, CliOathDigits, CliOathType};
 use crate::scp::{self, ScpParams};
-use crate::util::{
-    CliError, confirm, format_session_error, format_smartcard_connection_error, print_table,
-};
+use crate::util::{confirm, format_session_error, format_smartcard_connection_error, print_table};
 
 #[derive(Subcommand)]
 pub enum OathAction {
@@ -213,7 +212,7 @@ pub enum OathAccountAction {
 }
 
 impl OathAction {
-    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
         match self {
             Self::Info { password } => run_info(dev, scp_params, password.as_deref()),
             Self::Reset { force } => run_reset(dev, scp_params, force),
@@ -360,8 +359,8 @@ impl OathAction {
     }
 }
 
-fn oath_keys() -> Result<AppData, CliError> {
-    AppData::new("oath_keys").map_err(|e| CliError(format!("Failed to open OATH key store: {e}")))
+fn oath_keys() -> Result<AppData> {
+    AppData::new("oath_keys").map_err(|e| anyhow!("Failed to open OATH key store: {e}"))
 }
 
 /// Validate the key against the session, optionally remembering it.
@@ -370,13 +369,13 @@ fn validate_and_remember(
     key: &OathAccessKey,
     remember: bool,
     keys: &mut AppData,
-) -> Result<(), CliError> {
+) -> Result<()> {
     session
         .validate(key)
-        .map_err(|_| CliError("Invalid password.".into()))?;
+        .map_err(|_| anyhow!("Invalid password."))?;
     if remember {
         keys.put_secret(session.device_id(), &hex::encode(key.expose_secret()))
-            .map_err(|e| CliError(format!("Failed to remember password: {e}")))?;
+            .map_err(|e| anyhow!("Failed to remember password: {e}"))?;
         eprintln!("Password remembered.");
     }
     Ok(())
@@ -385,7 +384,7 @@ fn validate_and_remember(
 fn new_oath_session<'a>(
     dev: &'a dyn YubiKeyDevice,
     scp_config: &Option<yubikit::smartcard::ScpKeyParams>,
-) -> Result<OathSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<OathSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>> {
     let conn = dev
         .open_smartcard()
         .map_err(|e| format_smartcard_connection_error("OATH", e))?;
@@ -404,7 +403,7 @@ fn open_session<'a>(
     scp_params: &ScpParams,
     password: Option<&str>,
     remember: bool,
-) -> Result<OathSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError> {
+) -> Result<OathSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>> {
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
     let mut session = new_oath_session(dev, &scp_config)?;
 
@@ -452,8 +451,8 @@ fn open_session<'a>(
         let key = session.derive_key(&pw);
         validate_and_remember(&mut session, &key, remember, &mut keys)?;
     } else if password.is_some() {
-        return Err(CliError(
-            "Password provided, but no password is set on this YubiKey's OATH application.".into(),
+        return Err(anyhow!(
+            "Password provided, but no password is set on this YubiKey's OATH application."
         ));
     }
     Ok(session)
@@ -481,7 +480,7 @@ pub fn run_info(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     // Open a raw session without unlocking — info doesn't require authentication
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
     let session = new_oath_session(dev, &scp_config)?;
@@ -504,17 +503,13 @@ pub fn run_info(
     Ok(())
 }
 
-pub fn run_reset(
-    dev: &dyn YubiKeyDevice,
-    scp_params: &ScpParams,
-    force: bool,
-) -> Result<(), CliError> {
+pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
     if !force {
         eprintln!(
             "WARNING! This will delete all stored OATH accounts and restore factory settings of the OATH application."
         );
         if !confirm("Proceed?") {
-            return Err(CliError("Aborted by user.".into()));
+            return Err(anyhow!("Aborted by user."));
         }
     }
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
@@ -522,7 +517,7 @@ pub fn run_reset(
     let device_id = session.device_id().to_string();
     session
         .reset()
-        .map_err(|e| CliError(format!("Failed to reset OATH: {e}")))?;
+        .map_err(|e| anyhow!("Failed to reset OATH: {e}"))?;
 
     // Clean up any stored password for this device
     let mut keys = oath_keys()?;
@@ -541,11 +536,11 @@ pub fn run_accounts_list(
     show_hidden: bool,
     show_oath_type: bool,
     show_period: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let mut session = open_session(dev, scp_params, password, remember)?;
     let creds = session
         .list_credentials()
-        .map_err(|e| CliError(format!("Failed to list credentials: {e}")))?;
+        .map_err(|e| anyhow!("Failed to list credentials: {e}"))?;
 
     for cred in &creds {
         if !show_hidden && is_hidden(cred) {
@@ -575,13 +570,13 @@ pub fn run_accounts_code(
     query: Option<&str>,
     show_hidden: bool,
     single: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let mut session = open_session(dev, scp_params, password, remember)?;
     let timestamp = now_timestamp();
 
     let entries = session
         .calculate_all(timestamp)
-        .map_err(|e| CliError(format!("Failed to calculate codes: {e}")))?;
+        .map_err(|e| anyhow!("Failed to calculate codes: {e}"))?;
 
     // Filter by query
     let filtered: Vec<&(Credential, Option<Code>)> = entries
@@ -601,10 +596,10 @@ pub fn run_accounts_code(
 
     if single {
         if filtered.len() != 1 {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "Expected exactly 1 match, found {}.",
                 filtered.len()
-            )));
+            ));
         }
         let (cred, code) = filtered[0];
         let code = match code {
@@ -613,7 +608,7 @@ pub fn run_accounts_code(
                 // Touch required or HOTP - calculate individually
                 let c = session
                     .calculate_code(cred, timestamp)
-                    .map_err(|e| CliError(format!("Failed to calculate: {e}")))?;
+                    .map_err(|e| anyhow!("Failed to calculate: {e}"))?;
                 c.value
             }
         };
@@ -638,7 +633,7 @@ pub fn run_accounts_code(
                     } else {
                         let c = session
                             .calculate_code(cred, timestamp)
-                            .map_err(|e| CliError(format!("Failed to calculate: {e}")))?;
+                            .map_err(|e| anyhow!("Failed to calculate: {e}"))?;
                         c.value
                     }
                 }
@@ -664,20 +659,17 @@ pub fn run_accounts_add(
     period: u32,
     touch: bool,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let oath_type: OathType = oath_type.into();
     let hash_algorithm: HashAlgorithm = algorithm.into();
     let digits = digits.as_u8();
 
     let secret_bytes = match secret {
-        Some(s) => {
-            parse_b32_key(s).map_err(|_| CliError("Invalid Base32-encoded secret.".into()))?
-        }
+        Some(s) => parse_b32_key(s).map_err(|_| anyhow!("Invalid Base32-encoded secret."))?,
         None => {
             // Generate random secret
             let mut key = vec![0u8; 20];
-            getrandom::fill(&mut key)
-                .map_err(|e| CliError(format!("Failed to generate random: {e}")))?;
+            getrandom::fill(&mut key).map_err(|e| anyhow!("Failed to generate random: {e}"))?;
             key
         }
     };
@@ -699,7 +691,7 @@ pub fn run_accounts_add(
     if !force {
         let existing = session
             .list_credentials()
-            .map_err(|e| CliError(format!("Failed to list: {e}")))?;
+            .map_err(|e| anyhow!("Failed to list: {e}"))?;
         let display_name = match issuer {
             Some(i) => format!("{i}:{name}"),
             None => name.to_string(),
@@ -709,13 +701,13 @@ pub fn run_accounts_add(
                 "A credential called {display_name} already exists, overwrite?"
             ))
         {
-            return Err(CliError("Aborted by user.".into()));
+            return Err(anyhow!("Aborted by user."));
         }
     }
 
     session
         .put_credential(&cred_data, touch)
-        .map_err(|e| CliError(format!("Failed to add credential: {e}")))?;
+        .map_err(|e| anyhow!("Failed to add credential: {e}"))?;
 
     let display = match issuer {
         Some(i) => format!("{i}:{name}"),
@@ -732,11 +724,11 @@ pub fn run_accounts_delete(
     remember: bool,
     query: &str,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let mut session = open_session(dev, scp_params, password, remember)?;
     let creds = session
         .list_credentials()
-        .map_err(|e| CliError(format!("Failed to list: {e}")))?;
+        .map_err(|e| anyhow!("Failed to list: {e}"))?;
 
     let matching: Vec<_> = creds
         .iter()
@@ -748,23 +740,23 @@ pub fn run_accounts_delete(
         .collect();
 
     let cred = match matching.len() {
-        0 => return Err(CliError(format!("No credential matching '{query}'."))),
+        0 => return Err(anyhow!("No credential matching '{query}'.")),
         1 => matching[0],
         _ => {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "Multiple credentials matching '{query}'. Be more specific."
-            )));
+            ));
         }
     };
 
     let name = format_cred_name(cred);
     if !force && !confirm(&format!("Delete credential {name}?")) {
-        return Err(CliError("Aborted by user.".into()));
+        return Err(anyhow!("Aborted by user."));
     }
 
     session
         .delete_credential(&cred.id)
-        .map_err(|e| CliError(format!("Failed to delete: {e}")))?;
+        .map_err(|e| anyhow!("Failed to delete: {e}"))?;
     eprintln!("Credential deleted: {name}");
     Ok(())
 }
@@ -777,11 +769,11 @@ pub fn run_accounts_rename(
     query: &str,
     new_name: &str,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let mut session = open_session(dev, scp_params, password, remember)?;
     let creds = session
         .list_credentials()
-        .map_err(|e| CliError(format!("Failed to list: {e}")))?;
+        .map_err(|e| anyhow!("Failed to list: {e}"))?;
 
     let matching: Vec<_> = creds
         .iter()
@@ -793,12 +785,12 @@ pub fn run_accounts_rename(
         .collect();
 
     let cred = match matching.len() {
-        0 => return Err(CliError(format!("No credential matching '{query}'."))),
+        0 => return Err(anyhow!("No credential matching '{query}'.")),
         1 => matching[0],
         _ => {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "Multiple credentials matching '{query}'. Be more specific."
-            )));
+            ));
         }
     };
 
@@ -811,12 +803,12 @@ pub fn run_accounts_rename(
     };
 
     if !force && !confirm(&format!("Rename {old_name} to {new_name}?")) {
-        return Err(CliError("Aborted by user.".into()));
+        return Err(anyhow!("Aborted by user."));
     }
 
     session
         .rename_credential(&cred.id, new_account, new_issuer)
-        .map_err(|e| CliError(format!("Failed to rename: {e}")))?;
+        .map_err(|e| anyhow!("Failed to rename: {e}"))?;
     println!("Credential renamed: {old_name} → {new_name}");
     Ok(())
 }
@@ -828,13 +820,13 @@ pub fn run_access_change(
     new_password: Option<&str>,
     clear: bool,
     remember: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let mut session = open_session(dev, scp_params, password, false)?;
 
     if clear {
         session
             .unset_key()
-            .map_err(|e| CliError(format!("Failed to clear password: {e}")))?;
+            .map_err(|e| anyhow!("Failed to clear password: {e}"))?;
         // Remove stored password
         let mut keys = oath_keys()?;
         let _ = keys.remove(session.device_id());
@@ -847,12 +839,12 @@ pub fn run_access_change(
         let key = session.derive_key(&new_pw);
         session
             .set_key(&key)
-            .map_err(|e| CliError(format!("Failed to set password: {e}")))?;
+            .map_err(|e| anyhow!("Failed to set password: {e}"))?;
         eprintln!("Password set.");
         if remember {
             let mut keys = oath_keys()?;
             keys.put_secret(session.device_id(), &hex::encode(key.expose_secret()))
-                .map_err(|e| CliError(format!("Failed to remember password: {e}")))?;
+                .map_err(|e| anyhow!("Failed to remember password: {e}"))?;
             eprintln!("Password remembered.");
         }
     }
@@ -863,13 +855,13 @@ pub fn run_access_remember(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     password: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
     let mut session = new_oath_session(dev, &scp_config)?;
 
     if !session.locked() {
-        return Err(CliError(
-            "No password is set on this YubiKey's OATH application.".into(),
+        return Err(anyhow!(
+            "No password is set on this YubiKey's OATH application."
         ));
     }
 
@@ -883,15 +875,11 @@ pub fn run_access_remember(
     Ok(())
 }
 
-pub fn run_access_forget(
-    dev: &dyn YubiKeyDevice,
-    scp_params: &ScpParams,
-    all: bool,
-) -> Result<(), CliError> {
+pub fn run_access_forget(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, all: bool) -> Result<()> {
     let mut keys = oath_keys()?;
     if all {
         keys.clear()
-            .map_err(|e| CliError(format!("Failed to clear stored passwords: {e}")))?;
+            .map_err(|e| anyhow!("Failed to clear stored passwords: {e}"))?;
         eprintln!("All stored OATH passwords have been removed.");
     } else {
         // Need to open session to get device_id (without unlocking)
@@ -900,7 +888,7 @@ pub fn run_access_forget(
         let device_id = session.device_id();
         if keys.contains(device_id) {
             keys.remove(device_id)
-                .map_err(|e| CliError(format!("Failed to remove stored password: {e}")))?;
+                .map_err(|e| anyhow!("Failed to remove stored password: {e}"))?;
             eprintln!("Stored OATH password removed.");
         } else {
             eprintln!("No stored password for this YubiKey.");
@@ -917,20 +905,20 @@ pub fn run_accounts_uri(
     remember: bool,
     touch: bool,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     // Parse otpauth:// URI
     let url = uri
         .strip_prefix("otpauth://")
-        .ok_or_else(|| CliError("URI must start with otpauth://".into()))?;
+        .ok_or_else(|| anyhow!("URI must start with otpauth://"))?;
 
     let (oath_type_str, rest) = url
         .split_once('/')
-        .ok_or_else(|| CliError("Invalid otpauth URI format".into()))?;
+        .ok_or_else(|| anyhow!("Invalid otpauth URI format"))?;
 
     let oath_type = match oath_type_str.to_lowercase().as_str() {
         "totp" => OathType::Totp,
         "hotp" => OathType::Hotp,
-        _ => return Err(CliError(format!("Unknown oath type: {oath_type_str}"))),
+        _ => return Err(anyhow!("Unknown oath type: {oath_type_str}")),
     };
 
     // Split path from query
@@ -967,23 +955,23 @@ pub fn run_accounts_uri(
                     "SHA1" => HashAlgorithm::Sha1,
                     "SHA256" => HashAlgorithm::Sha256,
                     "SHA512" => HashAlgorithm::Sha512,
-                    _ => return Err(CliError(format!("Unknown algorithm: {value}"))),
+                    _ => return Err(anyhow!("Unknown algorithm: {value}")),
                 };
             }
             "digits" => {
                 digits = value
                     .parse()
-                    .map_err(|_| CliError(format!("Invalid digits: {value}")))?;
+                    .map_err(|_| anyhow!("Invalid digits: {value}"))?;
             }
             "period" => {
                 period = value
                     .parse()
-                    .map_err(|_| CliError(format!("Invalid period: {value}")))?;
+                    .map_err(|_| anyhow!("Invalid period: {value}"))?;
             }
             "counter" => {
                 counter = value
                     .parse()
-                    .map_err(|_| CliError(format!("Invalid counter: {value}")))?;
+                    .map_err(|_| anyhow!("Invalid counter: {value}"))?;
             }
             "issuer" => {
                 query_issuer = Some(urldecode(value));
@@ -992,9 +980,9 @@ pub fn run_accounts_uri(
         }
     }
 
-    let secret_str = secret.ok_or_else(|| CliError("URI missing 'secret' parameter".into()))?;
-    let secret_bytes = parse_b32_key(&secret_str)
-        .map_err(|_| CliError("Invalid Base32-encoded secret.".into()))?;
+    let secret_str = secret.ok_or_else(|| anyhow!("URI missing 'secret' parameter"))?;
+    let secret_bytes =
+        parse_b32_key(&secret_str).map_err(|_| anyhow!("Invalid Base32-encoded secret."))?;
 
     let issuer_ref = query_issuer.as_deref();
 
@@ -1004,7 +992,7 @@ pub fn run_accounts_uri(
             issuer_ref.map(|i| format!("{i}:")).unwrap_or_default()
         );
         if !confirm("Proceed?") {
-            return Err(CliError("Aborted by user.".into()));
+            return Err(anyhow!("Aborted by user."));
         }
     }
 
@@ -1023,7 +1011,7 @@ pub fn run_accounts_uri(
 
     session
         .put_credential(&cred_data, touch)
-        .map_err(|e| CliError(format!("Failed to add credential: {e}")))?;
+        .map_err(|e| anyhow!("Failed to add credential: {e}"))?;
     println!(
         "Credential added: {}{name}",
         issuer_ref.map(|i| format!("{i}:")).unwrap_or_default()
@@ -1079,22 +1067,21 @@ pub fn run_accounts_import(
     remember: bool,
     touch: bool,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let data = crate::util::read_file_or_stdin(file)?;
-    let xml_str =
-        String::from_utf8(data).map_err(|_| CliError("PSKC file is not valid UTF-8.".into()))?;
+    let xml_str = String::from_utf8(data).map_err(|_| anyhow!("PSKC file is not valid UTF-8."))?;
 
     let credentials = parse_pskc(&xml_str)?;
 
     if credentials.is_empty() {
-        return Err(CliError("No valid OATH accounts found in the file.".into()));
+        return Err(anyhow!("No valid OATH accounts found in the file."));
     }
 
     let mut session = open_session(dev, scp_params, password, remember)?;
 
     let existing = session
         .list_credentials()
-        .map_err(|e| CliError(format!("Failed to list credentials: {e}")))?;
+        .map_err(|e| anyhow!("Failed to list credentials: {e}"))?;
 
     let mut n_keys = 0;
     for cred in &credentials {
@@ -1140,7 +1127,7 @@ pub fn run_accounts_import(
 
         session
             .put_credential(&cred_data, touch)
-            .map_err(|e| CliError(format!("Failed to add credential '{account_name}': {e}")))?;
+            .map_err(|e| anyhow!("Failed to add credential '{account_name}': {e}"))?;
         eprintln!("Added account: {account_name}");
         n_keys += 1;
     }
@@ -1150,7 +1137,7 @@ pub fn run_accounts_import(
 }
 
 /// Parse a PSKC XML string and extract OATH credentials.
-fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>, CliError> {
+fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>> {
     use quick_xml::Reader;
     use quick_xml::events::Event;
 
@@ -1366,7 +1353,7 @@ fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>, CliError> {
                 }
             }
             Ok(Event::Eof) => break,
-            Err(e) => return Err(CliError(format!("Failed to parse PSKC XML: {e}"))),
+            Err(e) => return Err(anyhow!("Failed to parse PSKC XML: {e}")),
             _ => {}
         }
     }

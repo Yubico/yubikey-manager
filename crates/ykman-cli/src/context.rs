@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use yubikit::core::{Transport, Version, set_override_version};
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::{Capability, ReleaseType};
@@ -7,7 +8,6 @@ use yubikit::platform::device::scan_usb_devices;
 
 use crate::list;
 use crate::scp::ScpParams;
-use crate::util::CliError;
 
 pub struct CommandContext {
     serial: Option<u32>,
@@ -19,20 +19,20 @@ impl CommandContext {
         Self { serial, scp_params }
     }
 
-    pub fn device(&self) -> Result<Box<dyn YubiKeyDevice>, CliError> {
+    pub fn device(&self) -> Result<Box<dyn YubiKeyDevice>> {
         let dev = get_device(self.serial)?;
         apply_version_override(dev.as_ref());
         Ok(dev)
     }
 
-    pub fn device_for(&self, capability: Capability) -> Result<Box<dyn YubiKeyDevice>, CliError> {
+    pub fn device_for(&self, capability: Capability) -> Result<Box<dyn YubiKeyDevice>> {
         let dev = self.device()?;
         check_capability(dev.as_ref(), capability)?;
         self.check_scp_version(dev.as_ref())?;
         Ok(dev)
     }
 
-    pub fn device_with_scp_check(&self) -> Result<Box<dyn YubiKeyDevice>, CliError> {
+    pub fn device_with_scp_check(&self) -> Result<Box<dyn YubiKeyDevice>> {
         let dev = self.device()?;
         self.check_scp_version(dev.as_ref())?;
         Ok(dev)
@@ -42,14 +42,14 @@ impl CommandContext {
         &self,
         required: Version,
         feature: &str,
-    ) -> Result<Box<dyn YubiKeyDevice>, CliError> {
+    ) -> Result<Box<dyn YubiKeyDevice>> {
         let dev = self.device()?;
         check_version(dev.as_ref(), required, feature)?;
         self.check_scp_version(dev.as_ref())?;
         Ok(dev)
     }
 
-    fn check_scp_version(&self, dev: &dyn YubiKeyDevice) -> Result<(), CliError> {
+    fn check_scp_version(&self, dev: &dyn YubiKeyDevice) -> Result<()> {
         check_scp_version(dev, &self.scp_params)
     }
 }
@@ -57,21 +57,20 @@ impl CommandContext {
 fn select_device(
     devices: Vec<Box<dyn YubiKeyDevice>>,
     serial: Option<u32>,
-) -> Result<Box<dyn YubiKeyDevice>, CliError> {
+) -> Result<Box<dyn YubiKeyDevice>> {
     match (serial, devices.len()) {
         (None, 0) => {
             #[cfg(feature = "hardware")]
             {
                 let (scan_pids, _) = scan_usb_devices();
                 if !scan_pids.is_empty() {
-                    return Err(CliError(
+                    return Err(anyhow!(
                         "A YubiKey was detected, but FIDO access on Windows requires \
                          running as Administrator."
-                            .into(),
                     ));
                 }
             }
-            Err(CliError("No YubiKey detected!".into()))
+            Err(anyhow!("No YubiKey detected!"))
         }
         (None, 1) => Ok(devices.into_iter().next().unwrap()),
         (None, n) => {
@@ -80,24 +79,24 @@ fn select_device(
                 msg.push_str(&format!("\n- {}", list::describe_device(dev.as_ref())));
             }
             msg.push_str("\nUse --device SERIAL to specify which one to use.");
-            Err(CliError(msg))
+            Err(anyhow!(msg))
         }
         (Some(s), _) => devices
             .into_iter()
             .find(|d| d.info().serial == Some(s))
-            .ok_or_else(|| CliError(format!("YubiKey with serial {s} not found."))),
+            .ok_or_else(|| anyhow!("YubiKey with serial {s} not found.")),
     }
 }
 
-pub fn get_device(serial: Option<u32>) -> Result<Box<dyn YubiKeyDevice>, CliError> {
+pub fn get_device(serial: Option<u32>) -> Result<Box<dyn YubiKeyDevice>> {
     let mut source = ykman::device::get_device_source();
     let devices = source
         .list_devices()
-        .map_err(|e| CliError(format!("Failed to list devices: {e}")))?;
+        .map_err(|e| anyhow!("Failed to list devices: {e}"))?;
     select_device(devices, serial)
 }
 
-pub fn check_capability(dev: &dyn YubiKeyDevice, capability: Capability) -> Result<(), CliError> {
+pub fn check_capability(dev: &dyn YubiKeyDevice, capability: Capability) -> Result<()> {
     let info = dev.info();
     let transport = dev.transport();
     let name = capability_name(capability);
@@ -109,9 +108,7 @@ pub fn check_capability(dev: &dyn YubiKeyDevice, capability: Capability) -> Resu
         .unwrap_or(Capability::NONE);
 
     if !supported.contains(capability) {
-        return Err(CliError(format!(
-            "{name} is not available on this YubiKey."
-        )));
+        return Err(anyhow!("{name} is not available on this YubiKey."));
     }
 
     let enabled = info
@@ -126,11 +123,11 @@ pub fn check_capability(dev: &dyn YubiKeyDevice, capability: Capability) -> Resu
             Transport::Usb => "USB",
             Transport::Nfc => "NFC",
         };
-        return Err(CliError(format!(
+        return Err(anyhow!(
             "{name} is currently disabled on this YubiKey over {transport_name}.\n\n\
              Use 'ykman config {transport}' to enable it.",
             transport = transport_name.to_lowercase()
-        )));
+        ));
     }
 
     Ok(())
@@ -152,22 +149,18 @@ fn capability_name(cap: Capability) -> &'static str {
     }
 }
 
-pub fn check_version(
-    dev: &dyn YubiKeyDevice,
-    required: Version,
-    feature: &str,
-) -> Result<(), CliError> {
+pub fn check_version(dev: &dyn YubiKeyDevice, required: Version, feature: &str) -> Result<()> {
     let version = dev.info().version;
     if version < required {
-        Err(CliError(format!(
+        Err(anyhow!(
             "{feature} requires YubiKey {required} or later (this device has {version}).",
-        )))
+        ))
     } else {
         Ok(())
     }
 }
 
-fn check_scp_version(dev: &dyn YubiKeyDevice, scp: &ScpParams) -> Result<(), CliError> {
+fn check_scp_version(dev: &dyn YubiKeyDevice, scp: &ScpParams) -> Result<()> {
     if scp.scp03_keys.is_some() {
         check_version(dev, Version(5, 3, 0), "SCP03")?;
     }

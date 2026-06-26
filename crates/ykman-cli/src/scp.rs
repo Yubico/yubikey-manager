@@ -1,6 +1,7 @@
 //! SCP (Secure Channel Protocol) utilities for automatic SCP11b negotiation
 //! and explicit SCP from CLI flags.
 
+use anyhow::{Result, anyhow};
 use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
@@ -8,8 +9,7 @@ use yubikit::securitydomain::{KeyRef, SecurityDomainSession};
 use yubikit::smartcard::{ScpKeyParams, SmartCardConnection, SmartCardProtocol};
 
 use crate::util::{
-    CliError, format_session_error, format_smartcard_connection_error, parse_hex_u8,
-    read_file_or_stdin,
+    format_session_error, format_smartcard_connection_error, parse_hex_u8, read_file_or_stdin,
 };
 
 /// Parsed SCP parameters from CLI flags (before device interaction).
@@ -44,7 +44,7 @@ pub struct ScpInputs<'a> {
     pub scp_password: Option<&'a str>,
 }
 
-pub fn parse_scp_params(input: ScpInputs<'_>) -> Result<ScpParams, CliError> {
+pub fn parse_scp_params(input: ScpInputs<'_>) -> Result<ScpParams> {
     let mut params = ScpParams::default();
 
     if let Some(sd) = input.scp_sd {
@@ -75,12 +75,10 @@ pub fn parse_scp_params(input: ScpInputs<'_>) -> Result<ScpParams, CliError> {
             .iter()
             .all(|p| p.len() == 32 && p.chars().all(|c| c.is_ascii_hexdigit()))
     {
-        let key_enc =
-            hex::decode(parts[0]).map_err(|_| CliError("Invalid SCP03 K-ENC hex.".into()))?;
-        let key_mac =
-            hex::decode(parts[1]).map_err(|_| CliError("Invalid SCP03 K-MAC hex.".into()))?;
+        let key_enc = hex::decode(parts[0]).map_err(|_| anyhow!("Invalid SCP03 K-ENC hex."))?;
+        let key_mac = hex::decode(parts[1]).map_err(|_| anyhow!("Invalid SCP03 K-MAC hex."))?;
         let key_dek = if parts.len() == 3 {
-            Some(hex::decode(parts[2]).map_err(|_| CliError("Invalid SCP03 K-DEK hex.".into()))?)
+            Some(hex::decode(parts[2]).map_err(|_| anyhow!("Invalid SCP03 K-DEK hex."))?)
         } else {
             None
         };
@@ -131,7 +129,7 @@ pub fn resolve_scp(
     dev: &dyn YubiKeyDevice,
     params: &ScpParams,
     capability: Capability,
-) -> Result<Option<ScpKeyParams>, CliError> {
+) -> Result<Option<ScpKeyParams>> {
     // 1. Explicit SCP03
     if let Some((ref key_enc, ref key_mac, ref key_dek)) = params.scp03_keys {
         let kvn = params.sd_ref.map(|(_, kvn)| kvn).unwrap_or(0);
@@ -140,16 +138,16 @@ pub fn resolve_scp(
             key_enc: key_enc
                 .as_slice()
                 .try_into()
-                .map_err(|_| CliError("SCP03 K-ENC must be 16 bytes.".into()))?,
+                .map_err(|_| anyhow!("SCP03 K-ENC must be 16 bytes."))?,
             key_mac: key_mac
                 .as_slice()
                 .try_into()
-                .map_err(|_| CliError("SCP03 K-MAC must be 16 bytes.".into()))?,
+                .map_err(|_| anyhow!("SCP03 K-MAC must be 16 bytes."))?,
             key_dek: key_dek
                 .as_deref()
                 .map(<[u8; 16]>::try_from)
                 .transpose()
-                .map_err(|_| CliError("SCP03 K-DEK must be 16 bytes.".into()))?,
+                .map_err(|_| anyhow!("SCP03 K-DEK must be 16 bytes."))?,
         }));
     }
 
@@ -164,7 +162,7 @@ pub fn resolve_scp(
             sk_oce_ecka: sk
                 .as_slice()
                 .try_into()
-                .map_err(|_| CliError("SCP11 OCE private key must be 32 bytes.".into()))?,
+                .map_err(|_| anyhow!("SCP11 OCE private key must be 32 bytes."))?,
             certificates: params.scp11_certificates.clone(),
             oce_ref: params.oce_ref,
         }));
@@ -198,12 +196,12 @@ pub fn resolve_scp_for_app(
     params: &ScpParams,
     capability: Capability,
     app_name: &str,
-) -> Result<Option<ScpKeyParams>, CliError> {
+) -> Result<Option<ScpKeyParams>> {
     match resolve_scp(dev, params, capability) {
         Ok(config) => Ok(config),
-        Err(_) if !params.is_explicit() && needs_scp11b(dev, capability) => Err(CliError(format!(
-            "Unable to manage {app_name} over NFC without SCP"
-        ))),
+        Err(_) if !params.is_explicit() && needs_scp11b(dev, capability) => {
+            Err(anyhow!("Unable to manage {app_name} over NFC without SCP"))
+        }
         Err(e) => Err(e),
     }
 }
@@ -213,16 +211,16 @@ pub fn resolve_scp_for_app(
 pub fn apply_scp<C: SmartCardConnection>(
     protocol: &mut SmartCardProtocol<C>,
     params: &ScpKeyParams,
-) -> Result<(), CliError> {
+) -> Result<()> {
     protocol
         .init_scp(params)
-        .map_err(|e| CliError(format!("SCP initialization failed: {e}")))?;
+        .map_err(|e| anyhow!("SCP initialization failed: {e}"))?;
     Ok(())
 }
 
 /// Find SCP11b key parameters from the Security Domain on a separate connection.
 /// Returns (kid, kvn, pk_sd_ecka_bytes).
-pub fn find_scp11b_params(dev: &dyn YubiKeyDevice) -> Result<(u8, u8, Vec<u8>), CliError> {
+pub fn find_scp11b_params(dev: &dyn YubiKeyDevice) -> Result<(u8, u8, Vec<u8>)> {
     find_scp11_pk_with_kid(dev, 0x13).map(|(kvn, pk)| (0x13, kvn, pk))
 }
 
@@ -232,7 +230,7 @@ fn find_scp11_pk(
     kid: u8,
     kvn: u8,
     _ca_cert: Option<&[u8]>,
-) -> Result<Vec<u8>, CliError> {
+) -> Result<Vec<u8>> {
     let conn = dev
         .open_smartcard()
         .map_err(|e| format_smartcard_connection_error("Security Domain", e))?;
@@ -242,19 +240,19 @@ fn find_scp11_pk(
     let key_ref = KeyRef::new(kid, kvn);
     let certs = sd
         .get_certificate_bundle(key_ref)
-        .map_err(|e| CliError(format!("Failed to get certificate bundle: {e}")))?;
+        .map_err(|e| anyhow!("Failed to get certificate bundle: {e}"))?;
 
     if certs.is_empty() {
-        return Err(CliError(format!(
+        return Err(anyhow!(
             "No certificate chain stored for SCP key (KID=0x{kid:02X}, KVN=0x{kvn:02X})"
-        )));
+        ));
     }
 
     let leaf_cert = &certs[certs.len() - 1];
     extract_ec_pubkey_from_cert(leaf_cert)
 }
 
-fn find_scp11_pk_with_kid(dev: &dyn YubiKeyDevice, kid: u8) -> Result<(u8, Vec<u8>), CliError> {
+fn find_scp11_pk_with_kid(dev: &dyn YubiKeyDevice, kid: u8) -> Result<(u8, Vec<u8>)> {
     let conn = dev
         .open_smartcard()
         .map_err(|e| format_smartcard_connection_error("Security Domain", e))?;
@@ -263,7 +261,7 @@ fn find_scp11_pk_with_kid(dev: &dyn YubiKeyDevice, kid: u8) -> Result<(u8, Vec<u
 
     let keys = sd
         .get_key_information()
-        .map_err(|e| CliError(format!("Failed to get key info: {e}")))?;
+        .map_err(|e| anyhow!("Failed to get key info: {e}"))?;
 
     let mut kvn = None;
     for key_ref in keys.keys() {
@@ -272,18 +270,17 @@ fn find_scp11_pk_with_kid(dev: &dyn YubiKeyDevice, kid: u8) -> Result<(u8, Vec<u
             break;
         }
     }
-    let kvn =
-        kvn.ok_or_else(|| CliError(format!("No SCP key (KID=0x{kid:02X}) found on device")))?;
+    let kvn = kvn.ok_or_else(|| anyhow!("No SCP key (KID=0x{kid:02X}) found on device"))?;
 
     let key_ref = KeyRef::new(kid, kvn);
     let certs = sd
         .get_certificate_bundle(key_ref)
-        .map_err(|e| CliError(format!("Failed to get certificate bundle: {e}")))?;
+        .map_err(|e| anyhow!("Failed to get certificate bundle: {e}"))?;
 
     if certs.is_empty() {
-        return Err(CliError(format!(
+        return Err(anyhow!(
             "No certificate chain stored for SCP key (KVN=0x{kvn:02X})"
-        )));
+        ));
     }
 
     let leaf_cert = &certs[certs.len() - 1];
@@ -293,7 +290,7 @@ fn find_scp11_pk_with_kid(dev: &dyn YubiKeyDevice, kid: u8) -> Result<(u8, Vec<u
 }
 
 /// Extract the uncompressed EC public key bytes from a DER-encoded X.509 cert.
-fn extract_ec_pubkey_from_cert(cert_der: &[u8]) -> Result<Vec<u8>, CliError> {
+fn extract_ec_pubkey_from_cert(cert_der: &[u8]) -> Result<Vec<u8>> {
     let mut pos = 0;
 
     // Outer SEQUENCE
@@ -326,10 +323,10 @@ fn extract_ec_pubkey_from_cert(cert_der: &[u8]) -> Result<Vec<u8>, CliError> {
     let (_, bs_start, bs_end) = parse_der_tag(cert_der, &mut pos, 0x03)?;
 
     if bs_start >= bs_end {
-        return Err(CliError("Empty BIT STRING in certificate".into()));
+        return Err(anyhow!("Empty BIT STRING in certificate"));
     }
     if cert_der[bs_start] != 0 {
-        return Err(CliError("Unexpected unused bits in BIT STRING".into()));
+        return Err(anyhow!("Unexpected unused bits in BIT STRING"));
     }
 
     let pk_bytes = &cert_der[bs_start + 1..bs_end];
@@ -339,76 +336,72 @@ fn extract_ec_pubkey_from_cert(cert_der: &[u8]) -> Result<Vec<u8>, CliError> {
     {
         Ok(pk_bytes.to_vec())
     } else {
-        Err(CliError(format!(
+        Err(anyhow!(
             "Unexpected public key format ({} bytes)",
             pk_bytes.len()
-        )))
+        ))
     }
 }
 
-fn parse_der_tag(
-    data: &[u8],
-    pos: &mut usize,
-    expected_tag: u8,
-) -> Result<(u8, usize, usize), CliError> {
+fn parse_der_tag(data: &[u8], pos: &mut usize, expected_tag: u8) -> Result<(u8, usize, usize)> {
     if *pos >= data.len() {
-        return Err(CliError("DER parse: unexpected end".into()));
+        return Err(anyhow!("DER parse: unexpected end"));
     }
     let tag = data[*pos];
     if tag != expected_tag {
-        return Err(CliError(format!(
+        return Err(anyhow!(
             "DER parse: expected 0x{expected_tag:02X}, got 0x{tag:02X}"
-        )));
+        ));
     }
     *pos += 1;
     let (len, content_start) = parse_der_length(data, *pos)?;
     let content_end = content_start + len;
     if content_end > data.len() {
-        return Err(CliError("DER parse: content extends beyond data".into()));
+        return Err(anyhow!("DER parse: content extends beyond data"));
     }
     *pos = content_end;
     Ok((tag, content_start, content_end))
 }
 
-fn skip_der_element(data: &[u8], pos: &mut usize) -> Result<(), CliError> {
+fn skip_der_element(data: &[u8], pos: &mut usize) -> Result<()> {
     if *pos >= data.len() {
-        return Err(CliError("DER parse: unexpected end".into()));
+        return Err(anyhow!("DER parse: unexpected end"));
     }
     *pos += 1;
     let (len, content_start) = parse_der_length(data, *pos)?;
     *pos = content_start + len;
     if *pos > data.len() {
-        return Err(CliError("DER parse: element extends beyond data".into()));
+        return Err(anyhow!("DER parse: element extends beyond data"));
     }
     Ok(())
 }
 
-fn parse_der_length(data: &[u8], pos: usize) -> Result<(usize, usize), CliError> {
+fn parse_der_length(data: &[u8], pos: usize) -> Result<(usize, usize)> {
     if pos >= data.len() {
-        return Err(CliError("DER parse: unexpected end of length".into()));
+        return Err(anyhow!("DER parse: unexpected end of length"));
     }
     let first = data[pos];
     if first < 0x80 {
         Ok((first as usize, pos + 1))
     } else if first == 0x81 {
         if pos + 1 >= data.len() {
-            return Err(CliError("DER parse: truncated length".into()));
+            return Err(anyhow!("DER parse: truncated length"));
         }
         Ok((data[pos + 1] as usize, pos + 2))
     } else if first == 0x82 {
         if pos + 2 >= data.len() {
-            return Err(CliError("DER parse: truncated length".into()));
+            return Err(anyhow!("DER parse: truncated length"));
         }
         let len = ((data[pos + 1] as usize) << 8) | data[pos + 2] as usize;
         Ok((len, pos + 3))
     } else {
-        Err(CliError(format!(
+        Err(anyhow!(
             "DER parse: unsupported length encoding 0x{first:02X}"
-        )))
+        ))
     }
 }
 
-fn der_or_first_pem(data: &[u8]) -> Result<Vec<u8>, CliError> {
+fn der_or_first_pem(data: &[u8]) -> Result<Vec<u8>> {
     if let Ok(text) = std::str::from_utf8(data)
         && text.contains("-----BEGIN")
     {
@@ -417,7 +410,7 @@ fn der_or_first_pem(data: &[u8]) -> Result<Vec<u8>, CliError> {
     Ok(data.to_vec())
 }
 
-fn decrypt_private_key_data(text: &str, password: Option<&str>) -> Result<Vec<u8>, CliError> {
+fn decrypt_private_key_data(text: &str, password: Option<&str>) -> Result<Vec<u8>> {
     if text.contains("ENCRYPTED") {
         let password = match password {
             Some(password) => password.to_string(),
@@ -429,19 +422,19 @@ fn decrypt_private_key_data(text: &str, password: Option<&str>) -> Result<Vec<u8
     }
 }
 
-fn decrypt_pem_private_key(pem_text: &str, password: &str) -> Result<Vec<u8>, CliError> {
+fn decrypt_pem_private_key(pem_text: &str, password: &str) -> Result<Vec<u8>> {
     use pkcs8::EncryptedPrivateKeyInfo;
 
     let der = pem_decode_first(pem_text)?;
     let enc_key = EncryptedPrivateKeyInfo::try_from(der.as_slice())
-        .map_err(|e| CliError(format!("Failed to parse encrypted SCP key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to parse encrypted SCP key: {e}"))?;
     let dec_key = enc_key
         .decrypt(password)
-        .map_err(|_| CliError("Wrong password for encrypted SCP key.".into()))?;
+        .map_err(|_| anyhow!("Wrong password for encrypted SCP key."))?;
     Ok(dec_key.as_bytes().to_vec())
 }
 
-fn pem_decode_first(text: &str) -> Result<Vec<u8>, CliError> {
+fn pem_decode_first(text: &str) -> Result<Vec<u8>> {
     use base64::Engine;
     let mut in_block = false;
     let mut b64 = String::new();
@@ -459,10 +452,10 @@ fn pem_decode_first(text: &str) -> Result<Vec<u8>, CliError> {
     }
     base64::engine::general_purpose::STANDARD
         .decode(&b64)
-        .map_err(|e| CliError(format!("Invalid PEM data: {e}")))
+        .map_err(|e| anyhow!("Invalid PEM data: {e}"))
 }
 
-fn pem_decode_all_certs(text: &str) -> Result<Vec<Vec<u8>>, CliError> {
+fn pem_decode_all_certs(text: &str) -> Result<Vec<Vec<u8>>> {
     use base64::Engine;
     let mut certs = Vec::new();
     let mut in_cert = false;
@@ -477,7 +470,7 @@ fn pem_decode_all_certs(text: &str) -> Result<Vec<Vec<u8>>, CliError> {
             in_cert = false;
             let der = base64::engine::general_purpose::STANDARD
                 .decode(&b64)
-                .map_err(|e| CliError(format!("Invalid PEM cert: {e}")))?;
+                .map_err(|e| anyhow!("Invalid PEM cert: {e}"))?;
             certs.push(der);
             continue;
         }
@@ -488,7 +481,7 @@ fn pem_decode_all_certs(text: &str) -> Result<Vec<Vec<u8>>, CliError> {
     Ok(certs)
 }
 
-fn extract_ec_private_key(der: &[u8]) -> Result<Vec<u8>, CliError> {
+fn extract_ec_private_key(der: &[u8]) -> Result<Vec<u8>> {
     use elliptic_curve::SecretKey;
     use elliptic_curve::pkcs8::DecodePrivateKey;
 
@@ -504,7 +497,5 @@ fn extract_ec_private_key(der: &[u8]) -> Result<Vec<u8>, CliError> {
             return Ok(der[i + 2..i + 34].to_vec());
         }
     }
-    Err(CliError(
-        "Could not extract EC private key from DER.".into(),
-    ))
+    Err(anyhow!("Could not extract EC private key from DER."))
 }

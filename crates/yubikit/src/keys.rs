@@ -1082,16 +1082,9 @@ impl PublicKey {
 // ---------------------------------------------------------------------------
 
 /// Error type for key parsing/encoding operations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{0}")]
 pub struct KeyError(pub &'static str);
-
-impl fmt::Display for KeyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for KeyError {}
 
 // ---------------------------------------------------------------------------
 // Internal parsing helpers

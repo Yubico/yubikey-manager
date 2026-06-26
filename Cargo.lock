@@ -3404,6 +3404,7 @@ dependencies = [
 name = "ykman-cli"
 version = "6.0.0-dev.0"
 dependencies = [
+ "anyhow",
  "assert_cmd",
  "base32",
  "base64",
@@ -3440,6 +3441,7 @@ dependencies = [
 name = "ykman-svc"
 version = "0.1.0-dev.0"
 dependencies = [
+ "anyhow",
  "clap",
  "ctrlc",
  "hex",

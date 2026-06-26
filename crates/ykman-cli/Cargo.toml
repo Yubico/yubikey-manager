@@ -25,6 +25,7 @@ hardware = ["ykman/hardware", "yubikit/pcsc", "yubikit/hid"]
 [dependencies]
 ykman.workspace = true
 yubikit.workspace = true
+anyhow.workspace = true
 clap.workspace = true
 chrono.workspace = true
 getrandom.workspace = true

@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
@@ -6,7 +7,7 @@ use yubikit::securitydomain::{KeyRef, ScpKid, SecurityDomainSession};
 use crate::cli_enums::CliSdKeyType;
 use crate::scp::{self, ScpParams};
 use crate::util::{
-    CliError, confirm, format_session_error, format_smartcard_connection_error, parse_hex_u8,
+    confirm, format_session_error, format_smartcard_connection_error, parse_hex_u8,
     read_file_or_stdin, write_file_or_stdout,
 };
 
@@ -81,7 +82,7 @@ pub enum SecurityDomainKeysAction {
 }
 
 impl SecurityDomainAction {
-    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
         match self {
             Self::Info => run_info(dev, scp_params),
             Self::Reset { force } => run_reset(dev, scp_params, force),
@@ -142,8 +143,7 @@ impl SecurityDomainAction {
 fn open_session<'a>(
     dev: &'a dyn YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<SecurityDomainSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>, CliError>
-{
+) -> Result<SecurityDomainSession<impl yubikit::smartcard::SmartCardConnection + use<'a>>> {
     if scp_params.is_explicit() {
         // SD doesn't use auto SCP11b (it manages those keys), but explicit SCP
         // is needed for authenticated operations like key management.
@@ -165,12 +165,12 @@ fn open_session<'a>(
     SecurityDomainSession::new(conn).map_err(|(e, _)| format_session_error("Security Domain", e))
 }
 
-pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     let mut session = open_session(dev, scp_params)?;
 
     let keys = session
         .get_key_information()
-        .map_err(|e| CliError(format!("Failed to get key info: {e}")))?;
+        .map_err(|e| anyhow!("Failed to get key info: {e}"))?;
 
     let cas = session
         .get_supported_ca_identifiers(true, true)
@@ -249,29 +249,24 @@ fn extract_cert_subject(der: &[u8]) -> String {
     }
 }
 
-pub fn run_reset(
-    dev: &dyn YubiKeyDevice,
-    scp_params: &ScpParams,
-    force: bool,
-) -> Result<(), CliError> {
+pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
     if dev.transport() == Transport::Nfc && dev.info().is_fips {
-        return Err(CliError(
+        return Err(anyhow!(
             "Security Domain reset is not supported for FIPS YubiKeys over NFC. \
              Connect the YubiKey over USB and try again."
-                .into(),
         ));
     }
 
     if !force {
         eprintln!("WARNING! This will reset all Security Domain data.");
         if !confirm("Proceed?") {
-            return Err(CliError("Aborted.".into()));
+            return Err(anyhow!("Aborted."));
         }
     }
     let mut session = open_session(dev, scp_params)?;
     session
         .reset()
-        .map_err(|e| CliError(format!("Failed to reset: {e}")))?;
+        .map_err(|e| anyhow!("Failed to reset: {e}"))?;
     eprintln!("Security Domain has been reset.");
     Ok(())
 }
@@ -283,7 +278,7 @@ pub fn run_keys_generate(
     kvn: u8,
     output: &str,
     replace_kvn: Option<u8>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let key_ref = KeyRef::new(kid, kvn);
     let mut session = open_session(dev, scp_params)?;
     let pub_key = session
@@ -292,7 +287,7 @@ pub fn run_keys_generate(
             yubikit::securitydomain::Curve::Secp256r1,
             replace_kvn.unwrap_or(0),
         )
-        .map_err(|e| CliError(format!("Failed to generate key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to generate key: {e}"))?;
 
     write_file_or_stdout(output, &pub_key)?;
     println!(
@@ -307,14 +302,14 @@ pub fn run_keys_delete(
     kid: u8,
     kvn: u8,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     if !force && !confirm(&format!("Delete key (KID=0x{kid:02X}, KVN=0x{kvn:02X})?")) {
-        return Err(CliError("Aborted.".into()));
+        return Err(anyhow!("Aborted."));
     }
     let mut session = open_session(dev, scp_params)?;
     session
         .delete_key(kid, kvn, false)
-        .map_err(|e| CliError(format!("Failed to delete key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to delete key: {e}"))?;
     eprintln!("Key deleted.");
     Ok(())
 }
@@ -325,15 +320,15 @@ pub fn run_keys_export(
     kid: u8,
     kvn: u8,
     output: &str,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let key_ref = KeyRef::new(kid, kvn);
     let mut session = open_session(dev, scp_params)?;
     let certs = session
         .get_certificate_bundle(key_ref)
-        .map_err(|e| CliError(format!("Failed to get certificates: {e}")))?;
+        .map_err(|e| anyhow!("Failed to get certificates: {e}"))?;
 
     if certs.is_empty() {
-        return Err(CliError("No certificate bundle found.".into()));
+        return Err(anyhow!("No certificate bundle found."));
     }
 
     // Write all certs concatenated as PEM
@@ -362,7 +357,7 @@ pub fn run_keys_import(
     input: &str,
     replace_kvn: Option<u8>,
     password: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let key_ref = KeyRef::new(kid, kvn);
     let mut session = open_session(dev, scp_params)?;
 
@@ -371,39 +366,39 @@ pub fn run_keys_import(
             // Input is K-ENC:K-MAC[:K-DEK] hex
             let parts: Vec<&str> = input.split(':').collect();
             if parts.len() < 2 || parts.len() > 3 {
-                return Err(CliError("SCP03 keys format: K-ENC:K-MAC[:K-DEK]".into()));
+                return Err(anyhow!("SCP03 keys format: K-ENC:K-MAC[:K-DEK]"));
             }
-            let enc = hex::decode(parts[0]).map_err(|_| CliError("Invalid K-ENC hex".into()))?;
-            let mac = hex::decode(parts[1]).map_err(|_| CliError("Invalid K-MAC hex".into()))?;
+            let enc = hex::decode(parts[0]).map_err(|_| anyhow!("Invalid K-ENC hex"))?;
+            let mac = hex::decode(parts[1]).map_err(|_| anyhow!("Invalid K-MAC hex"))?;
             let dek = if parts.len() == 3 {
-                Some(hex::decode(parts[2]).map_err(|_| CliError("Invalid K-DEK hex".into()))?)
+                Some(hex::decode(parts[2]).map_err(|_| anyhow!("Invalid K-DEK hex"))?)
             } else {
                 None
             };
             let static_keys = yubikit::securitydomain::StaticKeys::new(
                 enc.as_slice()
                     .try_into()
-                    .map_err(|_| CliError("K-ENC must be 16 bytes".into()))?,
+                    .map_err(|_| anyhow!("K-ENC must be 16 bytes"))?,
                 mac.as_slice()
                     .try_into()
-                    .map_err(|_| CliError("K-MAC must be 16 bytes".into()))?,
+                    .map_err(|_| anyhow!("K-MAC must be 16 bytes"))?,
                 dek.map(|v| {
                     v.as_slice()
                         .try_into()
-                        .map_err(|_| CliError("K-DEK must be 16 bytes".into()))
+                        .map_err(|_| anyhow!("K-DEK must be 16 bytes"))
                 })
                 .transpose()?,
             );
             session
                 .put_key_static(key_ref, &static_keys, replace_kvn.unwrap_or(0))
-                .map_err(|e| CliError(format!("Failed to import SCP03 keys: {e}")))?;
+                .map_err(|e| anyhow!("Failed to import SCP03 keys: {e}"))?;
             eprintln!("SCP03 keys imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
         }
         CliSdKeyType::Scp11 => {
             // Input is a PEM file with certificate(s) and/or private key
             let pem_bytes = read_file_or_stdin(input)?;
             let pem_data = String::from_utf8(pem_bytes)
-                .map_err(|e| CliError(format!("Failed to read {input} as UTF-8: {e}")))?;
+                .map_err(|e| anyhow!("Failed to read {input} as UTF-8: {e}"))?;
 
             let mut certs = Vec::new();
             let mut private_key: Option<Vec<u8>> = None;
@@ -419,7 +414,7 @@ pub fn run_keys_import(
                         use base64::Engine;
                         let der = base64::engine::general_purpose::STANDARD
                             .decode(b64.replace(['\n', '\r'], ""))
-                            .map_err(|_| CliError("Invalid certificate PEM".into()))?;
+                            .map_err(|_| anyhow!("Invalid certificate PEM"))?;
                         certs.push(der);
                     }
                 } else if block.starts_with("ENCRYPTED PRIVATE KEY-----") {
@@ -437,7 +432,7 @@ pub fn run_keys_import(
                     use base64::Engine;
                     let der = base64::engine::general_purpose::STANDARD
                         .decode(b64.replace(['\n', '\r'], ""))
-                        .map_err(|_| CliError("Invalid private key PEM".into()))?;
+                        .map_err(|_| anyhow!("Invalid private key PEM"))?;
                     private_key = Some(der);
                 }
             }
@@ -456,21 +451,21 @@ pub fn run_keys_import(
             // from cert and import as public key + store CA issuer (SKI).
             if kid == 0x10 || (0x20..=0x2F).contains(&kid) {
                 if certs.is_empty() {
-                    return Err(CliError(
-                        "Input does not contain a certificate for CA key import.".into(),
+                    return Err(anyhow!(
+                        "Input does not contain a certificate for CA key import."
                     ));
                 }
                 let (pubkey, curve) = extract_ec_pubkey_and_curve(&certs[0])?;
                 session
                     .put_key_ec_public(key_ref, &pubkey, curve, replace_kvn.unwrap_or(0))
-                    .map_err(|e| CliError(format!("Failed to import CA public key: {e}")))?;
+                    .map_err(|e| anyhow!("Failed to import CA public key: {e}"))?;
                 eprintln!("CA public key imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
 
                 // Extract and store Subject Key Identifier (SKI) if present
                 if let Some(ski) = extract_ski_from_cert(&certs[0]) {
                     session
                         .store_ca_issuer(key_ref, &ski)
-                        .map_err(|e| CliError(format!("Failed to store CA issuer: {e}")))?;
+                        .map_err(|e| anyhow!("Failed to store CA issuer: {e}"))?;
                     eprintln!("CA key identifier stored.");
                 }
                 return Ok(());
@@ -481,36 +476,36 @@ pub fn run_keys_import(
                 // Extract raw EC scalar from PKCS#8 or SEC1 DER encoding
                 use elliptic_curve::SecretKey;
                 use elliptic_curve::pkcs8::DecodePrivateKey;
-                let (scalar_bytes, curve) =
-                    if let Ok(sk) = SecretKey::<p256::NistP256>::from_pkcs8_der(pk_der) {
-                        (
-                            sk.to_bytes().as_slice().to_vec(),
-                            yubikit::securitydomain::Curve::Secp256r1,
-                        )
-                    } else if let Ok(sk) = SecretKey::<p256::NistP256>::from_sec1_der(pk_der) {
-                        (
-                            sk.to_bytes().as_slice().to_vec(),
-                            yubikit::securitydomain::Curve::Secp256r1,
-                        )
-                    } else if let Ok(sk) = SecretKey::<p384::NistP384>::from_pkcs8_der(pk_der) {
-                        (
-                            sk.to_bytes().as_slice().to_vec(),
-                            yubikit::securitydomain::Curve::Secp384r1,
-                        )
-                    } else if let Ok(sk) = SecretKey::<p384::NistP384>::from_sec1_der(pk_der) {
-                        (
-                            sk.to_bytes().as_slice().to_vec(),
-                            yubikit::securitydomain::Curve::Secp384r1,
-                        )
-                    } else {
-                        return Err(CliError(
+                let (scalar_bytes, curve) = if let Ok(sk) =
+                    SecretKey::<p256::NistP256>::from_pkcs8_der(pk_der)
+                {
+                    (
+                        sk.to_bytes().as_slice().to_vec(),
+                        yubikit::securitydomain::Curve::Secp256r1,
+                    )
+                } else if let Ok(sk) = SecretKey::<p256::NistP256>::from_sec1_der(pk_der) {
+                    (
+                        sk.to_bytes().as_slice().to_vec(),
+                        yubikit::securitydomain::Curve::Secp256r1,
+                    )
+                } else if let Ok(sk) = SecretKey::<p384::NistP384>::from_pkcs8_der(pk_der) {
+                    (
+                        sk.to_bytes().as_slice().to_vec(),
+                        yubikit::securitydomain::Curve::Secp384r1,
+                    )
+                } else if let Ok(sk) = SecretKey::<p384::NistP384>::from_sec1_der(pk_der) {
+                    (
+                        sk.to_bytes().as_slice().to_vec(),
+                        yubikit::securitydomain::Curve::Secp384r1,
+                    )
+                } else {
+                    return Err(anyhow!(
                         "Failed to parse EC private key (expected P-256 or P-384 PKCS#8/SEC1 DER)"
-                            .into(),
                     ));
-                    };
+                };
                 session
                     .put_key_ec_private(key_ref, &scalar_bytes, curve, replace_kvn.unwrap_or(0))
-                    .map_err(|e| CliError(format!("Failed to import EC private key: {e}")))?;
+                    .map_err(|e| anyhow!("Failed to import EC private key: {e}"))?;
                 eprintln!("EC private key imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
             }
 
@@ -518,7 +513,7 @@ pub fn run_keys_import(
                 let cert_refs: Vec<&[u8]> = certs.iter().map(|c| c.as_slice()).collect();
                 session
                     .store_certificate_bundle(key_ref, &cert_refs)
-                    .map_err(|e| CliError(format!("Failed to store certificate bundle: {e}")))?;
+                    .map_err(|e| anyhow!("Failed to store certificate bundle: {e}"))?;
                 println!(
                     "{} certificate(s) imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).",
                     certs.len()
@@ -526,9 +521,7 @@ pub fn run_keys_import(
             }
 
             if private_key.is_none() && certs.is_empty() {
-                return Err(CliError(
-                    "No certificate or private key found in PEM file.".into(),
-                ));
+                return Err(anyhow!("No certificate or private key found in PEM file."));
             }
         }
     }
@@ -541,17 +534,17 @@ pub fn run_keys_set_allowlist(
     kid: u8,
     kvn: u8,
     serials: &[String],
-) -> Result<(), CliError> {
+) -> Result<()> {
     let key_ref = KeyRef::new(kid, kvn);
     let serial_bytes: Vec<Vec<u8>> = serials
         .iter()
-        .map(|s| hex::decode(s).map_err(|_| CliError(format!("Invalid hex serial: {s}"))))
+        .map(|s| hex::decode(s).map_err(|_| anyhow!("Invalid hex serial: {s}")))
         .collect::<Result<_, _>>()?;
 
     let mut session = open_session(dev, scp_params)?;
     session
         .store_allowlist(key_ref, &serial_bytes)
-        .map_err(|e| CliError(format!("Failed to set allowlist: {e}")))?;
+        .map_err(|e| anyhow!("Failed to set allowlist: {e}"))?;
     println!(
         "Allowlist set for KID=0x{kid:02X}, KVN=0x{kvn:02X} ({} serial(s)).",
         serial_bytes.len()
@@ -562,18 +555,18 @@ pub fn run_keys_set_allowlist(
 /// Extract EC public key bytes and curve from a DER-encoded X.509 certificate.
 fn extract_ec_pubkey_and_curve(
     cert_der: &[u8],
-) -> Result<(Vec<u8>, yubikit::securitydomain::Curve), CliError> {
+) -> Result<(Vec<u8>, yubikit::securitydomain::Curve)> {
     use x509_cert::Certificate;
     use x509_cert::der::{Decode, Encode, oid::ObjectIdentifier};
 
-    let cert = Certificate::from_der(cert_der)
-        .map_err(|e| CliError(format!("Failed to parse certificate: {e}")))?;
+    let cert =
+        Certificate::from_der(cert_der).map_err(|e| anyhow!("Failed to parse certificate: {e}"))?;
 
     let spki = &cert.tbs_certificate.subject_public_key_info;
     let pk_bits = spki
         .subject_public_key
         .as_bytes()
-        .ok_or_else(|| CliError("Public key has unused bits".into()))?;
+        .ok_or_else(|| anyhow!("Public key has unused bits"))?;
 
     // Determine curve from the algorithm parameters
     // P-256 OID: 1.2.840.10045.3.1.7, P-384 OID: 1.3.132.0.34
@@ -584,20 +577,20 @@ fn extract_ec_pubkey_and_curve(
         .algorithm
         .parameters
         .as_ref()
-        .ok_or_else(|| CliError("Missing EC curve parameters in certificate".into()))?;
+        .ok_or_else(|| anyhow!("Missing EC curve parameters in certificate"))?;
     let curve_oid = ObjectIdentifier::from_der(
         &params
             .to_der()
-            .map_err(|e| CliError(format!("Failed to encode algorithm parameters: {e}")))?,
+            .map_err(|e| anyhow!("Failed to encode algorithm parameters: {e}"))?,
     )
-    .map_err(|e| CliError(format!("Failed to parse curve OID: {e}")))?;
+    .map_err(|e| anyhow!("Failed to parse curve OID: {e}"))?;
 
     let curve = if curve_oid == P256_OID {
         yubikit::securitydomain::Curve::Secp256r1
     } else if curve_oid == P384_OID {
         yubikit::securitydomain::Curve::Secp384r1
     } else {
-        return Err(CliError(format!("Unsupported EC curve OID: {curve_oid}")));
+        return Err(anyhow!("Unsupported EC curve OID: {curve_oid}"));
     };
 
     Ok((pk_bits.to_vec(), curve))
@@ -628,7 +621,7 @@ fn extract_ski_from_cert(cert_der: &[u8]) -> Option<Vec<u8>> {
 
 /// Try to decrypt an encrypted private key from PEM data.
 /// Returns the DER-encoded PKCS#8 private key on success.
-fn try_decrypt_sd_private_key(pem_data: &str, password: &str) -> Result<Option<Vec<u8>>, CliError> {
+fn try_decrypt_sd_private_key(pem_data: &str, password: &str) -> Result<Option<Vec<u8>>> {
     use base64::Engine;
     use elliptic_curve::SecretKey;
     use elliptic_curve::pkcs8::DecodePrivateKey;
@@ -638,14 +631,14 @@ fn try_decrypt_sd_private_key(pem_data: &str, password: &str) -> Result<Option<V
         use elliptic_curve::pkcs8::EncodePrivateKey;
         let doc = sk
             .to_pkcs8_der()
-            .map_err(|e| CliError(format!("Failed to re-encode key: {e}")))?;
+            .map_err(|e| anyhow!("Failed to re-encode key: {e}"))?;
         return Ok(Some(doc.as_bytes().to_vec()));
     }
     if let Ok(sk) = SecretKey::<p384::NistP384>::from_pkcs8_pem(pem_data) {
         use elliptic_curve::pkcs8::EncodePrivateKey;
         let doc = sk
             .to_pkcs8_der()
-            .map_err(|e| CliError(format!("Failed to re-encode key: {e}")))?;
+            .map_err(|e| anyhow!("Failed to re-encode key: {e}"))?;
         return Ok(Some(doc.as_bytes().to_vec()));
     }
 
@@ -659,12 +652,12 @@ fn try_decrypt_sd_private_key(pem_data: &str, password: &str) -> Result<Option<V
 
     let der = base64::engine::general_purpose::STANDARD
         .decode(block.replace(['\n', '\r'], ""))
-        .map_err(|e| CliError(format!("Invalid encrypted private key PEM: {e}")))?;
+        .map_err(|e| anyhow!("Invalid encrypted private key PEM: {e}"))?;
     let enc_key = EncryptedPrivateKeyInfo::try_from(der.as_slice())
-        .map_err(|e| CliError(format!("Failed to parse encrypted private key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to parse encrypted private key: {e}"))?;
     let dec_key = enc_key
         .decrypt(password)
-        .map_err(|_| CliError("Wrong password for encrypted private key.".into()))?;
+        .map_err(|_| anyhow!("Wrong password for encrypted private key."))?;
 
     Ok(Some(dec_key.as_bytes().to_vec()))
 }

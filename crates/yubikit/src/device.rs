@@ -29,8 +29,6 @@
 //! }
 //! ```
 
-use std::fmt;
-
 use crate::core::{Transport, set_override_version};
 use crate::fido::FidoConnection;
 use crate::management::{BoxedManagementError, Capability, DeviceInfo, FormFactor, UsbInterface};
@@ -42,23 +40,31 @@ use crate::smartcard::{SmartCardConnection, SmartCardError};
 // ---------------------------------------------------------------------------
 
 /// Errors that can occur during device enumeration or connection.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum DeviceError {
     /// A SmartCard protocol error.
-    SmartCard(SmartCardError),
+    #[error("SmartCard error: {0}")]
+    SmartCard(#[from] SmartCardError),
     /// A management session error.
-    Management(BoxedManagementError),
+    #[error("Management error: {0}")]
+    Management(#[source] BoxedManagementError),
     /// A transport-level error (PC/SC, HID, or FIDO).
-    Transport(Box<dyn std::error::Error + Send + Sync>),
+    #[error("Transport error: {0}")]
+    Transport(#[source] Box<dyn std::error::Error + Send + Sync>),
     /// No YubiKey device was found.
+    #[error("No YubiKey device found")]
     NoDeviceFound,
     /// The card is not a YubiKey.
+    #[error("Not a YubiKey")]
     NotYubiKey,
     /// The operation was cancelled by the caller.
+    #[error("Operation cancelled")]
     Cancelled,
     /// A different YubiKey was inserted or removed during reinsert.
+    #[error("A different YubiKey was inserted/removed")]
     WrongDevice,
     /// The operation requires a disabled Cargo feature.
+    #[error("Operation requires the '{0}' feature")]
     UnsupportedFeature(&'static str),
 }
 
@@ -69,44 +75,6 @@ pub enum ReinsertStatus {
     Remove,
     /// The device has been removed and should be reinserted (USB: plug in, NFC: place on reader).
     Reinsert,
-}
-
-impl fmt::Display for DeviceError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::SmartCard(e) => write!(f, "SmartCard error: {e}"),
-            Self::Management(e) => write!(f, "Management error: {e}"),
-            Self::Transport(e) => write!(f, "Transport error: {e}"),
-            Self::NoDeviceFound => write!(f, "No YubiKey device found"),
-            Self::NotYubiKey => write!(f, "Not a YubiKey"),
-            Self::Cancelled => write!(f, "Operation cancelled"),
-            Self::WrongDevice => write!(f, "A different YubiKey was inserted/removed"),
-            Self::UnsupportedFeature(feature) => {
-                write!(f, "Operation requires the '{feature}' feature")
-            }
-        }
-    }
-}
-
-impl std::error::Error for DeviceError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::SmartCard(e) => Some(e),
-            Self::Management(e) => Some(e),
-            Self::Transport(e) => Some(e.as_ref()),
-            Self::NoDeviceFound
-            | Self::NotYubiKey
-            | Self::Cancelled
-            | Self::WrongDevice
-            | Self::UnsupportedFeature(_) => None,
-        }
-    }
-}
-
-impl From<SmartCardError> for DeviceError {
-    fn from(e: SmartCardError) -> Self {
-        Self::SmartCard(e)
-    }
 }
 
 impl From<crate::fido::FidoError> for DeviceError {

@@ -1,4 +1,5 @@
 #![windows_subsystem = "console"]
+use anyhow::{Result, anyhow};
 use std::process;
 
 use clap::{Parser, Subcommand};
@@ -30,7 +31,6 @@ use ykman::logging;
 
 use context::CommandContext;
 use scp::{ScpInputs, ScpParams};
-use util::CliError;
 
 #[derive(Parser)]
 #[command(
@@ -89,10 +89,10 @@ struct Cli {
     command: Option<Commands>,
 }
 
-fn init_logging(cli: &Cli) -> Result<(), CliError> {
+fn init_logging(cli: &Cli) -> Result<()> {
     if let Some(level) = cli.log_level {
         logging::init_logging(level, cli.log_file.as_deref())
-            .map_err(|e| CliError(e.to_string()))?;
+            .map_err(|e| anyhow!(e.to_string()))?;
         log::info!(
             "System info:\n  ykman:  {}\n  Platform:  {}\n  Arch:      {}",
             env!("CARGO_PKG_VERSION"),
@@ -100,9 +100,7 @@ fn init_logging(cli: &Cli) -> Result<(), CliError> {
             std::env::consts::ARCH,
         );
     } else if cli.log_file.is_some() {
-        return Err(CliError(
-            "--log-file requires specifying --log-level.".into(),
-        ));
+        return Err(anyhow!("--log-file requires specifying --log-level."));
     }
     Ok(())
 }
@@ -273,13 +271,14 @@ enum Commands {
     },
 }
 
-fn run() -> Result<(), CliError> {
+fn run() -> Result<()> {
     let cli = Cli::parse();
 
     init_logging(&cli)?;
 
     if cli.diagnose {
-        return diagnose::run_diagnose();
+        diagnose::run_diagnose()?;
+        return Ok(());
     }
 
     if cli.licenses {
@@ -298,7 +297,8 @@ fn run() -> Result<(), CliError> {
 
     let command = command_or_help(cli.command);
 
-    run_command(command, cli.device, &ctx, &scp_params)
+    run_command(command, cli.device, &ctx, &scp_params)?;
+    Ok(())
 }
 
 fn run_command(
@@ -306,11 +306,11 @@ fn run_command(
     device_filter: Option<u32>,
     ctx: &CommandContext,
     scp_params: &ScpParams,
-) -> Result<(), CliError> {
+) -> Result<()> {
     match command {
         Commands::List { serials, readers } => {
             if device_filter.is_some() {
-                return Err(CliError("--device can't be used with 'list'.".into()));
+                return Err(anyhow!("--device can't be used with 'list'."));
             }
             list::run(serials, readers)
         }
@@ -362,7 +362,7 @@ fn run_command(
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("Error: {}", e.0);
+        eprintln!("Error: {e}");
         process::exit(1);
     }
 }

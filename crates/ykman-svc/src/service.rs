@@ -3,6 +3,8 @@
 //! Uses the `windows-service` crate for SCM registration and lifecycle.
 
 #[cfg(target_os = "windows")]
+use anyhow::Result;
+#[cfg(target_os = "windows")]
 use std::ffi::OsString;
 #[cfg(target_os = "windows")]
 use std::sync::Arc;
@@ -33,7 +35,7 @@ define_windows_service!(ffi_service_main, service_main);
 
 /// Install the service.
 #[cfg(target_os = "windows")]
-pub fn install() -> Result<(), Box<dyn std::error::Error>> {
+pub fn install() -> Result<()> {
     let manager =
         ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CREATE_SERVICE)?;
 
@@ -60,7 +62,7 @@ pub fn install() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Uninstall the service.
 #[cfg(target_os = "windows")]
-pub fn uninstall() -> Result<(), Box<dyn std::error::Error>> {
+pub fn uninstall() -> Result<()> {
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
 
     let service = manager.open_service(
@@ -85,7 +87,7 @@ pub fn uninstall() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Entry point called by the service dispatcher.
 #[cfg(target_os = "windows")]
-pub fn run_service() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_service() -> Result<()> {
     service_dispatcher::start(SERVICE_NAME, ffi_service_main)?;
     Ok(())
 }
@@ -99,7 +101,7 @@ fn service_main(_arguments: Vec<OsString>) {
 }
 
 #[cfg(target_os = "windows")]
-fn run_service_inner() -> Result<(), Box<dyn std::error::Error>> {
+fn run_service_inner() -> Result<()> {
     if let Err(e) = ykman::logging::init_logging(ykman::logging::LogLevel::Warning, None) {
         eprintln!("Failed to initialize service logging: {e}");
     }

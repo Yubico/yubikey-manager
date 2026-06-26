@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use yubikit::device::YubiKeyDevice;
 use yubikit::hsmauth::{CredentialPassword, HsmAuthManagementKey, HsmAuthSession};
@@ -5,7 +6,7 @@ use yubikit::management::Capability;
 
 use crate::cli_enums::CliFormat;
 use crate::scp::ScpParams;
-use crate::util::{CliError, confirm, open_smartcard_session, print_table, write_file_or_stdout};
+use crate::util::{confirm, open_smartcard_session, print_table, write_file_or_stdout};
 
 const MANAGEMENT_KEY_LEN: usize = 16;
 
@@ -136,7 +137,7 @@ pub enum HsmauthAccessAction {
 }
 
 impl HsmauthAction {
-    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
         match self {
             Self::Info => run_info(dev, scp_params),
             Self::Reset { force } => run_reset(dev, scp_params, force),
@@ -254,7 +255,7 @@ impl HsmauthAction {
 fn open_session(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<HsmAuthSession<Box<dyn yubikit::smartcard::SmartCardConnection + Send>>, CliError> {
+) -> Result<HsmAuthSession<Box<dyn yubikit::smartcard::SmartCardConnection + Send>>> {
     open_smartcard_session(
         dev,
         scp_params,
@@ -266,29 +267,27 @@ fn open_session(
 }
 
 /// Parse a management password: UTF-8 string (≤16 bytes, null-padded) or hex (32 chars).
-fn parse_management_password(value: &str) -> Result<HsmAuthManagementKey, CliError> {
+fn parse_management_password(value: &str) -> Result<HsmAuthManagementKey> {
     let encoded = value.as_bytes();
     if encoded.len() <= MANAGEMENT_KEY_LEN {
         let mut key = [0u8; MANAGEMENT_KEY_LEN];
         key[..encoded.len()].copy_from_slice(encoded);
         return HsmAuthManagementKey::new(&key)
-            .map_err(|e| CliError(format!("Invalid management password: {e}")));
+            .map_err(|e| anyhow!("Invalid management password: {e}"));
     }
     if encoded.len() == MANAGEMENT_KEY_LEN * 2
         && let Ok(bytes) = hex::decode(value)
     {
         return HsmAuthManagementKey::new(&bytes)
-            .map_err(|e| CliError(format!("Invalid management password: {e}")));
+            .map_err(|e| anyhow!("Invalid management password: {e}"));
     }
-    Err(CliError(
-        "Management password must be at most 16 characters, or 32 hex digits.".into(),
+    Err(anyhow!(
+        "Management password must be at most 16 characters, or 32 hex digits."
     ))
 }
 
 /// Get the management password: from CLI arg, or prompt.
-fn require_management_password(
-    management_password: Option<&str>,
-) -> Result<HsmAuthManagementKey, CliError> {
+fn require_management_password(management_password: Option<&str>) -> Result<HsmAuthManagementKey> {
     match management_password {
         Some(p) => parse_management_password(p),
         None => {
@@ -299,16 +298,14 @@ fn require_management_password(
 }
 
 /// Get the credential password: from CLI arg, or prompt (with confirmation).
-fn require_credential_password(
-    credential_password: Option<&str>,
-) -> Result<CredentialPassword, CliError> {
+fn require_credential_password(credential_password: Option<&str>) -> Result<CredentialPassword> {
     match credential_password {
         Some(p) => Ok(CredentialPassword::from_password(p)),
         None => {
             let p1 = crate::util::prompt_secret("Enter credential password")?;
             let p2 = crate::util::prompt_secret("Confirm credential password")?;
             if p1 != p2 {
-                return Err(CliError("Passwords do not match.".into()));
+                return Err(anyhow!("Passwords do not match."));
             }
             Ok(CredentialPassword::from_password(&p1))
         }
@@ -339,7 +336,7 @@ fn format_credential_error(e: &yubikit::hsmauth::HsmAuthError, default_msg: &str
     }
 }
 
-pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     let mut session = open_session(dev, scp_params)?;
     let mut rows = vec![("YubiHSM Auth version", session.version().to_string())];
     if let Ok(retries) = session.get_management_key_retries() {
@@ -349,33 +346,26 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
     Ok(())
 }
 
-pub fn run_reset(
-    dev: &dyn YubiKeyDevice,
-    scp_params: &ScpParams,
-    force: bool,
-) -> Result<(), CliError> {
+pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
     if !force {
         eprintln!("WARNING! This will delete all stored HSM Auth credentials.");
         if !confirm("Proceed?") {
-            return Err(CliError("Aborted.".into()));
+            return Err(anyhow!("Aborted."));
         }
     }
     let mut session = open_session(dev, scp_params)?;
     session
         .reset()
-        .map_err(|e| CliError(format!("Failed to reset: {e}")))?;
+        .map_err(|e| anyhow!("Failed to reset: {e}"))?;
     eprintln!("HSM Auth application has been reset.");
     Ok(())
 }
 
-pub fn run_credentials_list(
-    dev: &dyn YubiKeyDevice,
-    scp_params: &ScpParams,
-) -> Result<(), CliError> {
+pub fn run_credentials_list(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     let mut session = open_session(dev, scp_params)?;
     let creds = session
         .list_credentials()
-        .map_err(|e| CliError(format!("Failed to list credentials: {e}")))?;
+        .map_err(|e| anyhow!("Failed to list credentials: {e}"))?;
 
     if creds.is_empty() {
         eprintln!("No credentials stored.");
@@ -402,7 +392,7 @@ pub fn run_credentials_generate(
     credential_password: Option<&str>,
     management_key: Option<&str>,
     touch: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let mgmt = require_management_password(management_key)?;
     let pw = require_credential_password(credential_password)?;
 
@@ -410,7 +400,7 @@ pub fn run_credentials_generate(
     session
         .generate_credential_asymmetric(&mgmt, label, &pw, touch)
         .map_err(|e| {
-            CliError(format_credential_error(
+            anyhow!(format_credential_error(
                 &e,
                 "Failed to generate credential.",
             ))
@@ -425,15 +415,15 @@ pub fn run_credentials_delete(
     label: &str,
     management_key: Option<&str>,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     if !force && !confirm(&format!("Delete credential '{label}'?")) {
-        return Err(CliError("Aborted.".into()));
+        return Err(anyhow!("Aborted."));
     }
     let mgmt = require_management_password(management_key)?;
     let mut session = open_session(dev, scp_params)?;
     session
         .delete_credential(&mgmt, label)
-        .map_err(|e| CliError(format_credential_error(&e, "Failed to delete credential.")))?;
+        .map_err(|e| anyhow!(format_credential_error(&e, "Failed to delete credential.")))?;
     eprintln!("Credential deleted: {label}");
     Ok(())
 }
@@ -448,34 +438,30 @@ pub fn run_credentials_symmetric(
     credential_password: Option<&str>,
     management_key: Option<&str>,
     touch: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let mgmt = require_management_password(management_key)?;
     let pw = require_credential_password(credential_password)?;
 
     let (enc, mac) = if generate {
         let mut e = [0u8; 16];
         let mut m = [0u8; 16];
-        getrandom::fill(&mut e).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
-        getrandom::fill(&mut m).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut e).map_err(|e| anyhow!("Failed to generate: {e}"))?;
+        getrandom::fill(&mut m).map_err(|e| anyhow!("Failed to generate: {e}"))?;
         (e.to_vec(), m.to_vec())
     } else {
         let e = enc_key
-            .ok_or_else(|| CliError("--enc-key is required (or use --generate).".into()))
-            .and_then(|k| {
-                hex::decode(k).map_err(|_| CliError("ENC key must be hex-encoded.".into()))
-            })?;
+            .ok_or_else(|| anyhow!("--enc-key is required (or use --generate)."))
+            .and_then(|k| hex::decode(k).map_err(|_| anyhow!("ENC key must be hex-encoded.")))?;
         let m = mac_key
-            .ok_or_else(|| CliError("--mac-key is required (or use --generate).".into()))
-            .and_then(|k| {
-                hex::decode(k).map_err(|_| CliError("MAC key must be hex-encoded.".into()))
-            })?;
+            .ok_or_else(|| anyhow!("--mac-key is required (or use --generate)."))
+            .and_then(|k| hex::decode(k).map_err(|_| anyhow!("MAC key must be hex-encoded.")))?;
         (e, m)
     };
 
     let mut session = open_session(dev, scp_params)?;
     session
         .put_credential_symmetric(&mgmt, label, &enc, &mac, &pw, touch)
-        .map_err(|e| CliError(format_credential_error(&e, "Failed to store credential.")))?;
+        .map_err(|e| anyhow!(format_credential_error(&e, "Failed to store credential.")))?;
     eprintln!("Symmetric credential stored: {label}");
     if generate {
         println!("ENC key: {}", hex::encode(&enc));
@@ -492,14 +478,14 @@ pub fn run_credentials_derive(
     credential_password: Option<&str>,
     management_key: Option<&str>,
     touch: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let mgmt = require_management_password(management_key)?;
     let pw = require_credential_password(credential_password)?;
 
     let mut session = open_session(dev, scp_params)?;
     session
         .put_credential_derived(&mgmt, label, derivation_password, &pw, touch)
-        .map_err(|e| CliError(format_credential_error(&e, "Failed to derive credential.")))?;
+        .map_err(|e| anyhow!(format_credential_error(&e, "Failed to derive credential.")))?;
     eprintln!("Derived credential stored: {label}");
     Ok(())
 }
@@ -510,7 +496,7 @@ pub fn run_credentials_change_password(
     label: &str,
     credential_password: Option<&str>,
     new_credential_password: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let old_pw = match credential_password {
         Some(p) => CredentialPassword::from_password(p),
         None => {
@@ -524,7 +510,7 @@ pub fn run_credentials_change_password(
             let p1 = crate::util::prompt_secret("Enter new credential password")?;
             let p2 = crate::util::prompt_secret("Confirm new credential password")?;
             if p1 != p2 {
-                return Err(CliError("Passwords do not match.".into()));
+                return Err(anyhow!("Passwords do not match."));
             }
             CredentialPassword::from_password(&p1)
         }
@@ -533,7 +519,7 @@ pub fn run_credentials_change_password(
     let mut session = open_session(dev, scp_params)?;
     session
         .change_credential_password(label, &old_pw, &new_pw)
-        .map_err(|e| CliError(format_credential_error(&e, "Failed to change password.")))?;
+        .map_err(|e| anyhow!(format_credential_error(&e, "Failed to change password.")))?;
     eprintln!("Credential password changed for: {label}");
     Ok(())
 }
@@ -548,7 +534,7 @@ pub fn run_credentials_import(
     credential_password: Option<&str>,
     management_key: Option<&str>,
     touch: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let mgmt = require_management_password(management_key)?;
     let cred_pw = require_credential_password(credential_password)?;
 
@@ -561,7 +547,7 @@ pub fn run_credentials_import(
     session
         .put_credential_asymmetric(&mgmt, label, &secret_key, &cred_pw, touch)
         .map_err(|e| {
-            CliError(format_credential_error(
+            anyhow!(format_credential_error(
                 &e,
                 "Failed to import asymmetric credential.",
             ))
@@ -571,7 +557,7 @@ pub fn run_credentials_import(
 }
 
 /// Parse an EC P-256 private key from PEM or DER data, with optional password decryption.
-fn parse_ec_private_key(data: &[u8], password: Option<&str>) -> Result<p256::SecretKey, CliError> {
+fn parse_ec_private_key(data: &[u8], password: Option<&str>) -> Result<p256::SecretKey> {
     use elliptic_curve::SecretKey;
     use elliptic_curve::pkcs8::DecodePrivateKey;
     use p256::NistP256;
@@ -588,10 +574,9 @@ fn parse_ec_private_key(data: &[u8], password: Option<&str>) -> Result<p256::Sec
             if let Ok(sk) = SecretKey::<NistP256>::from_pkcs8_pem(text) {
                 return Ok(sk);
             }
-            return Err(CliError(
+            return Err(anyhow!(
                 "Cannot decrypt encrypted key in-process. Convert first:\n  \
                  openssl pkey -in key.pem -out key_dec.pem"
-                    .into(),
             ));
         }
         // Try PKCS#8 PEM
@@ -602,9 +587,7 @@ fn parse_ec_private_key(data: &[u8], password: Option<&str>) -> Result<p256::Sec
         if let Ok(sk) = SecretKey::<NistP256>::from_sec1_pem(text) {
             return Ok(sk);
         }
-        return Err(CliError(
-            "Failed to parse EC P-256 private key from PEM.".into(),
-        ));
+        return Err(anyhow!("Failed to parse EC P-256 private key from PEM."));
     }
 
     // Try PKCS#8 DER
@@ -616,8 +599,8 @@ fn parse_ec_private_key(data: &[u8], password: Option<&str>) -> Result<p256::Sec
         return Ok(sk);
     }
 
-    Err(CliError(
-        "Failed to parse EC P-256 private key. Expected PKCS#8 or SEC1 format.".into(),
+    Err(anyhow!(
+        "Failed to parse EC P-256 private key. Expected PKCS#8 or SEC1 format."
     ))
 }
 
@@ -627,11 +610,11 @@ pub fn run_credentials_export(
     label: &str,
     output: &str,
     format: CliFormat,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let mut session = open_session(dev, scp_params)?;
     let public_key = session
         .get_public_key(label)
-        .map_err(|e| CliError(format_credential_error(&e, "Failed to get public key.")))?;
+        .map_err(|e| anyhow!(format_credential_error(&e, "Failed to get public key.")))?;
 
     // Export as SubjectPublicKeyInfo
     use base64::Engine;
@@ -699,7 +682,7 @@ pub fn run_access_change_management_key(
     management_key: Option<&str>,
     new_management_key: Option<&str>,
     generate: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     // Resolve old key: prompt if not given
     let old_mgmt = match management_key {
         Some(k) => parse_management_password(k)?,
@@ -711,16 +694,16 @@ pub fn run_access_change_management_key(
 
     let new_key = if generate {
         let mut k = [0u8; 16];
-        getrandom::fill(&mut k).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut k).map_err(|e| anyhow!("Failed to generate: {e}"))?;
         HsmAuthManagementKey::new(&k)
-            .map_err(|e| CliError(format!("Failed to create management password: {e}")))?
+            .map_err(|e| anyhow!("Failed to create management password: {e}"))?
     } else if let Some(k) = new_management_key {
         parse_management_password(k)?
     } else {
         let p1 = crate::util::prompt_secret("Enter a new management password")?;
         let p2 = crate::util::prompt_secret("Confirm new management password")?;
         if p1 != p2 {
-            return Err(CliError("Passwords do not match.".into()));
+            return Err(anyhow!("Passwords do not match."));
         }
         parse_management_password(&p1)?
     };
@@ -729,7 +712,7 @@ pub fn run_access_change_management_key(
     session
         .put_management_key(&old_mgmt, &new_key)
         .map_err(|e| {
-            CliError(format_credential_error(
+            anyhow!(format_credential_error(
                 &e,
                 "Failed to change management password.",
             ))

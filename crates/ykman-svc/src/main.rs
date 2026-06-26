@@ -1,3 +1,4 @@
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 
 mod connection;
@@ -42,7 +43,7 @@ enum Commands {
     },
 }
 
-fn main() {
+fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
@@ -56,59 +57,44 @@ fn main() {
             } else {
                 ykman::logging::init_logging_stdout(level)
             };
-            if let Err(e) = result {
-                eprintln!("Failed to initialize logging: {e}");
-                std::process::exit(1);
-            }
+            result?;
         }
         _ => {
-            if let Err(e) = ykman::logging::init_logging(ykman::logging::LogLevel::Warning, None) {
-                eprintln!("Failed to initialize logging: {e}");
-                std::process::exit(1);
-            }
+            ykman::logging::init_logging(ykman::logging::LogLevel::Warning, None)?;
         }
     }
 
     match cli.command {
         Commands::Install => {
             #[cfg(target_os = "windows")]
-            service::install().unwrap_or_else(|e| {
-                eprintln!("Failed to install service: {e}");
-                std::process::exit(1);
-            });
+            service::install()?;
             #[cfg(not(target_os = "windows"))]
-            {
-                eprintln!("Service install is only supported on Windows");
-                std::process::exit(1);
-            }
+            bail!("Service install is only supported on Windows");
         }
         Commands::Uninstall => {
             #[cfg(target_os = "windows")]
-            service::uninstall().unwrap_or_else(|e| {
-                eprintln!("Failed to uninstall service: {e}");
-                std::process::exit(1);
-            });
+            service::uninstall()?;
             #[cfg(not(target_os = "windows"))]
-            {
-                eprintln!("Service uninstall is only supported on Windows");
-                std::process::exit(1);
-            }
+            bail!("Service uninstall is only supported on Windows");
         }
         Commands::Run => {
             #[cfg(target_os = "windows")]
-            service::run_service().unwrap_or_else(|e| {
-                eprintln!("Service failed: {e}");
-                std::process::exit(1);
-            });
+            service::run_service()?;
             #[cfg(not(target_os = "windows"))]
-            {
-                eprintln!("Service mode is only supported on Windows");
-                std::process::exit(1);
-            }
+            bail!("Service mode is only supported on Windows");
         }
         Commands::Standalone { .. } => {
             log::info!("Running in standalone mode");
             pipe_server::run_standalone();
         }
+    }
+
+    Ok(())
+}
+
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
     }
 }

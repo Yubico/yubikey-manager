@@ -17,6 +17,7 @@ path = "src/main.rs"
 [dependencies]
 yubikit = { workspace = true, default-features = true }
 ykman = { workspace = true, default-features = true }
+anyhow.workspace = true
 clap.workspace = true
 log = { workspace = true, features = ["std"] }
 serde.workspace = true

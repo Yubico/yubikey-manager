@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -27,8 +28,7 @@ use crate::cli_enums::{
 };
 use crate::scp::ScpParams;
 use crate::util::{
-    CliError, confirm, open_smartcard_session, print_table, read_file_or_stdin,
-    write_file_or_stdout,
+    confirm, open_smartcard_session, print_table, read_file_or_stdin, write_file_or_stdout,
 };
 
 #[derive(Subcommand)]
@@ -337,7 +337,7 @@ pub enum PivObjectAction {
 }
 
 impl PivAction {
-    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
         match self {
             Self::Info => run_info(dev, scp_params),
             Self::Reset { force } => run_reset(dev, scp_params, force),
@@ -592,7 +592,7 @@ impl PivAction {
 fn open_session(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<PivSession<Box<dyn yubikit::smartcard::SmartCardConnection + Send>>, CliError> {
+) -> Result<PivSession<Box<dyn yubikit::smartcard::SmartCardConnection + Send>>> {
     open_smartcard_session(
         dev,
         scp_params,
@@ -603,7 +603,7 @@ fn open_session(
     )
 }
 
-fn parse_slot(s: &str) -> Result<Slot, CliError> {
+fn parse_slot(s: &str) -> Result<Slot> {
     // Accept hex (9a, 9c, etc.), names, or slot numbers
     let s_up = s.to_ascii_uppercase();
     match s_up.as_str() {
@@ -617,35 +617,34 @@ fn parse_slot(s: &str) -> Result<Slot, CliError> {
             if let Ok(v) =
                 u8::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16)
             {
-                Slot::from_u8(v).ok_or_else(|| CliError(format!("Invalid PIV slot: 0x{v:02X}")))
+                Slot::from_u8(v).ok_or_else(|| anyhow!("Invalid PIV slot: 0x{v:02X}"))
             } else {
-                Err(CliError(format!(
+                Err(anyhow!(
                     "Invalid slot: {s}. Use 9a, 9c, 9d, 9e, f9, or 82-95."
-                )))
+                ))
             }
         }
     }
 }
 
-fn parse_management_key(s: &str) -> Result<Vec<u8>, CliError> {
+fn parse_management_key(s: &str) -> Result<Vec<u8>> {
     let key = hex::decode(s).map_err(|_| {
-        CliError("Management key must be hex-encoded (32, 48, or 64 hexadecimal digits).".into())
+        anyhow!("Management key must be hex-encoded (32, 48, or 64 hexadecimal digits).")
     })?;
     if !matches!(key.len(), 16 | 24 | 32) {
-        return Err(CliError(
+        return Err(anyhow!(
             "Management key must be exactly 16, 24, or 32 bytes (32, 48, or 64 hexadecimal digits) long."
-                .into(),
         ));
     }
     Ok(key)
 }
 
-fn to_management_key(key_type: ManagementKeyType, key: &[u8]) -> Result<ManagementKey, CliError> {
-    ManagementKey::new(key_type, key).map_err(|e| CliError(format!("Invalid management key: {e}")))
+fn to_management_key(key_type: ManagementKeyType, key: &[u8]) -> Result<ManagementKey> {
+    ManagementKey::new(key_type, key).map_err(|e| anyhow!("Invalid management key: {e}"))
 }
 
-fn to_piv_pin(pin: &str, label: &str) -> Result<PivPin, CliError> {
-    PivPin::new(pin).map_err(|e| CliError(format!("Invalid {label}: {e}")))
+fn to_piv_pin(pin: &str, label: &str) -> Result<PivPin> {
+    PivPin::new(pin).map_err(|e| anyhow!("Invalid {label}: {e}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -656,13 +655,13 @@ fn authenticate_session(
     session: &mut PivSession<impl SmartCardConnection>,
     mgmt_key: Option<&str>,
     pin: Option<&str>,
-) -> Result<bool, CliError> {
+) -> Result<bool> {
     if let Some(k) = mgmt_key {
         let key = parse_management_key(k)?;
         let management_key = to_management_key(session.management_key_type(), &key)?;
         session
             .authenticate(&management_key)
-            .map_err(|e| CliError(format!("Authentication failed: {e}")))?;
+            .map_err(|e| anyhow!("Authentication failed: {e}"))?;
         return Ok(false);
     }
 
@@ -675,11 +674,11 @@ fn authenticate_session(
             let management_key = to_management_key(session.management_key_type(), key)?;
             session
                 .authenticate(&management_key)
-                .map_err(|e| CliError(format!("Authentication with stored key failed: {e}")))?;
+                .map_err(|e| anyhow!("Authentication with stored key failed: {e}"))?;
             return Ok(true);
         }
-        return Err(CliError(
-            "Management key is marked as stored on device but could not be read.".into(),
+        return Err(anyhow!(
+            "Management key is marked as stored on device but could not be read."
         ));
     }
 
@@ -695,7 +694,7 @@ fn authenticate_session(
     let management_key = to_management_key(session.management_key_type(), &key)?;
     session
         .authenticate(&management_key)
-        .map_err(|e| CliError(format!("Authentication failed: {e}")))?;
+        .map_err(|e| anyhow!("Authentication failed: {e}"))?;
     Ok(false)
 }
 
@@ -703,17 +702,17 @@ fn authenticate_session(
 fn ensure_pin(
     session: &mut PivSession<impl yubikit::smartcard::SmartCardConnection>,
     pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let pin_value = match pin {
         Some(p) => to_piv_pin(p, "PIN")?,
         None => crate::util::prompt_secret("Enter PIN").and_then(|p| to_piv_pin(&p, "PIN"))?,
     };
     session.verify_pin(&pin_value).map_err(|e| match &e {
-        yubikit::piv::PivError::InvalidPin(0) => CliError("PIN is blocked.".into()),
+        yubikit::piv::PivError::InvalidPin(0) => anyhow!("PIN is blocked."),
         yubikit::piv::PivError::InvalidPin(attempts) => {
-            CliError(format!("PIN verification failed, {attempts} tries left."))
+            anyhow!("PIN verification failed, {attempts} tries left.")
         }
-        _ => CliError(format!("PIN verification failed: {e}")),
+        _ => anyhow!("PIN verification failed: {e}"),
     })
 }
 
@@ -723,7 +722,7 @@ fn verify_pin_if_needed<C, F, T>(
     session: &mut PivSession<C>,
     pin: Option<&str>,
     mut f: F,
-) -> Result<T, CliError>
+) -> Result<T>
 where
     C: yubikit::smartcard::SmartCardConnection,
     F: FnMut(&mut PivSession<C>) -> Result<T, yubikit::piv::PivError>,
@@ -735,13 +734,13 @@ where
             ..
         })) if sw == yubikit::smartcard::Sw::SecurityConditionNotSatisfied as u16 => {
             ensure_pin(session, pin)?;
-            f(session).map_err(|e| CliError(format!("{e}")))
+            f(session).map_err(|e| anyhow!("{e}"))
         }
-        Err(e) => Err(CliError(format!("{e}"))),
+        Err(e) => Err(anyhow!("{e}")),
     }
 }
 
-fn parse_object_id(s: &str) -> Result<ObjectId, CliError> {
+fn parse_object_id(s: &str) -> Result<ObjectId> {
     match s.to_ascii_uppercase().as_str() {
         "CHUID" => Ok(ObjectId::Chuid),
         "CCC" | "CAPABILITY" => Ok(ObjectId::Capability),
@@ -756,13 +755,13 @@ fn parse_object_id(s: &str) -> Result<ObjectId, CliError> {
         "IRIS" => Ok(ObjectId::Iris),
         "PRINTED" => Ok(ObjectId::Printed),
         "ATTESTATION" => Ok(ObjectId::Attestation),
-        _ => Err(CliError(format!(
+        _ => Err(anyhow!(
             "Unknown object ID: {s}. Use CHUID, CCC, AUTHENTICATION, etc."
-        ))),
+        )),
     }
 }
 
-pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     let mut session = open_session(dev, scp_params)?;
     let reset_blocked = dev.info().reset_blocked.contains(Capability::PIV);
     let version = session.version();
@@ -942,13 +941,9 @@ fn parse_cert_info(cert_der: &[u8]) -> Option<CertInfo> {
     })
 }
 
-pub fn run_reset(
-    dev: &dyn YubiKeyDevice,
-    scp_params: &ScpParams,
-    force: bool,
-) -> Result<(), CliError> {
+pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
     if dev.info().reset_blocked.contains(Capability::PIV) {
-        return Err(CliError(
+        return Err(anyhow!(
             "Cannot perform PIV reset when FIDO is configured, \
              use 'ykman config reset' for full factory reset."
                 .to_string(),
@@ -958,7 +953,7 @@ pub fn run_reset(
     if !force {
         eprintln!("WARNING! This will delete all stored PIV data and restore factory settings.");
         if !confirm("Proceed?") {
-            return Err(CliError("Aborted.".into()));
+            return Err(anyhow!("Aborted."));
         }
     }
     let mut session = open_session(dev, scp_params)?;
@@ -973,7 +968,7 @@ pub fn run_reset(
 
     session
         .reset()
-        .map_err(|e| CliError(format!("Failed to reset PIV: {e}")))?;
+        .map_err(|e| anyhow!("Failed to reset PIV: {e}"))?;
     eprintln!("PIV application has been reset.");
     Ok(())
 }
@@ -983,7 +978,7 @@ pub fn run_change_pin(
     scp_params: &ScpParams,
     pin: Option<&str>,
     new_pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let old = match pin {
         Some(p) => to_piv_pin(p, "PIN")?,
         None => crate::util::prompt_secret("Enter the current PIN")
@@ -995,14 +990,14 @@ pub fn run_change_pin(
     };
 
     if new.len() < 6 || new.len() > 8 {
-        return Err(CliError("PIN must be 6-8 characters.".into()));
+        return Err(anyhow!("PIN must be 6-8 characters."));
     }
     let new = to_piv_pin(&new, "PIN")?;
 
     let mut session = open_session(dev, scp_params)?;
     session
         .change_pin(&old, &new)
-        .map_err(|e| CliError(format!("Failed to change PIN: {e}")))?;
+        .map_err(|e| anyhow!("Failed to change PIN: {e}"))?;
     eprintln!("PIN changed.");
     Ok(())
 }
@@ -1012,7 +1007,7 @@ pub fn run_change_puk(
     scp_params: &ScpParams,
     puk: Option<&str>,
     new_puk: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let old = match puk {
         Some(p) => to_piv_pin(p, "PUK")?,
         None => crate::util::prompt_secret("Enter the current PUK")
@@ -1024,14 +1019,14 @@ pub fn run_change_puk(
     };
 
     if new.len() < 6 || new.len() > 8 {
-        return Err(CliError("PUK must be 6-8 characters.".into()));
+        return Err(anyhow!("PUK must be 6-8 characters."));
     }
     let new = to_piv_pin(&new, "PUK")?;
 
     let mut session = open_session(dev, scp_params)?;
     session
         .change_puk(&old, &new)
-        .map_err(|e| CliError(format!("Failed to change PUK: {e}")))?;
+        .map_err(|e| anyhow!("Failed to change PUK: {e}"))?;
     eprintln!("PUK changed.");
     Ok(())
 }
@@ -1041,7 +1036,7 @@ pub fn run_unblock_pin(
     scp_params: &ScpParams,
     puk: Option<&str>,
     new_pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let puk = match puk {
         Some(p) => to_piv_pin(p, "PUK")?,
         None => crate::util::prompt_secret("Enter the PUK").and_then(|p| to_piv_pin(&p, "PUK"))?,
@@ -1052,14 +1047,14 @@ pub fn run_unblock_pin(
     };
 
     if new.len() < 6 || new.len() > 8 {
-        return Err(CliError("New PIN must be 6-8 characters.".into()));
+        return Err(anyhow!("New PIN must be 6-8 characters."));
     }
     let new = to_piv_pin(&new, "PIN")?;
 
     let mut session = open_session(dev, scp_params)?;
     session
         .unblock_pin(&puk, &new)
-        .map_err(|e| CliError(format!("Failed to unblock PIN: {e}")))?;
+        .map_err(|e| anyhow!("Failed to unblock PIN: {e}"))?;
     eprintln!("PIN unblocked.");
     Ok(())
 }
@@ -1072,13 +1067,13 @@ pub fn run_set_retries(
     mgmt_key: Option<&str>,
     pin: Option<&str>,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     if !force
         && !confirm(&format!(
             "Set PIN retries to {pin_retries} and PUK retries to {puk_retries}? This will reset PIN and PUK to defaults."
         ))
     {
-        return Err(CliError("Aborted.".into()));
+        return Err(anyhow!("Aborted."));
     }
 
     let mut session = open_session(dev, scp_params)?;
@@ -1088,7 +1083,7 @@ pub fn run_set_retries(
     }
     session
         .set_pin_attempts(pin_retries, puk_retries)
-        .map_err(|e| CliError(format!("Failed to set retries: {e}")))?;
+        .map_err(|e| anyhow!("Failed to set retries: {e}"))?;
     eprintln!("PIN and PUK retry counts set.");
     Ok(())
 }
@@ -1104,35 +1099,35 @@ pub fn run_change_management_key(
     force: bool,
     pin: Option<&str>,
     protect: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let key_type: ManagementKeyType = algorithm.into();
     let key_len = key_type.key_len();
 
     let new_key = if generate {
         let mut k = vec![0u8; key_len];
-        getrandom::fill(&mut k).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut k).map_err(|e| anyhow!("Failed to generate: {e}"))?;
         k
     } else if let Some(k) = new_mgmt_key {
         let bytes = parse_management_key(k)?;
         if bytes.len() != key_len {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "Management key must be {key_len} bytes for {key_type}."
-            )));
+            ));
         }
         bytes
     } else {
         let input = crate::util::prompt_new_secret("New management key (hex)")?;
         let bytes = parse_management_key(&input)?;
         if bytes.len() != key_len {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "Management key must be {key_len} bytes for {key_type}."
-            )));
+            ));
         }
         bytes
     };
 
     if !force && !confirm("Change management key?") {
-        return Err(CliError("Aborted.".into()));
+        return Err(anyhow!("Aborted."));
     }
 
     let mut session = open_session(dev, scp_params)?;
@@ -1141,7 +1136,7 @@ pub fn run_change_management_key(
         ensure_pin(&mut session, pin)?;
     }
     pivman_set_mgm_key(&mut session, key_type, &new_key, touch, protect)
-        .map_err(|e| CliError(format!("Failed to set management key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to set management key: {e}"))?;
 
     if generate {
         eprintln!("Management key set: {}", hex::encode(&new_key));
@@ -1162,7 +1157,7 @@ pub fn run_keys_generate(
     mgmt_key: Option<&str>,
     pin: Option<&str>,
     format: CliFormat,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot = parse_slot(slot)?;
     let key_type: KeyType = algorithm.into();
     let pp: PinPolicy = pin_policy.into();
@@ -1176,11 +1171,11 @@ pub fn run_keys_generate(
 
     let public_key = session
         .generate_key(slot, key_type, pp, tp)
-        .map_err(|e| CliError(format!("Failed to generate key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to generate key: {e}"))?;
 
     let spki_der = public_key
         .to_spki()
-        .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to encode public key: {e}"))?;
 
     match format {
         CliFormat::Der => {
@@ -1188,10 +1183,10 @@ pub fn run_keys_generate(
         }
         CliFormat::Pem => {
             let spki = SubjectPublicKeyInfoOwned::from_der(&spki_der)
-                .map_err(|e| CliError(format!("Failed to parse SPKI: {e}")))?;
+                .map_err(|e| anyhow!("Failed to parse SPKI: {e}"))?;
             let pem = spki
                 .to_pem(LineEnding::LF)
-                .map_err(|e| CliError(format!("Failed to encode PEM: {e}")))?;
+                .map_err(|e| anyhow!("Failed to encode PEM: {e}"))?;
             write_file_or_stdout(output, pem.as_bytes())?;
         }
     }
@@ -1210,7 +1205,7 @@ pub fn run_keys_import(
     mgmt_key: Option<&str>,
     pin: Option<&str>,
     password: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot = parse_slot(slot)?;
     let pp: PinPolicy = pin_policy.into();
     let tp: TouchPolicy = touch_policy.into();
@@ -1221,7 +1216,7 @@ pub fn run_keys_import(
 
     // Parse the private key (auto-detects algorithm from PKCS#8)
     let private_key = PrivateKey::from_pkcs8(&der)
-        .map_err(|_| CliError("Could not parse private key from file.".into()))?;
+        .map_err(|_| anyhow!("Could not parse private key from file."))?;
 
     let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
@@ -1231,22 +1226,18 @@ pub fn run_keys_import(
 
     session
         .put_key(slot, &private_key, pp, tp)
-        .map_err(|e| CliError(format!("Failed to import key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to import key: {e}"))?;
 
     eprintln!("Private key imported to slot {slot}.");
     Ok(())
 }
 
-pub fn run_keys_info(
-    dev: &dyn YubiKeyDevice,
-    scp_params: &ScpParams,
-    slot: &str,
-) -> Result<(), CliError> {
+pub fn run_keys_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, slot: &str) -> Result<()> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
     let meta = session
         .get_slot_metadata(slot)
-        .map_err(|e| CliError(format!("Failed to get slot metadata: {e}")))?;
+        .map_err(|e| anyhow!("Failed to get slot metadata: {e}"))?;
 
     println!("Slot: {slot}");
     println!("Algorithm: {:?}", meta.key_type);
@@ -1269,12 +1260,12 @@ pub fn run_keys_attest(
     slot: &str,
     output: &str,
     format: CliFormat,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
     let cert_der = session
         .attest_key(slot)
-        .map_err(|e| CliError(format!("Failed to attest key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to attest key: {e}"))?;
 
     write_cert_file(output, &cert_der, format)?;
     eprintln!("Attestation certificate written to {output}.");
@@ -1289,7 +1280,7 @@ pub fn run_keys_export(
     format: CliFormat,
     verify: bool,
     pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
 
@@ -1298,20 +1289,20 @@ pub fn run_keys_export(
         let der = meta
             .public_key
             .to_spki()
-            .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
+            .map_err(|e| anyhow!("Failed to encode public key: {e}"))?;
         (der, false)
     } else {
         // Fall back to reading public key from stored certificate
         let cert_der = session
             .get_certificate(slot)
-            .map_err(|_| CliError(format!("Unable to export public key from slot {slot}.")))?;
+            .map_err(|_| anyhow!("Unable to export public key from slot {slot}."))?;
         let cert = Certificate::from_der(&cert_der)
-            .map_err(|e| CliError(format!("Failed to parse certificate: {e}")))?;
+            .map_err(|e| anyhow!("Failed to parse certificate: {e}"))?;
         let spki = cert
             .tbs_certificate
             .subject_public_key_info
             .to_der()
-            .map_err(|e| CliError(format!("Failed to encode SPKI: {e}")))?;
+            .map_err(|e| anyhow!("Failed to encode SPKI: {e}"))?;
         (spki, true)
     };
 
@@ -1325,10 +1316,10 @@ pub fn run_keys_export(
         CliFormat::Der => write_file_or_stdout(output, &spki_der)?,
         CliFormat::Pem => {
             let spki = SubjectPublicKeyInfoOwned::from_der(&spki_der)
-                .map_err(|e| CliError(format!("Failed to parse SPKI: {e}")))?;
+                .map_err(|e| anyhow!("Failed to parse SPKI: {e}"))?;
             let pem = spki
                 .to_pem(LineEnding::LF)
-                .map_err(|e| CliError(format!("Failed to encode PEM: {e}")))?;
+                .map_err(|e| anyhow!("Failed to encode PEM: {e}"))?;
             write_file_or_stdout(output, pem.as_bytes())?;
         }
     }
@@ -1343,7 +1334,7 @@ pub fn run_keys_move(
     dest: &str,
     mgmt_key: Option<&str>,
     pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let from = parse_slot(source)?;
     let to = parse_slot(dest)?;
     let mut session = open_session(dev, scp_params)?;
@@ -1353,7 +1344,7 @@ pub fn run_keys_move(
     }
     session
         .move_key(from, to)
-        .map_err(|e| CliError(format!("Failed to move key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to move key: {e}"))?;
     println!("Key moved from {from} to {to}.");
     Ok(())
 }
@@ -1364,7 +1355,7 @@ pub fn run_keys_delete(
     slot: &str,
     mgmt_key: Option<&str>,
     pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
@@ -1373,7 +1364,7 @@ pub fn run_keys_delete(
     }
     session
         .delete_key(slot)
-        .map_err(|e| CliError(format!("Failed to delete key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to delete key: {e}"))?;
     eprintln!("Key in slot {slot} deleted.");
     Ok(())
 }
@@ -1384,12 +1375,12 @@ pub fn run_certificates_export(
     slot: &str,
     output: &str,
     format: CliFormat,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
     let cert_der = session
         .get_certificate(slot)
-        .map_err(|e| CliError(format!("Failed to get certificate: {e}")))?;
+        .map_err(|e| anyhow!("Failed to get certificate: {e}"))?;
 
     write_cert_file(output, &cert_der, format)?;
     eprintln!("Certificate exported to {output}.");
@@ -1407,7 +1398,7 @@ pub fn run_certificates_import(
     update_chuid: bool,
     password: Option<&str>,
     verify: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot = parse_slot(slot)?;
 
     let data = read_file_or_stdin(cert_file)?;
@@ -1422,19 +1413,19 @@ pub fn run_certificates_import(
 
     if verify {
         // Extract the public key from the certificate and check it matches the slot's private key
-        let cert = Certificate::from_der(&der)
-            .map_err(|e| CliError(format!("Failed to parse certificate: {e}")))?;
+        let cert =
+            Certificate::from_der(&der).map_err(|e| anyhow!("Failed to parse certificate: {e}"))?;
         let spki_der = cert
             .tbs_certificate
             .subject_public_key_info
             .to_der()
-            .map_err(|e| CliError(format!("Failed to encode SPKI: {e}")))?;
+            .map_err(|e| anyhow!("Failed to encode SPKI: {e}"))?;
         check_key_match(&mut session, slot, &spki_der, pin)?;
     }
 
     session
         .put_certificate(slot, &der, compress)
-        .map_err(|e| CliError(format!("Failed to import certificate: {e}")))?;
+        .map_err(|e| anyhow!("Failed to import certificate: {e}"))?;
     eprintln!("Certificate imported to slot {slot}.");
 
     if update_chuid {
@@ -1450,7 +1441,7 @@ pub fn run_certificates_delete(
     mgmt_key: Option<&str>,
     pin: Option<&str>,
     update_chuid: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
@@ -1459,7 +1450,7 @@ pub fn run_certificates_delete(
     }
     session
         .delete_certificate(slot)
-        .map_err(|e| CliError(format!("Failed to delete certificate: {e}")))?;
+        .map_err(|e| anyhow!("Failed to delete certificate: {e}"))?;
     eprintln!("Certificate in slot {slot} deleted.");
 
     if update_chuid {
@@ -1474,7 +1465,7 @@ pub fn run_objects_export(
     object: &str,
     output: &str,
     pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let obj_id = parse_object_id(object)?;
     let mut session = open_session(dev, scp_params)?;
     let data = verify_pin_if_needed(&mut session, pin, |s| s.get_object(obj_id))?;
@@ -1493,7 +1484,7 @@ pub fn run_objects_import(
     data_file: &str,
     mgmt_key: Option<&str>,
     pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let obj_id = parse_object_id(object)?;
     let data = read_file_or_stdin(data_file)?;
 
@@ -1504,7 +1495,7 @@ pub fn run_objects_import(
     }
     session
         .put_object(obj_id, Some(&data))
-        .map_err(|e| CliError(format!("Failed to write object: {e}")))?;
+        .map_err(|e| anyhow!("Failed to write object: {e}"))?;
     eprintln!("Object imported.");
     Ok(())
 }
@@ -1512,14 +1503,14 @@ pub fn run_objects_import(
 /// Generate a new CHUID and write it to the device.
 fn generate_chuid(
     session: &mut PivSession<impl yubikit::smartcard::SmartCardConnection>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let mut chuid = Vec::new();
     chuid.extend_from_slice(&[0x30, 0x19]);
     chuid.extend_from_slice(&[0x9E; 25]);
     chuid.push(0x34);
     chuid.push(0x10);
     let mut guid = [0u8; 16];
-    getrandom::fill(&mut guid).map_err(|e| CliError(format!("RNG error: {e}")))?;
+    getrandom::fill(&mut guid).map_err(|e| anyhow!("RNG error: {e}"))?;
     guid[6] = (guid[6] & 0x0f) | 0x40;
     guid[8] = (guid[8] & 0x3f) | 0x80;
     chuid.extend_from_slice(&guid);
@@ -1533,7 +1524,7 @@ fn generate_chuid(
 
     session
         .put_object(ObjectId::Chuid, Some(&chuid))
-        .map_err(|e| CliError(format!("Failed to update CHUID: {e}")))?;
+        .map_err(|e| anyhow!("Failed to update CHUID: {e}"))?;
     Ok(())
 }
 
@@ -1543,7 +1534,7 @@ pub fn run_objects_generate(
     object: &str,
     management_key: Option<&str>,
     pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, management_key, pin)?;
     if !pin_verified {
@@ -1561,7 +1552,7 @@ pub fn run_objects_generate(
             chuid.push(0x34);
             chuid.push(0x10);
             let mut guid = [0u8; 16];
-            getrandom::fill(&mut guid).map_err(|e| CliError(format!("RNG error: {e}")))?;
+            getrandom::fill(&mut guid).map_err(|e| anyhow!("RNG error: {e}"))?;
             guid[6] = (guid[6] & 0x0f) | 0x40;
             guid[8] = (guid[8] & 0x3f) | 0x80;
             chuid.extend_from_slice(&guid);
@@ -1578,7 +1569,7 @@ pub fn run_objects_generate(
 
             session
                 .put_object(ObjectId::Chuid, Some(&chuid))
-                .map_err(|e| CliError(format!("Failed to write CHUID: {e}")))?;
+                .map_err(|e| anyhow!("Failed to write CHUID: {e}"))?;
             eprintln!("CHUID generated.");
         }
         "CCC" => {
@@ -1588,7 +1579,7 @@ pub fn run_objects_generate(
             ccc.push(0xF0);
             ccc.push(0x15);
             let mut card_id = [0u8; 21];
-            getrandom::fill(&mut card_id).map_err(|e| CliError(format!("RNG error: {e}")))?;
+            getrandom::fill(&mut card_id).map_err(|e| anyhow!("RNG error: {e}"))?;
             ccc.extend_from_slice(&card_id);
             // Capability Container version number (tag 0xF1)
             ccc.extend_from_slice(&[0xF1, 0x01, 0x21]);
@@ -1608,13 +1599,11 @@ pub fn run_objects_generate(
 
             session
                 .put_object(ObjectId::Capability, Some(&ccc))
-                .map_err(|e| CliError(format!("Failed to write CCC: {e}")))?;
+                .map_err(|e| anyhow!("Failed to write CCC: {e}"))?;
             eprintln!("CCC generated.");
         }
         other => {
-            return Err(CliError(format!(
-                "Unknown object type: {other}. Use CHUID or CCC."
-            )));
+            return Err(anyhow!("Unknown object type: {other}. Use CHUID or CCC."));
         }
     }
     Ok(())
@@ -1631,7 +1620,7 @@ pub fn run_certificates_generate(
     pin: Option<&str>,
     public_key_file: Option<&str>,
     update_chuid: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot = parse_slot(slot)?;
     let hash_alg: HashAlgorithm = hash_algorithm.into();
 
@@ -1645,40 +1634,39 @@ pub fn run_certificates_generate(
 
     match key_type {
         KeyType::X25519 | KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "{key_type} keys cannot sign certificates. \
                  Use a signing key type (e.g. ECC, RSA, Ed25519, or ML-DSA) instead."
-            )));
+            ));
         }
         _ => {}
     }
 
     let spki = SubjectPublicKeyInfoOwned::from_der(&spki_der)
-        .map_err(|e| CliError(format!("Failed to parse SPKI: {e}")))?;
-    let subject_name =
-        Name::from_str(subject).map_err(|e| CliError(format!("Invalid subject DN: {e}")))?;
+        .map_err(|e| anyhow!("Failed to parse SPKI: {e}"))?;
+    let subject_name = Name::from_str(subject).map_err(|e| anyhow!("Invalid subject DN: {e}"))?;
 
     let serial = random_serial_number()?;
     let validity = Validity::from_now(Duration::from_secs(u64::from(valid_days) * 86400))
-        .map_err(|e| CliError(format!("Invalid validity period: {e}")))?;
+        .map_err(|e| anyhow!("Invalid validity period: {e}"))?;
 
     let cert_der = {
         let signer = PivSigner::new(&mut session, slot, key_type, hash_alg, &spki_der);
         let builder =
             CertificateBuilder::new(Profile::Root, serial, validity, subject_name, spki, &signer)
-                .map_err(|e| CliError(format!("Failed to create certificate builder: {e}")))?;
+                .map_err(|e| anyhow!("Failed to create certificate builder: {e}"))?;
 
         let cert = builder
             .build::<PivSignature>()
-            .map_err(|e| CliError(format!("Failed to build certificate: {e}")))?;
+            .map_err(|e| anyhow!("Failed to build certificate: {e}"))?;
 
         cert.to_der()
-            .map_err(|e| CliError(format!("Failed to encode certificate: {e}")))?
+            .map_err(|e| anyhow!("Failed to encode certificate: {e}"))?
     };
 
     session
         .put_certificate(slot, &cert_der, false)
-        .map_err(|e| CliError(format!("Failed to store certificate: {e}")))?;
+        .map_err(|e| anyhow!("Failed to store certificate: {e}"))?;
 
     eprintln!("Certificate generated and stored in slot {slot:?}.");
 
@@ -1697,7 +1685,7 @@ pub fn run_certificates_request(
     output: &str,
     pin: Option<&str>,
     public_key_file: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot = parse_slot(slot)?;
     let hash_alg: HashAlgorithm = hash_algorithm.into();
 
@@ -1708,28 +1696,27 @@ pub fn run_certificates_request(
 
     match key_type {
         KeyType::X25519 | KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "{key_type} keys cannot sign certificate requests. \
                  Use a signing key type (e.g. ECC, RSA, Ed25519, or ML-DSA) instead."
-            )));
+            ));
         }
         _ => {}
     }
 
-    let subject_name =
-        Name::from_str(subject).map_err(|e| CliError(format!("Invalid subject DN: {e}")))?;
+    let subject_name = Name::from_str(subject).map_err(|e| anyhow!("Invalid subject DN: {e}"))?;
 
     let signer = PivSigner::new(&mut session, slot, key_type, hash_alg, &spki_der);
     let builder = RequestBuilder::new(subject_name, &signer)
-        .map_err(|e| CliError(format!("Failed to create CSR builder: {e}")))?;
+        .map_err(|e| anyhow!("Failed to create CSR builder: {e}"))?;
 
     let csr = builder
         .build::<PivSignature>()
-        .map_err(|e| CliError(format!("Failed to build CSR: {e}")))?;
+        .map_err(|e| anyhow!("Failed to build CSR: {e}"))?;
 
     let pem = csr
         .to_pem(LineEnding::LF)
-        .map_err(|e| CliError(format!("Failed to encode CSR PEM: {e}")))?;
+        .map_err(|e| anyhow!("Failed to encode CSR PEM: {e}"))?;
     write_file_or_stdout(output, pem.as_bytes())?;
     if output != "-" {
         eprintln!("CSR written to {output}.");
@@ -1749,7 +1736,7 @@ fn resolve_public_key(
     session: &mut PivSession<impl yubikit::smartcard::SmartCardConnection>,
     slot: Slot,
     public_key_file: Option<&str>,
-) -> Result<(KeyType, Vec<u8>), CliError> {
+) -> Result<(KeyType, Vec<u8>)> {
     if let Some(pk_file) = public_key_file {
         let data = read_file_or_stdin(pk_file)?;
         let der = if let Ok(text) = std::str::from_utf8(&data) {
@@ -1762,34 +1749,32 @@ fn resolve_public_key(
             data
         };
         let pk = PublicKey::from_spki(&der)
-            .map_err(|_| CliError("Could not determine key type from public key file.".into()))?;
+            .map_err(|_| anyhow!("Could not determine key type from public key file."))?;
         let kt = KeyType::from_public_key(&pk)
-            .map_err(|_| CliError("Could not determine key type from public key file.".into()))?;
+            .map_err(|_| anyhow!("Could not determine key type from public key file."))?;
         Ok((kt, der))
     } else {
-        let metadata = session.get_slot_metadata(slot).map_err(|e| {
-            CliError(format!(
-                "Failed to get slot metadata (is a key present?): {e}"
-            ))
-        })?;
+        let metadata = session
+            .get_slot_metadata(slot)
+            .map_err(|e| anyhow!("Failed to get slot metadata (is a key present?): {e}"))?;
         let kt = metadata.key_type;
         let der = metadata
             .public_key
             .to_spki()
-            .map_err(|e| CliError(format!("Failed to encode public key: {e}")))?;
+            .map_err(|e| anyhow!("Failed to encode public key: {e}"))?;
         Ok((kt, der))
     }
 }
 
-fn random_serial_number() -> Result<SerialNumber, CliError> {
+fn random_serial_number() -> Result<SerialNumber> {
     let mut buf = [0u8; 16];
-    getrandom::fill(&mut buf).map_err(|e| CliError(format!("RNG error: {e}")))?;
+    getrandom::fill(&mut buf).map_err(|e| anyhow!("RNG error: {e}"))?;
     // Ensure positive (clear high bit)
     buf[0] &= 0x7F;
     if buf[0] == 0 {
         buf[0] = 0x01;
     }
-    SerialNumber::new(&buf).map_err(|e| CliError(format!("Invalid serial number: {e}")))
+    SerialNumber::new(&buf).map_err(|e| anyhow!("Invalid serial number: {e}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1799,7 +1784,7 @@ fn random_serial_number() -> Result<SerialNumber, CliError> {
 /// Attempt to decrypt/parse a private key from raw data, handling
 /// PEM (plain or ENCRYPTED), PKCS#12, and raw DER. If the key is encrypted
 /// and no password is provided, the user is prompted interactively.
-fn decrypt_private_key_data(data: &[u8], password: Option<&str>) -> Result<Vec<u8>, CliError> {
+fn decrypt_private_key_data(data: &[u8], password: Option<&str>) -> Result<Vec<u8>> {
     if let Ok(text) = std::str::from_utf8(data)
         && text.contains("-----BEGIN")
     {
@@ -1828,21 +1813,21 @@ fn decrypt_private_key_data(data: &[u8], password: Option<&str>) -> Result<Vec<u
 }
 
 /// Decrypt an encrypted PKCS#8 PEM private key.
-fn decrypt_pem_private_key(pem_text: &str, password: &str) -> Result<Vec<u8>, CliError> {
+fn decrypt_pem_private_key(pem_text: &str, password: &str) -> Result<Vec<u8>> {
     use pkcs8::EncryptedPrivateKeyInfo;
 
     let der = pem_decode(pem_text)?;
     let enc_key = EncryptedPrivateKeyInfo::try_from(der.as_slice())
-        .map_err(|e| CliError(format!("Failed to parse encrypted key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to parse encrypted key: {e}"))?;
     let dec_key = enc_key
         .decrypt(password)
-        .map_err(|_| CliError("Wrong password for encrypted key.".into()))?;
+        .map_err(|_| anyhow!("Wrong password for encrypted key."))?;
     Ok(dec_key.as_bytes().to_vec())
 }
 
 /// Attempt to parse a certificate from raw data, supporting password-protected
 /// PKCS#12 files. For PEM and DER certs, the password is ignored.
-fn decrypt_certificate_data(data: &[u8], password: Option<&str>) -> Result<Vec<u8>, CliError> {
+fn decrypt_certificate_data(data: &[u8], password: Option<&str>) -> Result<Vec<u8>> {
     if let Ok(text) = std::str::from_utf8(data)
         && text.contains("-----BEGIN")
     {
@@ -1883,23 +1868,23 @@ fn is_pkcs12(data: &[u8]) -> bool {
 }
 
 /// Extract a private key from PKCS#12 data.
-fn extract_private_key_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8>, CliError> {
+fn extract_private_key_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8>> {
     use p12_keystore::KeyStore;
 
     let ks = KeyStore::from_pkcs12(data, password)
-        .map_err(|e| CliError(format!("Failed to parse PKCS#12 file: {e}")))?;
+        .map_err(|e| anyhow!("Failed to parse PKCS#12 file: {e}"))?;
     let (_, chain) = ks
         .private_key_chain()
-        .ok_or_else(|| CliError("No private key found in PKCS#12 file.".into()))?;
+        .ok_or_else(|| anyhow!("No private key found in PKCS#12 file."))?;
     Ok(chain.key().to_vec())
 }
 
 /// Extract a certificate from PKCS#12 data.
-fn extract_certificate_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8>, CliError> {
+fn extract_certificate_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8>> {
     use p12_keystore::{KeyStore, KeyStoreEntry};
 
     let ks = KeyStore::from_pkcs12(data, password)
-        .map_err(|e| CliError(format!("Failed to parse PKCS#12 file: {e}")))?;
+        .map_err(|e| anyhow!("Failed to parse PKCS#12 file: {e}"))?;
 
     // Try cert from a key chain first, then standalone certs
     for (_, entry) in ks.entries() {
@@ -1915,7 +1900,7 @@ fn extract_certificate_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8
             _ => {}
         }
     }
-    Err(CliError("No certificate found in PKCS#12 file.".into()))
+    Err(anyhow!("No certificate found in PKCS#12 file."))
 }
 
 /// Verify that a public key (as SPKI DER) matches the private key in a PIV slot
@@ -1925,11 +1910,11 @@ fn check_key_match<C: yubikit::smartcard::SmartCardConnection>(
     slot: Slot,
     spki_der: &[u8],
     pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     // Determine key type from the metadata or SPKI
     let meta = session
         .get_slot_metadata(slot)
-        .map_err(|_| CliError(format!("No private key in slot {slot}.")))?;
+        .map_err(|_| anyhow!("No private key in slot {slot}."))?;
 
     let key_type = meta.key_type;
 
@@ -1950,14 +1935,14 @@ fn check_key_match<C: yubikit::smartcard::SmartCardConnection>(
         }
         KeyType::Ed25519 => test_message.to_vec(),
         KeyType::X25519 => {
-            return Err(CliError("X25519 keys cannot be used for signing.".into()));
+            return Err(anyhow!("X25519 keys cannot be used for signing."));
         }
         KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => test_message.to_vec(),
         KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
-            return Err(CliError("ML-KEM keys cannot be used for signing.".into()));
+            return Err(anyhow!("ML-KEM keys cannot be used for signing."));
         }
         _ => {
-            return Err(CliError(format!("Unsupported key type: {key_type:?}")));
+            return Err(anyhow!("Unsupported key type: {key_type:?}"));
         }
     };
 
@@ -1966,9 +1951,9 @@ fn check_key_match<C: yubikit::smartcard::SmartCardConnection>(
     // Verify signature with the public key
     let verified = verify_signature(key_type, spki_der, test_message, &signature);
     if !verified {
-        return Err(CliError(format!(
+        return Err(anyhow!(
             "Public key does not match the private key in slot {slot}."
-        )));
+        ));
     }
     Ok(())
 }
@@ -2038,25 +2023,25 @@ fn extract_ec_pubkey_bytes_from_spki(spki_der: &[u8]) -> Vec<u8> {
 // PEM encoding / decoding
 // ---------------------------------------------------------------------------
 
-fn pem_decode(text: &str) -> Result<Vec<u8>, CliError> {
+fn pem_decode(text: &str) -> Result<Vec<u8>> {
     // Generic PEM decode: extract first PEM block regardless of label
     let doc = der::Document::from_pem(text)
         .map(|(_, doc)| doc)
-        .map_err(|e| CliError(format!("Invalid PEM data: {e}")))?;
+        .map_err(|e| anyhow!("Invalid PEM data: {e}"))?;
     Ok(doc.as_bytes().to_vec())
 }
 
-fn write_cert_file(output: &str, cert_der: &[u8], format: CliFormat) -> Result<(), CliError> {
+fn write_cert_file(output: &str, cert_der: &[u8], format: CliFormat) -> Result<()> {
     match format {
         CliFormat::Der => {
             write_file_or_stdout(output, cert_der)?;
         }
         CliFormat::Pem => {
             let cert = Certificate::from_der(cert_der)
-                .map_err(|e| CliError(format!("Failed to parse certificate: {e}")))?;
+                .map_err(|e| anyhow!("Failed to parse certificate: {e}"))?;
             let pem = cert
                 .to_pem(LineEnding::LF)
-                .map_err(|e| CliError(format!("Failed to encode PEM: {e}")))?;
+                .map_err(|e| anyhow!("Failed to encode PEM: {e}"))?;
             write_file_or_stdout(output, pem.as_bytes())?;
         }
     }

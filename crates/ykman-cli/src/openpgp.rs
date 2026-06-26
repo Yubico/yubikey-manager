@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
@@ -6,7 +7,7 @@ use yubikit::openpgp::{KeyRef, KeyStatus, OpenPgpPin, OpenPgpSession, PinPolicy,
 use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
 use crate::scp::ScpParams;
 use crate::util::{
-    CliError, confirm, format_smartcard_connection_error, open_smartcard_session, print_table,
+    confirm, format_smartcard_connection_error, open_smartcard_session, print_table,
     read_file_or_stdin, write_file_or_stdout,
 };
 
@@ -153,7 +154,7 @@ pub enum OpenpgpCertAction {
 }
 
 impl OpenpgpAction {
-    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
         match self {
             Self::Info => run_info(dev, scp_params),
             Self::Reset { force } => run_reset(dev, scp_params, force),
@@ -253,7 +254,7 @@ impl OpenpgpAction {
 fn open_session(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
-) -> Result<OpenPgpSession<Box<dyn yubikit::smartcard::SmartCardConnection + Send>>, CliError> {
+) -> Result<OpenPgpSession<Box<dyn yubikit::smartcard::SmartCardConnection + Send>>> {
     open_smartcard_session(
         dev,
         scp_params,
@@ -264,21 +265,21 @@ fn open_session(
     )
 }
 
-fn ensure_admin_pin(admin_pin: Option<&str>) -> Result<OpenPgpPin, CliError> {
+fn ensure_admin_pin(admin_pin: Option<&str>) -> Result<OpenPgpPin> {
     match admin_pin {
         Some(p) => Ok(OpenPgpPin::new(p)),
         None => crate::util::prompt_secret("Enter Admin PIN").map(|p| OpenPgpPin::new(&p)),
     }
 }
 
-fn ensure_pin(pin: Option<&str>) -> Result<OpenPgpPin, CliError> {
+fn ensure_pin(pin: Option<&str>) -> Result<OpenPgpPin> {
     match pin {
         Some(p) => Ok(OpenPgpPin::new(p)),
         None => crate::util::prompt_secret("Enter PIN").map(|p| OpenPgpPin::new(&p)),
     }
 }
 
-pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     let mut session = open_session(dev, scp_params)?;
 
     let aid = session.aid().clone();
@@ -399,26 +400,21 @@ fn format_uif(uif: Uif) -> String {
     .to_string()
 }
 
-pub fn run_reset(
-    dev: &dyn YubiKeyDevice,
-    scp_params: &ScpParams,
-    force: bool,
-) -> Result<(), CliError> {
+pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
     if !force {
         eprintln!(
             "WARNING! This will delete all stored OpenPGP keys and restore factory settings."
         );
         if !confirm("Proceed?") {
-            return Err(CliError("Aborted.".into()));
+            return Err(anyhow!("Aborted."));
         }
     }
 
-    let safe_reset = || -> Result<(), CliError> {
+    let safe_reset = || -> Result<()> {
         let conn = dev
             .open_smartcard()
             .map_err(|e| format_smartcard_connection_error("OpenPGP", e))?;
-        yubikit::openpgp::safe_reset(conn)
-            .map_err(|e| CliError(format!("Failed to reset OpenPGP: {e}")))
+        yubikit::openpgp::safe_reset(conn).map_err(|e| anyhow!("Failed to reset OpenPGP: {e}"))
     };
 
     match open_session(dev, scp_params) {
@@ -427,7 +423,9 @@ pub fn run_reset(
                 safe_reset()?;
             }
         }
-        Err(e) if e.0 == "Unable to manage OpenPGP over NFC without SCP" => return Err(e),
+        Err(e) if e.to_string() == "Unable to manage OpenPGP over NFC without SCP" => {
+            return Err(e);
+        }
         Err(_) => safe_reset()?,
     }
 
@@ -443,22 +441,22 @@ pub fn run_set_retries(
     admin_pin_retries: u8,
     admin_pin: Option<&str>,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     if !force
         && !confirm(&format!(
             "Set PIN retries to {pin_retries}/{reset_code_retries}/{admin_pin_retries}?"
         ))
     {
-        return Err(CliError("Aborted.".into()));
+        return Err(anyhow!("Aborted."));
     }
     let mut session = open_session(dev, scp_params)?;
     let ap = ensure_admin_pin(admin_pin)?;
     session
         .verify_admin(&ap)
-        .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
+        .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
     session
         .set_pin_attempts(pin_retries, reset_code_retries, admin_pin_retries)
-        .map_err(|e| CliError(format!("Failed to set retries: {e}")))?;
+        .map_err(|e| anyhow!("Failed to set retries: {e}"))?;
     eprintln!("Retry counts set.");
     Ok(())
 }
@@ -468,7 +466,7 @@ pub fn run_change_pin(
     scp_params: &ScpParams,
     pin: Option<&str>,
     new_pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let old = ensure_pin(pin)?;
     let new = match new_pin {
         Some(p) => OpenPgpPin::new(p),
@@ -477,7 +475,7 @@ pub fn run_change_pin(
     let mut session = open_session(dev, scp_params)?;
     session
         .change_pin(&old, &new)
-        .map_err(|e| CliError(format!("Failed to change PIN: {e}")))?;
+        .map_err(|e| anyhow!("Failed to change PIN: {e}"))?;
     eprintln!("PIN changed.");
     Ok(())
 }
@@ -487,7 +485,7 @@ pub fn run_change_admin_pin(
     scp_params: &ScpParams,
     admin_pin: Option<&str>,
     new_admin_pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let old = ensure_admin_pin(admin_pin)?;
     let new = match new_admin_pin {
         Some(p) => OpenPgpPin::new(p),
@@ -496,7 +494,7 @@ pub fn run_change_admin_pin(
     let mut session = open_session(dev, scp_params)?;
     session
         .change_admin(&old, &new)
-        .map_err(|e| CliError(format!("Failed to change Admin PIN: {e}")))?;
+        .map_err(|e| anyhow!("Failed to change Admin PIN: {e}"))?;
     eprintln!("Admin PIN changed.");
     Ok(())
 }
@@ -506,7 +504,7 @@ pub fn run_change_reset_code(
     scp_params: &ScpParams,
     admin_pin: Option<&str>,
     reset_code: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let rc = match reset_code {
         Some(p) => OpenPgpPin::new(p),
         None => crate::util::prompt_new_secret("New reset code").map(|p| OpenPgpPin::new(&p))?,
@@ -515,10 +513,10 @@ pub fn run_change_reset_code(
     let mut session = open_session(dev, scp_params)?;
     session
         .verify_admin(&ap)
-        .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
+        .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
     session
         .set_reset_code(&rc)
-        .map_err(|e| CliError(format!("Failed to set reset code: {e}")))?;
+        .map_err(|e| anyhow!("Failed to set reset code: {e}"))?;
     eprintln!("Reset code set.");
     Ok(())
 }
@@ -529,7 +527,7 @@ pub fn run_unblock_pin(
     admin_pin: Option<&str>,
     reset_code: Option<&str>,
     new_pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let new = match new_pin {
         Some(p) => OpenPgpPin::new(p),
         None => crate::util::prompt_new_secret("New PIN").map(|p| OpenPgpPin::new(&p))?,
@@ -539,12 +537,12 @@ pub fn run_unblock_pin(
         let ap = OpenPgpPin::new(ap);
         session
             .verify_admin(&ap)
-            .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
+            .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
     }
     let reset_code = reset_code.map(OpenPgpPin::new);
     session
         .reset_pin(&new, reset_code.as_ref())
-        .map_err(|e| CliError(format!("Failed to unblock PIN: {e}")))?;
+        .map_err(|e| anyhow!("Failed to unblock PIN: {e}"))?;
     eprintln!("PIN unblocked.");
     Ok(())
 }
@@ -554,16 +552,16 @@ pub fn run_set_signature_policy(
     scp_params: &ScpParams,
     policy: CliOpenpgpPinPolicy,
     admin_pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let pp: PinPolicy = policy.into();
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
     session
         .verify_admin(&ap)
-        .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
+        .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
     session
         .set_signature_pin_policy(pp)
-        .map_err(|e| CliError(format!("Failed to set policy: {e}")))?;
+        .map_err(|e| anyhow!("Failed to set policy: {e}"))?;
     eprintln!("Signature PIN policy set to {pp:?}.");
     Ok(())
 }
@@ -572,13 +570,13 @@ pub fn run_keys_info(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     key: CliKeyRef,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let key_ref: KeyRef = key.into();
     let mut session = open_session(dev, scp_params)?;
 
     let data = session
         .get_application_related_data()
-        .map_err(|e| CliError(format!("Failed to get application data: {e}")))?;
+        .map_err(|e| anyhow!("Failed to get application data: {e}"))?;
     let disc = &data.discretionary;
 
     let status = disc.key_information.get(&key_ref);
@@ -591,10 +589,10 @@ pub fn run_keys_info(
     };
 
     if !has_key {
-        return Err(CliError(format!(
+        return Err(anyhow!(
             "No key stored in slot {}.",
             format_key_ref(key_ref)
-        )));
+        ));
     }
 
     let name = format_key_ref(key_ref);
@@ -668,14 +666,14 @@ pub fn run_keys_set_touch(
     policy: CliUif,
     admin_pin: Option<&str>,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let key_ref: KeyRef = key.into();
     let uif: Uif = policy.into();
 
     if uif.is_fixed() && !force {
         eprintln!("WARNING: Setting a FIXED touch policy cannot be undone without a full reset!");
         if !confirm("Proceed?") {
-            return Err(CliError("Aborted.".into()));
+            return Err(anyhow!("Aborted."));
         }
     }
 
@@ -683,10 +681,10 @@ pub fn run_keys_set_touch(
     let mut session = open_session(dev, scp_params)?;
     session
         .verify_admin(&ap)
-        .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
+        .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
     session
         .set_uif(key_ref, uif)
-        .map_err(|e| CliError(format!("Failed to set touch policy: {e}")))?;
+        .map_err(|e| anyhow!("Failed to set touch policy: {e}"))?;
     eprintln!(
         "Touch policy for {} set to {}.",
         format_key_ref(key_ref),
@@ -701,14 +699,14 @@ pub fn run_keys_import(
     key: CliKeyRef,
     key_file: &str,
     admin_pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let _key_ref: KeyRef = key.into();
     let _data = read_file_or_stdin(key_file)?;
 
     let _ap = ensure_admin_pin(admin_pin)?;
 
-    Err(CliError(
-        "Key import requires parsing private key format. Not yet implemented.".into(),
+    Err(anyhow!(
+        "Key import requires parsing private key format. Not yet implemented."
     ))
 }
 
@@ -719,16 +717,16 @@ pub fn run_keys_attest(
     output: &str,
     format: CliFormat,
     pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let key_ref: KeyRef = key.into();
     let mut session = open_session(dev, scp_params)?;
     let p = ensure_pin(pin)?;
     session
         .verify_pin(&p, false)
-        .map_err(|e| CliError(format!("PIN verification failed: {e}")))?;
+        .map_err(|e| anyhow!("PIN verification failed: {e}"))?;
     let cert_der = session
         .attest_key(key_ref)
-        .map_err(|e| CliError(format!("Failed to attest key: {e}")))?;
+        .map_err(|e| anyhow!("Failed to attest key: {e}"))?;
 
     write_output(output, &cert_der, format, "CERTIFICATE")?;
     eprintln!("Attestation certificate written to {output}.");
@@ -741,12 +739,12 @@ pub fn run_certificates_export(
     key: CliKeyRef,
     output: &str,
     format: CliFormat,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let key_ref: KeyRef = key.into();
     let mut session = open_session(dev, scp_params)?;
     let cert_der = session
         .get_certificate(key_ref)
-        .map_err(|e| CliError(format!("Failed to get certificate: {e}")))?;
+        .map_err(|e| anyhow!("Failed to get certificate: {e}"))?;
 
     write_output(output, &cert_der, format, "CERTIFICATE")?;
     eprintln!("Certificate exported to {output}.");
@@ -759,7 +757,7 @@ pub fn run_certificates_import(
     key: CliKeyRef,
     cert_file: &str,
     admin_pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let key_ref: KeyRef = key.into();
     let data = read_file_or_stdin(cert_file)?;
 
@@ -777,10 +775,10 @@ pub fn run_certificates_import(
     let mut session = open_session(dev, scp_params)?;
     session
         .verify_admin(&ap)
-        .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
+        .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
     session
         .put_certificate(key_ref, &der)
-        .map_err(|e| CliError(format!("Failed to import certificate: {e}")))?;
+        .map_err(|e| anyhow!("Failed to import certificate: {e}"))?;
     eprintln!("Certificate imported.");
     Ok(())
 }
@@ -790,21 +788,21 @@ pub fn run_certificates_delete(
     scp_params: &ScpParams,
     key: CliKeyRef,
     admin_pin: Option<&str>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let key_ref: KeyRef = key.into();
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
     session
         .verify_admin(&ap)
-        .map_err(|e| CliError(format!("Admin PIN verification failed: {e}")))?;
+        .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
     session
         .delete_certificate(key_ref)
-        .map_err(|e| CliError(format!("Failed to delete certificate: {e}")))?;
+        .map_err(|e| anyhow!("Failed to delete certificate: {e}"))?;
     eprintln!("Certificate deleted.");
     Ok(())
 }
 
-fn write_output(path: &str, der: &[u8], format: CliFormat, label: &str) -> Result<(), CliError> {
+fn write_output(path: &str, der: &[u8], format: CliFormat, label: &str) -> Result<()> {
     match format {
         CliFormat::Der => {
             write_file_or_stdout(path, der)?;
@@ -829,7 +827,7 @@ fn pem_encode(label: &str, der: &[u8]) -> String {
     pem
 }
 
-fn pem_decode(text: &str) -> Result<Vec<u8>, CliError> {
+fn pem_decode(text: &str) -> Result<Vec<u8>> {
     use base64::Engine;
     let mut in_block = false;
     let mut b64 = String::new();
@@ -847,5 +845,5 @@ fn pem_decode(text: &str) -> Result<Vec<u8>, CliError> {
     }
     base64::engine::general_purpose::STANDARD
         .decode(&b64)
-        .map_err(|e| CliError(format!("Invalid PEM data: {e}")))
+        .map_err(|e| anyhow!("Invalid PEM data: {e}"))
 }

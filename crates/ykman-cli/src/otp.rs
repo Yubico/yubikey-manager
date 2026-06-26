@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -16,9 +17,7 @@ use crate::cancel;
 use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliKeyboardLayout, CliOtpSlot, CliPacing};
 use crate::keyboard::{self, MODHEX_CHARS};
 use crate::scp::{self, ScpParams};
-use crate::util::{
-    self, CliError, confirm, format_session_error, format_smartcard_connection_error,
-};
+use crate::util::{self, confirm, format_session_error, format_smartcard_connection_error};
 
 pub fn effective_access_code<'a>(
     parent_access_code: &'a Option<String>,
@@ -257,7 +256,7 @@ impl OtpAction {
         dev: &dyn YubiKeyDevice,
         scp_params: &ScpParams,
         parent_access_code: &Option<String>,
-    ) -> Result<(), CliError> {
+    ) -> Result<()> {
         match self {
             Self::Info => run_info(dev, scp_params),
             Self::Swap { force } => run_swap(dev, scp_params, force),
@@ -430,7 +429,7 @@ impl EnterArgs {
 
 /// Trait for operations that can be run on any [`YubiOtpSession`].
 trait YubiOtpOp<R> {
-    fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<R, CliError>;
+    fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<R>;
 }
 
 /// Open an OTP session (preferring HID, falling back to SmartCard) and run `op`.
@@ -438,7 +437,7 @@ fn with_otp_session<F: YubiOtpOp<R>, R>(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     f: F,
-) -> Result<R, CliError> {
+) -> Result<R> {
     let scp_config = scp::resolve_scp(dev, scp_params, Capability::OTP)?;
 
     // If SCP is needed or NFC, must use SmartCard
@@ -461,7 +460,7 @@ fn with_otp_sc<F: YubiOtpOp<R>, R>(
     dev: &dyn YubiKeyDevice,
     scp_config: Option<yubikit::smartcard::ScpKeyParams>,
     f: F,
-) -> Result<R, CliError> {
+) -> Result<R> {
     let conn = dev
         .open_smartcard()
         .map_err(|e| format_smartcard_connection_error("OTP", e))?;
@@ -492,21 +491,19 @@ fn cli_to_keyboard_layout(layout: CliKeyboardLayout) -> keyboard::KeyboardLayout
     }
 }
 
-fn encode_password(password: &str, layout: CliKeyboardLayout) -> Result<Vec<u8>, CliError> {
+fn encode_password(password: &str, layout: CliKeyboardLayout) -> Result<Vec<u8>> {
     let map = keyboard::scancodes(cli_to_keyboard_layout(layout));
     password
         .chars()
         .map(|c| {
-            map.get(&c).copied().ok_or_else(|| {
-                CliError(format!(
-                    "Character '{c}' not supported in {layout:?} layout"
-                ))
-            })
+            map.get(&c)
+                .copied()
+                .ok_or_else(|| anyhow!("Character '{c}' not supported in {layout:?} layout"))
         })
         .collect()
 }
 
-fn generate_static_pw(length: usize, layout: CliKeyboardLayout) -> Result<String, CliError> {
+fn generate_static_pw(length: usize, layout: CliKeyboardLayout) -> Result<String> {
     let chars: Vec<char> = if matches!(layout, CliKeyboardLayout::Modhex) {
         MODHEX_CHARS.chars().collect()
     } else {
@@ -518,29 +515,28 @@ fn generate_static_pw(length: usize, layout: CliKeyboardLayout) -> Result<String
     };
     let mut pw = String::with_capacity(length);
     let mut rand_bytes = vec![0u8; length];
-    getrandom::fill(&mut rand_bytes)
-        .map_err(|e| CliError(format!("Failed to generate random: {e}")))?;
+    getrandom::fill(&mut rand_bytes).map_err(|e| anyhow!("Failed to generate random: {e}"))?;
     for b in rand_bytes {
         pw.push(chars[b as usize % chars.len()]);
     }
     Ok(pw)
 }
 
-fn parse_access_code(s: &str) -> Result<[u8; ACC_CODE_SIZE], CliError> {
-    let bytes = hex::decode(s).map_err(|_| CliError("Access code must be hex-encoded.".into()))?;
+fn parse_access_code(s: &str) -> Result<[u8; ACC_CODE_SIZE]> {
+    let bytes = hex::decode(s).map_err(|_| anyhow!("Access code must be hex-encoded."))?;
     if bytes.len() != ACC_CODE_SIZE {
-        return Err(CliError(format!(
+        return Err(anyhow!(
             "Access code must be {ACC_CODE_SIZE} bytes ({} hex chars).",
             ACC_CODE_SIZE * 2
-        )));
+        ));
     }
     let mut arr = [0u8; ACC_CODE_SIZE];
     arr.copy_from_slice(&bytes);
     Ok(arr)
 }
 
-fn to_access_code(code: &[u8; ACC_CODE_SIZE]) -> Result<AccessCode, CliError> {
-    AccessCode::new(code.as_slice()).map_err(|e| CliError(format!("Invalid access code: {e}")))
+fn to_access_code(code: &[u8; ACC_CODE_SIZE]) -> Result<AccessCode> {
+    AccessCode::new(code.as_slice()).map_err(|e| anyhow!("Invalid access code: {e}"))
 }
 
 fn confirm_slot_overwrite<C: Connection + 'static>(session: &YubiOtpSession<C>, slot: Slot) {
@@ -571,21 +567,18 @@ fn b32_encode(data: &[u8]) -> String {
     base32::encode(base32::Alphabet::Rfc4648 { padding: true }, data)
 }
 
-fn parse_hex_key(s: &str) -> Result<Vec<u8>, CliError> {
-    hex::decode(s).map_err(|_| CliError("Key must be hex-encoded.".into()))
+fn parse_hex_key(s: &str) -> Result<Vec<u8>> {
+    hex::decode(s).map_err(|_| anyhow!("Key must be hex-encoded."))
 }
 
 fn prompt_for_touch() {
     eprintln!("Touch your YubiKey...");
 }
 
-pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), CliError> {
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     struct Info;
     impl YubiOtpOp<()> for Info {
-        fn run<C: Connection + 'static>(
-            self,
-            session: &mut YubiOtpSession<C>,
-        ) -> Result<(), CliError> {
+        fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<()> {
             let state = session.get_config_state();
             for slot in [Slot::One, Slot::Two] {
                 let num = slot.map(1, 2);
@@ -604,23 +597,16 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<(), C
     with_otp_session(dev, scp_params, Info)
 }
 
-pub fn run_swap(
-    dev: &dyn YubiKeyDevice,
-    scp_params: &ScpParams,
-    force: bool,
-) -> Result<(), CliError> {
+pub fn run_swap(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
     if !force && !confirm("Swap the two slot configurations?") {
-        return Err(CliError("Aborted.".into()));
+        return Err(anyhow!("Aborted."));
     }
     struct Swap;
     impl YubiOtpOp<()> for Swap {
-        fn run<C: Connection + 'static>(
-            self,
-            session: &mut YubiOtpSession<C>,
-        ) -> Result<(), CliError> {
+        fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<()> {
             session
                 .swap_slots()
-                .map_err(|e| CliError(format!("Failed to swap slots: {e}")))?;
+                .map_err(|e| anyhow!("Failed to swap slots: {e}"))?;
             eprintln!("Slot configurations swapped.");
             Ok(())
         }
@@ -634,7 +620,7 @@ pub fn run_delete(
     slot: CliOtpSlot,
     access_code: Option<&str>,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
@@ -644,16 +630,16 @@ pub fn run_delete(
             fn run<C: Connection + 'static>(
                 self,
                 session: &mut YubiOtpSession<C>,
-            ) -> Result<ConfigState, CliError> {
+            ) -> Result<ConfigState> {
                 Ok(session.get_config_state())
             }
         }
         let state = with_otp_session(dev, scp_params, CheckEmpty)?;
         if matches!(state.is_configured(slot), Ok(false)) {
-            return Err(CliError("Not possible to delete an empty slot.".into()));
+            return Err(anyhow!("Not possible to delete an empty slot."));
         }
         if !confirm(&format!("Delete slot {}?", slot.map(1, 2))) {
-            return Err(CliError("Aborted.".into()));
+            return Err(anyhow!("Aborted."));
         }
     }
 
@@ -662,14 +648,11 @@ pub fn run_delete(
         acc: Option<[u8; ACC_CODE_SIZE]>,
     }
     impl YubiOtpOp<()> for Delete {
-        fn run<C: Connection + 'static>(
-            self,
-            session: &mut YubiOtpSession<C>,
-        ) -> Result<(), CliError> {
+        fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<()> {
             let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
                 .delete_slot(self.slot, acc.as_ref())
-                .map_err(|e| CliError(format!("Failed to delete slot: {e}")))?;
+                .map_err(|e| anyhow!("Failed to delete slot: {e}"))?;
             eprintln!("Configuration slot {} deleted.", self.slot.map(1, 2));
             Ok(())
         }
@@ -685,7 +668,7 @@ pub fn run_ndef(
     ndef_type: NdefType,
     access_code: Option<&str>,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
     let nt = ndef_type;
@@ -695,7 +678,7 @@ pub fn run_ndef(
             slot.map(1, 2)
         ))
     {
-        return Err(CliError("Aborted.".into()));
+        return Err(anyhow!("Aborted."));
     }
     struct Ndef {
         slot: Slot,
@@ -704,10 +687,7 @@ pub fn run_ndef(
         nt: NdefType,
     }
     impl YubiOtpOp<()> for Ndef {
-        fn run<C: Connection + 'static>(
-            self,
-            session: &mut YubiOtpSession<C>,
-        ) -> Result<(), CliError> {
+        fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<()> {
             session
                 .set_ndef_configuration(
                     self.slot,
@@ -715,7 +695,7 @@ pub fn run_ndef(
                     self.acc.as_ref().map(|a| a.as_slice()),
                     self.nt,
                 )
-                .map_err(|e| CliError(format!("Failed to configure NDEF: {e}")))?;
+                .map_err(|e| anyhow!("Failed to configure NDEF: {e}"))?;
             eprintln!("NDEF configuration updated.");
             Ok(())
         }
@@ -750,7 +730,7 @@ pub fn run_yubiotp(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     options: YubiOtpOptions<'_>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let YubiOtpOptions {
         slot,
         public_id,
@@ -771,13 +751,10 @@ pub fn run_yubiotp(
     let pub_id_bytes: Vec<u8> = if serial_public_id {
         struct GetSerial;
         impl YubiOtpOp<u32> for GetSerial {
-            fn run<C: Connection + 'static>(
-                self,
-                session: &mut YubiOtpSession<C>,
-            ) -> Result<u32, CliError> {
+            fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<u32> {
                 session
                     .get_serial()
-                    .map_err(|e| CliError(format!("Failed to get serial: {e}")))
+                    .map_err(|e| anyhow!("Failed to get serial: {e}"))
             }
         }
         let serial = with_otp_session(dev, scp_params, GetSerial)?;
@@ -786,52 +763,50 @@ pub fn run_yubiotp(
         eprintln!("Using YubiKey serial as public ID: {}", modhex_encode(&id));
         id
     } else if let Some(pid) = public_id {
-        modhex_decode(pid).map_err(|_| CliError("Invalid modhex public ID.".into()))?
+        modhex_decode(pid).map_err(|_| anyhow!("Invalid modhex public ID."))?
     } else if force {
-        return Err(CliError(
-            "Public ID not given. Remove the --force flag, or add the --serial-public-id flag or --public-id option.".into(),
+        return Err(anyhow!(
+            "Public ID not given. Remove the --force flag, or add the --serial-public-id flag or --public-id option."
         ));
     } else {
         let pid = util::prompt("Enter public ID")?;
         if pid.len() % 2 != 0 {
-            return Err(CliError(
-                "Invalid public ID, length must be a multiple of 2.".into(),
+            return Err(anyhow!(
+                "Invalid public ID, length must be a multiple of 2."
             ));
         }
-        modhex_decode(&pid).map_err(|_| CliError("Invalid modhex public ID.".into()))?
+        modhex_decode(&pid).map_err(|_| anyhow!("Invalid modhex public ID."))?
     };
 
     // Resolve private ID
     let priv_id: [u8; UID_SIZE] = if generate_private_id {
         let mut id = [0u8; UID_SIZE];
-        getrandom::fill(&mut id).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut id).map_err(|e| anyhow!("Failed to generate: {e}"))?;
         eprintln!("Using a randomly generated private ID: {}", hex::encode(id));
         id
     } else if let Some(pid) = private_id {
-        let bytes =
-            hex::decode(pid).map_err(|_| CliError("Private ID must be hex-encoded.".into()))?;
+        let bytes = hex::decode(pid).map_err(|_| anyhow!("Private ID must be hex-encoded."))?;
         if bytes.len() != UID_SIZE {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "Private ID must be {UID_SIZE} bytes ({} hex chars).",
                 UID_SIZE * 2
-            )));
+            ));
         }
         let mut arr = [0u8; UID_SIZE];
         arr.copy_from_slice(&bytes);
         arr
     } else if force {
-        return Err(CliError(
-            "Private ID not given. Remove the --force flag, or add the --generate-private-id flag or --private-id option.".into(),
+        return Err(anyhow!(
+            "Private ID not given. Remove the --force flag, or add the --generate-private-id flag or --private-id option."
         ));
     } else {
         let pid = util::prompt("Enter private ID")?;
-        let bytes =
-            hex::decode(&pid).map_err(|_| CliError("Private ID must be hex-encoded.".into()))?;
+        let bytes = hex::decode(&pid).map_err(|_| anyhow!("Private ID must be hex-encoded."))?;
         if bytes.len() != UID_SIZE {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "Private ID must be {UID_SIZE} bytes ({} hex chars).",
                 UID_SIZE * 2
-            )));
+            ));
         }
         let mut arr = [0u8; UID_SIZE];
         arr.copy_from_slice(&bytes);
@@ -841,32 +816,32 @@ pub fn run_yubiotp(
     // Resolve key
     let key_bytes: [u8; KEY_SIZE] = if generate_key {
         let mut k = [0u8; KEY_SIZE];
-        getrandom::fill(&mut k).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut k).map_err(|e| anyhow!("Failed to generate: {e}"))?;
         eprintln!("Using a randomly generated secret key: {}", hex::encode(k));
         k
     } else if let Some(k) = key {
-        let bytes = hex::decode(k).map_err(|_| CliError("Key must be hex-encoded.".into()))?;
+        let bytes = hex::decode(k).map_err(|_| anyhow!("Key must be hex-encoded."))?;
         if bytes.len() != KEY_SIZE {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "Key must be {KEY_SIZE} bytes ({} hex chars).",
                 KEY_SIZE * 2
-            )));
+            ));
         }
         let mut arr = [0u8; KEY_SIZE];
         arr.copy_from_slice(&bytes);
         arr
     } else if force {
-        return Err(CliError(
-            "Secret key not given. Remove the --force flag, or add the --generate-key flag or --key option.".into(),
+        return Err(anyhow!(
+            "Secret key not given. Remove the --force flag, or add the --generate-key flag or --key option."
         ));
     } else {
         let k = util::prompt("Enter secret key")?;
-        let bytes = hex::decode(&k).map_err(|_| CliError("Key must be hex-encoded.".into()))?;
+        let bytes = hex::decode(&k).map_err(|_| anyhow!("Key must be hex-encoded."))?;
         if bytes.len() != KEY_SIZE {
-            return Err(CliError(format!(
+            return Err(anyhow!(
                 "Key must be {KEY_SIZE} bytes ({} hex chars).",
                 KEY_SIZE * 2
-            )));
+            ));
         }
         let mut arr = [0u8; KEY_SIZE];
         arr.copy_from_slice(&bytes);
@@ -879,11 +854,11 @@ pub fn run_yubiotp(
             slot.map(1, 2)
         ))
     {
-        return Err(CliError("Aborted.".into()));
+        return Err(anyhow!("Aborted."));
     }
 
     let mut config = SlotConfiguration::yubiotp(&pub_id_bytes, &priv_id, &key_bytes)
-        .map_err(|e| CliError(format!("Invalid configuration: {e}")))?;
+        .map_err(|e| anyhow!("Invalid configuration: {e}"))?;
     if let Some(cr) = enter {
         config = config.append_cr(cr);
     }
@@ -901,15 +876,15 @@ pub fn run_yubiotp(
         fn run<C: Connection + 'static>(
             self,
             session: &mut YubiOtpSession<C>,
-        ) -> Result<Option<u32>, CliError> {
+        ) -> Result<Option<u32>> {
             let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
                 .put_configuration(self.slot, &self.config, acc.as_ref(), None)
-                .map_err(|e| CliError(format!("Failed to program: {e}")))?;
+                .map_err(|e| anyhow!("Failed to program: {e}"))?;
             if self.need_serial {
                 let serial = session
                     .get_serial()
-                    .map_err(|e| CliError(format!("Failed to get serial: {e}")))?;
+                    .map_err(|e| anyhow!("Failed to get serial: {e}"))?;
                 Ok(Some(serial))
             } else {
                 Ok(None)
@@ -962,7 +937,7 @@ pub fn run_static(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     options: StaticOptions<'_>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let StaticOptions {
         slot,
         password,
@@ -978,8 +953,8 @@ pub fn run_static(
 
     let pw = if let Some(p) = password {
         if p.len() > 38 {
-            return Err(CliError(
-                "Password too long (maximum length is 38 characters).".into(),
+            return Err(anyhow!(
+                "Password too long (maximum length is 38 characters)."
             ));
         }
         p.to_string()
@@ -992,7 +967,7 @@ pub fn run_static(
     let scan_codes = encode_password(&pw, keyboard_layout)?;
 
     let mut config = SlotConfiguration::static_password(&scan_codes)
-        .map_err(|e| CliError(format!("Invalid configuration: {e}")))?;
+        .map_err(|e| anyhow!("Invalid configuration: {e}"))?;
     if let Some(cr) = enter {
         config = config.append_cr(cr);
     }
@@ -1004,17 +979,14 @@ pub fn run_static(
         force: bool,
     }
     impl YubiOtpOp<()> for ProgramStatic {
-        fn run<C: Connection + 'static>(
-            self,
-            session: &mut YubiOtpSession<C>,
-        ) -> Result<(), CliError> {
+        fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<()> {
             if !self.force {
                 confirm_slot_overwrite(session, self.slot);
             }
             let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
                 .put_configuration(self.slot, &self.config, acc.as_ref(), None)
-                .map_err(|e| CliError(format!("Failed to program: {e}")))?;
+                .map_err(|e| anyhow!("Failed to program: {e}"))?;
             eprintln!("Static password stored in slot {}.", self.slot.map(1, 2));
             Ok(())
         }
@@ -1041,19 +1013,19 @@ pub fn run_chalresp(
     generate: bool,
     access_code: Option<&str>,
     force: bool,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot: Slot = slot.into();
     let acc = access_code.map(parse_access_code).transpose()?;
 
     let key_bytes: Vec<u8> = if let Some(k) = key {
         if totp {
-            parse_b32_key(k).map_err(|_| CliError("Invalid Base32-encoded key.".into()))?
+            parse_b32_key(k).map_err(|_| anyhow!("Invalid Base32-encoded key."))?
         } else {
             parse_hex_key(k)?
         }
     } else if generate {
         let mut k = vec![0u8; 20];
-        getrandom::fill(&mut k).map_err(|e| CliError(format!("Failed to generate: {e}")))?;
+        getrandom::fill(&mut k).map_err(|e| anyhow!("Failed to generate: {e}"))?;
         if totp {
             eprintln!(
                 "Using a randomly generated key (base32): {}",
@@ -1064,8 +1036,8 @@ pub fn run_chalresp(
         }
         k
     } else if force {
-        return Err(CliError(
-            "No secret key given. Remove the --force flag, set the KEY argument or set the --generate flag.".into(),
+        return Err(anyhow!(
+            "No secret key given. Remove the --force flag, set the KEY argument or set the --generate flag."
         ));
     } else if totp {
         loop {
@@ -1087,12 +1059,12 @@ pub fn run_chalresp(
             slot.map(1, 2)
         ))
     {
-        return Err(CliError("Aborted.".into()));
+        return Err(anyhow!("Aborted."));
     }
 
-    let hmac_key = HmacKey::new(&key_bytes).map_err(|e| CliError(format!("Invalid key: {e}")))?;
-    let mut config = SlotConfiguration::hmac_sha1(&hmac_key)
-        .map_err(|e| CliError(format!("Invalid key: {e}")))?;
+    let hmac_key = HmacKey::new(&key_bytes).map_err(|e| anyhow!("Invalid key: {e}"))?;
+    let mut config =
+        SlotConfiguration::hmac_sha1(&hmac_key).map_err(|e| anyhow!("Invalid key: {e}"))?;
     if touch {
         config = config.require_touch(true);
     }
@@ -1104,14 +1076,11 @@ pub fn run_chalresp(
         cred_type: String,
     }
     impl YubiOtpOp<()> for ProgramChalResp {
-        fn run<C: Connection + 'static>(
-            self,
-            session: &mut YubiOtpSession<C>,
-        ) -> Result<(), CliError> {
+        fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<()> {
             let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
                 .put_configuration(self.slot, &self.config, acc.as_ref(), None)
-                .map_err(|e| CliError(format!("Failed to program: {e}")))?;
+                .map_err(|e| anyhow!("Failed to program: {e}"))?;
             eprintln!(
                 "{} credential stored in slot {}.",
                 self.cred_type,
@@ -1139,7 +1108,7 @@ pub fn run_calculate(
     challenge: Option<&str>,
     totp: bool,
     digits: CliCalcDigits,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let slot: Slot = slot.into();
     let digits = digits.as_u8();
 
@@ -1147,7 +1116,7 @@ pub fn run_calculate(
         if let Some(c) = challenge {
             let ts: u64 = c
                 .parse()
-                .map_err(|_| CliError("Timestamp challenge for TOTP must be an integer.".into()))?;
+                .map_err(|_| anyhow!("Timestamp challenge for TOTP must be an integer."))?;
             (ts / 30).to_be_bytes().to_vec()
         } else {
             let now = SystemTime::now()
@@ -1157,10 +1126,10 @@ pub fn run_calculate(
             (now / 30).to_be_bytes().to_vec()
         }
     } else if let Some(c) = challenge {
-        hex::decode(c).map_err(|_| CliError("Challenge must be hex-encoded.".into()))?
+        hex::decode(c).map_err(|_| anyhow!("Challenge must be hex-encoded."))?
     } else {
         let input = util::prompt("Enter a challenge (hex)")?;
-        hex::decode(&input).map_err(|_| CliError("Challenge must be hex-encoded.".into()))?
+        hex::decode(&input).map_err(|_| anyhow!("Challenge must be hex-encoded."))?
     };
 
     struct Calculate {
@@ -1170,17 +1139,14 @@ pub fn run_calculate(
         digits: u8,
     }
     impl YubiOtpOp<()> for Calculate {
-        fn run<C: Connection + 'static>(
-            self,
-            session: &mut YubiOtpSession<C>,
-        ) -> Result<(), CliError> {
+        fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<()> {
             // Check that slot is configured
             if matches!(
                 session.get_config_state().is_configured(self.slot),
                 Ok(false)
             ) {
-                return Err(CliError(
-                    "Cannot perform challenge-response on an empty slot.".into(),
+                return Err(anyhow!(
+                    "Cannot perform challenge-response on an empty slot."
                 ));
             }
 
@@ -1200,7 +1166,7 @@ pub fn run_calculate(
                     Some(&cancel::is_cancelled),
                     Some(&on_keepalive),
                 )
-                .map_err(|e| CliError(format!("Failed to calculate: {e}")))?;
+                .map_err(|e| anyhow!("Failed to calculate: {e}"))?;
 
             if self.totp {
                 println!("{}", format_oath_code(&result, self.digits));
@@ -1237,7 +1203,7 @@ pub fn run_hotp(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     options: HotpOptions<'_>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let HotpOptions {
         slot,
         key,
@@ -1258,7 +1224,7 @@ pub fn run_hotp(
             let input = util::prompt("Enter a secret key (hex)")?;
             match parse_hex_key(&input) {
                 Ok(k) => break k,
-                Err(e) => eprintln!("{}", e.0),
+                Err(e) => eprintln!("{e}"),
             }
         }
     };
@@ -1273,10 +1239,10 @@ pub fn run_hotp(
                     fn run<C: Connection + 'static>(
                         self,
                         session: &mut YubiOtpSession<C>,
-                    ) -> Result<u32, CliError> {
+                    ) -> Result<u32> {
                         session
                             .get_serial()
-                            .map_err(|e| CliError(format!("Failed to get serial: {e}")))
+                            .map_err(|e| anyhow!("Failed to get serial: {e}"))
                     }
                 }
                 let serial = with_otp_session(dev, scp_params, GetSerial)?;
@@ -1284,7 +1250,7 @@ pub fn run_hotp(
             }
             8 => format!("ubhe{ident}"),
             12 => ident.to_string(),
-            _ => return Err(CliError("Incorrect length for token identifier.".into())),
+            _ => return Err(anyhow!("Incorrect length for token identifier.")),
         };
 
         let (omp_m, omp) = parse_modhex_or_bcd(&ident[..2])?;
@@ -1292,13 +1258,11 @@ pub fn run_hotp(
         let (mui_m, mui) = parse_modhex_or_bcd(&ident[4..])?;
 
         if tt_m && !omp_m {
-            return Err(CliError(
-                "TT can only be modhex encoded if OMP is as well.".into(),
-            ));
+            return Err(anyhow!("TT can only be modhex encoded if OMP is as well."));
         }
         if mui_m && !(omp_m && tt_m) {
-            return Err(CliError(
-                "MUI can only be modhex encoded if OMP and TT are as well.".into(),
+            return Err(anyhow!(
+                "MUI can only be modhex encoded if OMP and TT are as well."
             ));
         }
 
@@ -1320,19 +1284,18 @@ pub fn run_hotp(
             slot.map(1, 2)
         ))
     {
-        return Err(CliError("Aborted.".into()));
+        return Err(anyhow!("Aborted."));
     }
 
-    let hmac_key = HmacKey::new(&key_bytes).map_err(|e| CliError(format!("Invalid key: {e}")))?;
-    let mut config =
-        SlotConfiguration::hotp(&hmac_key).map_err(|e| CliError(format!("Invalid key: {e}")))?;
+    let hmac_key = HmacKey::new(&key_bytes).map_err(|e| anyhow!("Invalid key: {e}"))?;
+    let mut config = SlotConfiguration::hotp(&hmac_key).map_err(|e| anyhow!("Invalid key: {e}"))?;
     if matches!(digits, CliHotpDigits::Eight) {
         config = config.digits8(true);
     }
     if counter > 0 {
         config = config
             .imf(counter)
-            .map_err(|e| CliError(format!("Invalid counter: {e}")))?;
+            .map_err(|e| anyhow!("Invalid counter: {e}"))?;
     }
     if let Some(cr) = enter {
         config = config.append_cr(cr);
@@ -1340,7 +1303,7 @@ pub fn run_hotp(
     if !token_id.is_empty() {
         config = config
             .token_id(&token_id, mh1, mh2)
-            .map_err(|e| CliError(format!("Invalid token identifier: {e}")))?;
+            .map_err(|e| anyhow!("Invalid token identifier: {e}"))?;
     }
 
     struct ProgramHotp {
@@ -1349,14 +1312,11 @@ pub fn run_hotp(
         acc: Option<[u8; ACC_CODE_SIZE]>,
     }
     impl YubiOtpOp<()> for ProgramHotp {
-        fn run<C: Connection + 'static>(
-            self,
-            session: &mut YubiOtpSession<C>,
-        ) -> Result<(), CliError> {
+        fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<()> {
             let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
                 .put_configuration(self.slot, &self.config, acc.as_ref(), None)
-                .map_err(|e| CliError(format!("Failed to program: {e}")))?;
+                .map_err(|e| anyhow!("Failed to program: {e}"))?;
             eprintln!("HOTP credential stored in slot {}.", self.slot.map(1, 2));
             Ok(())
         }
@@ -1380,7 +1340,7 @@ pub fn run_settings(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     options: SettingsOptions<'_>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let SettingsOptions {
         slot,
         enter,
@@ -1396,8 +1356,8 @@ pub fn run_settings(
     let cur_acc = access_code.map(parse_access_code).transpose()?;
 
     if delete_access_code && access_code.is_none() {
-        return Err(CliError(
-            "--delete-access-code used without providing an access code (see \"ykman otp --help\" for more info).".into(),
+        return Err(anyhow!(
+            "--delete-access-code used without providing an access code (see \"ykman otp --help\" for more info)."
         ));
     }
 
@@ -1407,15 +1367,13 @@ pub fn run_settings(
             fn run<C: Connection + 'static>(
                 self,
                 session: &mut YubiOtpSession<C>,
-            ) -> Result<ConfigState, CliError> {
+            ) -> Result<ConfigState> {
                 Ok(session.get_config_state())
             }
         }
         let state = with_otp_session(dev, scp_params, CheckConfigured)?;
         if matches!(state.is_configured(slot), Ok(false)) {
-            return Err(CliError(
-                "Not possible to update settings on an empty slot.".into(),
-            ));
+            return Err(anyhow!("Not possible to update settings on an empty slot."));
         }
     }
 
@@ -1433,7 +1391,7 @@ pub fn run_settings(
             slot.map(1, 2)
         ))
     {
-        return Err(CliError("Aborted.".into()));
+        return Err(anyhow!("Aborted."));
     }
 
     let mut config = SlotConfiguration::update();
@@ -1458,15 +1416,12 @@ pub fn run_settings(
         cur_acc: Option<[u8; ACC_CODE_SIZE]>,
     }
     impl YubiOtpOp<()> for UpdateSettings {
-        fn run<C: Connection + 'static>(
-            self,
-            session: &mut YubiOtpSession<C>,
-        ) -> Result<(), CliError> {
+        fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<()> {
             let new_acc = self.new_acc.as_ref().map(to_access_code).transpose()?;
             let cur_acc = self.cur_acc.as_ref().map(to_access_code).transpose()?;
             session
                 .update_configuration(self.slot, &self.config, new_acc.as_ref(), cur_acc.as_ref())
-                .map_err(|e| CliError(format!("Failed to update settings: {e}")))?;
+                .map_err(|e| anyhow!("Failed to update settings: {e}"))?;
             eprintln!("Settings for slot {} updated.", self.slot.map(1, 2));
             Ok(())
         }
@@ -1485,15 +1440,14 @@ pub fn run_settings(
 
 /// Parse a value as modhex or BCD (decimal digits encoded as hex).
 /// Returns (is_modhex, decoded_bytes).
-fn parse_modhex_or_bcd(value: &str) -> Result<(bool, Vec<u8>), CliError> {
+fn parse_modhex_or_bcd(value: &str) -> Result<(bool, Vec<u8>)> {
     if let Ok(bytes) = modhex_decode(value) {
         return Ok((true, bytes));
     }
     // Try to parse as decimal digits (BCD)
     if value.chars().all(|c| c.is_ascii_digit()) {
-        let bytes =
-            hex::decode(value).map_err(|_| CliError("Value must be modhex or decimal.".into()))?;
+        let bytes = hex::decode(value).map_err(|_| anyhow!("Value must be modhex or decimal."))?;
         return Ok((false, bytes));
     }
-    Err(CliError("Value must be modhex or decimal.".into()))
+    Err(anyhow!("Value must be modhex or decimal."))
 }
