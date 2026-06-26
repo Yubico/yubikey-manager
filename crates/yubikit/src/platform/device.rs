@@ -276,7 +276,14 @@ impl LocalYubiKeyDevice {
             }
             state = new_state;
 
-            let devs = list_devices(interfaces)?;
+            let devs = match list_devices(interfaces) {
+                Ok(devs) => devs,
+                Err(e) if is_transient_reinsert_error(&e) => {
+                    log::debug!("Ignoring transient reinsert enumeration error: {e}");
+                    Vec::new()
+                }
+                Err(e) => return Err(e),
+            };
 
             if !removed {
                 if new_pids == pids {
@@ -385,6 +392,18 @@ impl LocalYubiKeyDevice {
             }
         }
     }
+}
+
+fn is_transient_reinsert_error(e: &DeviceError) -> bool {
+    #[cfg(feature = "pcsc")]
+    if let DeviceError::Transport(source) = e {
+        return source
+            .downcast_ref::<PcscError>()
+            .is_some_and(|e| e.is_unavailable() || e.is_no_card());
+    }
+
+    let _ = e;
+    false
 }
 
 impl YubiKeyDevice for LocalYubiKeyDevice {

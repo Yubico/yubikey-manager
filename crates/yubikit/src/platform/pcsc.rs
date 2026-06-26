@@ -49,6 +49,20 @@ impl PcscError {
         )
     }
 
+    /// Returns true if this error indicates that a USB reader or card is
+    /// temporarily unavailable while the device is being removed or reinserted.
+    pub fn is_unavailable(&self) -> bool {
+        self.is_no_card()
+            || matches!(
+                self,
+                PcscError::Pcsc(
+                    ::pcsc::Error::ReaderUnavailable
+                        | ::pcsc::Error::UnknownReader
+                        | ::pcsc::Error::NoReadersAvailable
+                )
+            )
+    }
+
     /// Returns true if this error indicates another process holds an exclusive
     /// lock on the card (e.g. scdaemon, yubikey-agent).
     pub fn is_sharing_violation(&self) -> bool {
