@@ -39,9 +39,14 @@ for cred in &creds {
 
 ## Features
 
-- `hardware` *(default)* — Enables USB HID and PC/SC transports for
-  communicating with physical YubiKeys. Disable for environments where only
-  custom/mock transports are needed.
+The default feature set enables both physical-device transport backends:
+
+- `pcsc` *(default)* — Enables PC/SC smart card transport for CCID over USB and
+  NFC readers.
+- `hid` *(default)* — Enables HID transport for FIDO and OTP over USB.
+
+Disable default features for environments where only custom transports are
+needed, or enable only the transport backend required by your application.
 
 ## Platform support
 
