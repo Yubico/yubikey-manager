@@ -60,7 +60,7 @@ use x509_cert::spki::{
 };
 use zeroize::Zeroizing;
 
-use crate::__internal::tlv::{parse_tlv_dict, tlv_append, tlv_encode, tlv_unpack};
+use crate::__internal::tlv::{parse_tlv_dict, tlv_append, tlv_encode, tlv_parse, tlv_unpack};
 use crate::core::{Version, int2bytes, patch_version};
 use crate::keys::{
     EcCurve, EcPublicKey, Ed25519PublicKey, KeyAlgorithm, KeyError, MlDsaParameterSet,
@@ -872,6 +872,52 @@ fn retries_from_sw(sw: u16) -> Option<u32> {
     None
 }
 
+/// The maximum command APDU size advertised by a PIV SELECT response via the
+/// ISO 7816-4 "extended length information" DO (tag `0x7F66`).
+///
+/// The first nested `0x02` field is the maximum *command APDU* size — the
+/// whole APDU, header included, not just the data field. Returns `0` when the
+/// DO is absent or cannot be parsed.
+///
+/// The whole response is walked, recursing into constructed templates: some
+/// cards (e.g. IDEMIA ID-One PIV) emit `7F66` as a sibling after the `0x61`
+/// Application Property Template rather than nested inside it.
+fn select_advertised_max_apdu_length(select_resp: &[u8]) -> usize {
+    const TAG_EXTENDED_LENGTH: u32 = 0x7F66;
+
+    fn walk(buf: &[u8]) -> Option<u16> {
+        let mut offset = 0;
+        while offset < buf.len() {
+            let t0 = buf[offset];
+            let (tag, value_offset, value_len, end) = tlv_parse(buf, offset).ok()?;
+            let value = &buf[value_offset..value_offset + value_len];
+            if tag == TAG_EXTENDED_LENGTH {
+                // Value is a sequence of `02 LL <size>` DOs; the first is the
+                // maximum command APDU size.
+                if let Ok((0x02, max_offset, max_len, _)) = tlv_parse(value, 0) {
+                    if max_len > 0 {
+                        let mut max_cmd = 0u32;
+                        for &b in &value[max_offset..max_offset + max_len] {
+                            max_cmd = (max_cmd << 8) | b as u32;
+                        }
+                        return Some(max_cmd.min(u16::MAX as u32) as u16);
+                    }
+                }
+                return Some(0);
+            }
+            // Recurse into constructed templates (bit 6 of the first tag byte).
+            if (t0 & 0x20) != 0 {
+                if let Some(m) = walk(value) {
+                    return Some(m);
+                }
+            }
+            offset = end;
+        }
+        None
+    }
+    walk(select_resp).unwrap_or(0) as usize
+}
+
 /// Encode an integer value as big-endian bytes with a specific length (zero-padded).
 fn int_to_bytes(value: &[u8], len: usize) -> Vec<u8> {
     if value.len() >= len {
@@ -1098,6 +1144,53 @@ impl<C: SmartCardConnection> PivSession<C> {
             return Err((e.into(), protocol.into_connection()));
         }
         Self::init(protocol)
+    }
+
+    /// Open a PIV session on a card that is not (necessarily) a YubiKey.
+    ///
+    /// Identical to [`new`] except that it never sends the Yubico-proprietary
+    /// `INS_GET_VERSION` (`0xFD`) or the YubiKey management-key metadata probe.
+    /// Use this for standards-conformant PIV cards that share the PIV AID but
+    /// don't implement Yubico's instructions.
+    ///
+    /// This matters beyond returning a clean error: some such cards are
+    /// actively harmed by the probe. The HID Global / Oberthur "ID-One PIV"
+    /// (NIST SP 800-73 Test Card 3) answers `INS_GET_VERSION` with `SW=0x6D00`
+    /// and then poisons the applet's access-control state, after which every
+    /// GET DATA / VERIFY returns `SW=0x6982` — even for PIN-free objects, and
+    /// even after a re-SELECT. Avoiding the instruction entirely is the only
+    /// reliable fix, so callers that may encounter non-YubiKey cards must use
+    /// this constructor rather than [`new`].
+    ///
+    /// The session reports [`Version`] `0.0.0`, so every `require_version` gate
+    /// degrades to [`PivError::NotSupported`], and the management key type
+    /// defaults to Triple-DES. Standards-defined PIV operations (SELECT, GET
+    /// DATA, VERIFY, GENERAL AUTHENTICATE) work normally.
+    pub fn new_generic(connection: C) -> Result<Self, (PivError, C)> {
+        let mut protocol = SmartCardProtocol::new(connection);
+        let select_resp = match protocol.select(Aid::PIV) {
+            Ok(fci) => fci,
+            Err(e) => return Err((e.into(), protocol.into_connection())),
+        };
+
+        // Pick APDU framing by capability. The version heuristic in
+        // `configure` can't help here (the version is unknown), so use the
+        // ISO 7816-4 extended-length information DO (tag 0x7F66) if the card
+        // advertises it in the SELECT response. The advertised maximum is the
+        // whole command APDU length; `set_max_apdu_size` chooses extended
+        // framing only when that exceeds the largest short APDU. The
+        // capability comes from the SELECT response already in hand, so there
+        // is no extra round-trip; a card that doesn't advertise it keeps the
+        // universally-safe short framing.
+        protocol.set_max_apdu_size(select_advertised_max_apdu_length(&select_resp));
+
+        Ok(Self {
+            protocol,
+            version: Version(0, 0, 0),
+            mgmt_key_type: ManagementKeyType::Tdes,
+            current_pin_retries: 3,
+            max_pin_retries: 3,
+        })
     }
 
     /// Open a PIV session with SCP (Secure Channel Protocol).
@@ -2550,6 +2643,42 @@ impl<C: SmartCardConnection> signature::Signer<PivSignature> for PivSigner<'_, C
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extended_length_detected_in_idone_select() {
+        // Real IDEMIA ID-One PIV SELECT response: the 0x61 APT, then a sibling
+        // 0x7F66 extended-length DO (max command 0x03F8, max response 0x7FFF).
+        let resp: &[u8] = &[
+            0x61, 0x2a, 0x4f, 0x0b, 0xa0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x10, 0x00, 0x01,
+            0x00, 0x79, 0x07, 0x4f, 0x05, 0xa0, 0x00, 0x00, 0x03, 0x08, 0x50, 0x0a, 0x49, 0x44,
+            0x2d, 0x4f, 0x6e, 0x65, 0x20, 0x50, 0x49, 0x56, 0xac, 0x06, 0x80, 0x01, 0x27, 0x06,
+            0x01, 0x00, 0x7f, 0x66, 0x08, 0x02, 0x02, 0x03, 0xf8, 0x02, 0x02, 0x7f, 0xff,
+        ];
+        assert!(select_advertised_max_apdu_length(resp) == 0x03F8);
+    }
+
+    #[test]
+    fn extended_length_detected_when_nested() {
+        // Same DO nested inside the 0x61 template (constructed-tag recursion).
+        let nested: &[u8] = &[
+            0x61, 0x09, 0x7f, 0x66, 0x06, 0x02, 0x02, 0x03, 0xf8, 0x02, 0x00,
+        ];
+        assert!(select_advertised_max_apdu_length(nested) == 0x03F8);
+    }
+
+    #[test]
+    fn extended_length_absent_in_minimal_select() {
+        // Minimal APT (e.g. a YubiKey): 4F + 79, no 7F66.
+        let minimal: &[u8] = &[
+            0x61, 0x11, 0x4f, 0x06, 0x00, 0x00, 0x10, 0x00, 0x01, 0x00, 0x79, 0x07, 0x4f, 0x05,
+            0xa0, 0x00, 0x00, 0x03, 0x08,
+        ];
+        assert!(select_advertised_max_apdu_length(minimal) == 0);
+        assert!(select_advertised_max_apdu_length(&[]) == 0);
+        // Small advertised maxima are still returned; framing selection decides
+        // whether the value is large enough to use extended APDUs.
+        assert!(select_advertised_max_apdu_length(&[0x7f, 0x66, 0x03, 0x02, 0x01, 0x40]) == 0x40);
+    }
 
     #[test]
     fn test_key_type_algorithm() {
