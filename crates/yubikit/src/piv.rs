@@ -1419,9 +1419,25 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Verify the PIV PIN. On failure, returns [`PivError::InvalidPin`] with remaining attempts.
     pub fn verify_pin(&mut self, pin: &PivPin) -> Result<(), PivError> {
-        log::debug!("Verifying PIN");
+        self.verify_pin_at_ref(PIN_P2, pin)
+    }
+
+    /// Verify reference data at an arbitrary PIV key reference.
+    ///
+    /// Same VERIFY command as [`verify_pin`], parameterised on the key
+    /// reference (P2) rather than hard-coded to the PIV Card Application
+    /// PIN. Per SP 800-73-5 Pt 1 Table 4, useful references include:
+    ///
+    /// - `0x00` — Global PIN.
+    /// - `0x80` — PIV Card Application PIN (what [`verify_pin`] uses).
+    ///
+    /// `pin` is padded to 8 bytes with `0xFF` before transmission. On
+    /// failure, returns [`PivError::InvalidPin`] with the remaining attempts
+    /// reported by the card.
+    pub fn verify_pin_at_ref(&mut self, pin_ref: u8, pin: &PivPin) -> Result<(), PivError> {
+        log::debug!("Verifying PIN at ref 0x{pin_ref:02X}");
         let data = pin.padded();
-        match self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, &data) {
+        match self.protocol.send_apdu(0, INS_VERIFY, 0, pin_ref, &data) {
             Ok(_) => Ok(()),
             Err(e) => {
                 if let SmartCardError::Apdu { sw, .. } = &e
@@ -1518,7 +1534,8 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Returns the number of remaining PIN attempts.
     ///
-    /// Older keys (firmware < 5.3.0) will return NotSupported if the PIN has already been verified in this session.
+    /// Older keys (firmware < 5.3.0) will return NotSupported if the PIN
+    /// has already been verified in this session.
     pub fn get_pin_attempts(&mut self) -> Result<u32, PivError> {
         log::debug!("Getting PIN attempts");
         match self.get_pin_metadata() {
@@ -1527,14 +1544,27 @@ impl<C: SmartCardConnection> PivSession<C> {
             Err(e) => return Err(e),
         }
 
-        // Fallback: send empty verify
-        match self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, &[]) {
-            Ok(_) => {
-                // Already verified, use cached value
-                Err(PivError::NotSupported(
-                    "Cannot get PIN attempts after PIN has been verified in this session".into(),
-                ))
-            }
+        // Fallback: empty-Lc VERIFY probe at the App PIN reference.
+        self.get_pin_attempts_at_ref(PIN_P2)
+    }
+
+    /// Returns the number of remaining attempts at an arbitrary PIV
+    /// authentication-data reference (per SP 800-73-5 Pt 1 Table 4).
+    ///
+    /// Sends the SP 800-73-5 Pt 2 §3.2.1 empty-Lc VERIFY probe
+    /// (`00 20 00 <ref>` with no data), which reports the retry counter
+    /// without consuming an attempt:
+    ///
+    /// - `SW=63CX` — `X` attempts remain.
+    /// - `SW=6983` (auth method blocked) — `0`.
+    /// - `SW=9000` — the reference is already verified this session;
+    ///   returns NotSupported.
+    pub fn get_pin_attempts_at_ref(&mut self, pin_ref: u8) -> Result<u32, PivError> {
+        log::debug!("Probing retry counter at ref 0x{pin_ref:02X}");
+        match self.protocol.send_apdu(0, INS_VERIFY, 0, pin_ref, &[]) {
+            Ok(_) => Err(PivError::NotSupported(
+                "Cannot get PIN attempts after PIN has been verified in this session".into(),
+            )),
             Err(SmartCardError::Apdu { sw, .. }) => {
                 if let Some(retries) = retries_from_sw(sw) {
                     Ok(retries)
