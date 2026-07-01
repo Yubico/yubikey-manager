@@ -189,7 +189,7 @@ const NDEF_URL_PREFIXES: &[&str] = &[
 /// ```
 /// use yubikit::yubiotp::HmacKey;
 ///
-/// let key = HmacKey::new(b"my-secret-key-material").unwrap();
+/// let key = HmacKey::new(b"my-secret-key").unwrap();
 /// ```
 #[derive(Clone)]
 pub struct HmacKey(crate::__internal::SecretValue<Vec<u8>>);
