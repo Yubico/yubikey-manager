@@ -531,7 +531,7 @@ fn format_short_apdu(
     data: &[u8],
     le: u8,
 ) -> Result<Vec<u8>, ApduError> {
-    if data.len() > 0xFF {
+    if data.len() > SHORT_APDU_MAX_CHUNK {
         return Err(ApduError::ShortApduTooLong(data.len()));
     }
     let mut buf = Vec::with_capacity(5 + data.len() + 1);
@@ -672,24 +672,13 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
     /// Configure the protocol optimally for the given YubiKey version.
     pub fn configure(&mut self, version: Version) {
-        self.configure_inner(version, false);
-    }
-
-    /// Configure with an option to force short APDUs.
-    pub fn configure_force_short(&mut self, version: Version, force_short: bool) {
-        self.configure_inner(version, force_short);
-    }
-
-    fn configure_inner(&mut self, version: Version, force_short: bool) {
         // Touch workaround for YK 4.2.0-4.2.6
         if self.connection.transport() == Transport::Usb
             && version >= Version(4, 2, 0)
             && version <= Version(4, 2, 6)
         {
             self.max_apdu_size = MaxApduSize::Yk4 as usize;
-            if !force_short {
-                self.apdu_format = ApduFormat::Extended;
-            }
+            self.apdu_format = ApduFormat::Extended;
             self.touch_workaround = true;
             return;
         }
@@ -699,7 +688,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             return;
         }
 
-        if self.connection.transport() == Transport::Usb && !force_short {
+        if self.connection.transport() == Transport::Usb {
             self.apdu_format = ApduFormat::Extended;
         }
         self.max_apdu_size = if version >= Version(6, 0, 0) {
@@ -708,6 +697,16 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             MaxApduSize::Yk4_3 as usize
         } else {
             MaxApduSize::Yk4 as usize
+        };
+    }
+
+    /// Manually set the maximum APDU size and adjust the APDU format accordingly.
+    pub fn set_max_apdu_size(&mut self, size: usize) {
+        self.max_apdu_size = size;
+        self.apdu_format = if size > SHORT_APDU_MAX_CHUNK + 6 {
+            ApduFormat::Extended
+        } else {
+            ApduFormat::Short
         };
     }
 

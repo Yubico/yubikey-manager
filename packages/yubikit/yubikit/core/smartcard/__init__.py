@@ -149,9 +149,13 @@ class SmartCardProtocol(Closable):
     def close(self) -> None:
         self._native.close()
 
-    def configure(self, version: Version, force_short: bool = False) -> None:
+    def configure(self, version: Version) -> None:
         """Configure the connection optimally for the given YubiKey version."""
-        self._native.configure(tuple(version), force_short)
+        self._native.configure(tuple(version))
+
+    def set_max_apdu_size(self, size: int) -> None:
+        """Manually set the maximum APDU size and adjust the APDU format accordingly."""
+        self._native.set_max_apdu_size(size)
 
     def send_apdu(
         self,

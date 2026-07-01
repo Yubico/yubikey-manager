@@ -77,10 +77,14 @@ impl SmartCardProtocol {
         self.close_inner(py)
     }
 
-    fn configure(&mut self, version: (u8, u8, u8), force_short: Option<bool>) -> PyResult<()> {
+    fn configure(&mut self, version: (u8, u8, u8)) -> PyResult<()> {
         let v = Version(version.0, version.1, version.2);
-        self.protocol_mut()?
-            .configure_force_short(v, force_short.unwrap_or(false));
+        self.protocol_mut()?.configure(v);
+        Ok(())
+    }
+
+    fn set_max_apdu_size(&mut self, size: usize) -> PyResult<()> {
+        self.protocol_mut()?.set_max_apdu_size(size);
         Ok(())
     }
 

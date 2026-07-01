@@ -37,7 +37,9 @@ def test_scp_apdus(config, size, ccid_connection, scp_params, version):
         if config == Configuration.default:
             protocol.configure(version)
         elif config == Configuration.force_short:
-            protocol.configure(version, True)
+            protocol.configure(version)
+            # Force short APDUs (261 = 5 header + 255 data + 1 le)
+            protocol.set_max_apdu_size(261)
         else:
             pass  # no configuration
 

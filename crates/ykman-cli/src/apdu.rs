@@ -1,6 +1,5 @@
 use anyhow::{Result, anyhow};
 use clap::{Args, ValueEnum};
-use yubikit::core::Version;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::{Capability, UsbInterface};
 use yubikit::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
@@ -248,9 +247,10 @@ fn run_apdu(
         .open_smartcard()
         .map_err(|e| format_smartcard_connection_error("APDU", e))?;
     let mut protocol = SmartCardProtocol::new(conn);
+    protocol.configure(dev.info().version);
 
     if short {
-        protocol.configure_force_short(Version(0, 0, 0), true);
+        protocol.set_max_apdu_size(261); // Force short APDUs (261 = 5 header + 255 data + 1 le)
     }
 
     let mut is_first = true;
