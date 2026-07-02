@@ -17,13 +17,14 @@
 use anyhow::{Error, Result, anyhow};
 use clap::Subcommand;
 use yubikit::core::{Connection, Transport};
-use yubikit::ctap::CtapSession;
+use yubikit::ctap::{CtapError, CtapSession};
 use yubikit::ctap2::{
     BioEnrollment, ClientPin, Config, CredentialManagement, Ctap2Error, Ctap2Pin, Ctap2Session,
     CtapStatus, Info, Permissions, PinProtocol,
 };
 use yubikit::device::{ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
+use yubikit::smartcard::SmartCardError;
 
 use crate::cancel;
 use crate::context;
@@ -32,6 +33,8 @@ use crate::util::{format_smartcard_connection_error, print_table};
 
 const KEEPALIVE_PROCESSING: u8 = 1;
 const KEEPALIVE_UPNEEDED: u8 = 2;
+const FIDO_WINDOWS_ADMIN_MESSAGE: &str =
+    "A YubiKey was detected, but FIDO access on Windows requires running as Administrator.";
 
 #[derive(Subcommand)]
 pub enum FidoAction {
@@ -328,6 +331,30 @@ fn check_fido_ccid(dev: &dyn YubiKeyDevice) -> Result<()> {
     Ok(())
 }
 
+fn format_ctap_init_error(e: CtapError<SmartCardError>) -> Error {
+    if is_windows_fido_access_denied(&e) {
+        anyhow!(FIDO_WINDOWS_ADMIN_MESSAGE)
+    } else {
+        anyhow!("Failed to initialize CTAP: {e}")
+    }
+}
+
+#[cfg(all(target_os = "windows", feature = "hardware"))]
+fn is_windows_fido_access_denied(e: &CtapError<SmartCardError>) -> bool {
+    let CtapError::Connection(SmartCardError::Transport(source)) = e else {
+        return false;
+    };
+
+    source
+        .downcast_ref::<yubikit::platform::pcsc::PcscError>()
+        .is_some_and(|e| e.to_string() == "PC/SC error: Access is denied to this file")
+}
+
+#[cfg(not(all(target_os = "windows", feature = "hardware")))]
+fn is_windows_fido_access_denied(_e: &CtapError<SmartCardError>) -> bool {
+    false
+}
+
 /// Opens a FIDO CTAP2 session and executes the body with the session bound.
 ///
 /// Prefers HID when no SCP is required; falls back to SmartCard (NFC/CCID).
@@ -367,7 +394,7 @@ macro_rules! with_fido_session {
             } else {
                 CtapSession::new(conn)
             }
-            .map_err(|(e, _)| anyhow!("Failed to initialize CTAP: {e}"))?;
+            .map_err(|(e, _)| format_ctap_init_error(e))?;
             #[allow(unused_mut)]
             let mut $session = Ctap2Session::new(ctap)
                 .map_err(|(e, _)| anyhow!("Failed to initialize CTAP2: {e}"))?;
