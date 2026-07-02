@@ -1,4 +1,6 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
+#[cfg(not(target_os = "windows"))]
+use anyhow::bail;
 use clap::{Parser, Subcommand};
 
 mod connection;

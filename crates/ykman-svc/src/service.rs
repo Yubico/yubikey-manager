@@ -113,7 +113,6 @@ fn run_service_inner() -> Result<()> {
         service_control_handler::register(SERVICE_NAME, move |control| match control {
             ServiceControl::Stop | ServiceControl::Shutdown => {
                 stop_clone.store(true, Ordering::Relaxed);
-                crate::pipe_server::poke_server();
                 ServiceControlHandlerResult::NoError
             }
             ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,

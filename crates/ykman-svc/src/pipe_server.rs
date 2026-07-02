@@ -16,23 +16,11 @@ pub fn run_standalone() {
     ctrlc::set_handler(move || {
         log::info!("Ctrl+C received, shutting down");
         stop_clone.store(true, Ordering::Relaxed);
-        poke_server();
     })
     .unwrap_or_else(|e| log::error!("Failed to set Ctrl+C handler: {e}"));
 
     let manager = DeviceManager::new();
     run_server(manager, &stop);
-}
-
-/// Wake a blocking server accept/connect operation after setting the stop flag.
-pub fn poke_server() {
-    #[cfg(target_os = "windows")]
-    {
-        let _ = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(crate::PIPE_NAME);
-    }
 }
 
 /// Run the pipe server, blocking until `stop` is set.
@@ -56,16 +44,21 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
     use std::fs::File;
     use std::os::windows::io::FromRawHandle;
 
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE, LocalFree};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, GetLastError, INVALID_HANDLE_VALUE,
+        LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    };
     use windows_sys::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
     };
     use windows_sys::Win32::Security::{SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR};
-    use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX};
+    use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
     use windows_sys::Win32::System::Pipes::{
         ConnectNamedPipe, CreateNamedPipeW, PIPE_NOWAIT, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
         PIPE_UNLIMITED_INSTANCES, PIPE_WAIT, SetNamedPipeHandleState,
     };
+    use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 
     struct PipeHandle(windows_sys::Win32::Foundation::HANDLE);
 
@@ -109,6 +102,80 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         fn drop(&mut self) {
             if !self.0.is_null() {
                 unsafe { LocalFree(self.0 as *mut core::ffi::c_void) };
+            }
+        }
+    }
+
+    fn wait_for_client_connect(
+        handle: windows_sys::Win32::Foundation::HANDLE,
+        stop: &AtomicBool,
+    ) -> bool {
+        struct EventHandle(windows_sys::Win32::Foundation::HANDLE);
+
+        impl Drop for EventHandle {
+            fn drop(&mut self) {
+                if !self.0.is_null() {
+                    unsafe { CloseHandle(self.0) };
+                }
+            }
+        }
+
+        let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+        if event.is_null() {
+            log::error!("CreateEventW failed: {}", std::io::Error::last_os_error());
+            return false;
+        }
+        let event = EventHandle(event);
+        let mut overlapped = unsafe { std::mem::zeroed::<OVERLAPPED>() };
+        overlapped.hEvent = event.0;
+
+        let connected = unsafe { ConnectNamedPipe(handle, &mut overlapped) };
+        if connected != 0 {
+            return true;
+        }
+
+        match unsafe { GetLastError() } {
+            ERROR_PIPE_CONNECTED => true,
+            ERROR_IO_PENDING => {
+                while !stop.load(Ordering::Relaxed) {
+                    match unsafe { WaitForSingleObject(event.0, 100) } {
+                        WAIT_OBJECT_0 => {
+                            let mut transferred = 0;
+                            let ok = unsafe {
+                                GetOverlappedResult(handle, &mut overlapped, &mut transferred, 0)
+                            };
+                            if ok != 0 {
+                                return true;
+                            }
+                            log::error!(
+                                "ConnectNamedPipe completion failed: {}",
+                                std::io::Error::last_os_error()
+                            );
+                            return false;
+                        }
+                        WAIT_TIMEOUT => {}
+                        _ => {
+                            log::error!(
+                                "WaitForSingleObject failed: {}",
+                                std::io::Error::last_os_error()
+                            );
+                            return false;
+                        }
+                    }
+                }
+                unsafe {
+                    CancelIoEx(handle, &mut overlapped);
+                    let mut transferred = 0;
+                    GetOverlappedResult(handle, &mut overlapped, &mut transferred, 1);
+                }
+                false
+            }
+            _ => {
+                log::error!(
+                    "ConnectNamedPipe failed: {}",
+                    std::io::Error::last_os_error()
+                );
+                false
             }
         }
     }
@@ -160,7 +227,7 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         let handle = unsafe {
             CreateNamedPipeW(
                 pipe_name_w.as_ptr(),
-                PIPE_ACCESS_DUPLEX,
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                 PIPE_UNLIMITED_INSTANCES,
                 4096,
@@ -180,17 +247,12 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         }
         let handle = PipeHandle(handle);
 
-        // Wait for a client to connect
-        let connected = unsafe { ConnectNamedPipe(handle.as_raw(), std::ptr::null_mut()) };
-        if connected == 0 {
-            let err = std::io::Error::last_os_error();
-            // ERROR_PIPE_CONNECTED means client connected between Create and Connect
-            if err.raw_os_error() != Some(535) {
-                log::error!("ConnectNamedPipe failed: {err}");
-                continue;
+        if !wait_for_client_connect(handle.as_raw(), stop) {
+            if stop.load(Ordering::Relaxed) {
+                break;
             }
+            continue;
         }
-
         if stop.load(Ordering::Relaxed) {
             break;
         }
