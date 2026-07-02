@@ -1130,8 +1130,6 @@ pub struct PivSession<C: SmartCardConnection> {
     protocol: SmartCardProtocol<C>,
     version: Version,
     mgmt_key_type: ManagementKeyType,
-    current_pin_retries: u32,
-    max_pin_retries: u32,
 }
 
 impl<C: SmartCardConnection> PivSession<C> {
@@ -1188,8 +1186,6 @@ impl<C: SmartCardConnection> PivSession<C> {
             protocol,
             version: Version(0, 0, 0),
             mgmt_key_type: ManagementKeyType::Tdes,
-            current_pin_retries: 3,
-            max_pin_retries: 3,
         })
     }
 
@@ -1223,8 +1219,6 @@ impl<C: SmartCardConnection> PivSession<C> {
             protocol,
             version,
             mgmt_key_type: ManagementKeyType::Tdes,
-            current_pin_retries: 3,
-            max_pin_retries: 3,
         };
 
         session.mgmt_key_type = match session.get_management_key_metadata() {
@@ -1304,8 +1298,6 @@ impl<C: SmartCardConnection> PivSession<C> {
 
         // Reset
         self.protocol.send_apdu(0, INS_RESET, 0, 0, &[])?;
-        self.current_pin_retries = 3;
-        self.max_pin_retries = 3;
 
         // Update management key type
         self.mgmt_key_type = match self.get_management_key_metadata() {
@@ -1430,15 +1422,11 @@ impl<C: SmartCardConnection> PivSession<C> {
         log::debug!("Verifying PIN");
         let data = pin.padded();
         match self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, &data) {
-            Ok(_) => {
-                self.current_pin_retries = self.max_pin_retries;
-                Ok(())
-            }
+            Ok(_) => Ok(()),
             Err(e) => {
                 if let SmartCardError::Apdu { sw, .. } = &e
                     && let Some(retries) = retries_from_sw(*sw)
                 {
-                    self.current_pin_retries = retries;
                     return Err(PivError::InvalidPin(retries));
                 }
                 Err(PivError::Connection(e))
@@ -1529,6 +1517,8 @@ impl<C: SmartCardConnection> PivSession<C> {
     }
 
     /// Returns the number of remaining PIN attempts.
+    ///
+    /// Older keys (firmware < 5.3.0) will return NotSupported if the PIN has already been verified in this session.
     pub fn get_pin_attempts(&mut self) -> Result<u32, PivError> {
         log::debug!("Getting PIN attempts");
         match self.get_pin_metadata() {
@@ -1541,11 +1531,12 @@ impl<C: SmartCardConnection> PivSession<C> {
         match self.protocol.send_apdu(0, INS_VERIFY, 0, PIN_P2, &[]) {
             Ok(_) => {
                 // Already verified, use cached value
-                Ok(self.current_pin_retries)
+                Err(PivError::NotSupported(
+                    "Cannot get PIN attempts after PIN has been verified in this session".into(),
+                ))
             }
             Err(SmartCardError::Apdu { sw, .. }) => {
                 if let Some(retries) = retries_from_sw(sw) {
-                    self.current_pin_retries = retries;
                     Ok(retries)
                 } else {
                     Err(PivError::Connection(SmartCardError::Apdu {
@@ -1612,8 +1603,6 @@ impl<C: SmartCardConnection> PivSession<C> {
             .send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts, &[])
         {
             Ok(_) => {
-                self.max_pin_retries = pin_attempts as u32;
-                self.current_pin_retries = pin_attempts as u32;
                 log::info!(
                     "PIN attempts set to {pin_attempts}, PUK attempts set to {puk_attempts}"
                 );
@@ -2116,9 +2105,6 @@ impl<C: SmartCardConnection> PivSession<C> {
                 if let SmartCardError::Apdu { sw, .. } = &e
                     && let Some(retries) = retries_from_sw(*sw)
                 {
-                    if p2 == PIN_P2 {
-                        self.current_pin_retries = retries;
-                    }
                     return Err(PivError::InvalidPin(retries));
                 }
                 Err(PivError::Connection(e))
