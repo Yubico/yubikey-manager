@@ -126,10 +126,16 @@ fn get_process_image_path(pid: u32) -> Result<PathBuf, SigningError> {
 
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if handle.is_null() {
-        return Err(SigningError(format!(
-            "OpenProcess({pid}) failed: {}",
-            std::io::Error::last_os_error()
-        )));
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED as i32)
+        {
+            return get_service_image_path_for_pid(pid).map_err(|fallback_error| {
+                SigningError(format!(
+                    "OpenProcess({pid}) failed: {error}; service image lookup failed: {fallback_error}"
+                ))
+            });
+        }
+        return Err(SigningError(format!("OpenProcess({pid}) failed: {error}")));
     }
 
     let mut buf = [0u16; 1024];
@@ -146,6 +152,153 @@ fn get_process_image_path(pid: u32) -> Result<PathBuf, SigningError> {
 
     let path = String::from_utf16_lossy(&buf[..size as usize]);
     Ok(PathBuf::from(path))
+}
+
+/// Get the configured service executable when the service process cannot be
+/// opened directly by a non-elevated client.
+#[cfg(target_os = "windows")]
+fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
+    use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, GetLastError};
+    use windows_sys::Win32::System::Services::{
+        CloseServiceHandle, OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW,
+        QueryServiceConfigW, QueryServiceStatusEx, SC_MANAGER_CONNECT, SC_STATUS_PROCESS_INFO,
+        SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_STATUS_PROCESS,
+    };
+
+    const SERVICE_NAME: &str = "ykman-svc";
+
+    struct ServiceHandle(windows_sys::Win32::System::Services::SC_HANDLE);
+
+    impl Drop for ServiceHandle {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { CloseServiceHandle(self.0) };
+            }
+        }
+    }
+
+    let manager = unsafe { OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT) };
+    if manager.is_null() {
+        return Err(SigningError(format!(
+            "OpenSCManagerW failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    let manager = ServiceHandle(manager);
+
+    let service_name_w: Vec<u16> = SERVICE_NAME
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let service = unsafe {
+        OpenServiceW(
+            manager.0,
+            service_name_w.as_ptr(),
+            SERVICE_QUERY_STATUS | SERVICE_QUERY_CONFIG,
+        )
+    };
+    if service.is_null() {
+        return Err(SigningError(format!(
+            "OpenServiceW({SERVICE_NAME}) failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    let service = ServiceHandle(service);
+
+    let mut status = unsafe { std::mem::zeroed::<SERVICE_STATUS_PROCESS>() };
+    let mut bytes_needed = 0;
+    let ok = unsafe {
+        QueryServiceStatusEx(
+            service.0,
+            SC_STATUS_PROCESS_INFO,
+            &mut status as *mut SERVICE_STATUS_PROCESS as *mut u8,
+            std::mem::size_of::<SERVICE_STATUS_PROCESS>() as u32,
+            &mut bytes_needed,
+        )
+    };
+    if ok == 0 {
+        return Err(SigningError(format!(
+            "QueryServiceStatusEx({SERVICE_NAME}) failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    if status.dwProcessId != pid {
+        return Err(SigningError(format!(
+            "{SERVICE_NAME} PID {} does not match pipe server PID {pid}",
+            status.dwProcessId
+        )));
+    }
+
+    let mut config_bytes_needed = 0;
+    let ok = unsafe {
+        QueryServiceConfigW(service.0, std::ptr::null_mut(), 0, &mut config_bytes_needed)
+    };
+    if ok != 0 || unsafe { GetLastError() } != ERROR_INSUFFICIENT_BUFFER {
+        return Err(SigningError(format!(
+            "QueryServiceConfigW({SERVICE_NAME}) sizing failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+
+    let mut config = vec![0u8; config_bytes_needed as usize];
+    let ok = unsafe {
+        QueryServiceConfigW(
+            service.0,
+            config.as_mut_ptr() as *mut QUERY_SERVICE_CONFIGW,
+            config_bytes_needed,
+            &mut config_bytes_needed,
+        )
+    };
+    if ok == 0 {
+        return Err(SigningError(format!(
+            "QueryServiceConfigW({SERVICE_NAME}) failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+
+    let binary_path = unsafe {
+        let ptr = (*(config.as_ptr() as *const QUERY_SERVICE_CONFIGW)).lpBinaryPathName;
+        if ptr.is_null() {
+            return Err(SigningError(format!(
+                "{SERVICE_NAME} has no configured binary path"
+            )));
+        }
+        let mut len = 0;
+        while *ptr.add(len) != 0 {
+            len += 1;
+        }
+        String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
+    };
+
+    executable_path_from_command_line(&binary_path)
+}
+
+#[cfg(target_os = "windows")]
+fn executable_path_from_command_line(command_line: &str) -> Result<PathBuf, SigningError> {
+    let command_line = command_line.trim();
+    if command_line.is_empty() {
+        return Err(SigningError("Service binary path is empty".into()));
+    }
+
+    if let Some(rest) = command_line.strip_prefix('"') {
+        if let Some(end) = rest.find('"') {
+            return Ok(PathBuf::from(&rest[..end]));
+        }
+        return Err(SigningError(format!(
+            "Service binary path has unmatched quote: {command_line}"
+        )));
+    }
+
+    let lower = command_line.to_ascii_lowercase();
+    if let Some(end) = lower.find(".exe") {
+        return Ok(PathBuf::from(&command_line[..end + 4]));
+    }
+
+    command_line
+        .split_whitespace()
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| SigningError("Service binary path is empty".into()))
 }
 
 /// Get the code signing certificate (DER-encoded) from an executable.

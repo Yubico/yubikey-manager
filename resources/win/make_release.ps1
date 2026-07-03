@@ -8,9 +8,12 @@ $SOURCE_DIR = "$CWD\ykman"
 echo "Signing ykman.exe"
 signtool.exe sign /sha1 a1614cd84976030d49209b56162d9efa69b73698 /fd SHA256 /t http://timestamp.digicert.com "$SOURCE_DIR\ykman.exe"
 
+echo "Signing ykman-svc.exe"
+signtool.exe sign /sha1 a1614cd84976030d49209b56162d9efa69b73698 /fd SHA256 /t http://timestamp.digicert.com "$SOURCE_DIR\ykman-svc.exe"
+
 $VERSION = $(& "$SOURCE_DIR\ykman.exe" --version).Split(' ')[-1]
 
-& $PSScriptRoot\make_msi.ps1
+& "$PSScriptRoot\make_msi.ps1" -SourceDir "$SOURCE_DIR"
 
 echo "Signing .msi"
 $OUTPUT_FILE = "yubikey-manager-$VERSION-win64.msi"

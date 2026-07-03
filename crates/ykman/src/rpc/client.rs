@@ -10,7 +10,10 @@ use yubikit::__internal::SecretValue;
 
 use crate::cancel;
 
-use super::protocol::{ClientMessage, CommandMessage, ServerMessage, SignalMessage};
+use super::protocol::{
+    ClientMessage, CommandMessage, RPC_PROTOCOL_VERSION, ServerMessage, SignalMessage,
+    rpc_protocol_version_parts,
+};
 
 /// Transport abstraction for the RPC client's read/write streams.
 enum Transport {
@@ -77,14 +80,17 @@ impl RpcClient {
             let reader: Box<dyn Read + Send> = Box::new(reader_file);
             let writer: Box<dyn Write + Send> = Box::new(file);
 
-            log::debug!("Connected to ykman-svc pipe");
-            Ok(Self {
+            let mut client = Self {
                 transport: Transport::Stream {
                     reader: BufReader::new(reader),
                     writer: Arc::new(Mutex::new(writer)),
                     reader_handle,
                 },
-            })
+            };
+            client.handshake()?;
+
+            log::debug!("Connected to ykman-svc pipe");
+            Ok(client)
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -104,13 +110,16 @@ impl RpcClient {
                 })?);
             let writer: Box<dyn Write + Send> = Box::new(stream);
 
-            log::debug!("Connected to ykman-svc socket");
-            Ok(Self {
+            let mut client = Self {
                 transport: Transport::Stream {
                     reader: BufReader::new(reader),
                     writer: Arc::new(Mutex::new(writer)),
                 },
-            })
+            };
+            client.handshake()?;
+
+            log::debug!("Connected to ykman-svc socket");
+            Ok(client)
         }
     }
 
@@ -151,6 +160,41 @@ impl RpcClient {
         writer
             .flush()
             .map_err(|e| RpcCallError::Transport(format!("Failed to flush RPC: {e}")))?;
+        Ok(())
+    }
+
+    fn write_line(&self, line: &str) -> Result<(), RpcCallError> {
+        let Transport::Stream { writer, .. } = &self.transport;
+        let mut writer = writer.lock().unwrap();
+        writer
+            .write_all(line.as_bytes())
+            .map_err(|e| RpcCallError::Transport(format!("Failed to write to RPC: {e}")))?;
+        writer
+            .write_all(b"\n")
+            .map_err(|e| RpcCallError::Transport(format!("Failed to write to RPC: {e}")))?;
+        writer
+            .flush()
+            .map_err(|e| RpcCallError::Transport(format!("Failed to flush RPC: {e}")))?;
+        Ok(())
+    }
+
+    fn handshake(&mut self) -> Result<(), RpcCallError> {
+        self.write_line(RPC_PROTOCOL_VERSION)?;
+        let server_version = self.read_rpc_line()?;
+        let (server_major, _server_minor) = rpc_protocol_version_parts(&server_version)
+            .ok_or_else(|| {
+                RpcCallError::Transport(format!(
+                    "Invalid ykman-svc RPC protocol version: {server_version}"
+                ))
+            })?;
+        let (client_major, _client_minor) = rpc_protocol_version_parts(RPC_PROTOCOL_VERSION)
+            .expect("RPC_PROTOCOL_VERSION is valid");
+        if server_major > client_major {
+            return Err(RpcCallError::Transport(format!(
+                "ykman-svc RPC protocol version {server_version} is not supported by client version {RPC_PROTOCOL_VERSION}"
+            )));
+        }
+        log::debug!("ykman-svc RPC protocol version {server_version}");
         Ok(())
     }
 
@@ -202,50 +246,14 @@ impl RpcClient {
         let mut cancel_sent = false;
         loop {
             #[cfg(target_os = "windows")]
-            if cancellable && !cancel_sent && cancel::is_cancelled() {
-                self.write_message(&ClientMessage::Signal(SignalMessage::cancel()))?;
-                cancel_sent = true;
-            }
-
-            #[cfg(target_os = "windows")]
-            match self.windows_read_state()? {
-                PipeReadState::NoData => {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                    continue;
+            {
+                if cancellable && !cancel_sent && cancel::is_cancelled() {
+                    self.write_message(&ClientMessage::Signal(SignalMessage::cancel()))?;
+                    cancel_sent = true;
                 }
-                PipeReadState::Disconnected => {
-                    return Err(RpcCallError::Transport(
-                        "RPC subprocess closed unexpectedly".into(),
-                    ));
-                }
-                PipeReadState::DataAvailable => {}
             }
 
-            let mut buf = SecretValue::new(String::new());
-            let n = match self.read_line(buf.expose_secret_mut()) {
-                Ok(n) => n,
-                Err(e) => {
-                    return Err(RpcCallError::Transport(format!(
-                        "Failed to read from RPC: {e}"
-                    )));
-                }
-            };
-            if n == 0 {
-                return Err(RpcCallError::Transport(
-                    "RPC subprocess closed unexpectedly".into(),
-                ));
-            }
-
-            let line = buf.expose_secret().trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            let resp: ServerMessage = serde_json::from_str(line).map_err(|e| {
-                RpcCallError::Transport(format!("Invalid JSON from RPC subprocess: {e}"))
-            })?;
-
-            match resp {
+            match self.read_server_message(signal_handler)? {
                 ServerMessage::Success(success) => {
                     let body = success.body.to_value().map_err(|e| {
                         RpcCallError::Transport(format!("Malformed RPC success body: {e}"))
@@ -277,6 +285,48 @@ impl RpcClient {
         }
     }
 
+    fn read_server_message(
+        &mut self,
+        signal_handler: Option<&dyn Fn(&str, &Value)>,
+    ) -> Result<ServerMessage, RpcCallError> {
+        loop {
+            #[cfg(target_os = "windows")]
+            match self.windows_read_state()? {
+                PipeReadState::NoData => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                }
+                PipeReadState::Disconnected => {
+                    return Err(RpcCallError::Transport(
+                        "RPC subprocess closed unexpectedly".into(),
+                    ));
+                }
+                PipeReadState::DataAvailable => {}
+            }
+
+            let line = self.read_rpc_line()?;
+            if line.is_empty() {
+                continue;
+            }
+
+            let resp: ServerMessage = serde_json::from_str(&line).map_err(|e| {
+                RpcCallError::Transport(format!("Invalid JSON from RPC subprocess: {e}"))
+            })?;
+
+            if let ServerMessage::Signal(signal) = &resp
+                && let Some(handler) = signal_handler
+            {
+                let body = signal.body.to_value().map_err(|e| {
+                    RpcCallError::Transport(format!("Malformed RPC signal body: {e}"))
+                })?;
+                handler(&signal.status, &body);
+                continue;
+            }
+
+            return Ok(resp);
+        }
+    }
+
     /// Call `get` on a target to retrieve node info.
     pub fn get(&mut self, target: &[impl AsRef<str>]) -> Result<RpcResult, RpcCallError> {
         self.call("get", target, json!({}), None, false)
@@ -285,6 +335,24 @@ impl RpcClient {
     fn read_line(&mut self, buf: &mut String) -> std::io::Result<usize> {
         let Transport::Stream { reader, .. } = &mut self.transport;
         reader.read_line(buf)
+    }
+
+    fn read_rpc_line(&mut self) -> Result<String, RpcCallError> {
+        let mut buf = SecretValue::new(String::new());
+        let n = match self.read_line(buf.expose_secret_mut()) {
+            Ok(n) => n,
+            Err(e) => {
+                return Err(RpcCallError::Transport(format!(
+                    "Failed to read from RPC: {e}"
+                )));
+            }
+        };
+        if n == 0 {
+            return Err(RpcCallError::Transport(
+                "RPC subprocess closed unexpectedly".into(),
+            ));
+        }
+        Ok(buf.expose_secret().trim().to_string())
     }
 
     #[cfg(target_os = "windows")]

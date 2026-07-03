@@ -3,6 +3,13 @@ use serde_json::Value;
 use serde_json::value::RawValue;
 use yubikit::__internal::SecretValue;
 
+pub const RPC_PROTOCOL_VERSION: &str = "0.1";
+
+pub fn rpc_protocol_version_parts(version: &str) -> Option<(u16, u16)> {
+    let (major, minor) = version.split_once('.')?;
+    Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
 /// Opaque JSON stored as zeroizing text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RawJson(SecretValue<String>);
@@ -157,6 +164,16 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn rpc_protocol_version_parses() {
+        assert_eq!(
+            rpc_protocol_version_parts(RPC_PROTOCOL_VERSION),
+            Some((0, 1))
+        );
+        assert_eq!(rpc_protocol_version_parts("1"), None);
+        assert_eq!(rpc_protocol_version_parts("1.x"), None);
+    }
 
     #[test]
     fn command_body_round_trips_as_raw_json() {

@@ -21,7 +21,10 @@ use yubikit::__internal::SecretValue;
 use zeroize::Zeroize;
 
 use ykman::rpc::node::NodeHost;
-use ykman::rpc::protocol::{ClientMessage, CommandMessage, ServerMessage, SignalMessage};
+use ykman::rpc::protocol::{
+    ClientMessage, CommandMessage, RPC_PROTOCOL_VERSION, ServerMessage, SignalMessage,
+    rpc_protocol_version_parts,
+};
 
 use crate::device_manager::DeviceManager;
 use crate::root_node::ServiceRootNode;
@@ -56,6 +59,7 @@ impl ClientSession {
         let manager = self.manager.clone();
         let worker = std::thread::spawn(move || run_worker(manager, command_rx, event_tx));
         let mut active_cancel: Option<Arc<AtomicBool>> = None;
+        let mut handshaken = false;
         let mut pending_line = SecretValue::new(Vec::new());
 
         log::debug!("Client session started");
@@ -64,12 +68,19 @@ impl ClientSession {
             let mut disconnected = false;
             loop {
                 match read_request(&mut reader, &mut pending_line) {
+                    ReadRequest::Version(version) => {
+                        if !handle_version(version, reader.get_mut(), &mut handshaken) {
+                            disconnected = true;
+                            break;
+                        }
+                    }
                     ReadRequest::Request(request) => {
                         if !handle_request(
                             request,
                             reader.get_mut(),
                             &command_tx,
                             &mut active_cancel,
+                            handshaken,
                         ) {
                             disconnected = true;
                             break;
@@ -146,7 +157,13 @@ fn write_response<W: Write>(w: &mut W, data: &impl Serialize) -> std::io::Result
     w.write_all(bytes.expose_secret())
 }
 
+fn write_line<W: Write>(w: &mut W, line: &str) -> std::io::Result<()> {
+    w.write_all(line.as_bytes())?;
+    w.write_all(b"\n")
+}
+
 enum ReadRequest {
+    Version(String),
     Request(ClientMessage),
     Invalid(&'static str),
     WouldBlock,
@@ -258,6 +275,8 @@ fn parse_pending_request(pending_line: &[u8]) -> ReadRequest {
     };
     if line.is_empty() {
         ReadRequest::Disconnected
+    } else if rpc_protocol_version_parts(line).is_some() {
+        ReadRequest::Version(line.to_string())
     } else {
         match serde_json::from_str(line) {
             Ok(v) => ReadRequest::Request(v),
@@ -271,9 +290,13 @@ fn handle_request<T: Write>(
     writer: &mut T,
     command_tx: &mpsc::Sender<WorkerCommand>,
     active_cancel: &mut Option<Arc<AtomicBool>>,
+    handshaken: bool,
 ) -> bool {
     match request {
         ClientMessage::Signal(signal) => {
+            if !handshaken {
+                return write_protocol_error(writer, "RPC handshake required");
+            }
             if signal.status == "cancel" {
                 log::debug!("Got cancel signal");
                 if let Some(cancel) = active_cancel {
@@ -283,9 +306,34 @@ fn handle_request<T: Write>(
             true
         }
         ClientMessage::Command(command) => {
+            if !handshaken {
+                return write_protocol_error(writer, "RPC handshake required");
+            }
             handle_command(command, writer, command_tx, active_cancel)
         }
     }
+}
+
+fn handle_version<T: Write>(client_version: String, writer: &mut T, handshaken: &mut bool) -> bool {
+    if *handshaken {
+        return write_protocol_error(writer, "RPC handshake already completed");
+    }
+    let server_version =
+        rpc_protocol_version_parts(RPC_PROTOCOL_VERSION).expect("RPC_PROTOCOL_VERSION is valid");
+    let client_version_parts =
+        rpc_protocol_version_parts(&client_version).expect("client version was parsed");
+    if server_version < client_version_parts {
+        return write_line(
+            writer,
+            &format!(
+                "ERROR RPC protocol version {client_version} is not supported by server version {RPC_PROTOCOL_VERSION}"
+            ),
+        )
+        .is_ok();
+    }
+
+    *handshaken = true;
+    write_line(writer, RPC_PROTOCOL_VERSION).is_ok()
 }
 
 fn handle_command<T: Write>(
@@ -319,6 +367,12 @@ fn handle_command<T: Write>(
 
 fn write_invalid_request<T: Write>(writer: &mut T, message: &'static str) -> bool {
     let err = ServerMessage::error("invalid-command", message, json!({}))
+        .expect("empty error body is valid JSON");
+    write_response(writer, &err).is_ok()
+}
+
+fn write_protocol_error<T: Write>(writer: &mut T, message: &'static str) -> bool {
+    let err = ServerMessage::error("protocol-error", message, json!({}))
         .expect("empty error body is valid JSON");
     write_response(writer, &err).is_ok()
 }
