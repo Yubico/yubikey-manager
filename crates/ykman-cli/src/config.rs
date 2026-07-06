@@ -3,7 +3,9 @@ use clap::Subcommand;
 use yubikit::core::Connection;
 use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
-use yubikit::management::{Capability, DeviceConfig, DeviceFlag, ManagementSession};
+use yubikit::management::{
+    Capability, DeviceConfig, DeviceFlag, ManagementError, ManagementSession,
+};
 
 use crate::cli_enums::CliCapability;
 use crate::util::{
@@ -250,7 +252,7 @@ fn write_config(
         fn run<C: Connection + 'static>(self, session: &mut ManagementSession<C>) -> Result<()> {
             session
                 .write_device_config(self.config, self.reboot, self.lock_code, self.new_lock_code)
-                .map_err(|e| anyhow!("Failed to write config: {e}"))
+                .map_err(format_write_config_error)
         }
     }
     with_management_session(
@@ -262,6 +264,19 @@ fn write_config(
             new_lock_code,
         },
     )
+}
+
+fn format_write_config_error<E: std::fmt::Debug + std::fmt::Display>(
+    error: ManagementError<E>,
+) -> anyhow::Error {
+    let message = error.to_string();
+    if message.contains("SW=0x63C0") {
+        anyhow!("Failed to write config: Wrong lock code provided")
+    } else if message.contains("SW=0x6983") {
+        anyhow!("Failed to write config: Lock code blocked. Remove and re-insert the YubiKey.")
+    } else {
+        anyhow!("Failed to write config: {error}")
+    }
 }
 
 fn parse_lock_code(hex: &str) -> Result<Vec<u8>> {
@@ -708,7 +723,8 @@ pub fn run_mode(
 
 #[cfg(test)]
 mod tests {
-    use super::current_lock_code;
+    use super::{current_lock_code, format_write_config_error};
+    use yubikit::management::ManagementError;
 
     const LOCK_CODE: &str = "01020304050607080102030405060708";
 
@@ -732,6 +748,24 @@ mod tests {
             current_lock_code(false, None, "Lock code")
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn lock_code_change_formats_wrong_current_code_error() {
+        let err = format_write_config_error(ManagementError::Connection("APDU error: SW=0x63C0"));
+        assert_eq!(
+            err.to_string(),
+            "Failed to write config: Wrong lock code provided"
+        );
+    }
+
+    #[test]
+    fn lock_code_change_formats_too_many_attempts_error() {
+        let err = format_write_config_error(ManagementError::Connection("APDU error: SW=0x6983"));
+        assert_eq!(
+            err.to_string(),
+            "Failed to write config: Lock code blocked. Remove and re-insert the YubiKey."
         );
     }
 }

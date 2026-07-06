@@ -592,6 +592,11 @@ fn format_extended_apdu(
     buf.push((le_actual >> 8) as u8);
     buf.push(le_actual as u8);
     if max_apdu_size > 0 && buf.len() > max_apdu_size {
+        log::debug!(
+            "Failed to send {} bytes (max APDU size {})",
+            buf.len(),
+            max_apdu_size
+        );
         return Err(ApduError::ExtendedApduTooLong);
     }
     Ok(buf)
