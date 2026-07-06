@@ -73,6 +73,7 @@ from ..util import (
 from .util import (
     CliFail,
     EnumChoice,
+    RFC4514StringParamType,
     click_callback,
     click_force_option,
     click_format_option,
@@ -1143,6 +1144,7 @@ def export_certificate(ctx, format, slot, certificate):
     "-s",
     "--subject",
     help="subject for the certificate, as an RFC 4514 string",
+    type=RFC4514StringParamType(),
     required=True,
 )
 @click.option(
@@ -1202,10 +1204,6 @@ def generate_certificate(
     now = datetime.datetime.now(datetime.timezone.utc)
     valid_to = now + datetime.timedelta(days=valid_days)
 
-    if "=" not in subject:
-        # Old style, common name only.
-        subject = "CN=" + subject
-
     # This verifies PIN, make sure next action is sign
     _ensure_authenticated(ctx, pin, management_key, require_pin_and_key=True)
 
@@ -1232,6 +1230,7 @@ def generate_certificate(
     "-s",
     "--subject",
     help="subject for the requested certificate, as an RFC 4514 string",
+    type=RFC4514StringParamType(),
     required=True,
 )
 @click_hash_option
@@ -1253,10 +1252,6 @@ def generate_certificate_signing_request(
 
     data = public_key.read()
     public_key = serialization.load_pem_public_key(data, default_backend())
-
-    if "=" not in subject:
-        # Old style, common name only.
-        subject = "CN=" + subject
 
     try:
         metadata = session.get_slot_metadata(slot)

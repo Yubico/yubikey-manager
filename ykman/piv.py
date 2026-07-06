@@ -145,6 +145,10 @@ def parse_rfc4514_string(value: str) -> x509.Name:
     )
     try:
         return x509.Name.from_rfc4514_string(value)
+    except ValueError as e:
+        if not str(e):
+            raise ValueError("Invalid RFC 4514 string") from e
+        raise
     except AttributeError:
         # cryptography < 37, use fallback implementation
         return _parse_rfc4514_string(value)
@@ -780,7 +784,7 @@ def generate_self_signed_certificate(
     session: PivSession,
     slot: SLOT,
     public_key: PublicKeyTypes,
-    subject_str: str,
+    subject: str | x509.Name,
     valid_from: datetime,
     valid_to: datetime,
     hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
@@ -790,7 +794,7 @@ def generate_self_signed_certificate(
     :param session: The PIV session.
     :param slot: The slot.
     :param public_key: The public key.
-    :param subject_str: The subject RFC 4514 string.
+    :param subject: The subject RFC 4514 string or x509.Name.
     :param valid_from: The date from when the certificate is valid.
     :param valid_to: The date when the certificate expires.
     :param hash_algorithm: The hash algorithm.
@@ -800,7 +804,8 @@ def generate_self_signed_certificate(
     if TYPE_CHECKING:
         public_key = cast(CertificatePublicKeyTypes, public_key)
 
-    subject = parse_rfc4514_string(subject_str)
+    if not isinstance(subject, x509.Name):
+        subject = parse_rfc4514_string(subject)
     builder = (
         x509.CertificateBuilder()
         .public_key(public_key)
@@ -818,7 +823,7 @@ def generate_csr(
     session: PivSession,
     slot: SLOT,
     public_key: PublicKeyTypes,
-    subject_str: str,
+    subject: str | x509.Name,
     hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
 ) -> x509.CertificateSigningRequest:
     """Generate a CSR using a private key in a slot.
@@ -826,12 +831,12 @@ def generate_csr(
     :param session: The PIV session.
     :param slot: The slot.
     :param public_key: The public key.
-    :param subject_str: The subject RFC 4514 string.
+    :param subject: The subject RFC 4514 string or x509.Name.
     :param hash_algorithm: The hash algorithm.
     """
     logger.debug("Generating a CSR")
-    builder = x509.CertificateSigningRequestBuilder().subject_name(
-        parse_rfc4514_string(subject_str)
-    )
+    if not isinstance(subject, x509.Name):
+        subject = parse_rfc4514_string(subject)
+    builder = x509.CertificateSigningRequestBuilder().subject_name(subject)
 
     return sign_csr_builder(session, slot, public_key, builder, hash_algorithm)
