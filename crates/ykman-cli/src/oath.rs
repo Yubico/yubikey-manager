@@ -372,7 +372,7 @@ fn validate_and_remember(
 ) -> Result<()> {
     session
         .validate(key)
-        .map_err(|_| anyhow!("Invalid password."))?;
+        .map_err(|_| anyhow!("Wrong password."))?;
     if remember {
         keys.put_secret(session.device_id(), &hex::encode(key.expose_secret()))
             .map_err(|e| anyhow!("Failed to remember password: {e}"))?;

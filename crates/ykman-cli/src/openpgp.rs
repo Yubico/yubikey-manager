@@ -2,7 +2,9 @@ use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
-use yubikit::openpgp::{KeyRef, KeyStatus, OpenPgpPin, OpenPgpSession, PinPolicy, Uif};
+use yubikit::openpgp::{
+    KeyRef, KeyStatus, OpenPgpError, OpenPgpPin, OpenPgpSession, PinPolicy, Uif,
+};
 
 use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
 use crate::scp::ScpParams;
@@ -279,6 +281,21 @@ fn ensure_pin(pin: Option<&str>) -> Result<OpenPgpPin> {
     }
 }
 
+fn format_openpgp_credential_error(
+    e: OpenPgpError,
+    credential: &str,
+    action: &str,
+) -> anyhow::Error {
+    match e {
+        OpenPgpError::InvalidPin(0) => anyhow!("{action}: {credential} is blocked."),
+        OpenPgpError::InvalidPin(attempts) => {
+            anyhow!("{action}: Wrong {credential}, {attempts} attempt(s) remaining.")
+        }
+        OpenPgpError::PinBlocked => anyhow!("{action}: {credential} is blocked."),
+        e => anyhow!("{action}: {e}"),
+    }
+}
+
 pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     let mut session = open_session(dev, scp_params)?;
 
@@ -451,9 +468,9 @@ pub fn run_set_retries(
     }
     let mut session = open_session(dev, scp_params)?;
     let ap = ensure_admin_pin(admin_pin)?;
-    session
-        .verify_admin(&ap)
-        .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
     session
         .set_pin_attempts(pin_retries, reset_code_retries, admin_pin_retries)
         .map_err(|e| anyhow!("Failed to set retries: {e}"))?;
@@ -475,7 +492,7 @@ pub fn run_change_pin(
     let mut session = open_session(dev, scp_params)?;
     session
         .change_pin(&old, &new)
-        .map_err(|e| anyhow!("Failed to change PIN: {e}"))?;
+        .map_err(|e| format_openpgp_credential_error(e, "PIN", "Failed to change PIN"))?;
     eprintln!("PIN changed.");
     Ok(())
 }
@@ -492,9 +509,9 @@ pub fn run_change_admin_pin(
         None => crate::util::prompt_new_secret("New Admin PIN").map(|p| OpenPgpPin::new(&p))?,
     };
     let mut session = open_session(dev, scp_params)?;
-    session
-        .change_admin(&old, &new)
-        .map_err(|e| anyhow!("Failed to change Admin PIN: {e}"))?;
+    session.change_admin(&old, &new).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Failed to change Admin PIN")
+    })?;
     eprintln!("Admin PIN changed.");
     Ok(())
 }
@@ -511,9 +528,9 @@ pub fn run_change_reset_code(
     };
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
-    session
-        .verify_admin(&ap)
-        .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
     session
         .set_reset_code(&rc)
         .map_err(|e| anyhow!("Failed to set reset code: {e}"))?;
@@ -535,14 +552,19 @@ pub fn run_unblock_pin(
     let mut session = open_session(dev, scp_params)?;
     if let Some(ap) = admin_pin {
         let ap = OpenPgpPin::new(ap);
-        session
-            .verify_admin(&ap)
-            .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
+        session.verify_admin(&ap).map_err(|e| {
+            format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+        })?;
     }
     let reset_code = reset_code.map(OpenPgpPin::new);
-    session
-        .reset_pin(&new, reset_code.as_ref())
-        .map_err(|e| anyhow!("Failed to unblock PIN: {e}"))?;
+    session.reset_pin(&new, reset_code.as_ref()).map_err(|e| {
+        let credential = if reset_code.is_some() {
+            "reset code"
+        } else {
+            "Admin PIN"
+        };
+        format_openpgp_credential_error(e, credential, "Failed to unblock PIN")
+    })?;
     eprintln!("PIN unblocked.");
     Ok(())
 }
@@ -556,9 +578,9 @@ pub fn run_set_signature_policy(
     let pp: PinPolicy = policy.into();
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
-    session
-        .verify_admin(&ap)
-        .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
     session
         .set_signature_pin_policy(pp)
         .map_err(|e| anyhow!("Failed to set policy: {e}"))?;
@@ -679,9 +701,9 @@ pub fn run_keys_set_touch(
 
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
-    session
-        .verify_admin(&ap)
-        .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
     session
         .set_uif(key_ref, uif)
         .map_err(|e| anyhow!("Failed to set touch policy: {e}"))?;
@@ -723,7 +745,7 @@ pub fn run_keys_attest(
     let p = ensure_pin(pin)?;
     session
         .verify_pin(&p, false)
-        .map_err(|e| anyhow!("PIN verification failed: {e}"))?;
+        .map_err(|e| format_openpgp_credential_error(e, "PIN", "PIN verification failed"))?;
     let cert_der = session
         .attest_key(key_ref)
         .map_err(|e| anyhow!("Failed to attest key: {e}"))?;
@@ -773,9 +795,9 @@ pub fn run_certificates_import(
 
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
-    session
-        .verify_admin(&ap)
-        .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
     session
         .put_certificate(key_ref, &der)
         .map_err(|e| anyhow!("Failed to import certificate: {e}"))?;
@@ -792,9 +814,9 @@ pub fn run_certificates_delete(
     let key_ref: KeyRef = key.into();
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
-    session
-        .verify_admin(&ap)
-        .map_err(|e| anyhow!("Admin PIN verification failed: {e}"))?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
     session
         .delete_certificate(key_ref)
         .map_err(|e| anyhow!("Failed to delete certificate: {e}"))?;
@@ -846,4 +868,24 @@ fn pem_decode(text: &str) -> Result<Vec<u8>> {
     base64::engine::general_purpose::STANDARD
         .decode(&b64)
         .map_err(|e| anyhow!("Invalid PEM data: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use yubikit::openpgp::OpenPgpError;
+
+    use super::format_openpgp_credential_error;
+
+    #[test]
+    fn openpgp_credential_errors_name_the_credential() {
+        let err =
+            format_openpgp_credential_error(OpenPgpError::InvalidPin(2), "Admin PIN", "Failed");
+        assert_eq!(
+            err.to_string(),
+            "Failed: Wrong Admin PIN, 2 attempt(s) remaining."
+        );
+
+        let err = format_openpgp_credential_error(OpenPgpError::PinBlocked, "PIN", "Failed");
+        assert_eq!(err.to_string(), "Failed: PIN is blocked.");
+    }
 }

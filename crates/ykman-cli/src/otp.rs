@@ -30,7 +30,7 @@ pub fn effective_access_code<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::effective_access_code;
+    use super::{effective_access_code, format_otp_write_error};
 
     #[test]
     fn parent_access_code_overrides_subcommand_access_code() {
@@ -51,6 +51,15 @@ mod tests {
         assert_eq!(
             effective_access_code(&parent, &subcommand),
             Some("aabbccddeeff")
+        );
+    }
+
+    #[test]
+    fn otp_write_error_mentions_possible_access_code() {
+        let err = format_otp_write_error("Connection error: Command rejected: No data");
+        assert_eq!(
+            err.to_string(),
+            "Failed to write to the YubiKey. Slot(s) may be protected with an access code."
         );
     }
 }
@@ -539,6 +548,14 @@ fn to_access_code(code: &[u8; ACC_CODE_SIZE]) -> Result<AccessCode> {
     AccessCode::new(code.as_slice()).map_err(|e| anyhow!("Invalid access code: {e}"))
 }
 
+fn format_otp_write_error<E: std::fmt::Display>(e: E) -> anyhow::Error {
+    if e.to_string().contains("Command rejected: No data") {
+        anyhow!("Failed to write to the YubiKey. Slot(s) may be protected with an access code.")
+    } else {
+        anyhow!("Failed to write to the YubiKey: {e}")
+    }
+}
+
 fn confirm_slot_overwrite<C: Connection + 'static>(session: &YubiOtpSession<C>, slot: Slot) {
     let state = session.get_config_state();
     if state.is_configured(slot).unwrap_or(false)
@@ -604,9 +621,7 @@ pub fn run_swap(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) ->
     struct Swap;
     impl YubiOtpOp<()> for Swap {
         fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<()> {
-            session
-                .swap_slots()
-                .map_err(|e| anyhow!("Failed to swap slots: {e}"))?;
+            session.swap_slots().map_err(format_otp_write_error)?;
             eprintln!("Slot configurations swapped.");
             Ok(())
         }
@@ -652,7 +667,7 @@ pub fn run_delete(
             let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
                 .delete_slot(self.slot, acc.as_ref())
-                .map_err(|e| anyhow!("Failed to delete slot: {e}"))?;
+                .map_err(format_otp_write_error)?;
             eprintln!("Configuration slot {} deleted.", self.slot.map(1, 2));
             Ok(())
         }
@@ -880,7 +895,7 @@ pub fn run_yubiotp(
             let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
                 .put_configuration(self.slot, &self.config, acc.as_ref(), None)
-                .map_err(|e| anyhow!("Failed to program: {e}"))?;
+                .map_err(format_otp_write_error)?;
             if self.need_serial {
                 let serial = session
                     .get_serial()
@@ -986,7 +1001,7 @@ pub fn run_static(
             let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
                 .put_configuration(self.slot, &self.config, acc.as_ref(), None)
-                .map_err(|e| anyhow!("Failed to program: {e}"))?;
+                .map_err(format_otp_write_error)?;
             eprintln!("Static password stored in slot {}.", self.slot.map(1, 2));
             Ok(())
         }
@@ -1080,7 +1095,7 @@ pub fn run_chalresp(
             let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
                 .put_configuration(self.slot, &self.config, acc.as_ref(), None)
-                .map_err(|e| anyhow!("Failed to program: {e}"))?;
+                .map_err(format_otp_write_error)?;
             eprintln!(
                 "{} credential stored in slot {}.",
                 self.cred_type,
@@ -1316,7 +1331,7 @@ pub fn run_hotp(
             let acc = self.acc.as_ref().map(to_access_code).transpose()?;
             session
                 .put_configuration(self.slot, &self.config, acc.as_ref(), None)
-                .map_err(|e| anyhow!("Failed to program: {e}"))?;
+                .map_err(format_otp_write_error)?;
             eprintln!("HOTP credential stored in slot {}.", self.slot.map(1, 2));
             Ok(())
         }
@@ -1421,7 +1436,7 @@ pub fn run_settings(
             let cur_acc = self.cur_acc.as_ref().map(to_access_code).transpose()?;
             session
                 .update_configuration(self.slot, &self.config, new_acc.as_ref(), cur_acc.as_ref())
-                .map_err(|e| anyhow!("Failed to update settings: {e}"))?;
+                .map_err(format_otp_write_error)?;
             eprintln!("Settings for slot {} updated.", self.slot.map(1, 2));
             Ok(())
         }

@@ -21,7 +21,7 @@ use yubikit::piv::{
 use ykman::piv::{
     TAG_PIVMAN_KEY, get_pivman_data, get_pivman_protected_data, has_stored_key, pivman_set_mgm_key,
 };
-use yubikit::smartcard::SmartCardConnection;
+use yubikit::smartcard::{SmartCardConnection, SmartCardError, Sw};
 
 use crate::cli_enums::{
     CliFormat, CliHashAlgorithm, CliKeyType, CliMgmtKeyType, CliPinPolicy, CliTouchPolicy,
@@ -661,7 +661,7 @@ fn authenticate_session(
         let management_key = to_management_key(session.management_key_type(), &key)?;
         session
             .authenticate(&management_key)
-            .map_err(|e| anyhow!("Authentication failed: {e}"))?;
+            .map_err(|e| format_management_key_auth_error(e, false))?;
         return Ok(false);
     }
 
@@ -674,7 +674,7 @@ fn authenticate_session(
             let management_key = to_management_key(session.management_key_type(), key)?;
             session
                 .authenticate(&management_key)
-                .map_err(|e| anyhow!("Authentication with stored key failed: {e}"))?;
+                .map_err(|e| format_management_key_auth_error(e, true))?;
             return Ok(true);
         }
         return Err(anyhow!(
@@ -694,8 +694,31 @@ fn authenticate_session(
     let management_key = to_management_key(session.management_key_type(), &key)?;
     session
         .authenticate(&management_key)
-        .map_err(|e| anyhow!("Authentication failed: {e}"))?;
+        .map_err(|e| format_management_key_auth_error(e, false))?;
     Ok(false)
+}
+
+fn format_management_key_auth_error(e: PivError, stored_key: bool) -> anyhow::Error {
+    match e {
+        PivError::Connection(SmartCardError::Apdu { sw, .. })
+            if Sw::from_u16(sw) == Some(Sw::SecurityConditionNotSatisfied) =>
+        {
+            if stored_key {
+                anyhow!(
+                    "Authentication with stored key failed: Stored management key does not match the YubiKey."
+                )
+            } else {
+                anyhow!("Authentication failed: Wrong management key.")
+            }
+        }
+        e => {
+            if stored_key {
+                anyhow!("Authentication with stored key failed: {e}")
+            } else {
+                anyhow!("Authentication failed: {e}")
+            }
+        }
+    }
 }
 
 /// Ensure PIN is verified. If pin is Some, verifies it. If None, prompts.
@@ -737,6 +760,16 @@ where
             f(session).map_err(|e| anyhow!("{e}"))
         }
         Err(e) => Err(anyhow!("{e}")),
+    }
+}
+
+fn format_piv_credential_error(e: PivError, credential: &str, action: &str) -> anyhow::Error {
+    match e {
+        PivError::InvalidPin(0) => anyhow!("{action}: {credential} is blocked."),
+        PivError::InvalidPin(attempts) => {
+            anyhow!("{action}: Wrong {credential}, {attempts} attempt(s) remaining.")
+        }
+        e => anyhow!("{action}: {e}"),
     }
 }
 
@@ -997,7 +1030,7 @@ pub fn run_change_pin(
     let mut session = open_session(dev, scp_params)?;
     session
         .change_pin(&old, &new)
-        .map_err(|e| anyhow!("Failed to change PIN: {e}"))?;
+        .map_err(|e| format_piv_credential_error(e, "PIN", "Failed to change PIN"))?;
     eprintln!("PIN changed.");
     Ok(())
 }
@@ -1026,7 +1059,7 @@ pub fn run_change_puk(
     let mut session = open_session(dev, scp_params)?;
     session
         .change_puk(&old, &new)
-        .map_err(|e| anyhow!("Failed to change PUK: {e}"))?;
+        .map_err(|e| format_piv_credential_error(e, "PUK", "Failed to change PUK"))?;
     eprintln!("PUK changed.");
     Ok(())
 }
@@ -1054,7 +1087,7 @@ pub fn run_unblock_pin(
     let mut session = open_session(dev, scp_params)?;
     session
         .unblock_pin(&puk, &new)
-        .map_err(|e| anyhow!("Failed to unblock PIN: {e}"))?;
+        .map_err(|e| format_piv_credential_error(e, "PUK", "Failed to unblock PIN"))?;
     eprintln!("PIN unblocked.");
     Ok(())
 }
@@ -2046,4 +2079,51 @@ fn write_cert_file(output: &str, cert_der: &[u8], format: CliFormat) -> Result<(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use yubikit::piv::PivError;
+    use yubikit::smartcard::SmartCardError;
+
+    use super::{format_management_key_auth_error, format_piv_credential_error};
+
+    #[test]
+    fn piv_credential_errors_name_the_credential() {
+        let err = format_piv_credential_error(PivError::InvalidPin(2), "PUK", "Failed");
+        assert_eq!(
+            err.to_string(),
+            "Failed: Wrong PUK, 2 attempt(s) remaining."
+        );
+
+        let err = format_piv_credential_error(PivError::InvalidPin(0), "PIN", "Failed");
+        assert_eq!(err.to_string(), "Failed: PIN is blocked.");
+    }
+
+    #[test]
+    fn piv_management_key_authentication_errors_are_clear() {
+        let err = format_management_key_auth_error(
+            PivError::Connection(SmartCardError::Apdu {
+                data: vec![],
+                sw: 0x6982,
+            }),
+            false,
+        );
+        assert_eq!(
+            err.to_string(),
+            "Authentication failed: Wrong management key."
+        );
+
+        let err = format_management_key_auth_error(
+            PivError::Connection(SmartCardError::Apdu {
+                data: vec![],
+                sw: 0x6982,
+            }),
+            true,
+        );
+        assert_eq!(
+            err.to_string(),
+            "Authentication with stored key failed: Stored management key does not match the YubiKey."
+        );
+    }
 }
