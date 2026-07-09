@@ -9,10 +9,55 @@ fn ykman() -> Command {
 fn assert_help(path: &[&str]) {
     let mut cmd = ykman();
     cmd.args(path).arg("--help");
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("Usage:"))
-        .stdout(predicate::str::contains("--help"));
+    let output = cmd.output().expect("failed to run help command");
+    assert!(
+        output.status.success(),
+        "help command failed for {:?}: {}",
+        path,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Usage:"), "missing Usage for {path:?}");
+    assert!(stdout.contains("--help"), "missing --help for {path:?}");
+    assert_no_missing_arg_descriptions(path, &stdout);
+}
+
+fn assert_no_missing_arg_descriptions(path: &[&str], help: &str) {
+    let lines: Vec<_> = help.lines().collect();
+    let mut in_arg_section = false;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if line.ends_with(':') && !line.starts_with(' ') {
+            in_arg_section = matches!(trimmed, "Arguments:" | "Options:");
+            continue;
+        }
+
+        if !in_arg_section
+            || !line.starts_with("  ")
+            || !(trimmed.starts_with('-') || trimmed.starts_with('<'))
+        {
+            continue;
+        }
+
+        if let Some((_, description)) = trimmed.rsplit_once("  ")
+            && !description.trim_start().starts_with('[')
+        {
+            continue;
+        }
+
+        let next = lines.get(i + 1).map(|line| line.trim()).unwrap_or("");
+        assert!(
+            lines
+                .get(i + 1)
+                .is_some_and(|line| line.starts_with("          "))
+                && !next.starts_with("[possible values:")
+                && !next.starts_with("[default:"),
+            "missing help description for {:?}: {}",
+            path,
+            trimmed
+        );
+    }
 }
 
 #[test]

@@ -16,6 +16,7 @@ pub enum HsmauthAction {
     Info,
     /// Reset the HSM Auth application
     Reset {
+        /// Confirm the reset without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -33,57 +34,73 @@ pub enum HsmauthCredAction {
     List,
     /// Generate asymmetric credential
     Generate {
+        /// Credential label
         label: String,
+        /// Password to protect the credential
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// Management password
         #[arg(short = 'm', long)]
         management_password: Option<String>,
+        /// Require touch to use the credential
         #[arg(short = 't', long)]
         touch: bool,
     },
     /// Import symmetric credential
     Symmetric {
+        /// Credential label
         label: String,
+        /// Encryption key in hex
         #[arg(short = 'E', long)]
         enc_key: Option<String>,
+        /// MAC key in hex
         #[arg(short = 'M', long)]
         mac_key: Option<String>,
+        /// Generate random encryption and MAC keys
         #[arg(short = 'g', long)]
         generate: bool,
+        /// Password to protect the credential
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// Management password
         #[arg(short = 'm', long)]
         management_password: Option<String>,
+        /// Require touch to use the credential
         #[arg(short = 't', long)]
         touch: bool,
     },
     /// Import credential derived from password
     Derive {
+        /// Credential label
         label: String,
         /// Derivation password
         derivation_password: String,
+        /// Password to protect the credential
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// Management password
         #[arg(short = 'm', long)]
         management_password: Option<String>,
+        /// Require touch to use the credential
         #[arg(short = 't', long)]
         touch: bool,
     },
     /// Delete credential
     Delete {
+        /// Credential label
         label: String,
         /// Management password
         #[arg(short = 'm', long)]
         management_password: Option<String>,
+        /// Confirm deletion without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
     /// Change credential password
     ChangePassword {
+        /// Credential label
         label: String,
+        /// Current credential password
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// New credential password
@@ -127,10 +144,13 @@ pub enum HsmauthAccessAction {
     /// Change the management key
     #[command(name = "change-management-password")]
     ChangeManagementPassword {
+        /// Current management password
         #[arg(short = 'm', long)]
         management_password: Option<String>,
+        /// New management password
         #[arg(short = 'n', long)]
         new_management_password: Option<String>,
+        /// Generate a random management password
         #[arg(short = 'g', long)]
         generate: bool,
     },

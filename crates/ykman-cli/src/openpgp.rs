@@ -19,6 +19,7 @@ pub enum OpenpgpAction {
     Info,
     /// Reset the OpenPGP application
     Reset {
+        /// Confirm the reset without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -37,30 +38,40 @@ pub enum OpenpgpAction {
 pub enum OpenpgpAccessAction {
     /// Set PIN retry counts
     SetRetries {
+        /// User PIN retry count
         pin_retries: u8,
+        /// Reset code retry count
         reset_code_retries: u8,
+        /// Admin PIN retry count
         admin_pin_retries: u8,
+        /// Admin PIN
         #[arg(short = 'a', long)]
         admin_pin: Option<String>,
+        /// Confirm changing retry counters without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
     /// Change user PIN
     ChangePin {
+        /// Current user PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
+        /// New user PIN
         #[arg(short = 'n', long)]
         new_pin: Option<String>,
     },
     /// Change admin PIN
     ChangeAdminPin {
+        /// Current admin PIN
         #[arg(short = 'a', long)]
         admin_pin: Option<String>,
+        /// New admin PIN
         #[arg(short = 'n', long)]
         new_admin_pin: Option<String>,
     },
     /// Change reset code
     ChangeResetCode {
+        /// Admin PIN
         #[arg(short = 'a', long)]
         admin_pin: Option<String>,
         /// New reset code
@@ -69,10 +80,13 @@ pub enum OpenpgpAccessAction {
     },
     /// Unblock PIN
     UnblockPin {
+        /// Admin PIN
         #[arg(short = 'a', long)]
         admin_pin: Option<String>,
+        /// Reset code
         #[arg(long)]
         reset_code: Option<String>,
+        /// New user PIN
         #[arg(short = 'n', long)]
         new_pin: Option<String>,
     },
@@ -80,6 +94,7 @@ pub enum OpenpgpAccessAction {
     SetSignaturePolicy {
         /// Policy
         policy: CliOpenpgpPinPolicy,
+        /// Admin PIN
         #[arg(short = 'a', long)]
         admin_pin: Option<String>,
     },
@@ -98,8 +113,10 @@ pub enum OpenpgpKeysAction {
         key: CliKeyRef,
         /// Touch policy
         policy: CliUif,
+        /// Admin PIN
         #[arg(short = 'a', long)]
         admin_pin: Option<String>,
+        /// Confirm setting touch policy without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -109,6 +126,7 @@ pub enum OpenpgpKeysAction {
         key: CliKeyRef,
         /// Key file
         key_file: String,
+        /// Admin PIN
         #[arg(short = 'a', long)]
         admin_pin: Option<String>,
     },
@@ -118,6 +136,7 @@ pub enum OpenpgpKeysAction {
         key: CliKeyRef,
         /// Output file
         output: String,
+        /// Output format
         #[arg(short = 'F', long, default_value = "pem")]
         format: CliFormat,
         /// PIN for attestation
@@ -134,6 +153,7 @@ pub enum OpenpgpCertAction {
         key: CliKeyRef,
         /// Output file
         output: String,
+        /// Output format
         #[arg(short = 'F', long, default_value = "pem")]
         format: CliFormat,
     },
@@ -143,6 +163,7 @@ pub enum OpenpgpCertAction {
         key: CliKeyRef,
         /// Certificate file
         cert_file: String,
+        /// Admin PIN
         #[arg(short = 'a', long)]
         admin_pin: Option<String>,
     },
@@ -150,6 +171,7 @@ pub enum OpenpgpCertAction {
     Delete {
         /// Key reference
         key: CliKeyRef,
+        /// Admin PIN
         #[arg(short = 'a', long)]
         admin_pin: Option<String>,
     },

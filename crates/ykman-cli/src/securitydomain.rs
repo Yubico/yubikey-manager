@@ -17,6 +17,7 @@ pub enum SecurityDomainAction {
     Info,
     /// Reset Security Domain
     Reset {
+        /// Confirm the reset without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -41,14 +42,20 @@ pub enum SecurityDomainKeysAction {
     },
     /// Export certificate bundle
     Export {
+        /// Key ID (hex)
         kid: String,
+        /// Key Version Number (hex)
         kvn: String,
+        /// Output file for certificate bundle
         output: String,
     },
     /// Delete a key
     Delete {
+        /// Key ID (hex)
         kid: String,
+        /// Key Version Number (hex)
         kvn: String,
+        /// Confirm deletion without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
