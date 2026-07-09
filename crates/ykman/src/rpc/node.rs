@@ -94,7 +94,7 @@ impl NodeHost {
     fn close_child(&mut self) {
         if let Some(mut child) = self.child.take() {
             let name = self.child_name.take().unwrap_or_default();
-            log::debug!("Closing child: {:?}", &name);
+            log::debug!("Closing child: {:?}", name);
             child.close();
             self.node.on_child_closed(&name);
         } else {

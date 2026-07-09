@@ -774,11 +774,11 @@ impl DeviceInfo {
         let fps_version = data
             .get(&TAG_FPS_VERSION)
             .map(|v| Version::from_bytes(v))
-            .and_then(|v| if v == Version(0, 0, 0) { None } else { Some(v) });
+            .filter(|&v| v != Version(0, 0, 0));
         let stm_version = data
             .get(&TAG_STM_VERSION)
             .map(|v| Version::from_bytes(v))
-            .and_then(|v| if v == Version(0, 0, 0) { None } else { Some(v) });
+            .filter(|&v| v != Version(0, 0, 0));
 
         let config = DeviceConfig {
             enabled_capabilities: enabled,
