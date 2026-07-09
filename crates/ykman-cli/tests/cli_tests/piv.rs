@@ -1,7 +1,7 @@
 use super::common::{
-    InputMode, fixture_path, piv_has_puk, piv_management_key, piv_management_key_algorithm,
-    piv_new_management_key, piv_new_pin, piv_new_puk, piv_pin, piv_puk, piv_reset, reset_blocked,
-    skip_before_version, ykman_dev, ykman_dev_tty,
+    InputMode, app_is_fips_capable, fixture_path, piv_has_puk, piv_management_key,
+    piv_management_key_algorithm, piv_new_management_key, piv_new_pin, piv_new_puk, piv_pin,
+    piv_puk, piv_reset, reset_blocked, skip_before_version, ykman_dev, ykman_dev_tty,
 };
 use predicates::prelude::*;
 use rstest::rstest;
@@ -148,6 +148,20 @@ fn test_piv_change_management_key(#[case] mode: InputMode) {
     piv_reset();
 
     if mode.is_interactive() {
+        let input = if app_is_fips_capable("PIV") {
+            format!(
+                "{}\n{}\n{}\n",
+                piv_management_key(),
+                piv_new_management_key(),
+                piv_new_management_key()
+            )
+        } else {
+            format!(
+                "{}\n{}\n",
+                piv_new_management_key(),
+                piv_new_management_key()
+            )
+        };
         let output = ykman_dev_tty(
             &[
                 "piv",
@@ -155,14 +169,8 @@ fn test_piv_change_management_key(#[case] mode: InputMode) {
                 "change-management-key",
                 "--algorithm",
                 piv_management_key_algorithm(),
-                "-f",
             ],
-            &format!(
-                "{}\n{}\n{}\n",
-                piv_new_management_key(),
-                piv_new_management_key(),
-                piv_management_key()
-            ),
+            &input,
         );
         assert!(output.status.success(), "{output:?}");
     } else {
@@ -177,7 +185,6 @@ fn test_piv_change_management_key(#[case] mode: InputMode) {
                 piv_new_management_key(),
                 "--algorithm",
                 piv_management_key_algorithm(),
-                "-f",
             ])
             .assert()
             .success();
@@ -191,13 +198,12 @@ fn test_piv_change_management_key(#[case] mode: InputMode) {
                 "change-management-key",
                 "--algorithm",
                 piv_management_key_algorithm(),
-                "-f",
             ],
             &format!(
                 "{}\n{}\n{}\n",
+                piv_new_management_key(),
                 piv_management_key(),
-                piv_management_key(),
-                piv_new_management_key()
+                piv_management_key()
             ),
         );
         assert!(output.status.success(), "{output:?}");
@@ -213,7 +219,6 @@ fn test_piv_change_management_key(#[case] mode: InputMode) {
                 piv_management_key(),
                 "--algorithm",
                 piv_management_key_algorithm(),
-                "-f",
             ])
             .assert()
             .success();

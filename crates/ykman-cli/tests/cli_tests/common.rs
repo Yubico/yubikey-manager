@@ -506,6 +506,8 @@ pub fn piv_new_management_key() -> &'static str {
 pub fn piv_management_key_algorithm() -> &'static str {
     if app_is_fips_capable("PIV") {
         "aes128"
+    } else if device_version().is_some_and(|version| version >= (5, 4, 0)) {
+        "aes192"
     } else {
         "tdes"
     }
@@ -689,7 +691,6 @@ pub fn piv_reset() {
                 FIPS_PIV_MANAGEMENT_KEY,
                 "--algorithm",
                 "aes128",
-                "-f",
             ])
             .assert()
             .success();

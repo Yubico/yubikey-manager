@@ -10,6 +10,7 @@ use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
 use x509_cert::time::Validity;
+use yubikit::core::Version;
 use yubikit::device::YubiKeyDevice;
 use yubikit::keys::{PrivateKey, PublicKey};
 use yubikit::management::Capability;
@@ -107,14 +108,12 @@ pub enum PivAccessAction {
         management_key: Option<String>,
         #[arg(short = 'n', long)]
         new_management_key: Option<String>,
-        #[arg(short = 'a', long, default_value = "tdes")]
-        algorithm: CliMgmtKeyType,
+        #[arg(short = 'a', long)]
+        algorithm: Option<CliMgmtKeyType>,
         #[arg(short = 't', long)]
         touch: bool,
         #[arg(short = 'g', long)]
         generate: bool,
-        #[arg(short = 'f', long)]
-        force: bool,
         /// Verify PIN before changing management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
@@ -372,7 +371,6 @@ impl PivAction {
                     algorithm,
                     touch,
                     generate,
-                    force,
                     pin,
                     protect,
                 } => run_change_management_key(
@@ -383,7 +381,6 @@ impl PivAction {
                     algorithm,
                     touch,
                     generate,
-                    force,
                     pin.as_deref(),
                     protect,
                 ),
@@ -689,7 +686,7 @@ fn authenticate_session(
     {
         return Ok(false);
     }
-    let input = crate::util::prompt_secret("Enter management key")?;
+    let input = crate::util::prompt_secret("Enter the current management key")?;
     let key = parse_management_key(&input)?;
     let management_key = to_management_key(session.management_key_type(), &key)?;
     session
@@ -1126,30 +1123,49 @@ pub fn run_change_management_key(
     scp_params: &ScpParams,
     mgmt_key: Option<&str>,
     new_mgmt_key: Option<&str>,
-    algorithm: CliMgmtKeyType,
+    algorithm: Option<CliMgmtKeyType>,
     touch: bool,
     generate: bool,
-    force: bool,
     pin: Option<&str>,
     protect: bool,
 ) -> Result<()> {
-    let key_type: ManagementKeyType = algorithm.into();
+    let mut session = open_session(dev, scp_params)?;
+    let key_type: ManagementKeyType = algorithm
+        .map(Into::into)
+        .unwrap_or_else(|| session.management_key_type());
+    check_management_key_type_supported(session.version(), dev.info().is_fips, key_type)
+        .map_err(|e| anyhow!("{e}"))?;
+
     let key_len = key_type.key_len();
 
-    let new_key = if generate {
-        let mut k = vec![0u8; key_len];
-        getrandom::fill(&mut k).map_err(|e| anyhow!("Failed to generate: {e}"))?;
-        k
-    } else if let Some(k) = new_mgmt_key {
+    let provided_new_key = if !generate && let Some(k) = new_mgmt_key {
         let bytes = parse_management_key(k)?;
         if bytes.len() != key_len {
             return Err(anyhow!(
                 "Management key must be {key_len} bytes for {key_type}."
             ));
         }
-        bytes
+        Some(bytes)
     } else {
-        let input = crate::util::prompt_new_secret("New management key (hex)")?;
+        None
+    };
+
+    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
+    if protect && !pin_verified {
+        ensure_pin(&mut session, pin)?;
+    }
+
+    let new_key = if generate {
+        let mut k = vec![0u8; key_len];
+        getrandom::fill(&mut k).map_err(|e| anyhow!("Failed to generate: {e}"))?;
+        k
+    } else if let Some(k) = provided_new_key {
+        k
+    } else {
+        let input = crate::util::prompt_new_secret(&format!(
+            "New management key ({}, in hex)",
+            management_key_type_prompt_name(key_type)
+        ))?;
         let bytes = parse_management_key(&input)?;
         if bytes.len() != key_len {
             return Err(anyhow!(
@@ -1159,15 +1175,6 @@ pub fn run_change_management_key(
         bytes
     };
 
-    if !force && !confirm("Change management key?") {
-        return Err(anyhow!("Aborted."));
-    }
-
-    let mut session = open_session(dev, scp_params)?;
-    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
-    if protect && !pin_verified {
-        ensure_pin(&mut session, pin)?;
-    }
     pivman_set_mgm_key(&mut session, key_type, &new_key, touch, protect)
         .map_err(|e| anyhow!("Failed to set management key: {e}"))?;
 
@@ -1177,6 +1184,38 @@ pub fn run_change_management_key(
         eprintln!("Management key changed.");
     }
     Ok(())
+}
+
+fn management_key_type_prompt_name(key_type: ManagementKeyType) -> &'static str {
+    match key_type {
+        ManagementKeyType::Tdes => "TDES",
+        ManagementKeyType::Aes128 => "AES-128",
+        ManagementKeyType::Aes192 => "AES-192",
+        ManagementKeyType::Aes256 => "AES-256",
+        _ => "unknown algorithm",
+    }
+}
+
+fn check_management_key_type_supported(
+    version: Version,
+    is_fips: bool,
+    key_type: ManagementKeyType,
+) -> std::result::Result<(), String> {
+    match key_type {
+        ManagementKeyType::Tdes
+            if (is_fips && version >= Version(5, 7, 0)) || version >= Version(6, 0, 0) =>
+        {
+            Err("TDES management keys are not supported by this YubiKey".to_string())
+        }
+        ManagementKeyType::Aes128 | ManagementKeyType::Aes192 | ManagementKeyType::Aes256
+            if version < Version(5, 4, 0) =>
+        {
+            Err(format!(
+                "{key_type} management keys are not supported by this YubiKey"
+            ))
+        }
+        _ => Ok(()),
+    }
 }
 
 pub fn run_keys_generate(
@@ -2083,10 +2122,15 @@ fn write_cert_file(output: &str, cert_der: &[u8], format: CliFormat) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    use yubikit::core::Version;
+    use yubikit::piv::ManagementKeyType;
     use yubikit::piv::PivError;
     use yubikit::smartcard::SmartCardError;
 
-    use super::{format_management_key_auth_error, format_piv_credential_error};
+    use super::{
+        check_management_key_type_supported, format_management_key_auth_error,
+        format_piv_credential_error, management_key_type_prompt_name,
+    };
 
     #[test]
     fn piv_credential_errors_name_the_credential() {
@@ -2098,6 +2142,46 @@ mod tests {
 
         let err = format_piv_credential_error(PivError::InvalidPin(0), "PIN", "Failed");
         assert_eq!(err.to_string(), "Failed: PIN is blocked.");
+    }
+
+    #[test]
+    fn management_key_prompt_names_include_algorithm() {
+        assert_eq!(
+            management_key_type_prompt_name(ManagementKeyType::Tdes),
+            "TDES"
+        );
+        assert_eq!(
+            management_key_type_prompt_name(ManagementKeyType::Aes128),
+            "AES-128"
+        );
+        assert_eq!(
+            management_key_type_prompt_name(ManagementKeyType::Aes192),
+            "AES-192"
+        );
+        assert_eq!(
+            management_key_type_prompt_name(ManagementKeyType::Aes256),
+            "AES-256"
+        );
+    }
+
+    #[test]
+    fn management_key_support_rejects_unsupported_algorithms() {
+        assert!(
+            check_management_key_type_supported(Version(5, 3, 9), false, ManagementKeyType::Aes192)
+                .is_err()
+        );
+        assert!(
+            check_management_key_type_supported(Version(5, 7, 0), true, ManagementKeyType::Tdes)
+                .is_err()
+        );
+        assert!(
+            check_management_key_type_supported(Version(6, 0, 0), false, ManagementKeyType::Tdes)
+                .is_err()
+        );
+        assert!(
+            check_management_key_type_supported(Version(5, 7, 0), false, ManagementKeyType::Aes192)
+                .is_ok()
+        );
     }
 
     #[test]
