@@ -5,3 +5,14 @@ RUST_TEST_THREADS = "1"
 # Force tests to stream println! and logs immediately to the terminal
 # This shows which tests are skipped
 RUST_TEST_NOCAPTURE = "1"
+
+[target.x86_64-unknown-linux-gnu]
+# cargo-zigbuild links against host-provided shared libraries such as
+# libpcsclite and libudev. Those libraries may reference GLIBC symbols newer
+# than the target baseline even though the final binary will resolve them from
+# the target system. Let the final shared libraries satisfy their own symbols.
+rustflags = ["-C", "link-arg=-Wl,--allow-shlib-undefined"]
+
+[target.aarch64-unknown-linux-gnu]
+# See x86_64-unknown-linux-gnu above.
+rustflags = ["-C", "link-arg=-Wl,--allow-shlib-undefined"]

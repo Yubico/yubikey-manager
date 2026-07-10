@@ -15,8 +15,12 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: ykman-builds-linux-x64
+            target: x86_64-unknown-linux-gnu.2.28
+            rust-target: x86_64-unknown-linux-gnu
           - os: ubuntu-22.04-arm
             artifact: ykman-builds-linux-arm64
+            target: aarch64-unknown-linux-gnu.2.28
+            rust-target: aarch64-unknown-linux-gnu
 
     steps:
       - uses: actions/checkout@v6
@@ -28,15 +32,25 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked
 
       - name: Install cargo-about
         run: cargo install cargo-about --locked --features cli
 
       - name: Build Rust CLI
         run: |
-          cargo build --release -p ykman-cli
+          target="${{ matrix.target }}"
+          cargo zigbuild --release --target "$target" -p ykman-cli
+          target_dir="target/${target%%.*}/release"
           mkdir -p dist
-          cp target/release/ykman dist/
+          cp "$target_dir/ykman" dist/
           dist/ykman --version
 
       - name: Upload build

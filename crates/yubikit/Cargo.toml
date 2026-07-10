@@ -49,7 +49,7 @@ x509-cert.workspace = true
 signature.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-hidapi = { workspace = true, default-features = false, features = ["linux-static-hidraw"], optional = true }
+hidapi = { workspace = true, default-features = false, features = ["linux-native"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 hidapi = { workspace = true, default-features = true, features = ["macos-shared-device"], optional = true }
