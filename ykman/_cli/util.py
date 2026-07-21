@@ -115,10 +115,10 @@ class EnumChoice(click.Choice):
     Underscores in enum names are translated to dashes in the option choice.
     """
 
-    def __init__(self, choices_enum, hidden=[]):
-        self.choices_names = [
+    def __init__(self, choices_enum, hidden=()):
+        self.choices_names = tuple(
             v.name.replace("_", "-") for v in choices_enum if v not in hidden
-        ]
+        )
         super().__init__(
             self.choices_names,
             case_sensitive=False,
@@ -132,11 +132,11 @@ class EnumChoice(click.Choice):
 
         try:
             # Allow aliases
-            self.choices = [
+            self.choices = tuple(
                 k.replace("_", "-")
                 for k, v in self.choices_enum.__members__.items()
                 if v not in self.hidden
-            ]
+            )
             name = super().convert(value, param, ctx).replace("-", "_")
         finally:
             self.choices = self.choices_names
@@ -329,16 +329,20 @@ def is_yk4_fips(info: DeviceInfo) -> bool:
     return info.version[0] == 4 and info.is_fips
 
 
-def _fileno(f) -> int:
+def _is_stdout(f) -> bool:
+    """Check if a file object represents stdout."""
+    if f is sys.stdout:
+        return True
+    if hasattr(sys.stdout, "buffer") and f is sys.stdout.buffer:
+        return True
     try:
-        return f.fileno()
+        return f.fileno() == sys.stdout.fileno()
     except Exception:
-        return -1
+        return False
 
 
 def log_or_echo(message: str, log: logging.Logger, *files) -> None:
-    fno = _fileno(sys.stdout)
-    if any(_fileno(f) == fno for f in files):
+    if any(_is_stdout(f) for f in files):
         log.info(message)
     else:
         click.echo(f"{message}.")

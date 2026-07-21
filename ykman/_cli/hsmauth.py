@@ -796,6 +796,9 @@ def change_management_key(ctx, management_key, new_management_key, generate):
             except Exception:
                 ctx.fail("New management key has the wrong format.")
 
+    if new_management_key is None:
+        raise CliFail("No new management key provided.")
+
     if len(new_management_key) != MANAGEMENT_KEY_LEN:
         raise CliFail(
             "Management key has the wrong length (expected %d bytes)."

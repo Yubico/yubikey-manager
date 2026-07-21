@@ -98,4 +98,4 @@ def _otp_reinsert(
 
 
 # Patch the reinsert method to the OtpYubiKeyDevice class for the correct backend
-OtpYubiKeyDevice._do_reinsert = _otp_reinsert  # type: ignore
+setattr(OtpYubiKeyDevice, "_do_reinsert", _otp_reinsert)

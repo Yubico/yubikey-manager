@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 
+import re
 from base64 import b32encode
 
 import pytest
-
 from ykman.oath import STEAM_CHAR_TABLE
 from yubikit.management import CAPABILITY
 
@@ -288,12 +288,12 @@ class TestOathFips:
 
     def test_no_fips_mode_without_password(self, ykman_cli):
         output = ykman_cli("oath", "info").output
-        assert "FIPS Approved Mode: No" in output
+        assert re.search(r"FIPS approved:\s+False", output)
 
     def test_fips_mode_with_password(self, ykman_cli):
         ykman_cli("oath", "access", "change", "-n", PASSWORD)
         output = ykman_cli("oath", "info").output
-        assert "FIPS Approved Mode: Yes" in output
+        assert re.search(r"FIPS approved:\s+True", output)
 
     def test_sha512_not_supported(self, ykman_cli):
         with pytest.raises(SystemExit):

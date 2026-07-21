@@ -3,7 +3,7 @@ In addition to using ykman as a standalone command line application, you can
 also use this project as a Python library for scripting purposes.
 
 === Setup
-You will need to have Python >= 3.7, and have `yubikey-manager` installed and
+You will need to have Python >= 3.10, and have `yubikey-manager` installed and
 added to your PYTHON_PATH. You can verify that this is set up correctly by
 running the following command from a Terminal:
 
@@ -34,7 +34,6 @@ connections.
 [source,py]
 ----
 from ykman.device import list_all_devices
-from yubikit.core.smartcard import SmartCardConnection
 
 for device, info in list_all_devices():
     if info.version >= (5, 0, 0):  # The info object provides details about the YubiKey
@@ -85,7 +84,6 @@ connected YubiKeys changes.
 [source,py]
 ----
 from ykman.device import list_all_devices, scan_devices
-from yubikit.core.smartcard import SmartCardConnection
 from time import sleep
 
 handled_serials = set()  # Keep track of YubiKeys we've already handled.

@@ -1,5 +1,4 @@
 import pytest
-
 from ykman.device import list_all_devices
 from yubikit.core import TRANSPORT
 from yubikit.core.otp import OtpConnection
@@ -119,6 +118,7 @@ class TestProgrammingState:
         assert not state.is_configured(SLOT.ONE)
         assert not state.is_configured(SLOT.TWO)
 
+    @condition.check(lambda info: TRANSPORT.NFC in info.supported_capabilities)
     def test_configure_ndef(self, session):
         session.put_configuration(SLOT.ONE, StaticPasswordSlotConfiguration(b"a"))
         session.set_ndef_configuration(SLOT.ONE)

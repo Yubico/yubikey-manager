@@ -198,7 +198,7 @@ def get_windows_version() -> tuple[int, int, int]:
     """Get the true Windows version, since sys.getwindowsversion lies."""
     osvi = OSVERSIONINFOW()
     osvi.dwOSVersionInfoSize = ctypes.sizeof(osvi)
-    ctypes.windll.Ntdll.RtlGetVersion(ctypes.byref(osvi))  # type: ignore
+    getattr(ctypes, "windll").Ntdll.RtlGetVersion(ctypes.byref(osvi))
     return osvi.dwMajorVersion, osvi.dwMinorVersion, osvi.dwBuildNumber
 
 

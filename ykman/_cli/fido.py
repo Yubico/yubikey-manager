@@ -120,8 +120,8 @@ def fido(ctx):
 
         if ctx.invoked_subcommand == "info":
             return  # Don't fail on info command
-        if ctx.invoked_subcommand == "reset" and is_yk4_fips(info):
-            # Reset is supported on YK4 FIPS only
+        if ctx.invoked_subcommand in ("reset", "access") and is_yk4_fips(info):
+            # Reset and change-pin is supported on YK4 FIPS only
             return
 
         # Fail other commands if CTAP2 is not enabled
@@ -146,10 +146,13 @@ def info(ctx):
     data: dict = {}
     lines: list = [data]
 
-    if CAPABILITY.FIDO2 in info.fips_capable:
-        data["FIPS approved"] = CAPABILITY.FIDO2 in info.fips_approved
-    elif is_yk4_fips(info):
-        data["FIPS approved"] = is_in_fips_mode(ctx.obj["conn"])
+    yk4_fips = is_yk4_fips(info)
+    yk4_fips_approved = yk4_fips and is_in_fips_mode(ctx.obj["conn"])
+
+    if CAPABILITY.FIDO2 in info.fips_capable or yk4_fips:
+        data["FIPS approved"] = (
+            CAPABILITY.FIDO2 in info.fips_approved or yk4_fips_approved
+        )
 
     if ctap2:
         if ctap2.info.aaguid:
@@ -200,7 +203,14 @@ def info(ctx):
         dev = ctx.obj["device"]
         supported = CAPABILITY.FIDO2 in info.supported_capabilities[dev.transport]
         data["CTAP2"] = "Disabled" if supported else "Not supported"
-        data["PIN"] = "Disabled" if supported else "Not supported"
+        if supported:
+            data["PIN"] = "Disabled"
+        elif yk4_fips:
+            # If not approved we cannot know the state
+            if yk4_fips_approved:
+                data["PIN"] = "Set"
+        else:
+            data["PIN"] = "Not supported"
 
     click.echo("\n".join(pretty_print(lines)))
 
@@ -511,6 +521,8 @@ def verify(ctx, pin):
         except CtapError as e:
             raise CliFail(f"PIN verification failed: {e}.")
     elif is_yk4_fips(ctx.obj["info"]):
+        if pin is None:
+            pin = _prompt_current_pin(prompt="Enter your PIN")
         try:
             fips_verify_pin(ctx.obj["conn"], pin)
         except ApduError as e:
