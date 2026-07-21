@@ -27,7 +27,7 @@
 
 from enum import Enum
 
-from . import bepo, de, fr, it, modhex, norman, uk, us
+from . import bepo, de, fr, it, modhex, norman, tr, uk, us
 
 
 class KEYBOARD_LAYOUT(Enum):
@@ -37,6 +37,8 @@ class KEYBOARD_LAYOUT(Enum):
     DE = de.scancodes
     FR = fr.scancodes
     IT = it.scancodes
+    TR = tr.scancodes
+    TR_F = tr.scancodes_f
     BEPO = bepo.scancodes
     NORMAN = norman.scancodes
 

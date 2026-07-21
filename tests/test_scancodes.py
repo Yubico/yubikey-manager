@@ -249,6 +249,65 @@ class TestScanMap(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode("@", KEYBOARD_LAYOUT.DE)
 
+    def test_tr_layout(self):
+        self.assertEqual(b"\x04\x05\x06", encode("abc", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\x37\x2f\x0c\x34", encode("çğıi", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\x36\x33\x30", encode("öşü", KEYBOARD_LAYOUT.TR))
+
+        self.assertEqual(b"\x84\x85\x86", encode("ABC", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xb7\xaf\x8c\xb4", encode("ÇĞIİ", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xb6\xb3\xb0", encode("ÖŞÜ", KEYBOARD_LAYOUT.TR))
+
+        self.assertEqual(b"\x35", encode('"', KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xb5", encode("é", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\x9e", encode("!", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\x9f", encode("'", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xa0", encode("^", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xa1", encode("+", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xa2", encode("%", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xa3", encode("&", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xa4", encode("/", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xa5", encode("(", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xa6", encode(")", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xa7", encode("=", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\x2d", encode("*", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xad", encode("?", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\x2e", encode("-", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xae", encode("_", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\x32", encode(",", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xb2", encode(";", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\x64", encode("<", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xe4", encode(">", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\x38", encode(".", KEYBOARD_LAYOUT.TR))
+        self.assertEqual(b"\xb8", encode(":", KEYBOARD_LAYOUT.TR))
+
+        with self.assertRaises(ValueError):
+            encode("@", KEYBOARD_LAYOUT.TR)
+
+    def test_tr_f_layout(self):
+        self.assertEqual(b"\x09\x36\x19", encode("abc", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\x05\x08\x15\x16", encode("çğıi", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\x1b\x34\x0a", encode("öşü", KEYBOARD_LAYOUT.TR_F))
+
+        self.assertEqual(b"\x89\xb6\x99", encode("ABC", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\x85\x88\x95\x96", encode("ÇĞIİ", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\x9b\xb4\x8a", encode("ÖŞÜ", KEYBOARD_LAYOUT.TR_F))
+
+        self.assertEqual(b"\x35", encode("+", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\xb5", encode("*", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\x9f", encode('"', KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\xa1", encode("$", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\xa4", encode("'", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\x2d", encode("/", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\xad", encode("?", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\x37", encode(".", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\xb7", encode(":", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\x38", encode(",", KEYBOARD_LAYOUT.TR_F))
+        self.assertEqual(b"\xb8", encode(";", KEYBOARD_LAYOUT.TR_F))
+
+        with self.assertRaises(ValueError):
+            encode("@", KEYBOARD_LAYOUT.TR_F)
+
     def test_norman_layout(self):
         self.assertEqual(b"\x04", encode("a", KEYBOARD_LAYOUT.NORMAN))
         self.assertEqual(b"\x05", encode("b", KEYBOARD_LAYOUT.NORMAN))
