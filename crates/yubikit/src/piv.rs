@@ -894,22 +894,22 @@ fn select_advertised_max_apdu_length(select_resp: &[u8]) -> usize {
             if tag == TAG_EXTENDED_LENGTH {
                 // Value is a sequence of `02 LL <size>` DOs; the first is the
                 // maximum command APDU size.
-                if let Ok((0x02, max_offset, max_len, _)) = tlv_parse(value, 0) {
-                    if max_len > 0 {
-                        let mut max_cmd = 0u32;
-                        for &b in &value[max_offset..max_offset + max_len] {
-                            max_cmd = (max_cmd << 8) | b as u32;
-                        }
-                        return Some(max_cmd.min(u16::MAX as u32) as u16);
+                if let Ok((0x02, max_offset, max_len, _)) = tlv_parse(value, 0)
+                    && max_len > 0
+                {
+                    let mut max_cmd = 0u32;
+                    for &b in &value[max_offset..max_offset + max_len] {
+                        max_cmd = (max_cmd << 8) | b as u32;
                     }
+                    return Some(max_cmd.min(u16::MAX as u32) as u16);
                 }
                 return Some(0);
             }
             // Recurse into constructed templates (bit 6 of the first tag byte).
-            if (t0 & 0x20) != 0 {
-                if let Some(m) = walk(value) {
-                    return Some(m);
-                }
+            if (t0 & 0x20) != 0
+                && let Some(m) = walk(value)
+            {
+                return Some(m);
             }
             offset = end;
         }

@@ -280,7 +280,7 @@ fn format_write_config_error<E: std::fmt::Debug + std::fmt::Display>(
 }
 
 fn parse_lock_code(hex: &str) -> Result<Vec<u8>> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return Err(anyhow!(
             "Lock code has the wrong format. It must be 32 hexadecimal characters."
         ));

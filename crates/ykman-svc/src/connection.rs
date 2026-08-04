@@ -327,7 +327,7 @@ fn decode_hex_param(
     max_len: usize,
 ) -> Result<SecretValue<Vec<u8>>, RpcError> {
     let hex = hex.expose_secret();
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return Err(RpcError::invalid_params(format!(
             "'{name}' must contain an even number of hex digits"
         )));
