@@ -55,10 +55,17 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
     use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX};
     use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
     use windows_sys::Win32::System::Pipes::{
-        ConnectNamedPipe, CreateNamedPipeW, PIPE_NOWAIT, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
-        PIPE_UNLIMITED_INSTANCES, PIPE_WAIT, SetNamedPipeHandleState,
+        ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
+        PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
     };
     use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
+
+    // NOTE: buffers are advisory hints to the OS for internal pipe
+    // sizing; RPC messages (especially large FIDO/CredentialManagement
+    // responses) may exceed this size. Use a generous size to reduce
+    // the odds of `WriteFile` needing to block/split on a full pipe
+    // buffer, and keep the pipe in blocking (PIPE_WAIT) mode below.
+    const PIPE_BUFFER_SIZE: u32 = 64 * 1024;
 
     struct PipeHandle(windows_sys::Win32::Foundation::HANDLE);
 
@@ -230,8 +237,8 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
                 PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                 PIPE_UNLIMITED_INSTANCES,
-                4096,
-                4096,
+                PIPE_BUFFER_SIZE,
+                PIPE_BUFFER_SIZE,
                 0,
                 sa_ptr,
             )
@@ -255,23 +262,6 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         }
         if stop.load(Ordering::Relaxed) {
             break;
-        }
-
-        let mut pipe_mode = PIPE_READMODE_BYTE | PIPE_NOWAIT;
-        let mode_set = unsafe {
-            SetNamedPipeHandleState(
-                handle.as_raw(),
-                &mut pipe_mode,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            )
-        };
-        if mode_set == 0 {
-            log::error!(
-                "SetNamedPipeHandleState failed: {}",
-                std::io::Error::last_os_error()
-            );
-            continue;
         }
 
         log::info!("Client connected");
