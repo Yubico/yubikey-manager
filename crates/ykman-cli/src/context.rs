@@ -3,7 +3,7 @@ use yubikit::core::{Transport, Version, set_override_version};
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::{Capability, ReleaseType};
 
-#[cfg(feature = "hardware")]
+#[cfg(all(target_os = "windows", feature = "hardware"))]
 use yubikit::platform::device::scan_usb_devices;
 
 use crate::list;
@@ -54,14 +54,16 @@ impl CommandContext {
     }
 }
 
-fn select_device(
-    devices: Vec<Box<dyn YubiKeyDevice>>,
-    serial: Option<u32>,
-) -> Result<Box<dyn YubiKeyDevice>> {
+pub fn get_device(serial: Option<u32>) -> Result<Box<dyn YubiKeyDevice>> {
+    let mut source = ykman::device::get_device_source();
+    let devices = source
+        .list_devices()
+        .map_err(|e| anyhow!("Failed to list devices: {e}"))?;
+
     match (serial, devices.len()) {
         (None, 0) => {
-            #[cfg(feature = "hardware")]
-            {
+            #[cfg(all(target_os = "windows", feature = "hardware"))]
+            if !source.is_service() {
                 let (scan_pids, _) = scan_usb_devices();
                 if !scan_pids.is_empty() {
                     return Err(anyhow!(
@@ -86,14 +88,6 @@ fn select_device(
             .find(|d| d.info().serial == Some(s))
             .ok_or_else(|| anyhow!("YubiKey with serial {s} not found.")),
     }
-}
-
-pub fn get_device(serial: Option<u32>) -> Result<Box<dyn YubiKeyDevice>> {
-    let mut source = ykman::device::get_device_source();
-    let devices = source
-        .list_devices()
-        .map_err(|e| anyhow!("Failed to list devices: {e}"))?;
-    select_device(devices, serial)
 }
 
 pub fn check_capability(dev: &dyn YubiKeyDevice, capability: Capability) -> Result<()> {
