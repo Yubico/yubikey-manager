@@ -924,19 +924,14 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             data.to_vec()
         };
 
-        // Build APDU for MAC calculation (always use extended format for long data)
-        let max_size = std::cmp::max(MaxApduSize::Yk4_3 as usize, self.max_apdu_size);
+        // Build a virtual APDU representation (never actually transmitted)
+        // purely to compute the MAC over the full logical command. The
+        // actual command may later be split into multiple physical APDUs
+        // by command chaining in `send_apdu_raw`, so this representation
+        // must not be subject to the device's max APDU size limit.
         let (mac_apdu, le_size) = if enc_data.len() + 8 > SHORT_APDU_MAX_CHUNK {
             (
-                format_extended_apdu(
-                    cla,
-                    ins,
-                    p1,
-                    p2,
-                    &[&enc_data[..], &[0u8; 8]].concat(),
-                    0,
-                    max_size,
-                )?,
+                format_extended_apdu(cla, ins, p1, p2, &[&enc_data[..], &[0u8; 8]].concat(), 0, 0)?,
                 2usize,
             )
         } else {
@@ -953,7 +948,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
                         p2,
                         &[&enc_data[..], &[0u8; 8]].concat(),
                         0,
-                        max_size,
+                        0,
                     )?,
                     2usize,
                 ),
@@ -961,7 +956,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         };
 
         // Calculate MAC over the APDU (minus the 8-byte MAC placeholder and
-        // the trailing Le which is not part of the SCP03 MAC input)
+        // the trailing Le which is not part of the SCP MAC input)
         let mac = scp.mac(&mac_apdu[..mac_apdu.len() - 8 - le_size])?;
 
         // Append MAC to encrypted data
