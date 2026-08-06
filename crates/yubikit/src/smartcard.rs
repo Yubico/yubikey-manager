@@ -802,13 +802,16 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             self.last_long_resp = None;
         }
 
-        // Command chaining for short APDUs
-        let (resp, sw) =
-            if self.apdu_format == ApduFormat::Short && data.len() > SHORT_APDU_MAX_CHUNK {
-                self.send_chained(cla, ins, p1, p2, data, le as u8)?
-            } else {
-                self.send_single_apdu(cla, ins, p1, p2, data, le)?
-            };
+        // Command chaining for short APDUs, or if data cannot fit in a single
+        // extended APDU, as the YubiKey may allow larger objects to be stored.
+        let (resp, sw) = if data.len() > SHORT_APDU_MAX_CHUNK
+            && (self.apdu_format == ApduFormat::Short
+                || format_extended_apdu(cla, ins, p1, p2, data, le, self.max_apdu_size).is_err())
+        {
+            self.send_chained(cla, ins, p1, p2, data, le as u8)?
+        } else {
+            self.send_single_apdu(cla, ins, p1, p2, data, le)?
+        };
 
         // Response chaining
         let (resp, sw) = self.read_chained_response(resp, sw)?;
@@ -1390,5 +1393,86 @@ mod tests {
     fn test_scp_state_rejects_invalid_mac_chain_length() {
         let result = ScpState::new([0; 16], [0; 16], [0; 16], Some(vec![0; 15]), Some(1));
         assert!(matches!(result, Err(ScpError::InvalidData(_))));
+    }
+
+    /// A fake [`SmartCardConnection`] that records every APDU sent to it and
+    /// replies with a fixed status word (defaulting to success).
+    struct RecordingConnection {
+        sent: Vec<Vec<u8>>,
+        sw: u16,
+    }
+
+    impl RecordingConnection {
+        fn new() -> Self {
+            Self {
+                sent: Vec::new(),
+                sw: SW_OK,
+            }
+        }
+    }
+
+    impl crate::core::Connection for RecordingConnection {
+        type Error = SmartCardError;
+        fn close(&mut self) {}
+    }
+
+    impl SmartCardConnection for RecordingConnection {
+        fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+            self.sent.push(apdu.to_vec());
+            Ok((Vec::new(), self.sw))
+        }
+        fn transport(&self) -> Transport {
+            Transport::Usb
+        }
+    }
+
+    #[test]
+    fn test_extended_apdu_falls_back_to_chained_short_apdus_when_too_large() {
+        let mut protocol = SmartCardProtocol::new(RecordingConnection::new());
+        // Force extended framing with a tiny max size so any sizable payload
+        // can't fit in a single extended APDU, forcing the short-APDU
+        // chaining fallback.
+        protocol.apdu_format = ApduFormat::Extended;
+        protocol.max_apdu_size = 16;
+
+        let data = vec![0xABu8; 600]; // requires 3 short-APDU chunks (255+255+90)
+        let (_, sw) = protocol
+            .send_apdu_raw(0x00, 0xDB, 0x3F, 0xFF, &data, 0)
+            .unwrap();
+        assert_eq!(sw, SW_OK);
+
+        let sent = &protocol.connection.sent;
+        assert_eq!(
+            sent.len(),
+            3,
+            "expected data split into 3 chained short APDUs"
+        );
+
+        // All but the last chunk must have the chaining bit (0x10) set in CLA.
+        assert_eq!(sent[0][0] & 0x10, 0x10);
+        assert_eq!(sent[1][0] & 0x10, 0x10);
+        assert_eq!(sent[2][0] & 0x10, 0x00);
+
+        // Each chunk uses short-APDU framing (5-byte header: CLA/INS/P1/P2/Lc).
+        let mut reassembled = Vec::new();
+        for apdu in sent {
+            let len = apdu[4] as usize;
+            reassembled.extend_from_slice(&apdu[5..5 + len]);
+        }
+        assert_eq!(reassembled, data);
+    }
+
+    #[test]
+    fn test_extended_apdu_used_directly_when_it_fits() {
+        let mut protocol = SmartCardProtocol::new(RecordingConnection::new());
+        protocol.apdu_format = ApduFormat::Extended;
+        protocol.max_apdu_size = MaxApduSize::Yk4_3 as usize;
+
+        let data = vec![0xCDu8; 300]; // fits comfortably in one extended APDU
+        let (_, sw) = protocol
+            .send_apdu_raw(0x00, 0xDB, 0x3F, 0xFF, &data, 0)
+            .unwrap();
+        assert_eq!(sw, SW_OK);
+        assert_eq!(protocol.connection.sent.len(), 1);
     }
 }
