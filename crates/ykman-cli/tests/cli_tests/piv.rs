@@ -844,6 +844,74 @@ fn test_piv_objects_export_chuid() {
     piv_reset();
 }
 
+#[test]
+fn test_piv_objects_export_hex_object_id() {
+    require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
+    piv_reset();
+
+    // Generate CHUID first
+    ykman_dev()
+        .args([
+            "piv",
+            "objects",
+            "generate",
+            "chuid",
+            "-m",
+            piv_management_key(),
+            "-P",
+            piv_pin(),
+        ])
+        .assert()
+        .success();
+
+    // Export using the raw hex object ID instead of the "CHUID" alias.
+    let output = ykman_dev()
+        .args(["piv", "objects", "export", "5fc102", "-"])
+        .output()
+        .expect("failed to run command");
+    assert!(output.status.success());
+    assert!(
+        !output.stdout.is_empty(),
+        "CHUID export via hex object ID should produce data"
+    );
+
+    piv_reset();
+}
+
+#[test]
+fn test_piv_objects_import_too_large_error() {
+    require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
+    piv_reset();
+
+    let temp_dir = tempfile::tempdir().expect("failed to create temporary directory");
+    let data_path = temp_dir.path().join("piv_large_object.bin");
+    std::fs::write(&data_path, vec![0u8; 8000]).expect("failed to write fixture");
+
+    ykman_dev()
+        .args([
+            "piv",
+            "objects",
+            "import",
+            "5fc10d",
+            data_path.to_str().unwrap(),
+            "-m",
+            piv_management_key(),
+            "-P",
+            piv_pin(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("too large to import"));
+
+    piv_reset();
+}
+
 #[rstest]
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]

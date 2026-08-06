@@ -815,25 +815,33 @@ fn format_piv_credential_error(e: PivError, credential: &str, action: &str) -> a
     }
 }
 
-fn parse_object_id(s: &str) -> Result<ObjectId> {
+fn parse_object_id(s: &str) -> Result<u32> {
     match s.to_ascii_uppercase().as_str() {
-        "CHUID" => Ok(ObjectId::Chuid),
-        "CCC" | "CAPABILITY" => Ok(ObjectId::Capability),
-        "AUTHENTICATION" => Ok(ObjectId::Authentication),
-        "SIGNATURE" => Ok(ObjectId::Signature),
-        "KEY-MANAGEMENT" | "KEY_MANAGEMENT" => Ok(ObjectId::KeyManagement),
-        "CARD-AUTH" | "CARD_AUTH" | "CARDAUTH" => Ok(ObjectId::CardAuth),
-        "DISCOVERY" => Ok(ObjectId::Discovery),
-        "KEY-HISTORY" | "KEY_HISTORY" => Ok(ObjectId::KeyHistory),
-        "FINGERPRINTS" => Ok(ObjectId::Fingerprints),
-        "FACIAL" => Ok(ObjectId::Facial),
-        "IRIS" => Ok(ObjectId::Iris),
-        "PRINTED" => Ok(ObjectId::Printed),
-        "ATTESTATION" => Ok(ObjectId::Attestation),
-        _ => Err(anyhow!(
-            "Unknown object ID: {s}. Use CHUID, CCC, AUTHENTICATION, etc."
-        )),
+        "CHUID" => return Ok(ObjectId::Chuid as u32),
+        "CCC" | "CAPABILITY" => return Ok(ObjectId::Capability as u32),
+        "AUTHENTICATION" => return Ok(ObjectId::Authentication as u32),
+        "SIGNATURE" => return Ok(ObjectId::Signature as u32),
+        "KEY-MANAGEMENT" | "KEY_MANAGEMENT" => return Ok(ObjectId::KeyManagement as u32),
+        "CARD-AUTH" | "CARD_AUTH" | "CARDAUTH" => return Ok(ObjectId::CardAuth as u32),
+        "DISCOVERY" => return Ok(ObjectId::Discovery as u32),
+        "KEY-HISTORY" | "KEY_HISTORY" => return Ok(ObjectId::KeyHistory as u32),
+        "FINGERPRINTS" => return Ok(ObjectId::Fingerprints as u32),
+        "FACIAL" => return Ok(ObjectId::Facial as u32),
+        "IRIS" => return Ok(ObjectId::Iris as u32),
+        "PRINTED" => return Ok(ObjectId::Printed as u32),
+        "ATTESTATION" => return Ok(ObjectId::Attestation as u32),
+        _ => {}
     }
+    // Fall back to a raw hexadecimal object ID (with or without a leading
+    // "0x"), so callers can target arbitrary/retired objects not covered by
+    // the named aliases above.
+    let hex = s
+        .strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .unwrap_or(s);
+    u32::from_str_radix(hex, 16).map_err(|_| {
+        anyhow!("Unknown object ID: {s}. Use CHUID, CCC, AUTHENTICATION, etc., or a hex object ID.")
+    })
 }
 
 pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
@@ -1585,7 +1593,7 @@ pub fn run_objects_export(
 ) -> Result<()> {
     let obj_id = parse_object_id(object)?;
     let mut session = open_session(dev, scp_params)?;
-    let data = verify_pin_if_needed(&mut session, pin, |s| s.get_object(obj_id))?;
+    let data = verify_pin_if_needed(&mut session, pin, |s| s.get_object_raw(obj_id))?;
 
     write_file_or_stdout(output, &data)?;
     if output != "-" {
@@ -1611,8 +1619,18 @@ pub fn run_objects_import(
         ensure_pin(&mut session, pin)?;
     }
     session
-        .put_object(obj_id, Some(&data))
-        .map_err(|e| anyhow!("Failed to write object: {e}"))?;
+        .put_object_raw(obj_id, Some(&data))
+        .map_err(|e| match &e {
+            PivError::Connection(SmartCardError::Apdu { sw, .. })
+                if Sw::from_u16(*sw) == Some(Sw::WrongLength) =>
+            {
+                anyhow!(
+                    "Failed to write object: data is too large to import ({} bytes)",
+                    data.len()
+                )
+            }
+            _ => anyhow!("Failed to write object: {e}"),
+        })?;
     eprintln!("Object imported.");
     Ok(())
 }
