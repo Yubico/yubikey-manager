@@ -38,3 +38,9 @@ repos:
     entry: cargo clippy --workspace --all-targets -- -D warnings
     pass_filenames: false
     types: [rust]
+  - id: cargo-deny
+    name: cargo deny
+    language: system
+    entry: cargo deny check
+    pass_filenames: false
+    files: '(^|/)(Cargo\.toml|Cargo\.lock|deny\.toml)$'

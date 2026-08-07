@@ -29,8 +29,10 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install cargo-about
-        run: cargo install cargo-about --locked --features cli
+      - name: Install cargo plugins
+        run: |
+          cargo install cargo-about --locked --features cli
+          cargo install cargo-deny --locked
 
       - name: Install the project
         run: uv sync --locked
