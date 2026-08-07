@@ -522,3 +522,78 @@ fn test_oath_import_pskc_sha256() {
 
     oath_reset();
 }
+
+#[test]
+fn test_oath_add_secret_and_generate_conflict() {
+    require_capability!("OATH");
+    oath_reset();
+
+    ykman_dev()
+        .args([
+            "oath",
+            "accounts",
+            "add",
+            "-f",
+            "conflict-test",
+            OATH_ACCOUNT_SECRET,
+            "--generate",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn test_oath_add_generate_prints_secret() {
+    require_capability!("OATH");
+    let password = prepare_oath_for_credentials();
+
+    let mut args = vec![
+        "oath",
+        "accounts",
+        "add",
+        "-f",
+        "generated-test",
+        "--generate",
+    ];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stderr(predicate::str::is_match(r"[A-Z2-7]{16,}=*").unwrap());
+
+    let mut args = vec!["oath", "accounts", "list"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("generated-test"));
+
+    oath_reset();
+}
+
+#[test]
+fn test_oath_add_prompts_for_secret_when_omitted() {
+    require_capability!("OATH");
+    if is_fips() {
+        // Interactive TTY test doesn't need FIPS password handling here.
+        return;
+    }
+    oath_reset();
+
+    let output = ykman_dev_tty(
+        &["oath", "accounts", "add", "-f", "prompted-test"],
+        &format!("{OATH_ACCOUNT_SECRET}\n"),
+    );
+    assert!(output.status.success(), "{output:?}");
+
+    ykman_dev()
+        .args(["oath", "accounts", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("prompted-test"));
+
+    oath_reset();
+}

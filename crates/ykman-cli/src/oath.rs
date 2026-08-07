@@ -13,7 +13,9 @@ use yubikit::oath::{
 use crate::appdata::AppData;
 use crate::cli_enums::{CliOathAlgorithm, CliOathDigits, CliOathType};
 use crate::scp::{self, ScpParams};
-use crate::util::{confirm, format_session_error, format_smartcard_connection_error, print_table};
+use crate::util::{
+    b32_encode, confirm, format_session_error, format_smartcard_connection_error, print_table,
+};
 
 #[derive(Subcommand)]
 pub enum OathAction {
@@ -110,6 +112,7 @@ pub enum OathAccountAction {
         /// Account name
         name: String,
         /// Secret key (Base32 encoded)
+        #[arg(conflicts_with = "generate")]
         secret: Option<String>,
         /// Password to unlock OATH
         #[arg(short = 'p', long)]
@@ -277,7 +280,7 @@ impl OathAction {
                     algorithm,
                     counter,
                     period,
-                    generate: _generate,
+                    generate,
                     touch,
                     force,
                 } => run_accounts_add(
@@ -287,6 +290,7 @@ impl OathAction {
                     remember,
                     &name,
                     secret.as_deref(),
+                    generate,
                     issuer.as_deref(),
                     oath_type,
                     digits,
@@ -651,6 +655,7 @@ pub fn run_accounts_add(
     remember: bool,
     name: &str,
     secret: Option<&str>,
+    generate: bool,
     issuer: Option<&str>,
     oath_type: CliOathType,
     digits: CliOathDigits,
@@ -664,13 +669,23 @@ pub fn run_accounts_add(
     let hash_algorithm: HashAlgorithm = algorithm.into();
     let digits = digits.as_u8();
 
-    let secret_bytes = match secret {
-        Some(s) => parse_b32_key(s).map_err(|_| anyhow!("Invalid Base32-encoded secret."))?,
-        None => {
-            // Generate random secret
-            let mut key = vec![0u8; 20];
-            getrandom::fill(&mut key).map_err(|e| anyhow!("Failed to generate random: {e}"))?;
-            key
+    let secret_bytes = if let Some(s) = secret {
+        parse_b32_key(s).map_err(|_| anyhow!("Invalid Base32-encoded secret."))?
+    } else if generate {
+        let mut key = vec![0u8; 20];
+        getrandom::fill(&mut key).map_err(|e| anyhow!("Failed to generate random: {e}"))?;
+        eprintln!(
+            "Using a randomly generated secret (base32): {}",
+            b32_encode(&key)
+        );
+        key
+    } else {
+        loop {
+            let input = crate::util::prompt("Enter a secret key (base32)")?;
+            match parse_b32_key(&input) {
+                Ok(k) => break k,
+                Err(e) => eprintln!("{e}"),
+            }
         }
     };
 

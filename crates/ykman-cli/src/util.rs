@@ -100,6 +100,11 @@ pub fn parse_hex_u8(s: &str) -> Result<u8> {
         .map_err(|_| anyhow!("Invalid hex value: {s}"))
 }
 
+/// Encode bytes as Base32 (RFC 4648, no padding).
+pub fn b32_encode(data: &[u8]) -> String {
+    base32::encode(base32::Alphabet::Rfc4648 { padding: false }, data)
+}
+
 /// Prompt the user with a yes/no confirmation.
 pub fn confirm(msg: &str) -> bool {
     eprint!("{msg} [y/N] ");

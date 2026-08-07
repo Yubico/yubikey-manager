@@ -17,7 +17,9 @@ use crate::cancel;
 use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliKeyboardLayout, CliOtpSlot, CliPacing};
 use crate::keyboard::{self, MODHEX_CHARS};
 use crate::scp::{self, ScpParams};
-use crate::util::{self, confirm, format_session_error, format_smartcard_connection_error};
+use crate::util::{
+    self, b32_encode, confirm, format_session_error, format_smartcard_connection_error,
+};
 
 pub fn effective_access_code<'a>(
     parent_access_code: &'a Option<String>,
@@ -578,10 +580,6 @@ fn format_oath_code(response: &[u8], digits: u8) -> String {
     ]);
     let modulus = 10u32.pow(digits as u32);
     format!("{:0>width$}", code % modulus, width = digits as usize)
-}
-
-fn b32_encode(data: &[u8]) -> String {
-    base32::encode(base32::Alphabet::Rfc4648 { padding: true }, data)
 }
 
 fn parse_hex_key(s: &str) -> Result<Vec<u8>> {
