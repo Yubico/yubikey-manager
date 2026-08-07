@@ -1091,8 +1091,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "hidapi"
 version = "2.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c78dadfc12f865bc3fcac3897e64533b930737ceb9ef245c8277de98d0b010e9"
+source = "git+https://github.com/dainnilsson/hidapi-rs?branch=dain%2Ffix-enumerate-no-serial#d2c41b32da041c250318fe438de352e8ad9e8a4a"
 dependencies = [
  "cc",
  "cfg-if",
