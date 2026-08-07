@@ -25,7 +25,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-about
-        run: cargo install cargo-about --locked --features cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
 
       - name: Build Rust CLI
         shell: bash

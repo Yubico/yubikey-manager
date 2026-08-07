@@ -18,7 +18,9 @@ jobs:
           targets: x86_64-apple-darwin aarch64-apple-darwin
 
       - name: Install cargo-about
-        run: cargo install cargo-about --locked --features cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
 
       - name: Build Rust CLI (universal)
         run: |

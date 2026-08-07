@@ -60,7 +60,9 @@ jobs:
 
       - name: Install cargo-about
         if: matrix.package == 'ykman' && !matrix.container
-        run: cargo install cargo-about --locked --features cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1

@@ -30,9 +30,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo plugins
-        run: |
-          cargo install cargo-about --locked --features cli
-          cargo install cargo-deny --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about,cargo-deny
 
       - name: Install the project
         run: uv sync --locked
