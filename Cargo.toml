@@ -65,6 +65,9 @@ x509-cert = { version = "0.2.5", features = ["builder", "pem"] }
 # Hardware
 hidapi = { version = "2", default-features = false }
 pcsc = "2"
+udev = "0.9"
+libc = "0.2"
+core-foundation-sys = "0.8"
 
 # Keyring
 keyring-core = "1"

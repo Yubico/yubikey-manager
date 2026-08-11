@@ -517,7 +517,7 @@ impl fmt::Display for LocalYubiKeyDevice {
 /// Parses interface indicators (OTP, CCID, FIDO/U2F) from the reader name
 /// and maps to the corresponding Yubico PID.
 #[cfg(feature = "pcsc")]
-fn pid_from_reader_name(name: &str) -> Option<u16> {
+pub(crate) fn pid_from_reader_name(name: &str) -> Option<u16> {
     if !is_reader_usb(name) {
         return None;
     }

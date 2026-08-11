@@ -412,26 +412,19 @@ pub fn read_info_ccid<C: SmartCardConnection + Send + 'static>(
         Err((e, conn)) => {
             log::debug!("Management session init failed ({e}), synthesizing info");
             // NEO and other old devices don't have the management applet.
-            // Try to get the version and serial from the OTP applet
-            let (version, serial, conn) = match YubiOtpSession::new(conn) {
-                Ok(mut otp_session) => {
-                    let version = otp_session.version();
-                    let serial = otp_session.get_serial().ok();
-                    (version, serial, otp_session.into_connection())
-                }
-                Err((e, conn)) => {
-                    log::debug!("Couldn't open YubiOTP session: {e}");
-                    // Assume a minimum version
-                    (Version(3, 0, 0), None, conn)
-                }
-            };
-            // Default to NEO CCID if we have no PID
-            return Ok((
-                synthesize_info(pid.unwrap_or(0x0112), version, serial),
-                conn,
-            ));
+            return Ok(synthesize_info_ccid(conn, pid, None));
         }
     };
+
+    // Old devices (NEO, YubiKey 3/4.0) expose the management applet but don't
+    // support reading DeviceInfo. Fall back to synthesizing it from the
+    // version reported by the applet and the serial from the OTP applet.
+    if session.version() < Version(4, 1, 0) {
+        log::debug!("Device predates DeviceInfo support, synthesizing info");
+        let version = session.version();
+        let conn = session.into_connection();
+        return Ok(synthesize_info_ccid(conn, pid, Some(version)));
+    }
 
     match session.read_device_info() {
         Ok(mut info) => {
@@ -441,6 +434,35 @@ pub fn read_info_ccid<C: SmartCardConnection + Send + 'static>(
         }
         Err(e) => Err(DeviceError::Management(e.erase())),
     }
+}
+
+/// Synthesize [`DeviceInfo`] for a legacy device over a SmartCard connection.
+///
+/// Attempts to read the version and serial from the OTP applet. If a version
+/// is already known (e.g. from the management applet select response), it is
+/// preferred over the OTP-reported version.
+fn synthesize_info_ccid<C: SmartCardConnection + Send + 'static>(
+    conn: C,
+    pid: Option<u16>,
+    known_version: Option<Version>,
+) -> (DeviceInfo, C) {
+    let (version, serial, conn) = match YubiOtpSession::new(conn) {
+        Ok(mut otp_session) => {
+            let version = known_version.unwrap_or_else(|| otp_session.version());
+            let serial = otp_session.get_serial().ok();
+            (version, serial, otp_session.into_connection())
+        }
+        Err((e, conn)) => {
+            log::debug!("Couldn't open YubiOTP session: {e}");
+            // Assume a minimum version if none is known.
+            (known_version.unwrap_or(Version(3, 0, 0)), None, conn)
+        }
+    };
+    // Default to NEO CCID if we have no PID.
+    (
+        synthesize_info(pid.unwrap_or(0x0112), version, serial),
+        conn,
+    )
 }
 
 /// Read [`DeviceInfo`] via OTP HID from an open connection.

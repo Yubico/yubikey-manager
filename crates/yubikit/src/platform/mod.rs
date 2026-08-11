@@ -41,3 +41,9 @@ pub mod pcsc;
 #[cfg(windows)]
 /// Windows SetupDI device enumeration.
 pub mod setupdi;
+
+/// Event-based monitoring of connected YubiKey devices.
+///
+/// Available when either the `pcsc` or `hid` feature is enabled.
+#[cfg(any(feature = "pcsc", feature = "hid"))]
+pub mod monitor;
