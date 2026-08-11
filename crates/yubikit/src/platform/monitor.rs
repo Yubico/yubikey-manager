@@ -33,20 +33,17 @@
 //! platform-specific: `udev` on Linux, `WM_DEVICECHANGE` window messages on
 //! Windows, and `IOHIDManager` callbacks on macOS.
 //!
-//! ## Legacy device note
-//!
-//! Older YubiKeys (e.g. the NEO) expose only a single active USB transport at
-//! a time: accessing the OTP/FIDO HID interface causes the CCID card to be
-//! ejected for a few seconds before it is re-inserted. To avoid reporting a
-//! spurious card removal/insertion in this case, removal of a USB
-//! [`DeviceNode::CardNode`] while its reader is still present is debounced with
-//! a short grace period. NFC card removals and full reader removals are
-//! reported immediately.
+//! Card events reflect the live state of the reader: an ejected card is
+//! reported removed immediately, and a re-inserted card is reported added
+//! immediately. Note that older YubiKeys (e.g. the NEO) expose only a single
+//! active USB transport at a time, so accessing their OTP/FIDO HID interface
+//! transiently ejects and re-inserts the CCID card, which surfaces as a
+//! matching pair of card removal/insertion events.
 
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::device::DeviceError;
 use crate::management::{DeviceInfo, UsbInterface};
@@ -63,12 +60,6 @@ use super::pcsc::{PcscSmartCardConnection, is_reader_usb, list_readers_with_stat
 use crate::device::read_info_ccid;
 #[cfg(feature = "hid")]
 use crate::device::{read_info_fido, read_info_otp};
-
-/// Grace period before reporting a USB card removal, to absorb the transient
-/// CCID ejection that older YubiKeys perform while their HID interface is
-/// accessed.
-#[cfg(feature = "pcsc")]
-const USB_CARD_REMOVAL_GRACE: Duration = Duration::from_secs(3);
 
 /// A low-level device interface discovered by [`monitor_device_events`].
 #[derive(Debug, Clone, PartialEq)]
@@ -143,9 +134,7 @@ pub fn monitor_device_events(
     let (tx, rx) = mpsc::channel::<Change>();
     let mut state = MonitorState::default();
 
-    // Emit events for the initial state before spawning watchers, so that a
-    // legacy key's HID-induced CCID ejection (triggered by the HID reads
-    // below) is seen as a transient change against a known-present card.
+    // Emit events for the initial state before spawning watchers.
     #[cfg(feature = "pcsc")]
     if usb_interfaces.contains(UsbInterface::CCID) {
         state.refresh_pcsc(&mut on_event);
@@ -161,49 +150,17 @@ pub fn monitor_device_events(
     drop(tx);
 
     loop {
-        // Wake either on a change signal or when a pending USB card removal is
-        // ready to be finalized.
-        let signal = match next_wait(&state) {
-            Some(timeout) => match rx.recv_timeout(timeout) {
-                Ok(change) => Some(change),
-                Err(mpsc::RecvTimeoutError::Timeout) => None,
-                Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
-            },
-            None => match rx.recv() {
-                Ok(change) => Some(change),
-                Err(_) => return Ok(()),
-            },
+        let change = match rx.recv() {
+            Ok(change) => change,
+            Err(_) => return Ok(()),
         };
 
-        match signal {
+        match change {
             #[cfg(feature = "pcsc")]
-            Some(Change::Pcsc) => state.refresh_pcsc(&mut on_event),
+            Change::Pcsc => state.refresh_pcsc(&mut on_event),
             #[cfg(feature = "hid")]
-            Some(Change::Hid) => state.refresh_hid(usb_interfaces, &mut on_event),
-            None => {}
+            Change::Hid => state.refresh_hid(usb_interfaces, &mut on_event),
         }
-
-        #[cfg(feature = "pcsc")]
-        state.finalize_pending_removals(&mut on_event);
-    }
-}
-
-/// Compute how long to wait for the next event before finalizing a pending
-/// removal. Returns `None` to block indefinitely.
-fn next_wait(state: &MonitorState) -> Option<Duration> {
-    #[cfg(feature = "pcsc")]
-    {
-        let now = Instant::now();
-        state
-            .pending_card_removals
-            .values()
-            .min()
-            .map(|deadline| deadline.saturating_duration_since(now))
-    }
-    #[cfg(not(feature = "pcsc"))]
-    {
-        let _ = state;
-        None
     }
 }
 
@@ -216,9 +173,6 @@ struct MonitorState {
     /// Card nodes, keyed by reader name.
     #[cfg(feature = "pcsc")]
     cards: HashMap<String, DeviceNode>,
-    /// USB card removals awaiting the grace period, keyed by reader name.
-    #[cfg(feature = "pcsc")]
-    pending_card_removals: HashMap<String, Instant>,
     /// OTP HID nodes, keyed by HID path.
     #[cfg(feature = "hid")]
     hid_otp: HashMap<String, DeviceNode>,
@@ -249,7 +203,6 @@ impl MonitorState {
             .collect();
         for name in gone {
             // Card first, then reader.
-            self.pending_card_removals.remove(&name);
             if let Some(node) = self.cards.remove(&name) {
                 on_event(NodeEvent::Removed(node));
             }
@@ -265,7 +218,6 @@ impl MonitorState {
             .cloned()
             .collect();
         for name in gone_cards {
-            self.pending_card_removals.remove(&name);
             if let Some(node) = self.cards.remove(&name) {
                 on_event(NodeEvent::Removed(node));
             }
@@ -289,9 +241,6 @@ impl MonitorState {
             }
 
             if *card_present {
-                // A previously-pending removal is cancelled: the card is back.
-                self.pending_card_removals.remove(name);
-
                 if !self.cards.contains_key(name) {
                     match read_card_info(name, usb) {
                         Ok(info) => {
@@ -307,33 +256,7 @@ impl MonitorState {
                         }
                     }
                 }
-            } else if self.cards.contains_key(name) {
-                if usb {
-                    // Debounce: a legacy key may be transiently ejecting its
-                    // CCID card while its HID interface is accessed.
-                    self.pending_card_removals
-                        .entry(name.clone())
-                        .or_insert_with(|| Instant::now() + USB_CARD_REMOVAL_GRACE);
-                } else if let Some(node) = self.cards.remove(name) {
-                    // NFC removal is a real user action; report immediately.
-                    on_event(NodeEvent::Removed(node));
-                }
-            }
-        }
-    }
-
-    /// Emit removals for USB cards whose grace period has elapsed.
-    fn finalize_pending_removals(&mut self, on_event: &mut impl FnMut(NodeEvent)) {
-        let now = Instant::now();
-        let expired: Vec<String> = self
-            .pending_card_removals
-            .iter()
-            .filter(|(_, deadline)| **deadline <= now)
-            .map(|(name, _)| name.clone())
-            .collect();
-        for name in expired {
-            self.pending_card_removals.remove(&name);
-            if let Some(node) = self.cards.remove(&name) {
+            } else if let Some(node) = self.cards.remove(name) {
                 on_event(NodeEvent::Removed(node));
             }
         }
