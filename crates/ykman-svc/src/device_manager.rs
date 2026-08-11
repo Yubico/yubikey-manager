@@ -32,6 +32,10 @@ const MAX_CLIENTS: usize = 16;
 /// How long to keep monitoring after the last client disconnects.
 const MONITOR_LINGER: Duration = Duration::from_secs(30);
 
+/// How long to wait for the monitor's initial device enumeration to complete
+/// before letting a connecting client proceed.
+const MONITOR_READY_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Manages device inventory and exclusive access.
 pub struct DeviceManager {
     state: Mutex<ManagerState>,
@@ -99,6 +103,19 @@ impl DeviceManager {
         });
         lifecycle.handle = Some(handle);
         log::info!("Device monitor started");
+
+        // Block until the initial device enumeration completes so the inventory
+        // is populated before the connecting client queries it. Bounded so a
+        // stalled scan can't hang the client indefinitely. This runs only on an
+        // actual monitor start (first connect, or after the linger window), so
+        // holding the lifecycle lock briefly here is acceptable.
+        if let Some(handle) = lifecycle.handle.as_ref()
+            && !handle.wait_ready(MONITOR_READY_TIMEOUT)
+        {
+            log::warn!(
+                "Device monitor initial scan did not complete within {MONITOR_READY_TIMEOUT:?}"
+            );
+        }
     }
 
     /// Notify that a client has connected.

@@ -45,7 +45,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::core::Transport;
 use crate::device::DeviceError;
@@ -196,6 +196,52 @@ impl Shutdown {
     }
 }
 
+/// A latch that lets callers wait until the monitor's initial device
+/// enumeration has been processed.
+///
+/// The monitor emits events for every currently-connected device before it
+/// starts reporting changes. Callers that need an accurate device inventory
+/// immediately after starting the monitor can block on
+/// [`MonitorHandle::wait_ready`] until that initial pass is complete.
+#[derive(Clone)]
+struct ReadySignal {
+    inner: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl ReadySignal {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new())),
+        }
+    }
+
+    /// Mark the initial scan as complete, waking any waiters. Idempotent.
+    fn signal(&self) {
+        let (lock, cvar) = &*self.inner;
+        let mut ready = lock.lock().unwrap_or_else(|p| p.into_inner());
+        *ready = true;
+        cvar.notify_all();
+    }
+
+    /// Block until signalled or `timeout` elapses. Returns `true` if ready.
+    fn wait_timeout(&self, timeout: Duration) -> bool {
+        let (lock, cvar) = &*self.inner;
+        let deadline = Instant::now() + timeout;
+        let mut ready = lock.lock().unwrap_or_else(|p| p.into_inner());
+        while !*ready {
+            let now = Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            let (guard, _) = cvar
+                .wait_timeout(ready, deadline - now)
+                .unwrap_or_else(|p| p.into_inner());
+            ready = guard;
+        }
+        true
+    }
+}
+
 /// A running device monitor.
 ///
 /// Returned by [`monitor_device_events`]. The monitor runs on background
@@ -205,6 +251,8 @@ impl Shutdown {
 pub struct MonitorHandle {
     shutdown: Arc<Shutdown>,
     threads: Vec<JoinHandle<()>>,
+    /// Signalled once the initial device enumeration has been processed.
+    ready: ReadySignal,
 }
 
 impl MonitorHandle {
@@ -215,8 +263,19 @@ impl MonitorHandle {
         self.shutdown_and_join();
     }
 
+    /// Block until the monitor's initial device enumeration has been processed,
+    /// or `timeout` elapses. Returns `true` if the initial scan completed.
+    ///
+    /// Once this returns `true`, every currently-connected device has been
+    /// reported to the event callback.
+    pub fn wait_ready(&self, timeout: Duration) -> bool {
+        self.ready.wait_timeout(timeout)
+    }
+
     fn shutdown_and_join(&mut self) {
         self.shutdown.signal_stop();
+        // Unblock anything still waiting on readiness; the monitor is stopping.
+        self.ready.signal();
         for handle in self.threads.drain(..) {
             let _ = handle.join();
         }
@@ -258,6 +317,7 @@ pub fn monitor_device_events(
 ) -> MonitorHandle {
     let (tx, rx) = mpsc::channel::<Change>();
     let shutdown = Arc::new(Shutdown::new(tx.clone()));
+    let ready = ReadySignal::new();
     let mut threads: Vec<JoinHandle<()>> = Vec::new();
 
     #[cfg(feature = "pcsc")]
@@ -271,6 +331,7 @@ pub fn monitor_device_events(
     drop(tx);
 
     // Coordination loop: owns the tracked state and calls `on_event`.
+    let coordinator_ready = ready.clone();
     let coordinator = thread::spawn(move || {
         let mut state = MonitorState::default();
 
@@ -285,6 +346,9 @@ pub fn monitor_device_events(
             state.refresh_hid(usb_interfaces, &mut on_event);
         }
 
+        // The initial device enumeration is complete.
+        coordinator_ready.signal();
+
         while let Ok(change) = rx.recv() {
             match change {
                 Change::Stop => break,
@@ -297,7 +361,11 @@ pub fn monitor_device_events(
     });
     threads.push(coordinator);
 
-    MonitorHandle { shutdown, threads }
+    MonitorHandle {
+        shutdown,
+        threads,
+        ready,
+    }
 }
 
 /// Tracked state for the monitor loop.
@@ -1039,34 +1107,84 @@ pub enum YubiKeyEvent {
 /// Like [`monitor_device_events`], monitoring runs on background threads and
 /// `on_event` is called from a single dedicated thread. The returned
 /// [`MonitorHandle`] keeps the monitor running until stopped or dropped.
+///
+/// [`MonitorHandle::wait_ready`] blocks until every currently-connected device
+/// has been enumerated, merged, and reported to `on_event`.
 pub fn monitor_yubikeys(
     usb_interfaces: UsbInterface,
     mut on_event: impl FnMut(YubiKeyEvent) + Send + 'static,
 ) -> MonitorHandle {
-    let (node_tx, node_rx) = mpsc::channel::<NodeEvent>();
+    // Messages from the low-level monitor to the aggregation thread. `Ready`
+    // is injected once the initial low-level enumeration is complete so the
+    // aggregator can signal high-level readiness after processing it.
+    enum AggMsg {
+        Node(Box<NodeEvent>),
+        Ready,
+    }
+
+    let (node_tx, node_rx) = mpsc::channel::<AggMsg>();
+    let ready_tx = node_tx.clone();
+
+    // Readiness reported to callers: the initial devices have been aggregated.
+    let ready = ReadySignal::new();
+    let agg_ready = ready.clone();
 
     // Aggregation thread: applies node events and emits device events.
     let aggregator = thread::spawn(move || {
         let mut state = Aggregator::default();
         loop {
-            match node_rx.recv() {
-                Ok(event) => state.apply(event),
+            let first = match node_rx.recv() {
+                Ok(msg) => msg,
                 // The monitor stopped; exit without emitting removals.
                 Err(_) => return,
-            }
-            // Drain any events already queued so a burst of interface events
+            };
+            // Drain any messages already queued so a burst of interface events
             // (a single physical insert/removal) is coalesced into one pass.
-            while let Ok(event) = node_rx.try_recv() {
-                state.apply(event);
+            let mut batch = vec![first];
+            while let Ok(msg) = node_rx.try_recv() {
+                batch.push(msg);
+            }
+            let mut became_ready = false;
+            for msg in batch {
+                match msg {
+                    AggMsg::Node(event) => state.apply(*event),
+                    AggMsg::Ready => became_ready = true,
+                }
             }
             state.reconcile(&mut on_event);
+            if became_ready {
+                agg_ready.signal();
+            }
         }
     });
 
-    let mut handle = monitor_device_events(usb_interfaces, move |event| {
-        let _ = node_tx.send(event);
+    let low_handle = monitor_device_events(usb_interfaces, move |event| {
+        let _ = node_tx.send(AggMsg::Node(Box::new(event)));
     });
+
+    // Forwarder: once the low-level initial scan is done, tell the aggregator
+    // so it can flush the initial state and report high-level readiness.
+    // Ordering is guaranteed: the low-level ready signal fires only after every
+    // initial node event has been enqueued ahead of this `Ready` message.
+    let low_ready = low_handle.ready.clone();
+    let low_shutdown = Arc::clone(&low_handle.shutdown);
+    let forwarder = thread::spawn(move || {
+        loop {
+            if low_shutdown.is_stopped() {
+                return;
+            }
+            if low_ready.wait_timeout(Duration::from_millis(100)) {
+                let _ = ready_tx.send(AggMsg::Ready);
+                return;
+            }
+        }
+    });
+
+    let mut handle = low_handle;
     handle.attach_thread(aggregator);
+    handle.attach_thread(forwarder);
+    // Report readiness based on the aggregated initial state, not the raw scan.
+    handle.ready = ready;
     handle
 }
 
