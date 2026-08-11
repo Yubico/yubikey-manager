@@ -1,17 +1,16 @@
 //! Device inventory management.
 //!
-//! Tracks connected YubiKeys, detects changes via background polling of
-//! `scan_usb_devices`, and provides exclusive device locking across clients.
+//! Tracks connected YubiKeys via the event-based [`monitor_yubikeys`] monitor
+//! and provides exclusive device locking across clients.
 //!
-//! While at least one client is connected, a background thread polls
-//! `scan_usb_devices` every 500ms. If the fingerprint changes, the state is
-//! marked dirty. On `update_devices()` (triggered by a "get" call), a full
-//! `list_devices` is only performed when dirty; otherwise a quick fingerprint
-//! check is done.
+//! The monitor is started when the first client connects and is stopped 30
+//! seconds after the last client disconnects. While running, it pushes device
+//! Added/Changed/Removed events that keep an in-memory inventory up to date;
+//! `update_devices()` simply projects that inventory into the RPC device map.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -20,7 +19,8 @@ use serde_json::{Value, json};
 use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::UsbInterface;
-use yubikit::platform::device::{LocalYubiKeyDevice, list_devices, scan_usb_devices};
+use yubikit::platform::device::LocalYubiKeyDevice;
+use yubikit::platform::monitor::{MonitorHandle, YubiKeyEvent, YubiKeyId, monitor_yubikeys};
 
 use ykman::rpc::error::RpcError;
 use ykman::rpc::node::RpcNode;
@@ -29,20 +29,31 @@ use crate::device::DeviceNode;
 
 const MAX_CLIENTS: usize = 16;
 
+/// How long to keep monitoring after the last client disconnects.
+const MONITOR_LINGER: Duration = Duration::from_secs(30);
+
 /// Manages device inventory and exclusive access.
 pub struct DeviceManager {
     state: Mutex<ManagerState>,
     /// Number of connected clients.
     client_count: AtomicUsize,
-    /// Whether the device inventory needs a full refresh.
-    dirty: AtomicBool,
-    /// Used to wake the scanner thread when clients connect.
-    wake: Arc<(Mutex<bool>, Condvar)>,
+    /// The running device monitor and its stop-scheduling generation.
+    monitor: Mutex<MonitorLifecycle>,
+    /// Live device inventory, keyed by stable monitor id. Updated by the
+    /// monitor's event callback.
+    monitored: Arc<Mutex<HashMap<YubiKeyId, LocalYubiKeyDevice>>>,
+}
+
+#[derive(Default)]
+struct MonitorLifecycle {
+    /// The running monitor, if any.
+    handle: Option<MonitorHandle>,
+    /// Bumped whenever the monitor is (re)started or a pending stop is
+    /// cancelled, so stale stop timers become no-ops.
+    generation: u64,
 }
 
 struct ManagerState {
-    /// Last fingerprint from scan_usb_devices for change detection.
-    last_fingerprint: u64,
     /// Current device inventory: name → device info for list_children.
     devices: BTreeMap<String, Value>,
     /// Cached device objects for fast re-open without re-enumeration.
@@ -53,65 +64,45 @@ struct ManagerState {
 
 impl DeviceManager {
     pub fn new() -> Arc<Self> {
-        let wake = Arc::new((Mutex::new(false), Condvar::new()));
-        let manager = Arc::new(Self {
+        Arc::new(Self {
             state: Mutex::new(ManagerState {
-                last_fingerprint: 0,
                 devices: BTreeMap::new(),
                 device_objects: BTreeMap::new(),
                 locked_devices: HashSet::new(),
             }),
             client_count: AtomicUsize::new(0),
-            dirty: AtomicBool::new(true),
-            wake: wake.clone(),
-        });
+            monitor: Mutex::new(MonitorLifecycle::default()),
+            monitored: Arc::new(Mutex::new(HashMap::new())),
+        })
+    }
 
-        // Spawn background scanner thread
-        let mgr = Arc::downgrade(&manager);
-        thread::spawn(move || {
-            let (lock, cvar) = &*wake;
-            loop {
-                // Wait until there are clients
-                {
-                    let mut started = recover_lock(lock.lock(), "scanner wake lock");
-                    while !*started {
-                        started = recover_lock(cvar.wait(started), "scanner wake wait");
-                    }
+    /// Start the device monitor if it is not already running.
+    fn start_monitor(self: &Arc<Self>) {
+        let mut lifecycle = recover_lock(self.monitor.lock(), "monitor lifecycle");
+        if lifecycle.handle.is_some() {
+            return; // Already running (possibly lingering after a disconnect).
+        }
+
+        let monitored = Arc::clone(&self.monitored);
+        let interfaces = UsbInterface::CCID | UsbInterface::FIDO | UsbInterface::OTP;
+        let handle = monitor_yubikeys(interfaces, move |event| {
+            let mut inv = recover_lock(monitored.lock(), "monitored inventory");
+            match event {
+                YubiKeyEvent::Added(yk) | YubiKeyEvent::Changed(yk) => {
+                    let id = yk.id();
+                    inv.insert(id, yk.into_device());
                 }
-
-                // Poll while clients are connected
-                loop {
-                    let Some(mgr) = mgr.upgrade() else {
-                        return; // DeviceManager dropped
-                    };
-                    if mgr.client_count.load(Ordering::Relaxed) == 0 {
-                        // No clients, go back to waiting
-                        let mut started = recover_lock(lock.lock(), "scanner wake lock");
-                        *started = false;
-                        break;
-                    }
-
-                    let (_, fingerprint) = scan_usb_devices();
-                    {
-                        let mut state = mgr.lock_state();
-                        if fingerprint != state.last_fingerprint {
-                            state.last_fingerprint = fingerprint;
-                            drop(state);
-                            log::debug!("Background scan: device change detected");
-                            mgr.dirty.store(true, Ordering::Relaxed);
-                        }
-                    }
-                    drop(mgr);
-                    thread::sleep(Duration::from_millis(500));
+                YubiKeyEvent::Removed(yk) => {
+                    inv.remove(&yk.id());
                 }
             }
         });
-
-        manager
+        lifecycle.handle = Some(handle);
+        log::info!("Device monitor started");
     }
 
-    /// Notify that a client has connected. Sets dirty immediately.
-    pub fn client_connected(&self) -> bool {
+    /// Notify that a client has connected.
+    pub fn client_connected(self: &Arc<Self>) -> bool {
         let mut current = self.client_count.load(Ordering::Relaxed);
         loop {
             if current >= MAX_CLIENTS {
@@ -131,61 +122,83 @@ impl DeviceManager {
                 Err(actual) => current = actual,
             }
         }
-        self.dirty.store(true, Ordering::Relaxed);
         log::debug!("Client connected (count: {})", current + 1);
 
-        if current == 0 {
-            // Wake the scanner thread
-            let (lock, cvar) = &*self.wake;
-            let mut started = recover_lock(lock.lock(), "scanner wake lock");
-            *started = true;
-            cvar.notify_one();
+        // Cancel any pending stop and ensure the monitor is running.
+        {
+            let mut lifecycle = recover_lock(self.monitor.lock(), "monitor lifecycle");
+            lifecycle.generation += 1;
         }
+        self.start_monitor();
         true
     }
 
     /// Notify that a client has disconnected.
-    pub fn client_disconnected(&self) {
+    ///
+    /// When the last client leaves, schedules the monitor to stop after
+    /// [`MONITOR_LINGER`] unless a client reconnects in the meantime.
+    pub fn client_disconnected(self: &Arc<Self>) {
         let prev = self
             .client_count
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
                 count.checked_sub(1)
             });
-        match prev {
-            Ok(count) => log::debug!("Client disconnected (count: {})", count - 1),
-            Err(_) => log::warn!("Client disconnect observed with count already at zero"),
-        }
-    }
-
-    /// Scan for device changes and update the inventory.
-    /// Performs a full `list_devices` only if dirty; otherwise does a quick
-    /// fingerprint check to see if a rescan is needed.
-    /// Returns the current device map.
-    pub fn update_devices(&self) -> BTreeMap<String, Value> {
-        if !self.dirty.load(Ordering::Relaxed) {
-            // Quick check: has anything changed since last full scan?
-            let (_, fingerprint) = scan_usb_devices();
-            let state = self.lock_state();
-            if fingerprint == state.last_fingerprint && !state.devices.is_empty() {
-                log::debug!("No device changes detected");
-                return state.devices.clone();
+        let remaining = match prev {
+            Ok(count) => {
+                log::debug!("Client disconnected (count: {})", count - 1);
+                count - 1
             }
-        }
-
-        self.dirty.store(false, Ordering::Relaxed);
-        log::info!("Device state changed, rescanning");
-
-        let (_, fingerprint) = scan_usb_devices();
-        // Full enumeration
-        let interfaces = UsbInterface::CCID | UsbInterface::FIDO | UsbInterface::OTP;
-        let devices = match list_devices(interfaces) {
-            Ok(devs) => devs,
-            Err(e) => {
-                log::error!("list_devices failed: {e}");
-                let state = self.lock_state();
-                return state.devices.clone();
+            Err(_) => {
+                log::warn!("Client disconnect observed with count already at zero");
+                return;
             }
         };
+
+        if remaining > 0 {
+            return;
+        }
+
+        // Last client gone: schedule a delayed stop.
+        let generation = {
+            let mut lifecycle = recover_lock(self.monitor.lock(), "monitor lifecycle");
+            lifecycle.generation += 1;
+            lifecycle.generation
+        };
+        let this = Arc::clone(self);
+        thread::spawn(move || {
+            thread::sleep(MONITOR_LINGER);
+            let handle = {
+                let mut lifecycle = recover_lock(this.monitor.lock(), "monitor lifecycle");
+                if this.client_count.load(Ordering::Relaxed) == 0
+                    && lifecycle.generation == generation
+                {
+                    lifecycle.handle.take()
+                } else {
+                    None
+                }
+            };
+            if let Some(handle) = handle {
+                handle.stop();
+                recover_lock(this.monitored.lock(), "monitored inventory").clear();
+                let mut state = recover_lock(this.state.lock(), "device manager state");
+                state.devices.clear();
+                state.device_objects.clear();
+                log::info!("Device monitor stopped after linger");
+            }
+        });
+    }
+
+    /// Project the live monitored inventory into the RPC device map.
+    /// Returns the current device map.
+    pub fn update_devices(&self) -> BTreeMap<String, Value> {
+        // Snapshot the monitored devices, ordered by stable id for
+        // deterministic duplicate-naming.
+        let mut devices: Vec<(YubiKeyId, LocalYubiKeyDevice)> = {
+            let inv = recover_lock(self.monitored.lock(), "monitored inventory");
+            inv.iter().map(|(id, dev)| (*id, dev.clone())).collect()
+        };
+        devices.sort_by_key(|(id, _)| *id);
+        let devices: Vec<LocalYubiKeyDevice> = devices.into_iter().map(|(_, dev)| dev).collect();
 
         let mut new_devices = BTreeMap::new();
         let mut new_device_objects: BTreeMap<String, LocalYubiKeyDevice> = BTreeMap::new();
@@ -263,7 +276,6 @@ impl DeviceManager {
         });
 
         let mut state = self.lock_state();
-        state.last_fingerprint = fingerprint;
 
         // Remove locks for devices that are no longer present
         state

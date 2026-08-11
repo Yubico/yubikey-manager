@@ -98,6 +98,28 @@ impl LocalYubiKeyDevice {
         get_name(&self.info)
     }
 
+    /// Construct a device from already-known transport paths and info.
+    ///
+    /// Used by the device monitor's aggregation layer to build a merged
+    /// device from a set of discovered [`DeviceNode`](crate::platform::monitor::DeviceNode)s.
+    pub(crate) fn from_parts(
+        reader_name: Option<String>,
+        hid_path: Option<String>,
+        fido_path: Option<String>,
+        pid: Option<u16>,
+        transport: Transport,
+        info: DeviceInfo,
+    ) -> Self {
+        LocalYubiKeyDevice {
+            reader_name,
+            hid_path,
+            fido_path,
+            pid,
+            transport,
+            info,
+        }
+    }
+
     /// Open a device from a PC/SC reader name.
     ///
     /// Connects to the given reader, reads device info, and returns a

@@ -76,16 +76,59 @@ impl From<PcscError> for SmartCardError {
     }
 }
 
+/// Some Windows PC/SC stacks return the raw Win32 code `ERROR_ACCESS_DENIED`
+/// (`0x5`) from `SCardListReaders`/`SCardGetStatusChange` when no reader is
+/// present. The `pcsc` crate does not recognise this code and panics while
+/// mapping it, which would otherwise tear down the calling thread (e.g. the
+/// device monitor's coordinator). We recover from that panic via
+/// `catch_unwind`; this hook keeps the panic message from being printed on
+/// every poll while leaving all other panics untouched.
+fn install_pcsc_panic_filter() {
+    use std::sync::Once;
+    static HOOK: Once = Once::new();
+    HOOK.call_once(|| {
+        let default = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let is_pcsc_code = info
+                .payload()
+                .downcast_ref::<String>()
+                .map(|s| s.contains("unknown PCSC error code"))
+                .unwrap_or(false);
+            if !is_pcsc_code {
+                default(info);
+            }
+        }));
+    });
+}
+
+/// Run a `pcsc` operation, converting the crate's panic on an unrecognised raw
+/// status code into a `NoReadersAvailable` error instead of unwinding into the
+/// caller.
+fn guard_pcsc<T>(f: impl FnOnce() -> Result<T, ::pcsc::Error>) -> Result<T, PcscError> {
+    install_pcsc_panic_filter();
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(result) => result.map_err(PcscError::from),
+        Err(_) => Err(PcscError::Pcsc(::pcsc::Error::NoReadersAvailable)),
+    }
+}
+
 /// List available PC/SC reader names.
 pub fn list_readers() -> Result<Vec<String>, PcscError> {
-    let ctx = Context::establish(Scope::User)?;
-    let len = ctx.list_readers_len()?;
-    let mut buf = vec![0u8; len];
-    let names: Vec<String> = ctx
-        .list_readers(&mut buf)?
-        .map(|r| r.to_string_lossy().into_owned())
-        .collect();
-    Ok(names)
+    let result = guard_pcsc(|| {
+        let ctx = Context::establish(Scope::User)?;
+        let len = ctx.list_readers_len()?;
+        let mut buf = vec![0u8; len];
+        let names: Vec<String> = ctx
+            .list_readers(&mut buf)?
+            .map(|r| r.to_string_lossy().into_owned())
+            .collect();
+        Ok(names)
+    });
+    match result {
+        Ok(names) => Ok(names),
+        Err(e) if e.is_unavailable() => Ok(vec![]),
+        Err(e) => Err(e),
+    }
 }
 
 /// List PC/SC readers together with their current card-present state.
@@ -93,37 +136,42 @@ pub fn list_readers() -> Result<Vec<String>, PcscError> {
 /// Each entry is `(reader_name, card_is_present)`. Uses `get_status_change`
 /// with a zero timeout so it returns the current snapshot immediately.
 pub fn list_readers_with_state() -> Result<Vec<(String, bool)>, PcscError> {
-    let ctx = Context::establish(Scope::User)?;
-    let len = ctx.list_readers_len()?;
-    let mut buf = vec![0u8; len];
-    let names: Vec<String> = ctx
-        .list_readers(&mut buf)?
-        .map(|r| r.to_string_lossy().into_owned())
-        .collect();
+    let result = guard_pcsc(|| {
+        let ctx = Context::establish(Scope::User)?;
+        let len = ctx.list_readers_len()?;
+        let mut buf = vec![0u8; len];
+        let names: Vec<String> = ctx
+            .list_readers(&mut buf)?
+            .map(|r| r.to_string_lossy().into_owned())
+            .collect();
 
-    if names.is_empty() {
-        return Ok(vec![]);
+        if names.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut reader_states: Vec<::pcsc::ReaderState> = names
+            .iter()
+            .filter_map(|name| std::ffi::CString::new(name.as_str()).ok())
+            .map(|cname| ::pcsc::ReaderState::new(cname, ::pcsc::State::UNAWARE))
+            .collect();
+
+        // Zero timeout → return immediately with current state; ignore timeout errors.
+        let _ = ctx.get_status_change(Some(std::time::Duration::ZERO), &mut reader_states);
+
+        Ok(names
+            .into_iter()
+            .zip(reader_states.iter())
+            .map(|(name, rs)| {
+                let present = rs.event_state().contains(::pcsc::State::PRESENT);
+                (name, present)
+            })
+            .collect())
+    });
+    match result {
+        Ok(readers) => Ok(readers),
+        Err(e) if e.is_unavailable() => Ok(vec![]),
+        Err(e) => Err(e),
     }
-
-    let mut reader_states: Vec<::pcsc::ReaderState> = names
-        .iter()
-        .filter_map(|name| std::ffi::CString::new(name.as_str()).ok())
-        .map(|cname| ::pcsc::ReaderState::new(cname, ::pcsc::State::UNAWARE))
-        .collect();
-
-    // Zero timeout → return immediately with current state; ignore timeout errors.
-    let _ = ctx.get_status_change(Some(std::time::Duration::ZERO), &mut reader_states);
-
-    let result = names
-        .into_iter()
-        .zip(reader_states.iter())
-        .map(|(name, rs)| {
-            let present = rs.event_state().contains(::pcsc::State::PRESENT);
-            (name, present)
-        })
-        .collect();
-
-    Ok(result)
 }
 
 /// Try to kill `scdaemon` (GPG smart card daemon) which may hold an exclusive

@@ -127,6 +127,11 @@ path = "examples/monitor_device_events.rs"
 required-features = ["pcsc", "hid"]
 
 [[example]]
+name = "monitor_yubikeys"
+path = "examples/monitor_yubikeys.rs"
+required-features = ["pcsc", "hid"]
+
+[[example]]
 name = "oath_list"
 path = "examples/oath_list.rs"
 required-features = ["pcsc", "hid"]

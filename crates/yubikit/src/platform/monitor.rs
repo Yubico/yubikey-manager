@@ -47,8 +47,10 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use crate::core::Transport;
 use crate::device::DeviceError;
 use crate::management::{DeviceInfo, UsbInterface};
+use crate::platform::device::LocalYubiKeyDevice;
 
 #[cfg(feature = "pcsc")]
 use super::device::pid_from_reader_name;
@@ -218,6 +220,14 @@ impl MonitorHandle {
         for handle in self.threads.drain(..) {
             let _ = handle.join();
         }
+    }
+
+    /// Attach an extra thread to be joined when the monitor is stopped.
+    ///
+    /// Used by [`monitor_yubikeys`] to keep its aggregation thread alive for
+    /// the lifetime of the handle.
+    fn attach_thread(&mut self, handle: JoinHandle<()>) {
+        self.threads.push(handle);
     }
 }
 
@@ -942,4 +952,478 @@ mod macos_hid {
         // `tx` is dropped here, after the run loop and its callbacks are done.
         drop(tx);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Higher-level aggregation: physical YubiKey devices.
+// ---------------------------------------------------------------------------
+
+/// A stable identifier for a monitored [`YubiKey`].
+///
+/// The id remains the same across [`YubiKeyEvent::Added`],
+/// [`YubiKeyEvent::Changed`], and [`YubiKeyEvent::Removed`] for a given
+/// physical device, so callers can correlate events over time.
+pub type YubiKeyId = u64;
+
+/// A physical YubiKey aggregated from one or more [`DeviceNode`]s.
+///
+/// Produced by [`monitor_yubikeys`]. The underlying [`LocalYubiKeyDevice`]
+/// (returned by [`YubiKey::device`]) can be used to open connections.
+#[derive(Debug, Clone)]
+pub struct YubiKey {
+    id: YubiKeyId,
+    device: LocalYubiKeyDevice,
+    nodes: Vec<DeviceNode>,
+}
+
+impl YubiKey {
+    /// The stable identifier for this device.
+    pub fn id(&self) -> YubiKeyId {
+        self.id
+    }
+
+    /// The underlying device, which can open connections.
+    pub fn device(&self) -> &LocalYubiKeyDevice {
+        &self.device
+    }
+
+    /// Consume this `YubiKey`, returning the underlying device.
+    pub fn into_device(self) -> LocalYubiKeyDevice {
+        self.device
+    }
+
+    /// The [`DeviceNode`]s that make up this physical device.
+    pub fn nodes(&self) -> &[DeviceNode] {
+        &self.nodes
+    }
+
+    /// The device info.
+    pub fn info(&self) -> &DeviceInfo {
+        self.device.info()
+    }
+
+    /// The device serial number, if available.
+    pub fn serial(&self) -> Option<u32> {
+        self.device.info().serial
+    }
+}
+
+/// A change in the set of connected physical [`YubiKey`]s.
+#[derive(Debug, Clone)]
+pub enum YubiKeyEvent {
+    /// A new physical device was connected.
+    Added(YubiKey),
+    /// An existing device's underlying [`DeviceNode`]s changed.
+    Changed(YubiKey),
+    /// A device was disconnected (all its nodes were removed).
+    Removed(YubiKey),
+}
+
+/// Monitor connected physical YubiKeys and report [`YubiKeyEvent`]s.
+///
+/// This is a higher-level version of [`monitor_device_events`] that aggregates
+/// the low-level [`DeviceNode`] events into physical devices. Nodes that
+/// belong to the same physical device (matched by serial number, or by USB
+/// Product ID when a serial is not available) are merged into a single
+/// [`YubiKey`].
+///
+/// Connecting or disconnecting a YubiKey produces several node events in quick
+/// succession (one per interface). Events already queued when a change is
+/// processed are drained together, so a burst is coalesced where possible, but
+/// interfaces that are enumerated with a delay (a YubiKey's HID interfaces
+/// often appear after its PC/SC reader) surface as [`YubiKeyEvent::Changed`].
+///
+/// A device that is only visible as a PC/SC reader (with no readable device
+/// info yet) is held back and not reported until an info-bearing node appears.
+///
+/// Like [`monitor_device_events`], monitoring runs on background threads and
+/// `on_event` is called from a single dedicated thread. The returned
+/// [`MonitorHandle`] keeps the monitor running until stopped or dropped.
+pub fn monitor_yubikeys(
+    usb_interfaces: UsbInterface,
+    mut on_event: impl FnMut(YubiKeyEvent) + Send + 'static,
+) -> MonitorHandle {
+    let (node_tx, node_rx) = mpsc::channel::<NodeEvent>();
+
+    // Aggregation thread: applies node events and emits device events.
+    let aggregator = thread::spawn(move || {
+        let mut state = Aggregator::default();
+        loop {
+            match node_rx.recv() {
+                Ok(event) => state.apply(event),
+                // The monitor stopped; exit without emitting removals.
+                Err(_) => return,
+            }
+            // Drain any events already queued so a burst of interface events
+            // (a single physical insert/removal) is coalesced into one pass.
+            while let Ok(event) = node_rx.try_recv() {
+                state.apply(event);
+            }
+            state.reconcile(&mut on_event);
+        }
+    });
+
+    let mut handle = monitor_device_events(usb_interfaces, move |event| {
+        let _ = node_tx.send(event);
+    });
+    handle.attach_thread(aggregator);
+    handle
+}
+
+/// Aggregates [`DeviceNode`]s into physical [`YubiKey`]s.
+#[derive(Default)]
+struct Aggregator {
+    /// USB PC/SC reader nodes, keyed by reader name.
+    usb_readers: HashMap<String, DeviceNode>,
+    /// Card nodes (USB or NFC), keyed by reader name.
+    cards: HashMap<String, DeviceNode>,
+    /// OTP HID nodes, keyed by HID path.
+    otp: HashMap<String, DeviceNode>,
+    /// FIDO HID nodes, keyed by HID path.
+    fido: HashMap<String, DeviceNode>,
+    /// Currently-reported devices.
+    devices: Vec<YubiKey>,
+    /// Next id to assign.
+    next_id: YubiKeyId,
+}
+
+impl Aggregator {
+    /// Apply a single node event to the tracked node set.
+    fn apply(&mut self, event: NodeEvent) {
+        let (added, node) = match event {
+            NodeEvent::Added(node) => (true, node),
+            NodeEvent::Removed(node) => (false, node),
+        };
+        let (map, key) = match &node {
+            DeviceNode::UsbReaderNode { reader_name, .. } => {
+                (&mut self.usb_readers, reader_name.clone())
+            }
+            DeviceNode::CardNode { reader_name, .. } => (&mut self.cards, reader_name.clone()),
+            DeviceNode::HidOtpNode { hid_path, .. } => (&mut self.otp, hid_path.clone()),
+            DeviceNode::HidFidoNode { hid_path, .. } => (&mut self.fido, hid_path.clone()),
+        };
+        if added {
+            map.insert(key, node);
+        } else {
+            map.remove(&key);
+        }
+    }
+
+    /// Reconcile the aggregated device set with the last-reported set and emit
+    /// events for the differences.
+    ///
+    /// Removals are emitted first, then additions, then changes.
+    fn reconcile(&mut self, on_event: &mut impl FnMut(YubiKeyEvent)) {
+        let built = self.build_devices();
+        let prev = std::mem::take(&mut self.devices);
+        let mut used = vec![false; prev.len()];
+
+        let mut new_devices: Vec<YubiKey> = Vec::new();
+        let mut added = Vec::new();
+        let mut changed = Vec::new();
+
+        for b in built {
+            let b_serial = b.device.info().serial;
+            let idx = (0..prev.len()).find(|&i| {
+                if used[i] {
+                    return false;
+                }
+                let p_serial = prev[i].device.info().serial;
+                match (b_serial, p_serial) {
+                    (Some(a), Some(c)) => a == c,
+                    (Some(_), None) | (None, None) => shares_path(&b.device, &prev[i].device),
+                    (None, Some(_)) => false,
+                }
+            });
+
+            match idx {
+                Some(i) => {
+                    used[i] = true;
+                    let yk = YubiKey {
+                        id: prev[i].id,
+                        device: b.device,
+                        nodes: b.nodes,
+                    };
+                    if yk.nodes != prev[i].nodes {
+                        changed.push(yk.clone());
+                    }
+                    new_devices.push(yk);
+                }
+                None => {
+                    let id = self.next_id;
+                    self.next_id += 1;
+                    let yk = YubiKey {
+                        id,
+                        device: b.device,
+                        nodes: b.nodes,
+                    };
+                    added.push(yk.clone());
+                    new_devices.push(yk);
+                }
+            }
+        }
+
+        // Devices that lost all of their nodes are removed.
+        let mut removed = Vec::new();
+        for (i, p) in prev.into_iter().enumerate() {
+            if !used[i] {
+                removed.push(p);
+            }
+        }
+
+        self.devices = new_devices;
+
+        for p in removed {
+            on_event(YubiKeyEvent::Removed(p));
+        }
+        for yk in added {
+            on_event(YubiKeyEvent::Added(yk));
+        }
+        for yk in changed {
+            on_event(YubiKeyEvent::Changed(yk));
+        }
+    }
+
+    /// Group the current node set into physical devices.
+    fn build_devices(&self) -> Vec<BuiltDevice> {
+        let mut built = Vec::new();
+
+        // NFC devices: a card in a reader with no matching USB reader node.
+        // Each is a standalone device with a single card node.
+        for (reader_name, node) in &self.cards {
+            if self.usb_readers.contains_key(reader_name) {
+                continue;
+            }
+            if let DeviceNode::CardNode { device_info, .. } = node {
+                built.push(BuiltDevice {
+                    device: LocalYubiKeyDevice::from_parts(
+                        Some(reader_name.clone()),
+                        None,
+                        None,
+                        None,
+                        Transport::Nfc,
+                        device_info.clone(),
+                    ),
+                    nodes: vec![node.clone()],
+                });
+            }
+        }
+
+        // Count physical USB devices per PID (max across interfaces).
+        let mut counts: HashMap<u16, usize> = HashMap::new();
+        {
+            let mut per_iface: [HashMap<u16, usize>; 3] = Default::default();
+            for node in self.usb_readers.values() {
+                if let DeviceNode::UsbReaderNode { pid, .. } = node {
+                    *per_iface[0].entry(*pid).or_insert(0) += 1;
+                }
+            }
+            for node in self.otp.values() {
+                if let DeviceNode::HidOtpNode { pid, .. } = node {
+                    *per_iface[1].entry(*pid).or_insert(0) += 1;
+                }
+            }
+            for node in self.fido.values() {
+                if let DeviceNode::HidFidoNode { pid, .. } = node {
+                    *per_iface[2].entry(*pid).or_insert(0) += 1;
+                }
+            }
+            for map in &per_iface {
+                for (&pid, &c) in map {
+                    let e = counts.entry(pid).or_insert(0);
+                    *e = (*e).max(c);
+                }
+            }
+        }
+
+        // USB partials, one per interface node.
+        let mut readers: Vec<Partial> = Vec::new();
+        for (reader_name, node) in &self.usb_readers {
+            if let DeviceNode::UsbReaderNode { pid, .. } = node {
+                let mut nodes = vec![node.clone()];
+                let info = match self.cards.get(reader_name) {
+                    Some(card @ DeviceNode::CardNode { device_info, .. }) => {
+                        nodes.push(card.clone());
+                        Some(device_info.clone())
+                    }
+                    _ => None,
+                };
+                readers.push(Partial {
+                    reader_name: Some(reader_name.clone()),
+                    hid_path: None,
+                    fido_path: None,
+                    pid: Some(*pid),
+                    info,
+                    nodes,
+                });
+            }
+        }
+        let otp: Vec<Partial> = self
+            .otp
+            .iter()
+            .filter_map(|(path, node)| {
+                if let DeviceNode::HidOtpNode {
+                    pid, device_info, ..
+                } = node
+                {
+                    Some(Partial {
+                        reader_name: None,
+                        hid_path: Some(path.clone()),
+                        fido_path: None,
+                        pid: Some(*pid),
+                        info: Some(device_info.clone()),
+                        nodes: vec![node.clone()],
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let fido: Vec<Partial> = self
+            .fido
+            .iter()
+            .filter_map(|(path, node)| {
+                if let DeviceNode::HidFidoNode {
+                    pid, device_info, ..
+                } = node
+                {
+                    Some(Partial {
+                        reader_name: None,
+                        hid_path: None,
+                        fido_path: Some(path.clone()),
+                        pid: Some(*pid),
+                        info: Some(device_info.clone()),
+                        nodes: vec![node.clone()],
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut base = readers;
+        merge_partials(&mut base, otp, &counts);
+        merge_partials(&mut base, fido, &counts);
+
+        // A device is only reported once it has readable info; reader-only
+        // devices are held back until an info-bearing node appears.
+        for mut p in base {
+            if let Some(info) = p.info.take() {
+                p.nodes.sort_by(node_sort_key);
+                built.push(BuiltDevice {
+                    device: LocalYubiKeyDevice::from_parts(
+                        p.reader_name,
+                        p.hid_path,
+                        p.fido_path,
+                        p.pid,
+                        Transport::Usb,
+                        info,
+                    ),
+                    nodes: p.nodes,
+                });
+            }
+        }
+
+        built
+    }
+}
+
+/// A device built from a group of merged nodes.
+struct BuiltDevice {
+    device: LocalYubiKeyDevice,
+    nodes: Vec<DeviceNode>,
+}
+
+/// A partially-assembled USB device during merging.
+struct Partial {
+    reader_name: Option<String>,
+    hid_path: Option<String>,
+    fido_path: Option<String>,
+    pid: Option<u16>,
+    info: Option<DeviceInfo>,
+    nodes: Vec<DeviceNode>,
+}
+
+impl Partial {
+    fn serial(&self) -> Option<u32> {
+        self.info.as_ref().and_then(|i| i.serial)
+    }
+
+    /// Absorb another partial representing the same physical device.
+    fn merge(&mut self, other: Partial) {
+        if self.reader_name.is_none() {
+            self.reader_name = other.reader_name;
+        }
+        if self.hid_path.is_none() {
+            self.hid_path = other.hid_path;
+        }
+        if self.fido_path.is_none() {
+            self.fido_path = other.fido_path;
+        }
+        if self.pid.is_none() {
+            self.pid = other.pid;
+        }
+        // Prefer info with a serial number, or a higher firmware version.
+        let take = match (&self.info, &other.info) {
+            (None, Some(_)) => true,
+            (Some(a), Some(b)) => {
+                (a.serial.is_none() && b.serial.is_some())
+                    || (a.serial == b.serial && b.version > a.version)
+            }
+            _ => false,
+        };
+        if take {
+            self.info = other.info;
+        }
+        self.nodes.extend(other.nodes);
+    }
+}
+
+/// Merge `incoming` partials into `base`, combining entries that represent the
+/// same physical device. Matching is by serial number first, then by PID when
+/// exactly one device of that PID exists.
+fn merge_partials(base: &mut Vec<Partial>, incoming: Vec<Partial>, counts: &HashMap<u16, usize>) {
+    for inc in incoming {
+        let serial = inc.serial();
+        let pid = inc.pid;
+        let unique_pid = pid.map(|p| counts.get(&p) == Some(&1)).unwrap_or(false);
+
+        let idx = serial
+            .and_then(|s| base.iter().position(|b| b.serial() == Some(s)))
+            .or_else(|| {
+                if unique_pid {
+                    base.iter().position(|b| b.pid == pid)
+                } else {
+                    None
+                }
+            });
+
+        match idx {
+            Some(i) => base[i].merge(inc),
+            None => base.push(inc),
+        }
+    }
+}
+
+/// Whether two devices share any transport path (and are thus the same key).
+fn shares_path(a: &LocalYubiKeyDevice, b: &LocalYubiKeyDevice) -> bool {
+    fn eq(x: &Option<String>, y: &Option<String>) -> bool {
+        matches!((x, y), (Some(x), Some(y)) if x == y)
+    }
+    eq(&a.reader_name, &b.reader_name)
+        || eq(&a.hid_path, &b.hid_path)
+        || eq(&a.fido_path, &b.fido_path)
+}
+
+/// Stable sort key for a device node, for deterministic change detection.
+fn node_sort_key(a: &DeviceNode, b: &DeviceNode) -> std::cmp::Ordering {
+    fn key(n: &DeviceNode) -> (u8, &str) {
+        match n {
+            DeviceNode::UsbReaderNode { reader_name, .. } => (0, reader_name),
+            DeviceNode::CardNode { reader_name, .. } => (1, reader_name),
+            DeviceNode::HidOtpNode { hid_path, .. } => (2, hid_path),
+            DeviceNode::HidFidoNode { hid_path, .. } => (3, hid_path),
+        }
+    }
+    key(a).cmp(&key(b))
 }
