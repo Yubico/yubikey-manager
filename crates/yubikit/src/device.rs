@@ -361,7 +361,7 @@ fn synthesize_info(pid: u16, version: Version, serial: Option<u32>) -> DeviceInf
         capabilities = Capability::OTP | Capability::U2F;
     } else {
         // NEO
-        capabilities = Capability::OTP | Capability::OATH | Capability::OPENPGP;
+        capabilities = Capability::OTP | Capability::OATH | Capability::OPENPGP | Capability::PIV;
         if version >= Version(3, 3, 0) || usb_interfaces_from_pid(pid).contains(UsbInterface::FIDO)
         {
             capabilities |= Capability::U2F;
