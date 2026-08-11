@@ -151,8 +151,8 @@ pub trait FidoConnection: crate::core::Connection<Error = FidoError> {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, FidoError>;
-    /// Return the firmware version as `(major, minor, patch)`.
-    fn device_version(&self) -> (u8, u8, u8);
+    /// Return the firmware version.
+    fn device_version(&self) -> crate::core::Version;
     /// Return the CTAP HID capability flags reported by the device.
     fn capabilities(&self) -> CtapHidCapability;
 }
@@ -174,7 +174,7 @@ impl FidoConnection for Box<dyn FidoConnection + Send> {
     ) -> Result<Vec<u8>, FidoError> {
         (**self).call(cmd, data, on_keepalive, cancel)
     }
-    fn device_version(&self) -> (u8, u8, u8) {
+    fn device_version(&self) -> crate::core::Version {
         (**self).device_version()
     }
     fn capabilities(&self) -> CtapHidCapability {
@@ -199,7 +199,7 @@ impl FidoConnection for Box<dyn FidoConnection + Send + Sync> {
     ) -> Result<Vec<u8>, FidoError> {
         (**self).call(cmd, data, on_keepalive, cancel)
     }
-    fn device_version(&self) -> (u8, u8, u8) {
+    fn device_version(&self) -> crate::core::Version {
         (**self).device_version()
     }
     fn capabilities(&self) -> CtapHidCapability {

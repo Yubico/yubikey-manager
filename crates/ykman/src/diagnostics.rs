@@ -993,7 +993,7 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
 
                 match HidFidoConnection::open(fido) {
                     Ok(conn) => {
-                        let (v1, v2, v3) = conn.device_version();
+                        let yubikit::core::Version(v1, v2, v3) = conn.device_version();
                         let caps = conn.capabilities();
 
                         if caps.has_cbor() {
@@ -1245,7 +1245,7 @@ fn probe_svc_ctap(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcFidoDi
         Err(e) => return ResultOrError::Err(format!("Failed to open CTAP: {e}")),
     };
 
-    let (v1, v2, v3) = conn.device_version();
+    let yubikit::core::Version(v1, v2, v3) = conn.device_version();
     let caps = conn.capabilities();
 
     if caps.has_cbor() {

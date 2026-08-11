@@ -194,7 +194,7 @@ impl SmartCardConnection for RpcSmartCardConnection {
 /// A `FidoConnection` backed by the `call` RPC action on a ctap connection node.
 pub struct RpcFidoConnection {
     client: SharedClient,
-    device_version: (u8, u8, u8),
+    device_version: yubikit::core::Version,
     capabilities: CtapHidCapability,
     device_prefix: Vec<String>,
 }
@@ -208,9 +208,8 @@ impl RpcFidoConnection {
             .map_err(|e| RpcCallError::Transport(format!("{e}")))?;
         let data = required_field(&info.body, "data")?;
 
-        let version =
+        let device_version =
             parse_version_array(required_field(data, "device_version")?, "device_version")?;
-        let device_version = (version.0, version.1, version.2);
 
         let capabilities = CtapHidCapability::from_raw(as_u8(
             required_u64(data, "capabilities")?,
@@ -281,7 +280,7 @@ impl FidoConnection for RpcFidoConnection {
             .map_err(|e| FidoError::Other(format!("bad hex from RPC: {e}")))
     }
 
-    fn device_version(&self) -> (u8, u8, u8) {
+    fn device_version(&self) -> yubikit::core::Version {
         self.device_version
     }
 

@@ -255,7 +255,7 @@ impl FidoConnectionTrait for PyFidoConn {
             Self::Bridge(c) => c.call(cmd, data, on_keepalive, cancel),
         }
     }
-    fn device_version(&self) -> (u8, u8, u8) {
+    fn device_version(&self) -> yubikit::core::Version {
         match self {
             Self::Native(c) => c.device_version(),
             Self::Bridge(c) => c.device_version(),
@@ -280,14 +280,15 @@ pub type BoxedFidoConnection = PyFidoConn;
 /// implemented in Python rather than being a native Rust connection.
 pub struct PythonFidoConnection {
     call_fn: Py<PyAny>,
-    device_version: (u8, u8, u8),
+    device_version: yubikit::core::Version,
     capabilities: CtapHidCapability,
 }
 
 impl PythonFidoConnection {
     fn from_py(connection: &Bound<'_, PyAny>) -> PyResult<Self> {
         let call_fn = connection.getattr("call")?.unbind();
-        let device_version: (u8, u8, u8) = connection.getattr("device_version")?.extract()?;
+        let (v1, v2, v3): (u8, u8, u8) = connection.getattr("device_version")?.extract()?;
+        let device_version = yubikit::core::Version(v1, v2, v3);
         let caps_raw: u8 = connection.getattr("capabilities")?.extract()?;
 
         Ok(Self {
@@ -323,7 +324,7 @@ impl FidoConnectionTrait for PythonFidoConnection {
         })
     }
 
-    fn device_version(&self) -> (u8, u8, u8) {
+    fn device_version(&self) -> yubikit::core::Version {
         self.device_version
     }
 

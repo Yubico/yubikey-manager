@@ -458,8 +458,7 @@ impl<C: FidoConnection> HidCtap<C> {
             ));
         }
 
-        let (v1, v2, v3) = connection.device_version();
-        let version = patch_version(Version(v1, v2, v3));
+        let version = patch_version(connection.device_version());
 
         Ok(Self {
             connection,

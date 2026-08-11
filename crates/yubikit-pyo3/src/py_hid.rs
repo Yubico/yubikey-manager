@@ -138,7 +138,7 @@ fn list_fido_devices() -> PyResult<Vec<FidoDeviceInfo>> {
 pub struct FidoConnection {
     inner: Option<hidapi::HidFidoConnection>,
     path: String,
-    device_version: (u8, u8, u8),
+    device_version: yubikit::core::Version,
     capabilities: u8,
 }
 
@@ -209,7 +209,8 @@ impl FidoConnection {
 
     #[getter]
     fn device_version(&self) -> (u8, u8, u8) {
-        self.device_version
+        let v = self.device_version;
+        (v.0, v.1, v.2)
     }
 
     #[getter]

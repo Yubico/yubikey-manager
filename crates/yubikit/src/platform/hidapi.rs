@@ -147,7 +147,7 @@ pub struct HidFidoConnection {
     device: Option<hidapi::HidDevice>,
     channel_id: u32,
     packet_size: usize,
-    device_version: (u8, u8, u8),
+    device_version: crate::core::Version,
     capabilities: CtapHidCapability,
 }
 
@@ -166,7 +166,7 @@ impl HidFidoConnection {
             device: Some(device),
             channel_id: BROADCAST_CID,
             packet_size: info.report_size_out,
-            device_version: (0, 0, 0),
+            device_version: crate::core::Version(0, 0, 0),
             capabilities: CtapHidCapability(0),
         };
 
@@ -190,7 +190,7 @@ impl HidFidoConnection {
         let capabilities = CtapHidCapability(response[16]);
 
         conn.channel_id = channel_id;
-        conn.device_version = (v1, v2, v3);
+        conn.device_version = crate::core::Version(v1, v2, v3);
         conn.capabilities = capabilities;
 
         log_traffic!(
@@ -206,7 +206,7 @@ impl HidFidoConnection {
     }
 
     /// Device firmware version reported during INIT.
-    pub fn device_version(&self) -> (u8, u8, u8) {
+    pub fn device_version(&self) -> crate::core::Version {
         self.device_version
     }
 
@@ -389,7 +389,7 @@ impl crate::fido::FidoConnection for HidFidoConnection {
         self.recv_response(cmd, on_keepalive, cancel)
     }
 
-    fn device_version(&self) -> (u8, u8, u8) {
+    fn device_version(&self) -> crate::core::Version {
         self.device_version()
     }
 

@@ -1454,19 +1454,18 @@ impl<C: FidoConnection> FidoManagement<C> {
 
     fn open(mut connection: C) -> Result<Self, (FidoError, C)> {
         log::debug!("Opening FidoManagement");
-        let (v1, v2, v3) = connection.device_version();
-        let mut version = Version(v1, v2, v3);
-        // Prior to YK4 the device_version was not firmware version
-        if v1 < 4 && (v1, v2, v3) != (0, 0, 1) && !(v1 == 0 && connection.capabilities().has_cbor())
-        {
-            version = Version(3, 0, 0); // Guess NEO
-        }
+        let mut version = connection.device_version();
 
         // Dev devices report 0.0.1; read the real version from device info.
         if let Err(error) = resolve_dev_version(&mut version, &mut |page| {
             Self::fido_read_config(&mut connection, page)
         }) {
             return Err((management_to_fido_error(error), connection));
+        }
+
+        // Prior to YK4 the device_version was not firmware version
+        if version.0 < 4 && !(version.0 == 0 && connection.capabilities().has_cbor()) {
+            version = Version(3, 0, 0); // Guess NEO
         }
 
         Ok(Self {
