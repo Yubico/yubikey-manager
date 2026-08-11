@@ -21,8 +21,10 @@
 //! ```
 //!
 //! The example prints an event for every currently-connected interface, then
-//! blocks and prints events as devices are connected and disconnected. Stop it
-//! with Ctrl+C.
+//! prints events as devices are connected and disconnected. Press Enter to
+//! stop, or Ctrl+C to quit.
+
+use std::io::BufRead;
 
 use yubikit::management::UsbInterface;
 use yubikit::platform::monitor::{DeviceNode, NodeEvent, monitor_device_events};
@@ -65,7 +67,7 @@ fn describe(node: &DeviceNode) -> String {
 }
 
 fn main() {
-    println!("Monitoring YubiKey device events. Press Ctrl+C to stop.\n");
+    println!("Monitoring YubiKey device events. Press Enter (or Ctrl+C) to stop.\n");
 
     let interfaces = UsbInterface::OTP | UsbInterface::CCID | UsbInterface::FIDO;
 
@@ -74,7 +76,7 @@ fn main() {
     let mut otp = 0i64;
     let mut fido = 0i64;
 
-    let result = monitor_device_events(interfaces, |event| {
+    let handle = monitor_device_events(interfaces, move |event| {
         let (sign, node) = match &event {
             NodeEvent::Added(node) => ("+", node),
             NodeEvent::Removed(node) => ("-", node),
@@ -94,8 +96,10 @@ fn main() {
         println!("  totals: readers={readers} cards={cards} otp={otp} fido={fido}\n");
     });
 
-    if let Err(e) = result {
-        eprintln!("Monitor error: {e}");
-        std::process::exit(1);
-    }
+    // Block until the user presses Enter, then stop the monitor cleanly.
+    let mut line = String::new();
+    let _ = std::io::stdin().lock().read_line(&mut line);
+
+    println!("Stopping monitor...");
+    handle.stop();
 }

@@ -41,8 +41,10 @@
 //! matching pair of card removal/insertion events.
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crate::device::DeviceError;
@@ -107,12 +109,122 @@ pub enum NodeEvent {
     Removed(DeviceNode),
 }
 
-/// A wake-up signal from one of the transport watchers.
+/// A wake-up signal delivered to the coordination loop.
 enum Change {
+    /// A PC/SC reader or card state changed; re-diff the PC/SC transport.
     #[cfg(feature = "pcsc")]
     Pcsc,
+    /// A HID device was added or removed; re-diff the HID transport.
     #[cfg(feature = "hid")]
     Hid,
+    /// Shut down the coordination loop.
+    Stop,
+}
+
+/// Shared shutdown state, used to stop the coordination loop and wake every
+/// watcher thread out of its blocking wait.
+struct Shutdown {
+    /// Set once a stop has been requested. Polling watchers check this.
+    stopped: AtomicBool,
+    /// Retained sender used to wake the coordination loop's `recv`.
+    stop_tx: mpsc::Sender<Change>,
+    /// Cloned PC/SC context, used to cancel a blocking `get_status_change`.
+    #[cfg(all(feature = "pcsc", not(windows)))]
+    pcsc_ctx: std::sync::Mutex<Option<::pcsc::Context>>,
+    /// Thread id of the Windows HID message loop, used to post `WM_QUIT`.
+    #[cfg(all(feature = "hid", target_os = "windows"))]
+    win_thread_id: std::sync::atomic::AtomicU32,
+    /// `CFRunLoopRef` (as `usize`) of the macOS HID run loop, used to stop it.
+    #[cfg(all(feature = "hid", target_os = "macos"))]
+    macos_runloop: std::sync::Mutex<Option<usize>>,
+}
+
+impl Shutdown {
+    fn new(stop_tx: mpsc::Sender<Change>) -> Self {
+        Self {
+            stopped: AtomicBool::new(false),
+            stop_tx,
+            #[cfg(all(feature = "pcsc", not(windows)))]
+            pcsc_ctx: std::sync::Mutex::new(None),
+            #[cfg(all(feature = "hid", target_os = "windows"))]
+            win_thread_id: std::sync::atomic::AtomicU32::new(0),
+            #[cfg(all(feature = "hid", target_os = "macos"))]
+            macos_runloop: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// Whether a stop has been requested.
+    fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
+    }
+
+    /// Request shutdown and wake every watcher out of its blocking wait.
+    ///
+    /// Idempotent: the wakeups only run on the first call.
+    fn signal_stop(&self) {
+        if self.stopped.swap(true, Ordering::SeqCst) {
+            return;
+        }
+
+        // Wake the coordination loop.
+        let _ = self.stop_tx.send(Change::Stop);
+
+        // Cancel a blocking PC/SC `get_status_change` (Unix event-driven path).
+        #[cfg(all(feature = "pcsc", not(windows)))]
+        if let Some(ctx) = self.pcsc_ctx.lock().unwrap().as_ref() {
+            let _ = ctx.cancel();
+        }
+
+        // Post WM_QUIT to the Windows HID message loop.
+        #[cfg(all(feature = "hid", target_os = "windows"))]
+        {
+            let tid = self.win_thread_id.load(Ordering::SeqCst);
+            if tid != 0 {
+                use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
+                unsafe { PostThreadMessageW(tid, WM_QUIT, 0, 0) };
+            }
+        }
+
+        // Stop the macOS HID run loop.
+        #[cfg(all(feature = "hid", target_os = "macos"))]
+        if let Some(rl) = *self.macos_runloop.lock().unwrap() {
+            use core_foundation_sys::runloop::{CFRunLoopRef, CFRunLoopStop};
+            unsafe { CFRunLoopStop(rl as CFRunLoopRef) };
+        }
+    }
+}
+
+/// A running device monitor.
+///
+/// Returned by [`monitor_device_events`]. The monitor runs on background
+/// threads; call [`MonitorHandle::stop`] to shut it down and join those
+/// threads. Dropping the handle also stops the monitor.
+#[must_use = "the monitor stops when the handle is dropped"]
+pub struct MonitorHandle {
+    shutdown: Arc<Shutdown>,
+    threads: Vec<JoinHandle<()>>,
+}
+
+impl MonitorHandle {
+    /// Stop the monitor and wait for its threads to finish.
+    ///
+    /// No further [`NodeEvent`]s are delivered after this returns.
+    pub fn stop(mut self) {
+        self.shutdown_and_join();
+    }
+
+    fn shutdown_and_join(&mut self) {
+        self.shutdown.signal_stop();
+        for handle in self.threads.drain(..) {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for MonitorHandle {
+    fn drop(&mut self) {
+        self.shutdown_and_join();
+    }
 }
 
 /// Monitor connected YubiKey device interfaces and report [`NodeEvent`]s.
@@ -123,45 +235,59 @@ enum Change {
 /// - [`UsbInterface::OTP`] enables OTP HID monitoring.
 /// - [`UsbInterface::FIDO`] enables FIDO HID monitoring.
 ///
-/// The function first emits an [`NodeEvent::Added`] for every currently
-/// connected interface, then blocks and invokes `on_event` for each change.
-/// It runs until the process is stopped (there is no graceful stop signal —
-/// callers such as CLI tools terminate the process, e.g. on Ctrl+C).
+/// Monitoring runs on background threads. `on_event` is first invoked with an
+/// [`NodeEvent::Added`] for every currently-connected interface, then once per
+/// change. It is always called from a single dedicated thread, so it does not
+/// need to be synchronized.
+///
+/// The returned [`MonitorHandle`] keeps the monitor running until
+/// [`MonitorHandle::stop`] is called or the handle is dropped.
 pub fn monitor_device_events(
     usb_interfaces: UsbInterface,
-    mut on_event: impl FnMut(NodeEvent),
-) -> Result<(), DeviceError> {
+    mut on_event: impl FnMut(NodeEvent) + Send + 'static,
+) -> MonitorHandle {
     let (tx, rx) = mpsc::channel::<Change>();
-    let mut state = MonitorState::default();
+    let shutdown = Arc::new(Shutdown::new(tx.clone()));
+    let mut threads: Vec<JoinHandle<()>> = Vec::new();
 
-    // Emit events for the initial state before spawning watchers.
     #[cfg(feature = "pcsc")]
     if usb_interfaces.contains(UsbInterface::CCID) {
-        state.refresh_pcsc(&mut on_event);
-        spawn_pcsc_watcher(tx.clone());
+        threads.push(spawn_pcsc_watcher(tx.clone(), Arc::clone(&shutdown)));
     }
     #[cfg(feature = "hid")]
     if usb_interfaces.contains(UsbInterface::OTP) || usb_interfaces.contains(UsbInterface::FIDO) {
-        state.refresh_hid(usb_interfaces, &mut on_event);
-        spawn_hid_watcher(tx.clone());
+        threads.push(spawn_hid_watcher(tx.clone(), Arc::clone(&shutdown)));
     }
-
-    // Drop our own sender so the loop can exit if every watcher thread stops.
     drop(tx);
 
-    loop {
-        let change = match rx.recv() {
-            Ok(change) => change,
-            Err(_) => return Ok(()),
-        };
+    // Coordination loop: owns the tracked state and calls `on_event`.
+    let coordinator = thread::spawn(move || {
+        let mut state = MonitorState::default();
 
-        match change {
-            #[cfg(feature = "pcsc")]
-            Change::Pcsc => state.refresh_pcsc(&mut on_event),
-            #[cfg(feature = "hid")]
-            Change::Hid => state.refresh_hid(usb_interfaces, &mut on_event),
+        // Emit events for the initial state before processing changes.
+        #[cfg(feature = "pcsc")]
+        if usb_interfaces.contains(UsbInterface::CCID) {
+            state.refresh_pcsc(&mut on_event);
         }
-    }
+        #[cfg(feature = "hid")]
+        if usb_interfaces.contains(UsbInterface::OTP) || usb_interfaces.contains(UsbInterface::FIDO)
+        {
+            state.refresh_hid(usb_interfaces, &mut on_event);
+        }
+
+        while let Ok(change) = rx.recv() {
+            match change {
+                Change::Stop => break,
+                #[cfg(feature = "pcsc")]
+                Change::Pcsc => state.refresh_pcsc(&mut on_event),
+                #[cfg(feature = "hid")]
+                Change::Hid => state.refresh_hid(usb_interfaces, &mut on_event),
+            }
+        }
+    });
+    threads.push(coordinator);
+
+    MonitorHandle { shutdown, threads }
 }
 
 /// Tracked state for the monitor loop.
@@ -390,8 +516,8 @@ fn read_fido_info(device: &FidoDeviceInfo) -> Result<DeviceInfo, DeviceError> {
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "pcsc")]
-fn spawn_pcsc_watcher(tx: mpsc::Sender<Change>) {
-    thread::spawn(move || pcsc_watch_loop(&tx));
+fn spawn_pcsc_watcher(tx: mpsc::Sender<Change>, shutdown: Arc<Shutdown>) -> JoinHandle<()> {
+    thread::spawn(move || pcsc_watch_loop(&tx, &shutdown))
 }
 
 /// Block on PC/SC status changes and signal the monitor loop on each change.
@@ -399,8 +525,10 @@ fn spawn_pcsc_watcher(tx: mpsc::Sender<Change>) {
 /// Uses the special `\\?PnP?\Notification` pseudo-reader to detect reader
 /// arrival/removal in addition to per-reader card state changes. This relies
 /// on `SCardGetStatusChange` blocking until a reader or card state changes.
+/// A concurrent [`Context::cancel`](::pcsc::Context::cancel) (issued by
+/// [`Shutdown::signal_stop`]) unblocks the wait so the thread can exit.
 #[cfg(all(feature = "pcsc", not(windows)))]
-fn pcsc_watch_loop(tx: &mpsc::Sender<Change>) {
+fn pcsc_watch_loop(tx: &mpsc::Sender<Change>, shutdown: &Shutdown) {
     use ::pcsc::{Context, PNP_NOTIFICATION, ReaderState, Scope, State};
     use std::ffi::CString;
 
@@ -411,9 +539,18 @@ fn pcsc_watch_loop(tx: &mpsc::Sender<Change>) {
             return;
         }
     };
+    // Publish a cancel handle so shutdown can unblock get_status_change.
+    *shutdown.pcsc_ctx.lock().unwrap() = Some(ctx.clone());
+    if shutdown.is_stopped() {
+        return;
+    }
     let mut states: Vec<ReaderState> = vec![ReaderState::new(PNP_NOTIFICATION(), State::UNAWARE)];
 
     loop {
+        if shutdown.is_stopped() {
+            return;
+        }
+
         // Refresh the tracked reader list (readers may have come or gone).
         let names = current_reader_names(&ctx);
 
@@ -439,7 +576,7 @@ fn pcsc_watch_loop(tx: &mpsc::Sender<Change>) {
                 for rs in &mut states {
                     rs.sync_current_state();
                 }
-                if tx.send(Change::Pcsc).is_err() {
+                if shutdown.is_stopped() || tx.send(Change::Pcsc).is_err() {
                     return;
                 }
             }
@@ -449,7 +586,9 @@ fn pcsc_watch_loop(tx: &mpsc::Sender<Change>) {
                 }
             }
             Err(e) => {
-                log::debug!("PC/SC watcher stopped: {e}");
+                if !shutdown.is_stopped() {
+                    log::debug!("PC/SC watcher stopped: {e}");
+                }
                 return;
             }
         }
@@ -465,12 +604,15 @@ fn pcsc_watch_loop(tx: &mpsc::Sender<Change>) {
 /// of blocking. Rather than depend on that behaviour, poll the reader list at
 /// a fixed interval and let the monitor loop diff it. `list_readers` snapshots
 /// (used by the monitor's `refresh_pcsc`) are reliable here.
+///
+/// Stop latency is bounded by the poll interval, since the loop checks the
+/// shutdown flag each iteration.
 #[cfg(all(feature = "pcsc", windows))]
-fn pcsc_watch_loop(tx: &mpsc::Sender<Change>) {
+fn pcsc_watch_loop(tx: &mpsc::Sender<Change>, shutdown: &Shutdown) {
     const POLL_INTERVAL: Duration = Duration::from_millis(750);
-    loop {
+    while !shutdown.is_stopped() {
         thread::sleep(POLL_INTERVAL);
-        if tx.send(Change::Pcsc).is_err() {
+        if shutdown.is_stopped() || tx.send(Change::Pcsc).is_err() {
             return;
         }
     }
@@ -495,7 +637,7 @@ fn current_reader_names(ctx: &::pcsc::Context) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 #[cfg(all(feature = "hid", target_os = "linux"))]
-fn spawn_hid_watcher(tx: mpsc::Sender<Change>) {
+fn spawn_hid_watcher(tx: mpsc::Sender<Change>, shutdown: Arc<Shutdown>) -> JoinHandle<()> {
     use std::os::fd::AsRawFd;
 
     thread::spawn(move || {
@@ -511,11 +653,15 @@ fn spawn_hid_watcher(tx: mpsc::Sender<Change>) {
         };
 
         loop {
+            if shutdown.is_stopped() {
+                return;
+            }
             let mut pollfd = libc::pollfd {
                 fd: socket.as_raw_fd(),
                 events: libc::POLLIN,
                 revents: 0,
             };
+            // Wake at least once a second to re-check the shutdown flag.
             let result = unsafe { libc::poll(&mut pollfd, 1, 1000) };
             if result < 0 {
                 log::debug!(
@@ -542,30 +688,31 @@ fn spawn_hid_watcher(tx: mpsc::Sender<Change>) {
                     relevant = true;
                 }
             }
-            if relevant && tx.send(Change::Hid).is_err() {
+            if relevant && (shutdown.is_stopped() || tx.send(Change::Hid).is_err()) {
                 return;
             }
         }
-    });
+    })
 }
 
 #[cfg(all(feature = "hid", target_os = "windows"))]
-fn spawn_hid_watcher(tx: mpsc::Sender<Change>) {
-    thread::spawn(move || windows_hid::run(tx));
+fn spawn_hid_watcher(tx: mpsc::Sender<Change>, shutdown: Arc<Shutdown>) -> JoinHandle<()> {
+    thread::spawn(move || windows_hid::run(tx, &shutdown))
 }
 
 #[cfg(all(feature = "hid", target_os = "macos"))]
-fn spawn_hid_watcher(tx: mpsc::Sender<Change>) {
-    thread::spawn(move || macos_hid::run(tx));
+fn spawn_hid_watcher(tx: mpsc::Sender<Change>, shutdown: Arc<Shutdown>) -> JoinHandle<()> {
+    thread::spawn(move || macos_hid::run(tx, &shutdown))
 }
 
 #[cfg(all(
     feature = "hid",
     not(any(target_os = "linux", target_os = "windows", target_os = "macos"))
 ))]
-fn spawn_hid_watcher(tx: mpsc::Sender<Change>) {
-    let _ = tx;
+fn spawn_hid_watcher(tx: mpsc::Sender<Change>, shutdown: Arc<Shutdown>) -> JoinHandle<()> {
+    let _ = (tx, shutdown);
     log::warn!("HID device-event monitoring is not supported on this platform");
+    thread::spawn(|| {})
 }
 
 // ---------------------------------------------------------------------------
@@ -574,17 +721,20 @@ fn spawn_hid_watcher(tx: mpsc::Sender<Change>) {
 
 #[cfg(all(feature = "hid", target_os = "windows"))]
 mod windows_hid {
-    use super::Change;
+    use super::{Change, Shutdown};
     use std::cell::RefCell;
+    use std::sync::atomic::Ordering;
     use std::sync::mpsc;
     use windows_sys::Win32::Devices::HumanInterfaceDevice::GUID_DEVINTERFACE_HID;
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE, DBT_DEVTYP_DEVICEINTERFACE,
         DEV_BROADCAST_DEVICEINTERFACE_W, DEVICE_NOTIFY_WINDOW_HANDLE, DefWindowProcW,
-        DispatchMessageW, GetMessageW, HWND_MESSAGE, MSG, RegisterClassW,
-        RegisterDeviceNotificationW, TranslateMessage, WM_DEVICECHANGE, WNDCLASSW,
+        DispatchMessageW, GetMessageW, HWND_MESSAGE, MSG, PM_NOREMOVE, PeekMessageW,
+        RegisterClassW, RegisterDeviceNotificationW, TranslateMessage, WM_DEVICECHANGE, WM_USER,
+        WNDCLASSW,
     };
 
     thread_local! {
@@ -616,7 +766,7 @@ mod windows_hid {
         unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
     }
 
-    pub(super) fn run(tx: mpsc::Sender<Change>) {
+    pub(super) fn run(tx: mpsc::Sender<Change>, shutdown: &Shutdown) {
         SENDER.with(|sender| *sender.borrow_mut() = Some(tx));
 
         unsafe {
@@ -663,7 +813,24 @@ mod windows_hid {
                 return;
             }
 
+            // Force creation of this thread's message queue, then publish the
+            // thread id so shutdown can post WM_QUIT to it. If a stop was
+            // requested before we got here, bail out instead of blocking.
             let mut msg: MSG = std::mem::zeroed();
+            PeekMessageW(
+                &mut msg,
+                std::ptr::null_mut(),
+                WM_USER,
+                WM_USER,
+                PM_NOREMOVE,
+            );
+            shutdown
+                .win_thread_id
+                .store(GetCurrentThreadId(), Ordering::SeqCst);
+            if shutdown.is_stopped() {
+                return;
+            }
+
             while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
@@ -678,7 +845,7 @@ mod windows_hid {
 
 #[cfg(all(feature = "hid", target_os = "macos"))]
 mod macos_hid {
-    use super::Change;
+    use super::{Change, Shutdown};
     use core_foundation_sys::base::{CFAllocatorRef, kCFAllocatorDefault};
     use core_foundation_sys::dictionary::CFDictionaryRef;
     use core_foundation_sys::runloop::{
@@ -720,7 +887,13 @@ mod macos_hid {
             run_loop: CFRunLoopRef,
             run_loop_mode: CFStringRef,
         );
+        fn IOHIDManagerUnscheduleFromRunLoop(
+            manager: IOHIDManagerRef,
+            run_loop: CFRunLoopRef,
+            run_loop_mode: CFStringRef,
+        );
         fn IOHIDManagerOpen(manager: IOHIDManagerRef, options: IOOptionBits) -> IOReturn;
+        fn IOHIDManagerClose(manager: IOHIDManagerRef, options: IOOptionBits) -> IOReturn;
     }
 
     extern "C" fn device_callback(
@@ -729,13 +902,18 @@ mod macos_hid {
         _sender: *mut c_void,
         _device: IOHIDDeviceRef,
     ) {
-        // SAFETY: `context` is a pointer to a leaked `Sender<Change>` that
-        // lives for the duration of the run loop (i.e. the process).
+        // SAFETY: `context` is a pointer to a `Sender<Change>` owned by `run`,
+        // which outlives the run loop (and hence every callback invocation).
         let tx = unsafe { &*(context as *const mpsc::Sender<Change>) };
         let _ = tx.send(Change::Hid);
     }
 
-    pub(super) fn run(tx: mpsc::Sender<Change>) {
+    pub(super) fn run(tx: mpsc::Sender<Change>, shutdown: &Shutdown) {
+        // Keep the sender alive on the stack for the duration of the run loop;
+        // callbacks borrow it via a raw pointer.
+        let tx = Box::new(tx);
+        let context = (&*tx as *const mpsc::Sender<Change>) as *mut c_void;
+
         unsafe {
             let manager = IOHIDManagerCreate(kCFAllocatorDefault, 0);
             if manager.is_null() {
@@ -744,15 +922,24 @@ mod macos_hid {
             }
             // Match all HID devices; the monitor loop filters to YubiKeys.
             IOHIDManagerSetDeviceMatching(manager, std::ptr::null());
-
-            // Leak the sender so it remains valid for the callbacks' lifetime.
-            let context = Box::into_raw(Box::new(tx)) as *mut c_void;
             IOHIDManagerRegisterDeviceMatchingCallback(manager, device_callback, context);
             IOHIDManagerRegisterDeviceRemovalCallback(manager, device_callback, context);
-            IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
+
+            let run_loop = CFRunLoopGetCurrent();
+            IOHIDManagerScheduleWithRunLoop(manager, run_loop, kCFRunLoopDefaultMode);
             IOHIDManagerOpen(manager, 0);
 
-            CFRunLoopRun();
+            // Publish the run loop so shutdown can stop it. If a stop was
+            // requested before we got here, don't enter the run loop.
+            *shutdown.macos_runloop.lock().unwrap() = Some(run_loop as usize);
+            if !shutdown.is_stopped() {
+                CFRunLoopRun();
+            }
+
+            IOHIDManagerUnscheduleFromRunLoop(manager, run_loop, kCFRunLoopDefaultMode);
+            IOHIDManagerClose(manager, 0);
         }
+        // `tx` is dropped here, after the run loop and its callbacks are done.
+        drop(tx);
     }
 }
