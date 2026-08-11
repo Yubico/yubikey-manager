@@ -1,8 +1,10 @@
 use anyhow::{Result, anyhow};
+#[cfg(feature = "hardware")]
+use yubikit::device::usb_interfaces_from_pid;
 use yubikit::device::{YubiKeyDevice, get_name};
 use yubikit::management::UsbInterface;
 #[cfg(feature = "hardware")]
-use yubikit::platform::device::{name_from_pid, scan_usb_devices, usb_interfaces_from_pid};
+use yubikit::platform::device::{name_from_pid, scan_usb_devices};
 #[cfg(feature = "hardware")]
 use yubikit::platform::pcsc::list_readers;
 

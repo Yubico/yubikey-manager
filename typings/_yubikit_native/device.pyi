@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from typing import Any
 
-def read_info(connection: Any) -> dict[str, Any]: ...
+def read_info(connection: Any, pid: int | None = None) -> dict[str, Any]: ...
 def get_name(
     version: tuple[int, int, int],
     form_factor: int,

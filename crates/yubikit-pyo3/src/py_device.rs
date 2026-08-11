@@ -32,12 +32,25 @@ fn device_err(e: device::DeviceError) -> PyErr {
 /// Read device info from an open connection.
 ///
 /// Accepts a SmartCardConnection, OtpConnection, or FidoConnection.
+/// `pid` is the USB product ID, used to synthesize device info for older
+/// devices that don't support the management applet; pass `None` if
+/// unknown (e.g. NFC connections), in which case a generic fallback is
+/// used.
 /// Returns a dict matching the Python DeviceInfo structure.
 #[pyfunction]
-pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+#[pyo3(signature = (connection, pid=None))]
+pub fn read_info(
+    py: Python<'_>,
+    connection: &Bound<'_, PyAny>,
+    pid: Option<u16>,
+) -> PyResult<Py<PyAny>> {
+    // Fall back to a generic NEO CCID PID when the caller doesn't know the
+    // real one; it's only used to synthesize data for older devices.
+    let otp_fido_pid = pid.unwrap_or(0x0112);
+
     // Try OTP connection
     if let Ok(native) = extract_otp_connection(connection) {
-        match device::read_info_otp(native) {
+        match device::read_info_otp(native, otp_fido_pid) {
             Ok((info, conn)) => {
                 restore_otp_connection(connection, conn)?;
                 return device_info_to_dict(py, &info);
@@ -53,7 +66,7 @@ pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<Py<P
 
     // Try FIDO connection
     if let Ok(native) = extract_fido_connection(connection) {
-        match device::read_info_fido(native) {
+        match device::read_info_fido(native, otp_fido_pid) {
             Ok((info, conn)) => {
                 restore_fido_connection(connection, conn)?;
                 return device_info_to_dict(py, &info);
@@ -73,7 +86,7 @@ pub fn read_info(py: Python<'_>, connection: &Bound<'_, PyAny>) -> PyResult<Py<P
             "Expected a SmartCardConnection, OtpConnection, or FidoConnection",
         )
     })?;
-    match device::read_info_ccid(conn) {
+    match device::read_info_ccid(conn, pid) {
         Ok((info, conn)) => {
             restore_smartcard_connection(connection, conn)?;
             device_info_to_dict(py, &info)

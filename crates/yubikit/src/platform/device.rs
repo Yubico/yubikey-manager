@@ -12,7 +12,7 @@ use std::time::Duration;
 use crate::core::Transport;
 #[cfg(feature = "pcsc")]
 use crate::device::read_info_ccid;
-use crate::device::{DeviceError, ReinsertStatus, YubiKeyDevice};
+use crate::device::{DeviceError, ReinsertStatus, YubiKeyDevice, usb_interfaces_from_pid};
 #[cfg(feature = "hid")]
 use crate::device::{read_info_fido, read_info_otp};
 
@@ -569,31 +569,6 @@ fn pid_from_interfaces(interfaces: UsbInterface, is_neo: bool) -> Option<u16> {
     }
 }
 
-/// Derive USB interface flags from a Yubico USB Product ID.
-pub fn usb_interfaces_from_pid(pid: u16) -> UsbInterface {
-    match pid {
-        // NEO PIDs
-        0x0110 => UsbInterface::OTP,
-        0x0111 => UsbInterface::OTP | UsbInterface::CCID,
-        0x0112 => UsbInterface::CCID,
-        0x0113 => UsbInterface::FIDO,
-        0x0114 => UsbInterface::OTP | UsbInterface::FIDO,
-        0x0115 => UsbInterface::FIDO | UsbInterface::CCID,
-        0x0116 => UsbInterface::OTP | UsbInterface::FIDO | UsbInterface::CCID,
-        // YK4+ PIDs
-        0x0401 => UsbInterface::OTP,
-        0x0402 => UsbInterface::FIDO,
-        0x0403 => UsbInterface::OTP | UsbInterface::FIDO,
-        0x0404 => UsbInterface::CCID,
-        0x0405 => UsbInterface::OTP | UsbInterface::CCID,
-        0x0406 => UsbInterface::FIDO | UsbInterface::CCID,
-        0x0407 => UsbInterface::OTP | UsbInterface::FIDO | UsbInterface::CCID,
-        // SKY
-        0x0120 => UsbInterface::FIDO,
-        _ => UsbInterface(0),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Device enumeration
 // ---------------------------------------------------------------------------
@@ -1062,7 +1037,8 @@ pub fn name_from_pid(pid: u16) -> &'static str {
 fn read_info_reader(reader_name: &str) -> Result<(DeviceInfo, Transport), DeviceError> {
     let conn = PcscSmartCardConnection::open(reader_name)?;
     let transport = conn.transport();
-    let (info, _conn) = read_info_ccid(conn)?;
+    let pid = pid_from_reader_name(reader_name);
+    let (info, _conn) = read_info_ccid(conn, pid)?;
     Ok((info, transport))
 }
 
@@ -1070,7 +1046,7 @@ fn read_info_reader(reader_name: &str) -> Result<(DeviceInfo, Transport), Device
 #[cfg(feature = "hid")]
 fn read_info_otp_device(hid: &HidDeviceInfo) -> Result<DeviceInfo, DeviceError> {
     let conn = HidOtpConnection::new(&hid.path)?;
-    read_info_otp(conn)
+    read_info_otp(conn, hid.pid)
         .map(|(info, _)| info)
         .map_err(|(e, _)| e)
 }
@@ -1079,7 +1055,7 @@ fn read_info_otp_device(hid: &HidDeviceInfo) -> Result<DeviceInfo, DeviceError> 
 #[cfg(feature = "hid")]
 fn read_info_fido_device(fido: &FidoDeviceInfo) -> Result<DeviceInfo, DeviceError> {
     let conn = HidFidoConnection::open(fido)?;
-    read_info_fido(conn)
+    read_info_fido(conn, fido.pid)
         .map(|(info, _)| info)
         .map_err(|(e, _)| e)
 }

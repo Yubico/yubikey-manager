@@ -171,8 +171,36 @@ impl YubiKeyDevice for Box<dyn YubiKeyDevice> {
 
 use crate::core::Version;
 use crate::management::{DeviceConfig, ManagementSession, ReleaseType};
-use crate::smartcard::{Aid, SmartCardProtocol};
 use crate::yubiotp::YubiOtpSession;
+
+/// Derive USB interface flags from a Yubico USB Product ID.
+pub fn usb_interfaces_from_pid(pid: u16) -> UsbInterface {
+    match pid {
+        // NEO PIDs
+        0x0110 => UsbInterface::OTP,
+        0x0111 => UsbInterface::OTP | UsbInterface::CCID,
+        0x0112 => UsbInterface::CCID,
+        0x0113 => UsbInterface::FIDO,
+        0x0114 => UsbInterface::OTP | UsbInterface::FIDO,
+        0x0115 => UsbInterface::FIDO | UsbInterface::CCID,
+        0x0116 => UsbInterface::OTP | UsbInterface::FIDO | UsbInterface::CCID,
+        // YK4+ PIDs
+        0x0401 => UsbInterface::OTP,
+        0x0402 => UsbInterface::FIDO,
+        0x0403 => UsbInterface::OTP | UsbInterface::FIDO,
+        0x0404 => UsbInterface::CCID,
+        0x0405 => UsbInterface::OTP | UsbInterface::CCID,
+        0x0406 => UsbInterface::FIDO | UsbInterface::CCID,
+        0x0407 => UsbInterface::OTP | UsbInterface::FIDO | UsbInterface::CCID,
+        // SKY
+        0x0120 => UsbInterface::FIDO,
+        // YK Plus
+        0x0410 => UsbInterface::OTP | UsbInterface::FIDO,
+        // YK Standard
+        0x0010 => UsbInterface::OTP,
+        _ => UsbInterface(0),
+    }
+}
 
 /// Preview firmware version ranges.
 const PREVIEW_RANGES: &[(Version, Version)] = &[
@@ -316,6 +344,60 @@ fn build_yk5_name(info: &DeviceInfo, usb_supported: Capability) -> String {
     parts.join(" ").replace("5 C", "5C").replace("5 A", "5A")
 }
 
+/// Synthesize device info based on PID and version
+fn synthesize_info(pid: u16, version: Version, serial: Option<u32>) -> DeviceInfo {
+    let mut supported = std::collections::HashMap::new();
+    let mut enabled = std::collections::HashMap::new();
+    let mut capabilities: Capability;
+
+    if pid == 0x0010 {
+        // YubiKey Standard (1-2)
+        capabilities = Capability::OTP;
+    } else if pid == 0x0120 {
+        // SKY
+        capabilities = Capability::U2F;
+    } else if pid == 0x0410 {
+        // YubiKey Plus
+        capabilities = Capability::OTP | Capability::U2F;
+    } else {
+        // NEO
+        capabilities = Capability::OTP | Capability::OATH | Capability::OPENPGP;
+        if version >= Version(3, 3, 0) || usb_interfaces_from_pid(pid).contains(UsbInterface::FIDO)
+        {
+            capabilities |= Capability::U2F;
+        }
+        supported.insert(Transport::Nfc, capabilities);
+        enabled.insert(Transport::Nfc, capabilities);
+    }
+    supported.insert(Transport::Usb, capabilities);
+    enabled.insert(Transport::Usb, capabilities);
+
+    DeviceInfo {
+        config: DeviceConfig {
+            enabled_capabilities: enabled,
+            auto_eject_timeout: None,
+            challenge_response_timeout: None,
+            device_flags: None,
+            nfc_restricted: None,
+        },
+        serial,
+        version,
+        form_factor: FormFactor::Unknown,
+        supported_capabilities: supported,
+        is_locked: false,
+        is_fips: false,
+        is_sky: pid == 0x0120,
+        part_number: None,
+        fips_capable: Capability::NONE,
+        fips_approved: Capability::NONE,
+        pin_complexity: false,
+        reset_blocked: Capability::NONE,
+        fps_version: None,
+        stm_version: None,
+        version_qualifier: crate::management::VersionQualifier::final_release(version),
+    }
+}
+
 /// Read [`DeviceInfo`] from an open smart card connection.
 ///
 /// Falls back to probing individual applets on older devices that lack
@@ -323,29 +405,38 @@ fn build_yk5_name(info: &DeviceInfo, usb_supported: Capability) -> String {
 /// (no supported capabilities detected). Returns the connection for reuse.
 pub fn read_info_ccid<C: SmartCardConnection + Send + 'static>(
     conn: C,
+    pid: Option<u16>,
 ) -> Result<(DeviceInfo, C), DeviceError> {
     let mut session = match ManagementSession::new(conn) {
         Ok(s) => s,
         Err((e, conn)) => {
-            // NEO and other old devices don't have the management applet.
-            // Fall back to probing individual applets.
             log::debug!("Management session init failed ({e}), synthesizing info");
-            let (info, conn) = synthesize_info_ccid(conn, Version(0, 0, 0))?;
-            return check_yubikey_info(info, conn);
+            // NEO and other old devices don't have the management applet.
+            // Try to get the version and serial from the OTP applet
+            let (version, serial, conn) = match YubiOtpSession::new(conn) {
+                Ok(mut otp_session) => {
+                    let version = otp_session.version();
+                    let serial = otp_session.get_serial().ok();
+                    (version, serial, otp_session.into_connection())
+                }
+                Err((e, conn)) => {
+                    log::debug!("Couldn't open YubiOTP session: {e}");
+                    // Assume a minimum version
+                    (Version(3, 0, 0), None, conn)
+                }
+            };
+            // Default to NEO CCID if we have no PID
+            return Ok((
+                synthesize_info(pid.unwrap_or(0x0112), version, serial),
+                conn,
+            ));
         }
     };
-    let version = session.version();
 
     match session.read_device_info() {
         Ok(mut info) => {
             apply_device_info_fixups(&mut info);
             let conn = session.into_connection();
-            check_yubikey_info(info, conn)
-        }
-        Err(_) if version < Version(4, 1, 0) => {
-            log::debug!("Management read_device_info not supported, synthesizing");
-            let conn = session.into_connection();
-            let (info, conn) = synthesize_info_ccid(conn, version)?;
             check_yubikey_info(info, conn)
         }
         Err(e) => Err(DeviceError::Management(e.erase())),
@@ -356,9 +447,33 @@ pub fn read_info_ccid<C: SmartCardConnection + Send + 'static>(
 ///
 /// Returns the connection for reuse. On error the connection is returned
 /// when possible.
-pub fn read_info_otp<T: OtpConnection + 'static>(
-    conn: T,
+pub fn read_info_otp<T: OtpConnection + Send + 'static>(
+    mut conn: T,
+    pid: u16,
 ) -> Result<(DeviceInfo, T), (DeviceError, Option<T>)> {
+    // Read the version directly from the connection
+    let version = conn
+        .otp_receive()
+        .ok()
+        .filter(|r| r.len() >= 4)
+        .map(|r| Version::from_bytes(&r[1..4]))
+        .unwrap_or(Version(0, 0, 0));
+
+    // Older key, synthesize info
+    if version != Version(0, 0, 1) && version < Version(4, 1, 0) {
+        let (serial, conn) = match YubiOtpSession::new_otp(conn) {
+            Ok(mut session) => {
+                let serial = session.get_serial().ok();
+                (serial, session.into_connection())
+            }
+            Err((e, conn)) => {
+                log::debug!("Couldn't open YubiOTP session to read serial: {e}");
+                (None, conn)
+            }
+        };
+        return Ok((synthesize_info(pid, version, serial), conn));
+    }
+
     let mut session = ManagementSession::new_otp(conn)
         .map_err(|(e, conn)| (DeviceError::Management(e.erase()), Some(conn)))?;
     match session.read_device_info() {
@@ -379,7 +494,15 @@ pub fn read_info_otp<T: OtpConnection + 'static>(
 /// when possible.
 pub fn read_info_fido<C: FidoConnection + 'static>(
     conn: C,
+    pid: u16,
 ) -> Result<(DeviceInfo, C), (DeviceError, Option<C>)> {
+    let version = conn.device_version();
+
+    // Older key, synthesize info
+    if version != Version(0, 0, 1) && version < Version(4, 1, 0) {
+        return Ok((synthesize_info(pid, version, None), conn));
+    }
+
     let mut session = ManagementSession::new_fido(conn)
         .map_err(|(e, conn)| (DeviceError::Management(e.erase()), Some(conn)))?;
     match session.read_device_info() {
@@ -392,95 +515,6 @@ pub fn read_info_fido<C: FidoConnection + 'static>(
             Some(session.into_connection()),
         )),
     }
-}
-
-/// Applets to scan when synthesizing DeviceInfo for older keys.
-const SCAN_APPLETS: &[(&[u8], Capability)] = &[
-    (Aid::FIDO, Capability::U2F),
-    (Aid::PIV, Capability::PIV),
-    (Aid::OPENPGP, Capability::OPENPGP),
-    (Aid::OATH, Capability::OATH),
-];
-
-/// Synthesize DeviceInfo for older YubiKeys (NEO) over CCID by probing applets.
-fn synthesize_info_ccid<C: SmartCardConnection + Send + 'static>(
-    conn: C,
-    mut version: Version,
-) -> Result<(DeviceInfo, C), DeviceError> {
-    use std::collections::HashMap;
-
-    let mut capabilities = Capability::NONE;
-
-    // Try to read serial and version from OTP application
-    let mut serial = None;
-    let conn = match YubiOtpSession::new(conn) {
-        Ok(mut otp_session) => {
-            capabilities |= Capability::OTP;
-            if version == Version(0, 0, 0) {
-                version = otp_session.version();
-            }
-            match otp_session.get_serial() {
-                Ok(s) => serial = Some(s),
-                Err(e) => log::debug!("Unable to read serial over OTP: {e}"),
-            }
-            otp_session.into_connection()
-        }
-        Err((e, conn)) => {
-            log::debug!("Couldn't select OTP application: {e}");
-            conn
-        }
-    };
-
-    // Scan remaining applets
-    let mut protocol = SmartCardProtocol::new(conn);
-    for (aid, cap) in SCAN_APPLETS {
-        match protocol.select(aid) {
-            Ok(_) => {
-                capabilities |= *cap;
-                log::debug!("Found applet: capability {:?}", cap);
-            }
-            Err(e) => {
-                log::debug!("Missing applet: capability {:?}: {e}", cap);
-            }
-        }
-    }
-    let conn = protocol.into_connection();
-
-    // Assume U2F on devices >= 3.3.0
-    if version >= Version(3, 3, 0) {
-        capabilities |= Capability::U2F;
-    }
-
-    let mut supported = HashMap::new();
-    supported.insert(Transport::Usb, capabilities);
-    supported.insert(Transport::Nfc, capabilities);
-
-    let mut info = DeviceInfo {
-        config: DeviceConfig {
-            enabled_capabilities: HashMap::new(),
-            auto_eject_timeout: None,
-            challenge_response_timeout: None,
-            device_flags: None,
-            nfc_restricted: None,
-        },
-        serial,
-        version,
-        form_factor: FormFactor::Unknown,
-        supported_capabilities: supported,
-        is_locked: false,
-        is_fips: false,
-        is_sky: false,
-        part_number: None,
-        fips_capable: Capability::NONE,
-        fips_approved: Capability::NONE,
-        pin_complexity: false,
-        reset_blocked: Capability::NONE,
-        fps_version: None,
-        stm_version: None,
-        version_qualifier: crate::management::VersionQualifier::final_release(version),
-    };
-    apply_device_info_fixups(&mut info);
-    Ok((info, conn))
 }
 
 fn check_yubikey_info<C>(info: DeviceInfo, conn: C) -> Result<(DeviceInfo, C), DeviceError> {
@@ -496,7 +530,7 @@ fn check_yubikey_info<C>(info: DeviceInfo, conn: C) -> Result<(DeviceInfo, C), D
 }
 
 /// Apply standard fixups for known device quirks.
-pub(crate) fn apply_device_info_fixups(info: &mut DeviceInfo) {
+fn apply_device_info_fixups(info: &mut DeviceInfo) {
     // Override version from version qualifier for non-final (dev) firmware
     if info.version_qualifier.release_type != ReleaseType::Final {
         log::debug!(

@@ -816,7 +816,7 @@ fn probe_pcsc() -> ResultOrError<PcscDiag> {
                         return Some((r, None));
                     }
                     let conn = PcscSmartCardConnection::new(r, false).ok()?;
-                    let (info, _) = read_info_ccid(conn).ok()?;
+                    let (info, _) = read_info_ccid(conn, None).ok()?;
                     Some((r, Some(info)))
                 })
                 .collect();
@@ -848,7 +848,7 @@ fn probe_pcsc() -> ResultOrError<PcscDiag> {
                 let (mgmt, conn, usb_info) = if let Some(info) = cached_info {
                     (ResultOrError::Ok(management_diag(info)), conn, None)
                 } else {
-                    match read_info_ccid(conn) {
+                    match read_info_ccid(conn, None) {
                         Ok((info, c)) => {
                             let mgmt = ResultOrError::Ok(management_diag(&info));
                             (mgmt, c, Some(info))
@@ -931,7 +931,7 @@ fn probe_otp() -> ResultOrError<BTreeMap<String, OtpDeviceDiag>> {
                     }
                 };
 
-                let (mgmt, conn) = match read_info_otp(conn) {
+                let (mgmt, conn) = match read_info_otp(conn, hid.pid) {
                     Ok((info, c)) => (ResultOrError::Ok(management_diag(&info)), c),
                     Err((e, conn_opt)) => {
                         let mgmt = ResultOrError::Err(format!("{e}"));
@@ -1010,7 +1010,7 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
                                         });
 
                                         let conn = ctap2.into_session().into_connection();
-                                        let mgmt = match read_info_fido(conn) {
+                                        let mgmt = match read_info_fido(conn, fido.pid) {
                                             Ok((info, _)) => {
                                                 ResultOrError::Ok(management_diag(&info))
                                             }
@@ -1039,7 +1039,7 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
                                 },
                             );
                         } else {
-                            let mgmt = match read_info_fido(conn) {
+                            let mgmt = match read_info_fido(conn, fido.pid) {
                                 Ok((info, _)) => ResultOrError::Ok(management_diag(&info)),
                                 Err((e, _)) => ResultOrError::Err(format!("{e}")),
                             };
@@ -1202,7 +1202,7 @@ fn probe_svc_ccid(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcCcidDi
         Err(e) => return ResultOrError::Err(format!("Failed to open CCID: {e}")),
     };
 
-    let (mgmt, conn) = match read_info_ccid(conn) {
+    let (mgmt, conn) = match read_info_ccid(conn, dev.pid()) {
         Ok((info, c)) => (ResultOrError::Ok(management_diag(&info)), c),
         Err(e) => {
             let mgmt = ResultOrError::Err(format!("{e}"));
@@ -1260,7 +1260,7 @@ fn probe_svc_ctap(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcFidoDi
                         pin,
                     });
                     let conn = ctap2.into_session().into_connection();
-                    let mgmt = match read_info_fido(conn) {
+                    let mgmt = match read_info_fido(conn, dev.pid().unwrap_or(0x0112)) {
                         Ok((info, _)) => ResultOrError::Ok(management_diag(&info)),
                         Err((e, _)) => ResultOrError::Err(format!("{e}")),
                     };
@@ -1284,7 +1284,7 @@ fn probe_svc_ctap(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<SvcFidoDi
             management: mgmt,
         })
     } else {
-        let mgmt = match read_info_fido(conn) {
+        let mgmt = match read_info_fido(conn, dev.pid().unwrap_or(0x0112)) {
             Ok((info, _)) => ResultOrError::Ok(management_diag(&info)),
             Err((e, _)) => ResultOrError::Err(format!("{e}")),
         };
@@ -1306,7 +1306,7 @@ fn probe_svc_otp(dev: &crate::rpc::proxy::RpcDevice) -> ResultOrError<OtpDeviceD
         Err(e) => return ResultOrError::Err(format!("Failed to open OTP: {e}")),
     };
 
-    let (mgmt, conn) = match read_info_otp(conn) {
+    let (mgmt, conn) = match read_info_otp(conn, dev.pid().unwrap_or(0x0112)) {
         Ok((info, c)) => (ResultOrError::Ok(management_diag(&info)), c),
         Err((e, c)) => (
             ResultOrError::Err(format!("{e}")),
