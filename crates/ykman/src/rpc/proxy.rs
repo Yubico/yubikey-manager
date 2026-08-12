@@ -372,13 +372,6 @@ pub struct RpcDevice {
 }
 
 impl RpcDevice {
-    /// Create an RPC device from a client owning its connection exclusively,
-    /// targeting a specific device by name.
-    pub fn from_client_at(client: RpcClient, device_name: &str) -> Result<Self, RpcCallError> {
-        let prefix = vec![device_name.to_string()];
-        Self::from_shared_inner(Arc::new(Mutex::new(client)), prefix)
-    }
-
     /// Create an RPC device from an already-shared client, targeting a specific
     /// device by name.
     ///
@@ -392,27 +385,8 @@ impl RpcDevice {
         Self::from_shared_inner(client, prefix)
     }
 
-    pub fn has_ccid(&self) -> bool {
-        self.has_ccid
-    }
-
-    pub fn has_ctap(&self) -> bool {
-        self.has_ctap
-    }
-
-    pub fn has_otp(&self) -> bool {
-        self.has_otp
-    }
-
     pub fn pid(&self) -> Option<u16> {
         self.pid
-    }
-
-    /// Parse device info from a JSON value (children map entry from the service).
-    pub fn parse_device_info(
-        data: &serde_json::Value,
-    ) -> Result<yubikit::management::DeviceInfo, RpcCallError> {
-        Self::read_device_info(data)
     }
 
     fn from_shared_inner(

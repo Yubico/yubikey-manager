@@ -97,18 +97,25 @@ pub struct RpcDeviceSource {
 
 impl RpcDeviceSource {
     #[cfg(any(target_os = "windows", debug_assertions))]
-    fn new(client: RpcClient) -> Self {
+    pub fn new(client: RpcClient) -> Self {
         Self {
             client: Arc::new(Mutex::new(client)),
         }
     }
 
-    /// Get a shared reference to the underlying RPC client.
+    /// Connect to the ykman-svc service, returning `None` if it is unavailable.
     ///
-    /// Useful for callers that need to perform additional operations on the
-    /// same connection (e.g., opening a specific device by name).
-    pub fn client(&self) -> Arc<Mutex<RpcClient>> {
-        self.client.clone()
+    /// Unlike [`get_device_source`], this never falls back to local access:
+    /// it is for callers that specifically need the service (e.g. diagnostics).
+    #[cfg(any(target_os = "windows", debug_assertions))]
+    pub fn connect() -> Option<Self> {
+        match RpcClient::connect_pipe() {
+            Ok(client) => Some(Self::new(client)),
+            Err(e) => {
+                log::debug!("ykman-svc not available: {e}");
+                None
+            }
+        }
     }
 }
 
