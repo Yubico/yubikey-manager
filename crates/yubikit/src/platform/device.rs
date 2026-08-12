@@ -1026,25 +1026,6 @@ fn merge_devices(base: &mut Vec<LocalYubiKeyDevice>, incoming: Vec<LocalYubiKeyD
     }
 }
 
-/// Check if a USB PID belongs to a Security Key (SKY).
-fn is_sky_pid(pid: u16) -> bool {
-    pid == 0x0120
-}
-
-/// Get a basic device name from a USB Product ID.
-///
-/// Returns "Security Key" for SKY PIDs, "YubiKey NEO" for NEO PIDs,
-/// or "YubiKey" for all other Yubico PIDs.
-pub fn name_from_pid(pid: u16) -> &'static str {
-    if is_sky_pid(pid) {
-        "Security Key"
-    } else if (0x0110..=0x0116).contains(&pid) {
-        "YubiKey NEO"
-    } else {
-        "YubiKey"
-    }
-}
-
 // ---------------------------------------------------------------------------
 // read_info_reader
 // ---------------------------------------------------------------------------
@@ -1426,12 +1407,5 @@ mod tests {
             .unwrap();
         assert!(d2.reader_name.is_some());
         assert!(d2.hid_path.is_some());
-    }
-
-    #[test]
-    fn test_is_sky_pid() {
-        assert!(is_sky_pid(0x0120));
-        assert!(!is_sky_pid(0x0116));
-        assert!(!is_sky_pid(0x0401));
     }
 }

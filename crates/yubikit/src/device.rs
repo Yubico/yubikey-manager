@@ -33,7 +33,7 @@ use crate::core::{Transport, set_override_version};
 use crate::fido::FidoConnection;
 use crate::management::{BoxedManagementError, Capability, DeviceInfo, FormFactor, UsbInterface};
 use crate::otp::OtpConnection;
-use crate::smartcard::{SmartCardConnection, SmartCardError};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
 
 // ---------------------------------------------------------------------------
 // DeviceError
@@ -172,6 +172,35 @@ impl YubiKeyDevice for Box<dyn YubiKeyDevice> {
 use crate::core::Version;
 use crate::management::{DeviceConfig, ManagementSession, ReleaseType};
 use crate::yubiotp::YubiOtpSession;
+
+/// Check if a USB PID belongs to a Security Key (SKY).
+pub(crate) fn is_sky_pid(pid: u16) -> bool {
+    pid == 0x0120
+}
+
+/// Check if a USB PID belongs to a YubiKey Plus.
+pub(crate) fn is_plus_pid(pid: u16) -> bool {
+    pid == 0x0410
+}
+
+/// Check if a USB PID belongs to a YubiKey NEO.
+pub(crate) fn is_neo_pid(pid: u16) -> bool {
+    (0x0110..=0x0116).contains(&pid)
+}
+
+/// Get a basic device name from a USB Product ID.
+///
+/// Returns "Security Key" for SKY PIDs, "YubiKey NEO" for NEO PIDs,
+/// or "YubiKey" for all other Yubico PIDs.
+pub fn name_from_pid(pid: u16) -> &'static str {
+    if is_sky_pid(pid) {
+        "Security Key"
+    } else if is_neo_pid(pid) {
+        "YubiKey NEO"
+    } else {
+        "YubiKey"
+    }
+}
 
 /// Derive USB interface flags from a Yubico USB Product ID.
 pub fn usb_interfaces_from_pid(pid: u16) -> UsbInterface {
@@ -353,13 +382,13 @@ fn synthesize_info(pid: u16, version: Version, serial: Option<u32>) -> DeviceInf
     if pid == 0x0010 {
         // YubiKey Standard (1-2)
         capabilities = Capability::OTP;
-    } else if pid == 0x0120 {
+    } else if is_sky_pid(pid) {
         // SKY
         capabilities = Capability::U2F;
-    } else if pid == 0x0410 {
+    } else if is_plus_pid(pid) {
         // YubiKey Plus
         capabilities = Capability::OTP | Capability::U2F;
-    } else {
+    } else if is_neo_pid(pid) {
         // NEO
         capabilities = Capability::OTP | Capability::OATH | Capability::OPENPGP | Capability::PIV;
         if version >= Version(3, 3, 0) || usb_interfaces_from_pid(pid).contains(UsbInterface::FIDO)
@@ -368,6 +397,8 @@ fn synthesize_info(pid: u16, version: Version, serial: Option<u32>) -> DeviceInf
         }
         supported.insert(Transport::Nfc, capabilities);
         enabled.insert(Transport::Nfc, capabilities);
+    } else {
+        capabilities = Capability::NONE;
     }
     supported.insert(Transport::Usb, capabilities);
     enabled.insert(Transport::Usb, capabilities);
@@ -412,7 +443,7 @@ pub fn read_info_ccid<C: SmartCardConnection + Send + 'static>(
         Err((e, conn)) => {
             log::debug!("Management session init failed ({e}), synthesizing info");
             // NEO and other old devices don't have the management applet.
-            return Ok(synthesize_info_ccid(conn, pid, None));
+            return synthesize_info_ccid(conn, pid, None);
         }
     };
 
@@ -423,46 +454,124 @@ pub fn read_info_ccid<C: SmartCardConnection + Send + 'static>(
         log::debug!("Device predates DeviceInfo support, synthesizing info");
         let version = session.version();
         let conn = session.into_connection();
-        return Ok(synthesize_info_ccid(conn, pid, Some(version)));
+        return synthesize_info_ccid(conn, pid, Some(version));
     }
 
     match session.read_device_info() {
         Ok(mut info) => {
             apply_device_info_fixups(&mut info);
-            let conn = session.into_connection();
-            check_yubikey_info(info, conn)
+            Ok((info, session.into_connection()))
         }
         Err(e) => Err(DeviceError::Management(e.erase())),
     }
 }
+
+/// Applets to scan (by AID) when synthesizing [`DeviceInfo`] for older keys
+/// over CCID without a known PID.
+const SCAN_APPLETS: &[(&[u8], Capability)] = &[
+    (Aid::FIDO, Capability::U2F),
+    (Aid::PIV, Capability::PIV),
+    (Aid::OPENPGP, Capability::OPENPGP),
+    (Aid::OATH, Capability::OATH),
+];
 
 /// Synthesize [`DeviceInfo`] for a legacy device over a SmartCard connection.
 ///
 /// Attempts to read the version and serial from the OTP applet. If a version
 /// is already known (e.g. from the management applet select response), it is
 /// preferred over the OTP-reported version.
+///
+/// When `pid` is known, capabilities are derived from it. When `pid` is `None`
+/// (e.g. a NEO seen over NFC, where no USB Product ID is available), the
+/// supported applets are probed over CCID to determine the capabilities.
+///
+/// Returns [`DeviceError::NotYubiKey`] if the device exposes no capabilities.
 fn synthesize_info_ccid<C: SmartCardConnection + Send + 'static>(
     conn: C,
     pid: Option<u16>,
     known_version: Option<Version>,
-) -> (DeviceInfo, C) {
-    let (version, serial, conn) = match YubiOtpSession::new(conn) {
+) -> Result<(DeviceInfo, C), DeviceError> {
+    use std::collections::HashMap;
+
+    let (version, serial, otp_present, conn) = match YubiOtpSession::new(conn) {
         Ok(mut otp_session) => {
             let version = known_version.unwrap_or_else(|| otp_session.version());
             let serial = otp_session.get_serial().ok();
-            (version, serial, otp_session.into_connection())
+            (version, serial, true, otp_session.into_connection())
         }
         Err((e, conn)) => {
             log::debug!("Couldn't open YubiOTP session: {e}");
             // Assume a minimum version if none is known.
-            (known_version.unwrap_or(Version(3, 0, 0)), None, conn)
+            (known_version.unwrap_or(Version(3, 0, 0)), None, false, conn)
         }
     };
-    // Default to NEO CCID if we have no PID.
-    (
-        synthesize_info(pid.unwrap_or(0x0112), version, serial),
-        conn,
-    )
+
+    // When the PID is known, capabilities are derived from it.
+    if let Some(pid) = pid {
+        return Ok((synthesize_info(pid, version, serial), conn));
+    }
+
+    // No PID (e.g. NEO over NFC): probe the applets present on the card to
+    // determine the supported capabilities.
+    let mut capabilities = if otp_present {
+        Capability::OTP
+    } else {
+        Capability::NONE
+    };
+
+    let mut protocol = SmartCardProtocol::new(conn);
+    for (aid, cap) in SCAN_APPLETS {
+        match protocol.select(aid) {
+            Ok(_) => {
+                capabilities |= *cap;
+                log::debug!("Found applet: capability {cap:?}");
+            }
+            Err(e) => log::debug!("Missing applet: capability {cap:?}: {e}"),
+        }
+    }
+    let conn = protocol.into_connection();
+
+    // Assume U2F on devices >= 3.3.0.
+    if version >= Version(3, 3, 0) {
+        capabilities |= Capability::U2F;
+    }
+
+    if capabilities == Capability::NONE {
+        return Err(DeviceError::NotYubiKey);
+    }
+
+    let mut supported = HashMap::new();
+    supported.insert(Transport::Usb, capabilities);
+    supported.insert(Transport::Nfc, capabilities);
+    let mut enabled = HashMap::new();
+    enabled.insert(Transport::Usb, capabilities);
+    enabled.insert(Transport::Nfc, capabilities);
+
+    let info = DeviceInfo {
+        config: DeviceConfig {
+            enabled_capabilities: enabled,
+            auto_eject_timeout: None,
+            challenge_response_timeout: None,
+            device_flags: None,
+            nfc_restricted: None,
+        },
+        serial,
+        version,
+        form_factor: FormFactor::Unknown,
+        supported_capabilities: supported,
+        is_locked: false,
+        is_fips: false,
+        is_sky: false,
+        part_number: None,
+        fips_capable: Capability::NONE,
+        fips_approved: Capability::NONE,
+        pin_complexity: false,
+        reset_blocked: Capability::NONE,
+        fps_version: None,
+        stm_version: None,
+        version_qualifier: crate::management::VersionQualifier::final_release(version),
+    };
+    Ok((info, conn))
 }
 
 /// Read [`DeviceInfo`] via OTP HID from an open connection.
@@ -536,18 +645,6 @@ pub fn read_info_fido<C: FidoConnection + 'static>(
             DeviceError::Management(e.erase()),
             Some(session.into_connection()),
         )),
-    }
-}
-
-fn check_yubikey_info<C>(info: DeviceInfo, conn: C) -> Result<(DeviceInfo, C), DeviceError> {
-    let has_caps = info
-        .supported_capabilities
-        .values()
-        .any(|c| *c != Capability::NONE);
-    if has_caps {
-        Ok((info, conn))
-    } else {
-        Err(DeviceError::NotYubiKey)
     }
 }
 
@@ -951,5 +1048,12 @@ mod tests {
             false,
         );
         assert_eq!(get_name(&info), "FIDO U2F Security Key");
+    }
+
+    #[test]
+    fn test_is_sky_pid() {
+        assert!(is_sky_pid(0x0120));
+        assert!(!is_sky_pid(0x0116));
+        assert!(!is_sky_pid(0x0401));
     }
 }
