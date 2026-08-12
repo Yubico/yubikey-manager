@@ -434,6 +434,21 @@ impl RpcDevice {
 
         let info = Self::read_device_info(data)?;
 
+        // Non-final (dev/alpha/beta) firmware reports a placeholder version
+        // (DEV_VERSION) for some applications (e.g. OTP). Local device
+        // enumeration patches this via `apply_device_info_fixups`, setting a
+        // process-wide override so `patch_version` can substitute the real
+        // version later. RPC-sourced devices skip that enumeration path, so
+        // replicate the override here for this (client) process.
+        if info.version_qualifier.release_type != yubikit::management::ReleaseType::Final {
+            log::debug!(
+                "Overriding version {} with qualifier version {} for RPC device",
+                info.version,
+                info.version_qualifier.version
+            );
+            yubikit::core::set_override_version(info.version_qualifier.version);
+        }
+
         log::debug!(
             "RPC device: {name}, transport={transport:?}, ccid={has_ccid}, ctap={has_ctap}, otp={has_otp}"
         );
