@@ -330,6 +330,13 @@ fn run_command(
             access_code: parent_access_code,
             action,
         } => {
+            if let otp::OtpAction::Static {
+                list_layouts: true, ..
+            } = action
+            {
+                otp::print_layouts();
+                return Ok(());
+            }
             let dev = ctx.device_for(Capability::OTP)?;
             action.run(dev.as_ref(), scp_params, &parent_access_code)
         }

@@ -151,7 +151,8 @@ pub enum OtpAction {
     /// Program a static password
     Static {
         /// Slot number (1 or 2)
-        slot: CliOtpSlot,
+        #[arg(required_unless_present = "list_layouts")]
+        slot: Option<CliOtpSlot>,
         /// Password to store
         password: Option<String>,
         /// Generate a random password
@@ -163,6 +164,9 @@ pub enum OtpAction {
         /// Keyboard layout (e.g. modhex, us, gb, de, fr, fr:bepo)
         #[arg(short = 'k', long, default_value = "modhex")]
         keyboard_layout: KeyboardLayout,
+        /// List the available keyboard layouts and exit
+        #[arg(long, conflicts_with_all = ["password", "generate"])]
+        list_layouts: bool,
         #[command(flatten)]
         enter: EnterArgs,
         /// Access code (hex)
@@ -332,23 +336,31 @@ impl OtpAction {
                 generate,
                 length,
                 keyboard_layout,
+                list_layouts,
                 enter,
                 access_code,
                 force,
-            } => run_static(
-                dev,
-                scp_params,
-                StaticOptions {
-                    slot,
-                    password: password.as_deref(),
-                    generate,
-                    length,
-                    keyboard_layout,
-                    enter: enter.value(),
-                    access_code: effective_access_code(parent_access_code, &access_code),
-                    force,
-                },
-            ),
+            } => {
+                if list_layouts {
+                    print_layouts();
+                    return Ok(());
+                }
+                let slot = slot.expect("slot is required unless --list-layouts is set");
+                run_static(
+                    dev,
+                    scp_params,
+                    StaticOptions {
+                        slot,
+                        password: password.as_deref(),
+                        generate,
+                        length,
+                        keyboard_layout,
+                        enter: enter.value(),
+                        access_code: effective_access_code(parent_access_code, &access_code),
+                        force,
+                    },
+                )
+            }
             Self::Chalresp {
                 slot,
                 key,
@@ -486,6 +498,13 @@ fn with_otp_sc<F: YubiOtpOp<R>, R>(
                 .map_err(|(e, _)| format_session_error("OTP", e))?;
             f.run(&mut session)
         }
+    }
+}
+
+/// Prints the available keyboard layout names, one per line.
+pub fn print_layouts() {
+    for layout in KeyboardLayout::all() {
+        println!("{}", layout.name());
     }
 }
 
