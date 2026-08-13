@@ -1,7 +1,16 @@
 //! USB HID keyboard scancode tables for YubiKey OTP configuration.
 //!
-//! Provides scancode mappings for various keyboard layouts, used when
-//! programming static passwords or calculating OTP codes.
+//! A YubiKey stores a static password as a sequence of USB HID keyboard scan
+//! codes, each optionally OR-ed with the [`SHIFT`] bit. Which character a scan
+//! code produces depends on the keyboard layout active on the host receiving
+//! the keystrokes, so we ship a table mapping characters to scan codes for a
+//! wide range of layouts.
+//!
+//! The layout tables are generated from the system's XKB data by
+//! `scripts/gen_keyboard_layouts.py` and embedded as a compact binary blob
+//! (`keyboard_layouts.bin`) that is parsed on first use. The blob does *not*
+//! contain modhex: modhex is a YubiKey-specific, layout-invariant encoding
+//! using a fixed subset of characters, so it is defined directly in code.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -12,44 +21,132 @@ pub const SHIFT: u8 = 0x80;
 /// The 16 characters used in modhex encoding.
 pub const MODHEX_CHARS: &str = "cbdefghijklnrtuv";
 
-/// Keyboard layout for OTP scancode encoding.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum KeyboardLayout {
-    Modhex,
-    Us,
-    Uk,
-    De,
-    Fr,
-    It,
-    Bepo,
-    Norman,
+/// Canonical name of the modhex pseudo-layout.
+const MODHEX_NAME: &str = "MODHEX";
+
+/// Embedded layout blob produced by `scripts/gen_keyboard_layouts.py`.
+const LAYOUT_BLOB: &[u8] = include_bytes!("keyboard_layouts.bin");
+
+/// Backing data for a single keyboard layout.
+struct LayoutData {
+    name: String,
+    scancodes: HashMap<char, u8>,
+}
+
+/// A keyboard layout mapping characters to YubiKey scan codes.
+///
+/// Values are lightweight handles into a process-wide registry loaded from the
+/// embedded layout blob, so they are cheap to copy and live for the whole
+/// program.
+#[derive(Clone, Copy)]
+pub struct KeyboardLayout {
+    data: &'static LayoutData,
+}
+
+/// Returns the process-wide layout registry, parsing the blob on first use.
+///
+/// The modhex pseudo-layout is always first, followed by the generated layouts
+/// in the order they appear in the blob (sorted by name at generation time).
+fn registry() -> &'static Vec<LayoutData> {
+    static REG: OnceLock<Vec<LayoutData>> = OnceLock::new();
+    REG.get_or_init(|| {
+        let mut layouts = Vec::new();
+        layouts.push(LayoutData {
+            name: MODHEX_NAME.to_string(),
+            scancodes: modhex_scancodes(),
+        });
+        parse_blob(LAYOUT_BLOB, &mut layouts);
+        layouts
+    })
+}
+
+/// Parses the embedded layout blob, appending each layout to `out`.
+///
+/// Format (little-endian):
+///   magic `b"YKL1"`, `u16` layout count, then per layout: `u8` name length,
+///   name (UTF-8), `u16` entry count, then entries of `u32` codepoint + `u8`
+///   scancode.
+fn parse_blob(data: &[u8], out: &mut Vec<LayoutData>) {
+    assert!(
+        data.len() >= 6 && &data[0..4] == b"YKL1",
+        "invalid keyboard layout blob header"
+    );
+    let count = u16::from_le_bytes([data[4], data[5]]) as usize;
+    let mut off = 6;
+    for _ in 0..count {
+        let name_len = data[off] as usize;
+        off += 1;
+        let name = std::str::from_utf8(&data[off..off + name_len])
+            .expect("invalid UTF-8 in layout name")
+            .to_string();
+        off += name_len;
+        let entries = u16::from_le_bytes([data[off], data[off + 1]]) as usize;
+        off += 2;
+        let mut scancodes = HashMap::with_capacity(entries);
+        for _ in 0..entries {
+            let cp = u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]);
+            let sc = data[off + 4];
+            off += 5;
+            if let Some(c) = char::from_u32(cp) {
+                scancodes.insert(c, sc);
+            }
+        }
+        out.push(LayoutData { name, scancodes });
+    }
+}
+
+/// Resolves user-facing layout aliases to the names used in the blob.
+///
+/// Keeps the historical short names working now that layouts follow XKB naming
+/// (e.g. `UK` is XKB `gb`, `BEPO` is the `fr:bepo` variant).
+fn resolve_alias(name: &str) -> String {
+    match name.to_ascii_lowercase().as_str() {
+        "modhex" => MODHEX_NAME.to_string(),
+        "uk" => "gb".to_string(),
+        "bepo" => "fr:bepo".to_string(),
+        "norman" => "us:norman".to_string(),
+        other => other.to_string(),
+    }
 }
 
 impl KeyboardLayout {
-    /// All available layouts in canonical order.
-    pub const ALL: &[KeyboardLayout] = &[
-        KeyboardLayout::Modhex,
-        KeyboardLayout::Us,
-        KeyboardLayout::Uk,
-        KeyboardLayout::De,
-        KeyboardLayout::Fr,
-        KeyboardLayout::It,
-        KeyboardLayout::Bepo,
-        KeyboardLayout::Norman,
-    ];
-
-    /// Layout name as a string.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Modhex => "MODHEX",
-            Self::Us => "US",
-            Self::Uk => "UK",
-            Self::De => "DE",
-            Self::Fr => "FR",
-            Self::It => "IT",
-            Self::Bepo => "BEPO",
-            Self::Norman => "NORMAN",
+    /// The modhex pseudo-layout.
+    pub fn modhex() -> KeyboardLayout {
+        KeyboardLayout {
+            data: &registry()[0],
         }
+    }
+
+    /// All available layouts, modhex first.
+    pub fn all() -> Vec<KeyboardLayout> {
+        registry()
+            .iter()
+            .map(|data| KeyboardLayout { data })
+            .collect()
+    }
+
+    /// Looks up a layout by name (case-insensitive), honoring aliases.
+    pub fn from_name(name: &str) -> Option<KeyboardLayout> {
+        let target = resolve_alias(name);
+        registry()
+            .iter()
+            .find(|d| d.name.eq_ignore_ascii_case(&target))
+            .map(|data| KeyboardLayout { data })
+    }
+
+    /// The layout's canonical name.
+    pub fn name(&self) -> &'static str {
+        self.data.name.as_str()
+    }
+
+    /// The character-to-scancode map for this layout.
+    pub fn scancodes(&self) -> &'static HashMap<char, u8> {
+        &self.data.scancodes
+    }
+
+    /// Whether this is the modhex pseudo-layout.
+    pub fn is_modhex(&self) -> bool {
+        self.data.name == MODHEX_NAME
     }
 }
 
@@ -57,17 +154,7 @@ impl std::str::FromStr for KeyboardLayout {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_uppercase().as_str() {
-            "MODHEX" => Ok(Self::Modhex),
-            "US" => Ok(Self::Us),
-            "UK" => Ok(Self::Uk),
-            "DE" => Ok(Self::De),
-            "FR" => Ok(Self::Fr),
-            "IT" => Ok(Self::It),
-            "BEPO" => Ok(Self::Bepo),
-            "NORMAN" => Ok(Self::Norman),
-            _ => Err(format!("Unknown keyboard layout: {s}")),
-        }
+        KeyboardLayout::from_name(s).ok_or_else(|| format!("Unknown keyboard layout: {s}"))
     }
 }
 
@@ -77,97 +164,21 @@ impl std::fmt::Display for KeyboardLayout {
     }
 }
 
-/// Returns the USB HID scancode mapping for the given keyboard layout.
-pub fn scancodes(layout: KeyboardLayout) -> &'static HashMap<char, u8> {
-    static MAPS: OnceLock<[HashMap<char, u8>; 8]> = OnceLock::new();
-    let maps = MAPS.get_or_init(|| {
-        [
-            modhex_scancodes(),
-            us_scancodes(),
-            uk_scancodes(),
-            de_scancodes(),
-            fr_scancodes(),
-            it_scancodes(),
-            bepo_scancodes(),
-            norman_scancodes(),
-        ]
-    });
-    &maps[match layout {
-        KeyboardLayout::Modhex => 0,
-        KeyboardLayout::Us => 1,
-        KeyboardLayout::Uk => 2,
-        KeyboardLayout::De => 3,
-        KeyboardLayout::Fr => 4,
-        KeyboardLayout::It => 5,
-        KeyboardLayout::Bepo => 6,
-        KeyboardLayout::Norman => 7,
-    }]
+impl std::fmt::Debug for KeyboardLayout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("KeyboardLayout").field(&self.name()).finish()
+    }
 }
 
-fn us_scancodes() -> HashMap<char, u8> {
-    let mut m = HashMap::new();
-    for (i, c) in "abcdefghijklmnopqrstuvwxyz".chars().enumerate() {
-        m.insert(c, 0x04 + i as u8);
-        m.insert(c.to_ascii_uppercase(), (0x04 + i as u8) | SHIFT);
+impl PartialEq for KeyboardLayout {
+    fn eq(&self, other: &Self) -> bool {
+        self.data.name == other.data.name
     }
-    let digits = [
-        ('1', 0x1E),
-        ('2', 0x1F),
-        ('3', 0x20),
-        ('4', 0x21),
-        ('5', 0x22),
-        ('6', 0x23),
-        ('7', 0x24),
-        ('8', 0x25),
-        ('9', 0x26),
-        ('0', 0x27),
-    ];
-    for (c, sc) in digits {
-        m.insert(c, sc);
-    }
-    let symbols = [
-        ('\t', 0x2B),
-        ('\n', 0x28),
-        (' ', 0x2C),
-        ('!', 0x1E | SHIFT),
-        ('@', 0x1F | SHIFT),
-        ('#', 0x20 | SHIFT),
-        ('$', 0x21 | SHIFT),
-        ('%', 0x22 | SHIFT),
-        ('^', 0xA3),
-        ('&', 0x24 | SHIFT),
-        ('*', 0x25 | SHIFT),
-        ('(', 0x26 | SHIFT),
-        (')', 0x27 | SHIFT),
-        ('-', 0x2D),
-        ('_', 0xAD),
-        ('=', 0x2E),
-        ('+', 0x2E | SHIFT),
-        ('[', 0x2F),
-        ('{', 0x2F | SHIFT),
-        (']', 0x30),
-        ('}', 0x30 | SHIFT),
-        ('\\', 0x32),
-        ('|', 0x32 | SHIFT),
-        (';', 0x33),
-        (':', 0x33 | SHIFT),
-        ('\'', 0x34),
-        ('"', 0x34 | SHIFT),
-        ('`', 0x35),
-        ('~', 0x35 | SHIFT),
-        (',', 0x36),
-        ('<', 0x36 | SHIFT),
-        ('.', 0x37),
-        ('>', 0x37 | SHIFT),
-        ('/', 0x38),
-        ('?', 0x38 | SHIFT),
-    ];
-    for (c, sc) in symbols {
-        m.insert(c, sc);
-    }
-    m
 }
 
+impl Eq for KeyboardLayout {}
+
+/// The modhex scancode map, defined in code since modhex is not a real layout.
 fn modhex_scancodes() -> HashMap<char, u8> {
     let mut m = HashMap::new();
     for c in MODHEX_CHARS.chars() {
@@ -178,620 +189,46 @@ fn modhex_scancodes() -> HashMap<char, u8> {
     m
 }
 
-fn uk_scancodes() -> HashMap<char, u8> {
-    HashMap::from([
-        ('a', 0x04),
-        ('b', 0x05),
-        ('c', 0x06),
-        ('d', 0x07),
-        ('e', 0x08),
-        ('f', 0x09),
-        ('g', 0x0A),
-        ('h', 0x0B),
-        ('i', 0x0C),
-        ('j', 0x0D),
-        ('k', 0x0E),
-        ('l', 0x0F),
-        ('m', 0x10),
-        ('n', 0x11),
-        ('o', 0x12),
-        ('p', 0x13),
-        ('q', 0x14),
-        ('r', 0x15),
-        ('s', 0x16),
-        ('t', 0x17),
-        ('u', 0x18),
-        ('v', 0x19),
-        ('w', 0x1A),
-        ('x', 0x1B),
-        ('y', 0x1C),
-        ('z', 0x1D),
-        ('A', SHIFT | 0x04),
-        ('B', SHIFT | 0x05),
-        ('C', SHIFT | 0x06),
-        ('D', SHIFT | 0x07),
-        ('E', SHIFT | 0x08),
-        ('F', SHIFT | 0x09),
-        ('G', SHIFT | 0x0A),
-        ('H', SHIFT | 0x0B),
-        ('I', SHIFT | 0x0C),
-        ('J', SHIFT | 0x0D),
-        ('K', SHIFT | 0x0E),
-        ('L', SHIFT | 0x0F),
-        ('M', SHIFT | 0x10),
-        ('N', SHIFT | 0x11),
-        ('O', SHIFT | 0x12),
-        ('P', SHIFT | 0x13),
-        ('Q', SHIFT | 0x14),
-        ('R', SHIFT | 0x15),
-        ('S', SHIFT | 0x16),
-        ('T', SHIFT | 0x17),
-        ('U', SHIFT | 0x18),
-        ('V', SHIFT | 0x19),
-        ('W', SHIFT | 0x1A),
-        ('X', SHIFT | 0x1B),
-        ('Y', SHIFT | 0x1C),
-        ('Z', SHIFT | 0x1D),
-        ('0', 0x27),
-        ('1', 0x1E),
-        ('2', 0x1F),
-        ('3', 0x20),
-        ('4', 0x21),
-        ('5', 0x22),
-        ('6', 0x23),
-        ('7', 0x24),
-        ('8', 0x25),
-        ('9', 0x26),
-        ('\t', 0x2B),
-        ('\n', 0x28),
-        ('!', SHIFT | 0x1E),
-        ('@', SHIFT | 0x34),
-        ('\u{a3}', SHIFT | 0x20),
-        ('$', SHIFT | 0x21),
-        ('%', SHIFT | 0x22),
-        ('&', SHIFT | 0x24),
-        ('\'', 0x34),
-        ('`', 0x35),
-        ('(', SHIFT | 0x26),
-        (')', SHIFT | 0x27),
-        ('*', SHIFT | 0x25),
-        ('+', SHIFT | 0x2E),
-        (',', 0x36),
-        ('-', 0x2D),
-        ('.', 0x37),
-        ('/', 0x38),
-        (':', SHIFT | 0x33),
-        (';', 0x33),
-        ('<', SHIFT | 0x36),
-        ('=', 0x2E),
-        ('>', SHIFT | 0x37),
-        ('?', SHIFT | 0x38),
-        ('"', SHIFT | 0x1F),
-        ('[', 0x2F),
-        ('#', 0x32),
-        (']', 0x30),
-        ('^', 0xA3),
-        ('_', 0xAD),
-        ('{', SHIFT | 0x2F),
-        ('}', SHIFT | 0x30),
-        ('~', SHIFT | 0x32),
-        ('\u{ac}', SHIFT | 0x35),
-        (' ', 0x2C),
-    ])
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn de_scancodes() -> HashMap<char, u8> {
-    HashMap::from([
-        ('a', 0x04),
-        ('b', 0x05),
-        ('c', 0x06),
-        ('d', 0x07),
-        ('e', 0x08),
-        ('f', 0x09),
-        ('g', 0x0A),
-        ('h', 0x0B),
-        ('i', 0x0C),
-        ('j', 0x0D),
-        ('k', 0x0E),
-        ('l', 0x0F),
-        ('m', 0x10),
-        ('n', 0x11),
-        ('o', 0x12),
-        ('p', 0x13),
-        ('q', 0x14),
-        ('r', 0x15),
-        ('s', 0x16),
-        ('t', 0x17),
-        ('u', 0x18),
-        ('v', 0x19),
-        ('w', 0x1A),
-        ('x', 0x1B),
-        ('y', 0x1D),
-        ('z', 0x1C),
-        ('A', SHIFT | 0x04),
-        ('B', SHIFT | 0x05),
-        ('C', SHIFT | 0x06),
-        ('D', SHIFT | 0x07),
-        ('E', SHIFT | 0x08),
-        ('F', SHIFT | 0x09),
-        ('G', SHIFT | 0x0A),
-        ('H', SHIFT | 0x0B),
-        ('I', SHIFT | 0x0C),
-        ('J', SHIFT | 0x0D),
-        ('K', SHIFT | 0x0E),
-        ('L', SHIFT | 0x0F),
-        ('M', SHIFT | 0x10),
-        ('N', SHIFT | 0x11),
-        ('O', SHIFT | 0x12),
-        ('P', SHIFT | 0x13),
-        ('Q', SHIFT | 0x14),
-        ('R', SHIFT | 0x15),
-        ('S', SHIFT | 0x16),
-        ('T', SHIFT | 0x17),
-        ('U', SHIFT | 0x18),
-        ('V', SHIFT | 0x19),
-        ('W', SHIFT | 0x1A),
-        ('X', SHIFT | 0x1B),
-        ('Y', SHIFT | 0x1D),
-        ('Z', SHIFT | 0x1C),
-        ('0', 0x27),
-        ('1', 0x1E),
-        ('2', 0x1F),
-        ('3', 0x20),
-        ('4', 0x21),
-        ('5', 0x22),
-        ('6', 0x23),
-        ('7', 0x24),
-        ('8', 0x25),
-        ('9', 0x26),
-        ('\t', 0x2B),
-        ('\n', 0x28),
-        ('!', SHIFT | 0x1E),
-        ('"', SHIFT | 0x1F),
-        ('#', 0x32),
-        ('$', SHIFT | 0x21),
-        ('%', SHIFT | 0x22),
-        ('&', SHIFT | 0x23),
-        ('\'', SHIFT | 0x32),
-        ('(', SHIFT | 0x25),
-        (')', SHIFT | 0x26),
-        ('*', SHIFT | 0x30),
-        ('+', 0x30),
-        (',', 0x36),
-        ('-', 0x38),
-        ('.', 0x37),
-        ('/', SHIFT | 0x24),
-        (':', SHIFT | 0x37),
-        (';', SHIFT | 0x36),
-        ('<', 0x64),
-        ('=', SHIFT | 0x27),
-        ('>', SHIFT | 0x64),
-        ('?', SHIFT | 0x2D),
-        ('^', 0x35),
-        ('_', SHIFT | 0x38),
-        (' ', 0x2C),
-        ('`', SHIFT | 0x2D),
-        ('\u{a7}', SHIFT | 0x20),
-        ('\u{b4}', 0x2E),
-        ('\u{c4}', SHIFT | 0x34),
-        ('\u{d6}', SHIFT | 0x33),
-        ('\u{dc}', SHIFT | 0x2F),
-        ('\u{df}', 0x2D),
-        ('\u{e4}', 0x34),
-        ('\u{f6}', 0x33),
-        ('\u{fc}', 0x2F),
-    ])
-}
+    #[test]
+    fn blob_parses_and_has_common_layouts() {
+        for name in ["us", "gb", "de", "fr", "it", "fr:bepo", "us:norman"] {
+            let layout =
+                KeyboardLayout::from_name(name).unwrap_or_else(|| panic!("missing layout {name}"));
+            assert!(!layout.scancodes().is_empty());
+        }
+    }
 
-fn fr_scancodes() -> HashMap<char, u8> {
-    HashMap::from([
-        ('a', 0x14),
-        ('b', 0x05),
-        ('c', 0x06),
-        ('d', 0x07),
-        ('e', 0x08),
-        ('f', 0x09),
-        ('g', 0x0A),
-        ('h', 0x0B),
-        ('i', 0x0C),
-        ('j', 0x0D),
-        ('k', 0x0E),
-        ('l', 0x0F),
-        ('m', 0x33),
-        ('n', 0x11),
-        ('o', 0x12),
-        ('p', 0x13),
-        ('q', 0x04),
-        ('r', 0x15),
-        ('s', 0x16),
-        ('t', 0x17),
-        ('u', 0x18),
-        ('v', 0x19),
-        ('w', 0x1D),
-        ('x', 0x1B),
-        ('y', 0x1C),
-        ('z', 0x1A),
-        ('A', SHIFT | 0x14),
-        ('B', SHIFT | 0x05),
-        ('C', SHIFT | 0x06),
-        ('D', SHIFT | 0x07),
-        ('E', SHIFT | 0x08),
-        ('F', SHIFT | 0x09),
-        ('G', SHIFT | 0x0A),
-        ('H', SHIFT | 0x0B),
-        ('I', SHIFT | 0x0C),
-        ('J', SHIFT | 0x0D),
-        ('K', SHIFT | 0x0E),
-        ('L', SHIFT | 0x0F),
-        ('M', SHIFT | 0x33),
-        ('N', SHIFT | 0x11),
-        ('O', SHIFT | 0x12),
-        ('P', SHIFT | 0x13),
-        ('Q', SHIFT | 0x04),
-        ('R', SHIFT | 0x15),
-        ('S', SHIFT | 0x16),
-        ('T', SHIFT | 0x17),
-        ('U', SHIFT | 0x18),
-        ('V', SHIFT | 0x19),
-        ('W', SHIFT | 0x1D),
-        ('X', SHIFT | 0x1B),
-        ('Y', SHIFT | 0x1C),
-        ('Z', SHIFT | 0x1A),
-        ('0', SHIFT | 0x27),
-        ('1', SHIFT | 0x1E),
-        ('2', SHIFT | 0x1F),
-        ('3', SHIFT | 0x20),
-        ('4', SHIFT | 0x21),
-        ('5', SHIFT | 0x22),
-        ('6', SHIFT | 0x23),
-        ('7', SHIFT | 0x24),
-        ('8', SHIFT | 0x25),
-        ('9', SHIFT | 0x26),
-        ('\t', 0x2B),
-        ('\n', 0x28),
-        (' ', 0x2C),
-        ('!', 0x38),
-        ('"', 0x20),
-        ('$', 0x30),
-        ('%', SHIFT | 0x34),
-        ('&', 0x1E),
-        ('\'', 0x21),
-        ('(', 0x22),
-        (')', 0x2D),
-        ('*', 0x31),
-        ('+', SHIFT | 0x2E),
-        (',', 0x10),
-        ('-', 0x23),
-        ('.', SHIFT | 0x36),
-        ('/', SHIFT | 0x37),
-        (':', 0x37),
-        (';', 0x36),
-        ('<', 0x64),
-        ('=', 0x2E),
-        ('_', 0x25),
-        ('\x7f', 0x2A),
-        ('\u{a3}', SHIFT | 0x30),
-        ('\u{a7}', SHIFT | 0x38),
-        ('\u{b0}', SHIFT | 0x2D),
-        ('\u{b2}', 0x35),
-        ('\u{b5}', SHIFT | 0x31),
-        ('\u{e0}', 0x27),
-        ('\u{e7}', 0x26),
-        ('\u{e8}', 0x24),
-        ('\u{e9}', 0x1F),
-        ('\u{f9}', 0x34),
-    ])
-}
+    #[test]
+    fn modhex_is_special() {
+        let modhex = KeyboardLayout::modhex();
+        assert!(modhex.is_modhex());
+        assert_eq!(modhex.name(), MODHEX_NAME);
+        // 16 modhex chars, each in lower and upper case.
+        assert_eq!(modhex.scancodes().len(), MODHEX_CHARS.chars().count() * 2);
+        assert_eq!(modhex.scancodes().get(&'c'), Some(&0x06));
+    }
 
-fn it_scancodes() -> HashMap<char, u8> {
-    HashMap::from([
-        ('\t', 0x2B),
-        ('\n', 0x28),
-        (' ', 0x2C),
-        ('!', SHIFT | 0x1E),
-        ('"', SHIFT | 0x1F),
-        ('#', 0x32),
-        ('$', SHIFT | 0x21),
-        ('%', SHIFT | 0x22),
-        ('&', SHIFT | 0x23),
-        ('\'', 0x2D),
-        ('(', SHIFT | 0x25),
-        (')', SHIFT | 0x26),
-        ('*', 0x55),
-        ('+', 0x30),
-        (',', 0x36),
-        ('-', 0x38),
-        ('.', 0x63),
-        ('/', SHIFT | 0x24),
-        ('0', 0x27),
-        ('1', 0x1E),
-        ('2', 0x1F),
-        ('3', 0x20),
-        ('4', 0x21),
-        ('5', 0x22),
-        ('6', 0x23),
-        ('7', 0x24),
-        ('8', 0x25),
-        ('9', 0x26),
-        (':', 0xB7),
-        (';', 0xB6),
-        ('<', 0x64),
-        ('=', SHIFT | 0x27),
-        ('>', SHIFT | 0x64),
-        ('?', SHIFT | 0x2D),
-        ('@', 0x24),
-        ('A', SHIFT | 0x04),
-        ('B', SHIFT | 0x05),
-        ('C', SHIFT | 0x06),
-        ('D', SHIFT | 0x07),
-        ('E', SHIFT | 0x08),
-        ('F', SHIFT | 0x09),
-        ('G', SHIFT | 0x0A),
-        ('H', SHIFT | 0x0B),
-        ('I', SHIFT | 0x0C),
-        ('J', SHIFT | 0x0D),
-        ('K', SHIFT | 0x0E),
-        ('L', SHIFT | 0x0F),
-        ('M', SHIFT | 0x10),
-        ('N', SHIFT | 0x11),
-        ('O', SHIFT | 0x12),
-        ('P', SHIFT | 0x13),
-        ('Q', SHIFT | 0x14),
-        ('R', SHIFT | 0x15),
-        ('S', SHIFT | 0x16),
-        ('T', SHIFT | 0x17),
-        ('U', SHIFT | 0x18),
-        ('V', SHIFT | 0x19),
-        ('W', SHIFT | 0x1A),
-        ('X', SHIFT | 0x1B),
-        ('Y', SHIFT | 0x1C),
-        ('Z', SHIFT | 0x1D),
-        ('\\', 0x35),
-        ('^', 0xAE),
-        ('_', 0xB8),
-        ('`', SHIFT | 0x2D),
-        ('a', 0x04),
-        ('b', 0x05),
-        ('c', 0x06),
-        ('d', 0x07),
-        ('e', 0x08),
-        ('f', 0x09),
-        ('g', 0x0A),
-        ('h', 0x0B),
-        ('i', 0x0C),
-        ('j', 0x0D),
-        ('k', 0x0E),
-        ('l', 0x0F),
-        ('m', 0x10),
-        ('n', 0x11),
-        ('o', 0x12),
-        ('p', 0x13),
-        ('q', 0x14),
-        ('r', 0x15),
-        ('s', 0x16),
-        ('t', 0x17),
-        ('u', 0x18),
-        ('v', 0x19),
-        ('w', 0x1A),
-        ('x', 0x1B),
-        ('y', 0x1C),
-        ('z', 0x1D),
-        ('|', 0xB5),
-        ('\u{a3}', 0xA0),
-        ('\u{a7}', 0xB2),
-        ('\u{b0}', 0xB4),
-        ('\u{e7}', 0xB3),
-        ('\u{e8}', 0x2F),
-        ('\u{e9}', SHIFT | 0x2F),
-        ('\u{e0}', 0x34),
-        ('\u{ec}', 0x2E),
-        ('\u{f2}', 0x33),
-        ('\u{f9}', 0x31),
-    ])
-}
+    #[test]
+    fn aliases_resolve() {
+        assert_eq!(KeyboardLayout::from_name("uk").unwrap().name(), "gb");
+        assert_eq!(KeyboardLayout::from_name("BEPO").unwrap().name(), "fr:bepo");
+        assert_eq!(
+            KeyboardLayout::from_name("norman").unwrap().name(),
+            "us:norman"
+        );
+        assert!(KeyboardLayout::from_name("modhex").unwrap().is_modhex());
+    }
 
-fn bepo_scancodes() -> HashMap<char, u8> {
-    HashMap::from([
-        ('\t', SHIFT | 0x2B),
-        ('\n', SHIFT | 0x28),
-        (' ', 0x2C),
-        ('!', SHIFT | 0x1C),
-        ('"', 0x1E),
-        ('#', SHIFT | 0x35),
-        ('$', 0x35),
-        ('%', 0x2E),
-        ('\'', 0x11),
-        ('(', 0x21),
-        (')', 0x22),
-        ('*', 0x27),
-        ('+', 0x24),
-        (',', 0x0A),
-        ('-', 0x25),
-        ('.', 0x19),
-        ('/', 0x26),
-        ('0', SHIFT | 0x27),
-        ('1', SHIFT | 0x1E),
-        ('2', SHIFT | 0x1F),
-        ('3', SHIFT | 0x20),
-        ('4', SHIFT | 0x21),
-        ('5', SHIFT | 0x22),
-        ('6', SHIFT | 0x23),
-        ('7', SHIFT | 0x24),
-        ('8', SHIFT | 0x25),
-        ('9', SHIFT | 0x26),
-        (':', SHIFT | 0x19),
-        (';', SHIFT | 0x0A),
-        ('=', 0x2D),
-        ('?', SHIFT | 0x11),
-        ('@', 0x23),
-        ('A', SHIFT | 0x04),
-        ('B', SHIFT | 0x14),
-        ('C', SHIFT | 0x0B),
-        ('D', SHIFT | 0x0C),
-        ('E', SHIFT | 0x09),
-        ('F', SHIFT | 0x38),
-        ('G', SHIFT | 0x36),
-        ('H', SHIFT | 0x37),
-        ('I', SHIFT | 0x07),
-        ('J', SHIFT | 0x13),
-        ('K', SHIFT | 0x05),
-        ('L', SHIFT | 0x12),
-        ('M', SHIFT | 0x34),
-        ('N', SHIFT | 0x33),
-        ('O', SHIFT | 0x15),
-        ('P', SHIFT | 0x08),
-        ('Q', SHIFT | 0x10),
-        ('R', SHIFT | 0x0F),
-        ('S', SHIFT | 0x0E),
-        ('T', SHIFT | 0x0D),
-        ('U', SHIFT | 0x16),
-        ('V', SHIFT | 0x18),
-        ('W', SHIFT | 0x30),
-        ('X', SHIFT | 0x06),
-        ('Y', SHIFT | 0x1B),
-        ('Z', SHIFT | 0x2F),
-        ('`', SHIFT | 0x2E),
-        ('a', 0x04),
-        ('b', 0x14),
-        ('c', 0x0B),
-        ('d', 0x0C),
-        ('e', 0x09),
-        ('f', 0x38),
-        ('g', 0x36),
-        ('h', 0x37),
-        ('i', 0x07),
-        ('j', 0x13),
-        ('k', 0x05),
-        ('l', 0x12),
-        ('m', 0x34),
-        ('n', 0x33),
-        ('o', 0x15),
-        ('p', 0x08),
-        ('q', 0x10),
-        ('r', 0x0F),
-        ('s', 0x0E),
-        ('t', 0x0D),
-        ('u', 0x16),
-        ('v', 0x18),
-        ('w', 0x30),
-        ('x', 0x06),
-        ('y', 0x1B),
-        ('z', 0x2F),
-        ('\u{a0}', SHIFT | 0x2C),
-        ('\u{ab}', 0x1F),
-        ('\u{b0}', SHIFT | 0x2D),
-        ('\u{bb}', 0x20),
-        ('\u{c0}', SHIFT | 0x1D),
-        ('\u{c7}', SHIFT | 0x31),
-        ('\u{c8}', SHIFT | 0x17),
-        ('\u{c9}', SHIFT | 0x1A),
-        ('\u{ca}', SHIFT | 0x64),
-        ('\u{e0}', 0x1D),
-        ('\u{e7}', 0x31),
-        ('\u{e8}', 0x17),
-        ('\u{e9}', 0x1A),
-        ('\u{ea}', 0x64),
-    ])
-}
-
-fn norman_scancodes() -> HashMap<char, u8> {
-    HashMap::from([
-        ('a', 0x04),
-        ('b', 0x05),
-        ('c', 0x06),
-        ('d', 0x08),
-        ('e', 0x07),
-        ('f', 0x15),
-        ('g', 0x0A),
-        ('h', 0x33),
-        ('i', 0x0E),
-        ('j', 0x1C),
-        ('k', 0x17),
-        ('l', 0x12),
-        ('m', 0x10),
-        ('n', 0x0D),
-        ('o', 0x0F),
-        ('p', 0x11),
-        ('q', 0x14),
-        ('r', 0x0C),
-        ('s', 0x16),
-        ('t', 0x09),
-        ('u', 0x18),
-        ('v', 0x19),
-        ('w', 0x1A),
-        ('x', 0x1B),
-        ('y', 0x0B),
-        ('z', 0x1D),
-        ('A', SHIFT | 0x04),
-        ('B', SHIFT | 0x05),
-        ('C', SHIFT | 0x06),
-        ('D', SHIFT | 0x08),
-        ('E', SHIFT | 0x07),
-        ('F', SHIFT | 0x15),
-        ('G', SHIFT | 0x0A),
-        ('H', SHIFT | 0x33),
-        ('I', SHIFT | 0x0E),
-        ('J', SHIFT | 0x1C),
-        ('K', SHIFT | 0x17),
-        ('L', SHIFT | 0x12),
-        ('M', SHIFT | 0x10),
-        ('N', SHIFT | 0x0D),
-        ('O', SHIFT | 0x0F),
-        ('P', SHIFT | 0x11),
-        ('Q', SHIFT | 0x14),
-        ('R', SHIFT | 0x0C),
-        ('S', SHIFT | 0x16),
-        ('T', SHIFT | 0x09),
-        ('U', SHIFT | 0x18),
-        ('V', SHIFT | 0x19),
-        ('W', SHIFT | 0x1A),
-        ('X', SHIFT | 0x1B),
-        ('Y', SHIFT | 0x0B),
-        ('Z', SHIFT | 0x1D),
-        ('0', 0x27),
-        ('1', 0x1E),
-        ('2', 0x1F),
-        ('3', 0x20),
-        ('4', 0x21),
-        ('5', 0x22),
-        ('6', 0x23),
-        ('7', 0x24),
-        ('8', 0x25),
-        ('9', 0x26),
-        ('\t', 0x2B),
-        ('\n', 0x28),
-        ('!', SHIFT | 0x1E),
-        ('"', SHIFT | 0x34),
-        ('#', SHIFT | 0x20),
-        ('$', SHIFT | 0x21),
-        ('%', SHIFT | 0x22),
-        ('&', SHIFT | 0x24),
-        ('\'', 0x34),
-        ('`', 0x35),
-        ('(', SHIFT | 0x26),
-        (')', SHIFT | 0x27),
-        ('*', SHIFT | 0x25),
-        ('+', SHIFT | 0x2E),
-        (',', 0x36),
-        ('-', 0x2D),
-        ('.', 0x37),
-        ('/', 0x38),
-        (':', SHIFT | 0x33),
-        (';', 0x13),
-        ('<', SHIFT | 0x36),
-        ('=', 0x2E),
-        ('>', SHIFT | 0x37),
-        ('?', SHIFT | 0x38),
-        ('@', SHIFT | 0x1F),
-        ('[', 0x2F),
-        ('\\', 0x32),
-        (']', 0x30),
-        ('^', 0xA3),
-        ('_', 0xAD),
-        ('{', SHIFT | 0x2F),
-        ('}', SHIFT | 0x30),
-        ('|', SHIFT | 0x32),
-        ('~', SHIFT | 0x35),
-        (' ', 0x2C),
-    ])
+    #[test]
+    fn us_layout_basics() {
+        let us = KeyboardLayout::from_name("us").unwrap();
+        assert_eq!(us.scancodes().get(&'a'), Some(&0x04));
+        assert_eq!(us.scancodes().get(&'A'), Some(&(0x04 | SHIFT)));
+        assert_eq!(us.scancodes().get(&'1'), Some(&0x1E));
+        assert_eq!(us.scancodes().get(&' '), Some(&0x2C));
+    }
 }

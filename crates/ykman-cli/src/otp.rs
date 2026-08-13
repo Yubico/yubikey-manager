@@ -14,8 +14,8 @@ use yubikit::yubiotp::{
 };
 
 use crate::cancel;
-use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliKeyboardLayout, CliOtpSlot, CliPacing};
-use crate::keyboard::{self, MODHEX_CHARS};
+use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliOtpSlot, CliPacing};
+use crate::keyboard::{KeyboardLayout, MODHEX_CHARS};
 use crate::scp::{self, ScpParams};
 use crate::util::{
     self, b32_encode, confirm, format_session_error, format_smartcard_connection_error,
@@ -160,9 +160,9 @@ pub enum OtpAction {
         /// Length of generated password
         #[arg(short = 'L', long, default_value_t = 38)]
         length: usize,
-        /// Keyboard layout
+        /// Keyboard layout (e.g. modhex, us, gb, de, fr, fr:bepo)
         #[arg(short = 'k', long, default_value = "modhex")]
-        keyboard_layout: CliKeyboardLayout,
+        keyboard_layout: KeyboardLayout,
         #[command(flatten)]
         enter: EnterArgs,
         /// Access code (hex)
@@ -489,36 +489,24 @@ fn with_otp_sc<F: YubiOtpOp<R>, R>(
     }
 }
 
-fn cli_to_keyboard_layout(layout: CliKeyboardLayout) -> keyboard::KeyboardLayout {
-    match layout {
-        CliKeyboardLayout::Us => keyboard::KeyboardLayout::Us,
-        CliKeyboardLayout::Uk => keyboard::KeyboardLayout::Uk,
-        CliKeyboardLayout::De => keyboard::KeyboardLayout::De,
-        CliKeyboardLayout::Fr => keyboard::KeyboardLayout::Fr,
-        CliKeyboardLayout::It => keyboard::KeyboardLayout::It,
-        CliKeyboardLayout::Bepo => keyboard::KeyboardLayout::Bepo,
-        CliKeyboardLayout::Norman => keyboard::KeyboardLayout::Norman,
-        CliKeyboardLayout::Modhex => keyboard::KeyboardLayout::Modhex,
-    }
-}
-
-fn encode_password(password: &str, layout: CliKeyboardLayout) -> Result<Vec<u8>> {
-    let map = keyboard::scancodes(cli_to_keyboard_layout(layout));
+fn encode_password(password: &str, layout: KeyboardLayout) -> Result<Vec<u8>> {
+    let map = layout.scancodes();
     password
         .chars()
         .map(|c| {
             map.get(&c)
                 .copied()
-                .ok_or_else(|| anyhow!("Character '{c}' not supported in {layout:?} layout"))
+                .ok_or_else(|| anyhow!("Character '{c}' not supported in {} layout", layout.name()))
         })
         .collect()
 }
 
-fn generate_static_pw(length: usize, layout: CliKeyboardLayout) -> Result<String> {
-    let chars: Vec<char> = if matches!(layout, CliKeyboardLayout::Modhex) {
+fn generate_static_pw(length: usize, layout: KeyboardLayout) -> Result<String> {
+    let chars: Vec<char> = if layout.is_modhex() {
         MODHEX_CHARS.chars().collect()
     } else {
-        keyboard::scancodes(cli_to_keyboard_layout(layout))
+        layout
+            .scancodes()
             .keys()
             .copied()
             .filter(|c| !"\t\n ".contains(*c))
@@ -940,7 +928,7 @@ pub struct StaticOptions<'a> {
     pub password: Option<&'a str>,
     pub generate: bool,
     pub length: usize,
-    pub keyboard_layout: CliKeyboardLayout,
+    pub keyboard_layout: KeyboardLayout,
     pub enter: Option<bool>,
     pub access_code: Option<&'a str>,
     pub force: bool,

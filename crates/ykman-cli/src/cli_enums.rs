@@ -296,18 +296,6 @@ impl From<CliNdefType> for yubikit::yubiotp::NdefType {
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
-pub enum CliKeyboardLayout {
-    Us,
-    Uk,
-    De,
-    Fr,
-    It,
-    Bepo,
-    Norman,
-    Modhex,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum CliHotpDigits {
     #[value(name = "6")]
     Six,
