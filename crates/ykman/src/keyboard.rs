@@ -222,25 +222,11 @@ fn parse_blob(data: &[u8], out: &mut Vec<KeyboardLayout>) {
     }
 }
 
-/// Resolves user-facing layout aliases to the names used in the blob.
-///
-/// Keeps the historical short names working now that layouts follow XKB naming
-/// (e.g. `UK` is XKB `gb`, `BEPO` is the `fr:bepo` variant).
-fn resolve_alias(name: &str) -> String {
-    match name.to_ascii_lowercase().as_str() {
-        "uk" => "gb".to_string(),
-        "bepo" => "fr:bepo".to_string(),
-        "norman" => "us:norman".to_string(),
-        other => other.to_string(),
-    }
-}
-
 /// Resolves a `layout` or `layout:variant` selector into a [`LayoutSelection`].
 fn resolve(input: &str) -> Result<LayoutSelection, String> {
-    let canonical = resolve_alias(input);
-    let (layout_name, variant_name) = match canonical.split_once(':') {
+    let (layout_name, variant_name) = match input.split_once(':') {
         Some((l, v)) => (l, Some(v)),
-        None => (canonical.as_str(), None),
+        None => (input, None),
     };
     let layout = registry()
         .iter()
@@ -349,15 +335,17 @@ mod tests {
     }
 
     #[test]
-    fn resolves_variants_and_aliases() {
+    fn resolves_variants() {
         assert_eq!(
             LayoutSelection::from_str("de:dvorak").unwrap().name(),
             "de:dvorak"
         );
-        assert_eq!(LayoutSelection::from_str("uk").unwrap().name(), "gb");
-        assert_eq!(LayoutSelection::from_str("bepo").unwrap().name(), "fr:bepo");
         assert_eq!(
-            LayoutSelection::from_str("norman").unwrap().name(),
+            LayoutSelection::from_str("fr:bepo").unwrap().name(),
+            "fr:bepo"
+        );
+        assert_eq!(
+            LayoutSelection::from_str("us:norman").unwrap().name(),
             "us:norman"
         );
         assert!(LayoutSelection::from_str("modhex").unwrap().is_modhex());
