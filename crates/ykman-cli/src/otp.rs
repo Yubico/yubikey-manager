@@ -15,7 +15,7 @@ use yubikit::yubiotp::{
 
 use crate::cancel;
 use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliOtpSlot, CliPacing};
-use crate::keyboard::{KeyboardLayout, MODHEX_CHARS};
+use crate::keyboard::{KeyboardLayout, LayoutSelection, MODHEX_CHARS};
 use crate::scp::{self, ScpParams};
 use crate::util::{
     self, b32_encode, confirm, format_session_error, format_smartcard_connection_error,
@@ -161,10 +161,10 @@ pub enum OtpAction {
         /// Length of generated password
         #[arg(short = 'L', long, default_value_t = 38)]
         length: usize,
-        /// Keyboard layout (e.g. modhex, us, gb, de, fr, fr:bepo)
+        /// Keyboard layout as 'layout' or 'layout:variant' (see --list-layouts)
         #[arg(short = 'k', long, default_value = "modhex")]
-        keyboard_layout: KeyboardLayout,
-        /// List the available keyboard layouts and exit
+        keyboard_layout: LayoutSelection,
+        /// List the available keyboard layouts (and variants) and exit
         #[arg(long, conflicts_with_all = ["password", "generate"])]
         list_layouts: bool,
         #[command(flatten)]
@@ -501,14 +501,26 @@ fn with_otp_sc<F: YubiOtpOp<R>, R>(
     }
 }
 
-/// Prints the available keyboard layout names, one per line.
+/// Prints the available keyboard layouts, one per line, e.g.
+/// `de - German (variants: deadacute, dvorak)`.
 pub fn print_layouts() {
     for layout in KeyboardLayout::all() {
-        println!("{}", layout.name());
+        let variants = layout.variants();
+        if variants.is_empty() {
+            println!("{} - {}", layout.name(), layout.description());
+        } else {
+            let names: Vec<&str> = variants.iter().map(|v| v.name()).collect();
+            println!(
+                "{} - {} (variants: {})",
+                layout.name(),
+                layout.description(),
+                names.join(", ")
+            );
+        }
     }
 }
 
-fn encode_password(password: &str, layout: KeyboardLayout) -> Result<Vec<u8>> {
+fn encode_password(password: &str, layout: LayoutSelection) -> Result<Vec<u8>> {
     let map = layout.scancodes();
     password
         .chars()
@@ -520,7 +532,7 @@ fn encode_password(password: &str, layout: KeyboardLayout) -> Result<Vec<u8>> {
         .collect()
 }
 
-fn generate_static_pw(length: usize, layout: KeyboardLayout) -> Result<String> {
+fn generate_static_pw(length: usize, layout: LayoutSelection) -> Result<String> {
     let chars: Vec<char> = if layout.is_modhex() {
         MODHEX_CHARS.chars().collect()
     } else {
@@ -947,7 +959,7 @@ pub struct StaticOptions<'a> {
     pub password: Option<&'a str>,
     pub generate: bool,
     pub length: usize,
-    pub keyboard_layout: KeyboardLayout,
+    pub keyboard_layout: LayoutSelection,
     pub enter: Option<bool>,
     pub access_code: Option<&'a str>,
     pub force: bool,

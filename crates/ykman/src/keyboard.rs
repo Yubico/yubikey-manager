@@ -6,7 +6,11 @@
 //! the keystrokes, so we ship a table mapping characters to scan codes for a
 //! wide range of layouts.
 //!
-//! The layout tables are generated from the system's XKB data by
+//! Layouts are organized as a [`KeyboardLayout`] family (a base layout plus
+//! zero or more named [`Variant`]s). A specific mapping is selected with a
+//! `layout` or `layout:variant` string, resolved into a [`LayoutSelection`].
+//!
+//! The tables are generated from the system's XKB data by
 //! `scripts/gen_keyboard_layouts.py` and embedded as a compact binary blob
 //! (`keyboard_layouts.bin`) that is parsed on first use. The blob does *not*
 //! contain modhex: modhex is a YubiKey-specific, layout-invariant encoding
@@ -22,76 +26,199 @@ pub const SHIFT: u8 = 0x80;
 pub const MODHEX_CHARS: &str = "cbdefghijklnrtuv";
 
 /// Canonical name of the modhex pseudo-layout.
-const MODHEX_NAME: &str = "MODHEX";
+const MODHEX_NAME: &str = "modhex";
 
 /// Embedded layout blob produced by `scripts/gen_keyboard_layouts.py`.
 const LAYOUT_BLOB: &[u8] = include_bytes!("keyboard_layouts.bin");
 
-/// Backing data for a single keyboard layout.
-struct LayoutData {
+/// A named variant of a [`KeyboardLayout`], with its own scancode mapping.
+pub struct Variant {
     name: String,
+    /// Fully-qualified `layout:variant` selector, e.g. `de:dvorak`.
+    full_name: String,
     scancodes: HashMap<char, u8>,
 }
 
-/// A keyboard layout mapping characters to YubiKey scan codes.
+impl Variant {
+    /// The variant's short name, e.g. `dvorak`.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+/// A keyboard layout family: a base layout plus zero or more [`Variant`]s.
 ///
-/// Values are lightweight handles into a process-wide registry loaded from the
-/// embedded layout blob, so they are cheap to copy and live for the whole
-/// program.
-#[derive(Clone, Copy)]
+/// Values live in a process-wide registry loaded from the embedded blob.
 pub struct KeyboardLayout {
-    data: &'static LayoutData,
+    name: String,
+    description: String,
+    scancodes: HashMap<char, u8>,
+    variants: Vec<Variant>,
+}
+
+impl KeyboardLayout {
+    /// The layout's canonical name, e.g. `de` or `modhex`.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// A human-readable description, e.g. `German`.
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// The layout's variants, if any.
+    pub fn variants(&self) -> &[Variant] {
+        &self.variants
+    }
+
+    /// All available layouts, modhex first.
+    pub fn all() -> &'static [KeyboardLayout] {
+        registry()
+    }
+
+    /// Whether this is the modhex pseudo-layout.
+    fn is_modhex(&self) -> bool {
+        self.name == MODHEX_NAME
+    }
+}
+
+/// A resolved selection of a specific scancode mapping (base layout or variant).
+///
+/// This is a lightweight handle into the registry, cheap to copy and valid for
+/// the whole program.
+#[derive(Clone, Copy)]
+pub struct LayoutSelection {
+    name: &'static str,
+    scancodes: &'static HashMap<char, u8>,
+    is_modhex: bool,
+}
+
+impl LayoutSelection {
+    /// The modhex pseudo-layout selection.
+    pub fn modhex() -> LayoutSelection {
+        resolve(MODHEX_NAME).expect("modhex layout is always present")
+    }
+
+    /// The fully-qualified name of the selection, e.g. `de` or `de:dvorak`.
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// The character-to-scancode map for this selection.
+    pub fn scancodes(&self) -> &'static HashMap<char, u8> {
+        self.scancodes
+    }
+
+    /// Whether this selection is the modhex pseudo-layout.
+    pub fn is_modhex(&self) -> bool {
+        self.is_modhex
+    }
 }
 
 /// Returns the process-wide layout registry, parsing the blob on first use.
 ///
 /// The modhex pseudo-layout is always first, followed by the generated layouts
 /// in the order they appear in the blob (sorted by name at generation time).
-fn registry() -> &'static Vec<LayoutData> {
-    static REG: OnceLock<Vec<LayoutData>> = OnceLock::new();
+fn registry() -> &'static Vec<KeyboardLayout> {
+    static REG: OnceLock<Vec<KeyboardLayout>> = OnceLock::new();
     REG.get_or_init(|| {
         let mut layouts = Vec::new();
-        layouts.push(LayoutData {
+        layouts.push(KeyboardLayout {
             name: MODHEX_NAME.to_string(),
+            description: "Modhex".to_string(),
             scancodes: modhex_scancodes(),
+            variants: Vec::new(),
         });
         parse_blob(LAYOUT_BLOB, &mut layouts);
         layouts
     })
 }
 
-/// Parses the embedded layout blob, appending each layout to `out`.
-///
-/// Format (little-endian):
-///   magic `b"YKL1"`, `u16` layout count, then per layout: `u8` name length,
-///   name (UTF-8), `u16` entry count, then entries of `u32` codepoint + `u8`
-///   scancode.
-fn parse_blob(data: &[u8], out: &mut Vec<LayoutData>) {
-    assert!(
-        data.len() >= 6 && &data[0..4] == b"YKL1",
-        "invalid keyboard layout blob header"
-    );
-    let count = u16::from_le_bytes([data[4], data[5]]) as usize;
-    let mut off = 6;
-    for _ in 0..count {
-        let name_len = data[off] as usize;
-        off += 1;
-        let name = std::str::from_utf8(&data[off..off + name_len])
-            .expect("invalid UTF-8 in layout name")
+/// Cursor over the embedded blob.
+struct Reader<'a> {
+    data: &'a [u8],
+    off: usize,
+}
+
+impl Reader<'_> {
+    fn u8(&mut self) -> u8 {
+        let v = self.data[self.off];
+        self.off += 1;
+        v
+    }
+
+    fn u16(&mut self) -> usize {
+        let v = u16::from_le_bytes([self.data[self.off], self.data[self.off + 1]]);
+        self.off += 2;
+        v as usize
+    }
+
+    fn u32(&mut self) -> u32 {
+        let v = u32::from_le_bytes([
+            self.data[self.off],
+            self.data[self.off + 1],
+            self.data[self.off + 2],
+            self.data[self.off + 3],
+        ]);
+        self.off += 4;
+        v
+    }
+
+    fn string(&mut self) -> String {
+        let len = self.u8() as usize;
+        let s = std::str::from_utf8(&self.data[self.off..self.off + len])
+            .expect("invalid UTF-8 in layout blob")
             .to_string();
-        off += name_len;
-        let entries = u16::from_le_bytes([data[off], data[off + 1]]) as usize;
-        off += 2;
-        let mut scancodes = HashMap::with_capacity(entries);
+        self.off += len;
+        s
+    }
+
+    fn scancodes(&mut self) -> HashMap<char, u8> {
+        let entries = self.u16();
+        let mut map = HashMap::with_capacity(entries);
         for _ in 0..entries {
-            let cp = u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]);
-            let sc = data[off + 4];
-            off += 5;
+            let cp = self.u32();
+            let sc = self.u8();
             if let Some(c) = char::from_u32(cp) {
-                scancodes.insert(c, sc);
+                map.insert(c, sc);
             }
         }
-        out.push(LayoutData { name, scancodes });
+        map
+    }
+}
+
+/// Parses the embedded layout blob, appending each layout family to `out`.
+///
+/// See `scripts/gen_keyboard_layouts.py` for the format specification.
+fn parse_blob(data: &[u8], out: &mut Vec<KeyboardLayout>) {
+    assert!(
+        data.len() >= 6 && &data[0..4] == b"YKL2",
+        "invalid keyboard layout blob header"
+    );
+    let mut r = Reader { data, off: 4 };
+    let count = r.u16();
+    for _ in 0..count {
+        let name = r.string();
+        let description = r.string();
+        let scancodes = r.scancodes();
+        let variant_count = r.u16();
+        let mut variants = Vec::with_capacity(variant_count);
+        for _ in 0..variant_count {
+            let vname = r.string();
+            let vscancodes = r.scancodes();
+            variants.push(Variant {
+                full_name: format!("{name}:{vname}"),
+                name: vname,
+                scancodes: vscancodes,
+            });
+        }
+        out.push(KeyboardLayout {
+            name,
+            description,
+            scancodes,
+            variants,
+        });
     }
 }
 
@@ -101,7 +228,6 @@ fn parse_blob(data: &[u8], out: &mut Vec<LayoutData>) {
 /// (e.g. `UK` is XKB `gb`, `BEPO` is the `fr:bepo` variant).
 fn resolve_alias(name: &str) -> String {
     match name.to_ascii_lowercase().as_str() {
-        "modhex" => MODHEX_NAME.to_string(),
         "uk" => "gb".to_string(),
         "bepo" => "fr:bepo".to_string(),
         "norman" => "us:norman".to_string(),
@@ -109,74 +235,70 @@ fn resolve_alias(name: &str) -> String {
     }
 }
 
-impl KeyboardLayout {
-    /// The modhex pseudo-layout.
-    pub fn modhex() -> KeyboardLayout {
-        KeyboardLayout {
-            data: &registry()[0],
+/// Resolves a `layout` or `layout:variant` selector into a [`LayoutSelection`].
+fn resolve(input: &str) -> Result<LayoutSelection, String> {
+    let canonical = resolve_alias(input);
+    let (layout_name, variant_name) = match canonical.split_once(':') {
+        Some((l, v)) => (l, Some(v)),
+        None => (canonical.as_str(), None),
+    };
+    let layout = registry()
+        .iter()
+        .find(|l| l.name.eq_ignore_ascii_case(layout_name))
+        .ok_or_else(|| format!("Unknown keyboard layout: {input}"))?;
+    match variant_name {
+        None => Ok(LayoutSelection {
+            name: layout.name.as_str(),
+            scancodes: &layout.scancodes,
+            is_modhex: layout.is_modhex(),
+        }),
+        Some(variant) => {
+            let variant = layout
+                .variants
+                .iter()
+                .find(|v| v.name.eq_ignore_ascii_case(variant))
+                .ok_or_else(|| {
+                    format!(
+                        "Unknown variant '{variant}' for keyboard layout '{}'",
+                        layout.name
+                    )
+                })?;
+            Ok(LayoutSelection {
+                name: variant.full_name.as_str(),
+                scancodes: &variant.scancodes,
+                is_modhex: false,
+            })
         }
-    }
-
-    /// All available layouts, modhex first.
-    pub fn all() -> Vec<KeyboardLayout> {
-        registry()
-            .iter()
-            .map(|data| KeyboardLayout { data })
-            .collect()
-    }
-
-    /// Looks up a layout by name (case-insensitive), honoring aliases.
-    pub fn from_name(name: &str) -> Option<KeyboardLayout> {
-        let target = resolve_alias(name);
-        registry()
-            .iter()
-            .find(|d| d.name.eq_ignore_ascii_case(&target))
-            .map(|data| KeyboardLayout { data })
-    }
-
-    /// The layout's canonical name.
-    pub fn name(&self) -> &'static str {
-        self.data.name.as_str()
-    }
-
-    /// The character-to-scancode map for this layout.
-    pub fn scancodes(&self) -> &'static HashMap<char, u8> {
-        &self.data.scancodes
-    }
-
-    /// Whether this is the modhex pseudo-layout.
-    pub fn is_modhex(&self) -> bool {
-        self.data.name == MODHEX_NAME
     }
 }
 
-impl std::str::FromStr for KeyboardLayout {
+impl std::str::FromStr for LayoutSelection {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        KeyboardLayout::from_name(s).ok_or_else(|| format!("Unknown keyboard layout: {s}"))
+        resolve(s)
     }
 }
 
-impl std::fmt::Display for KeyboardLayout {
+impl std::fmt::Display for LayoutSelection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.name())
+        f.write_str(self.name)
     }
 }
 
-impl std::fmt::Debug for KeyboardLayout {
+impl std::fmt::Debug for LayoutSelection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("KeyboardLayout").field(&self.name()).finish()
+        f.debug_tuple("LayoutSelection").field(&self.name).finish()
     }
 }
 
-impl PartialEq for KeyboardLayout {
+impl PartialEq for LayoutSelection {
     fn eq(&self, other: &Self) -> bool {
-        self.data.name == other.data.name
+        self.name == other.name
     }
 }
 
-impl Eq for KeyboardLayout {}
+impl Eq for LayoutSelection {}
 
 /// The modhex scancode map, defined in code since modhex is not a real layout.
 fn modhex_scancodes() -> HashMap<char, u8> {
@@ -192,40 +314,65 @@ fn modhex_scancodes() -> HashMap<char, u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn blob_parses_and_has_common_layouts() {
-        for name in ["us", "gb", "de", "fr", "it", "fr:bepo", "us:norman"] {
-            let layout =
-                KeyboardLayout::from_name(name).unwrap_or_else(|| panic!("missing layout {name}"));
-            assert!(!layout.scancodes().is_empty());
+        for name in ["us", "gb", "de", "fr", "it"] {
+            let selection = LayoutSelection::from_str(name)
+                .unwrap_or_else(|e| panic!("missing layout {name}: {e}"));
+            assert!(!selection.scancodes().is_empty());
         }
     }
 
     #[test]
-    fn modhex_is_special() {
-        let modhex = KeyboardLayout::modhex();
-        assert!(modhex.is_modhex());
-        assert_eq!(modhex.name(), MODHEX_NAME);
-        // 16 modhex chars, each in lower and upper case.
-        assert_eq!(modhex.scancodes().len(), MODHEX_CHARS.chars().count() * 2);
-        assert_eq!(modhex.scancodes().get(&'c'), Some(&0x06));
+    fn layouts_have_descriptions_and_variants() {
+        let de = KeyboardLayout::all()
+            .iter()
+            .find(|l| l.name() == "de")
+            .expect("de layout present");
+        assert_eq!(de.description(), "German");
+        assert!(de.variants().iter().any(|v| v.name() == "dvorak"));
     }
 
     #[test]
-    fn aliases_resolve() {
-        assert_eq!(KeyboardLayout::from_name("uk").unwrap().name(), "gb");
-        assert_eq!(KeyboardLayout::from_name("BEPO").unwrap().name(), "fr:bepo");
+    fn modhex_is_special() {
+        let modhex = LayoutSelection::modhex();
+        assert!(modhex.is_modhex());
+        assert_eq!(modhex.name(), MODHEX_NAME);
+        assert_eq!(modhex.scancodes().len(), MODHEX_CHARS.chars().count() * 2);
+        assert_eq!(modhex.scancodes().get(&'c'), Some(&0x06));
+        // Modhex is listed first and carries no variants.
+        let first = &KeyboardLayout::all()[0];
+        assert_eq!(first.name(), MODHEX_NAME);
+        assert!(first.variants().is_empty());
+    }
+
+    #[test]
+    fn resolves_variants_and_aliases() {
         assert_eq!(
-            KeyboardLayout::from_name("norman").unwrap().name(),
+            LayoutSelection::from_str("de:dvorak").unwrap().name(),
+            "de:dvorak"
+        );
+        assert_eq!(LayoutSelection::from_str("uk").unwrap().name(), "gb");
+        assert_eq!(LayoutSelection::from_str("bepo").unwrap().name(), "fr:bepo");
+        assert_eq!(
+            LayoutSelection::from_str("norman").unwrap().name(),
             "us:norman"
         );
-        assert!(KeyboardLayout::from_name("modhex").unwrap().is_modhex());
+        assert!(LayoutSelection::from_str("modhex").unwrap().is_modhex());
+    }
+
+    #[test]
+    fn rejects_unknown_layout_and_variant() {
+        assert!(LayoutSelection::from_str("nonesuch").is_err());
+        let err = LayoutSelection::from_str("de:nope").unwrap_err();
+        assert!(err.contains("Unknown variant"), "{err}");
     }
 
     #[test]
     fn us_layout_basics() {
-        let us = KeyboardLayout::from_name("us").unwrap();
+        let us = LayoutSelection::from_str("us").unwrap();
         assert_eq!(us.scancodes().get(&'a'), Some(&0x04));
         assert_eq!(us.scancodes().get(&'A'), Some(&(0x04 | SHIFT)));
         assert_eq!(us.scancodes().get(&'1'), Some(&0x1E));

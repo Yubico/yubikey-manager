@@ -29,6 +29,8 @@ For each layout the script compiles an XKB keymap (without touching the running
 keyboard) and records the character produced by each YubiKey-emittable scan
 code at the base and Shift levels. The YubiKey only has a Shift modifier for
 static passwords, so AltGr-only characters are intentionally not represented.
+Each layout also stores its human-readable description (e.g. `German`) and its
+variants (e.g. `dvorak`, `neo`) grouped under it.
 
 ## Modhex
 
@@ -41,11 +43,19 @@ encoding using a fixed 16-character subset, so it is defined directly in
 Little-endian:
 
 ```
-magic   : b"YKL1"
-count   : u16                      number of layouts
-layouts : repeated `count` times
+magic    : b"YKL2"
+count    : u16                      number of layout families
+families : repeated `count` times
     name_len : u8
-    name     : name_len UTF-8 bytes   e.g. "us" or "fr:bepo"
-    entries  : u16
-    entry    : u32 codepoint + u8 scancode   repeated `entries` times
+    name     : name_len UTF-8 bytes        e.g. "de"
+    desc_len : u8
+    desc     : desc_len UTF-8 bytes         e.g. "German"
+    base     : scancode map                 the layout's default mapping
+    variants : u16                          number of variants
+        vname_len : u8
+        vname     : vname_len UTF-8 bytes    e.g. "dvorak"
+        map       : scancode map
+scancode map:
+    entries : u16
+    entry   : u32 codepoint + u8 scancode   repeated `entries` times
 ```

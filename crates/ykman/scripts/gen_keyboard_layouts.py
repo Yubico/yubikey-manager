@@ -58,15 +58,24 @@ XKB_MODEL = "pc105"
 
 SHIFT = 0x80
 
-# Blob format:
-#   magic   : b"YKL1"
-#   count   : u16 little-endian (number of layouts)
-#   layouts : repeated
+# Blob format (little-endian):
+#   magic    : b"YKL2"
+#   count    : u16                      number of layout families
+#   families : repeated `count` times
 #       name_len : u8
-#       name     : name_len UTF-8 bytes  (e.g. "us" or "fr:bepo")
-#       entries  : u16 little-endian
-#       entry    : char (u32 LE) + scancode (u8)   -- repeated `entries` times
-MAGIC = b"YKL1"
+#       name     : name_len UTF-8 bytes         e.g. "us"
+#       desc_len : u8
+#       desc     : desc_len UTF-8 bytes          e.g. "English (US)"
+#       base     : scancode map (see below)      the layout's default mapping
+#       variants : u16                           number of variants
+#           variant :
+#               vname_len : u8
+#               vname     : vname_len UTF-8 bytes e.g. "dvorak"
+#               map       : scancode map
+#   scancode map:
+#       entries : u16
+#       entry   : char (u32 LE) + scancode (u8)  repeated `entries` times
+MAGIC = b"YKL2"
 
 # Map each YubiKey-producible HID keyboard usage id to the XKB key name for its
 # physical position.  These are exactly the scan codes referenced by
@@ -231,47 +240,82 @@ class Xkb:
         result.setdefault(char, scancode)
 
 
-def enumerate_layouts(xml_path: str) -> list[tuple[str, str]]:
-    """Return (layout, variant) pairs from the evdev rules database."""
+def load_layout_db(xml_path: str) -> list[tuple[str, str, list[str]]]:
+    """Return ordered (layout, description, [variant, ...]) from evdev rules."""
     # evdev.xml ships with the system's xkb-data package and is trusted input.
     tree = ET.parse(xml_path)  # noqa: S314
-    pairs: list[tuple[str, str]] = []
+    families: list[tuple[str, str, list[str]]] = []
     for layout in tree.findall(".//layout"):
-        name_el = layout.find("./configItem/name")
+        config = layout.find("./configItem")
+        if config is None:
+            continue
+        name_el = config.find("name")
         if name_el is None or not name_el.text:
             continue
         name = name_el.text
-        pairs.append((name, ""))
-        for variant in layout.findall("./variantList/variant/configItem/name"):
-            if variant.text:
-                pairs.append((name, variant.text))
-    return pairs
+        desc_el = config.find("description")
+        description = desc_el.text if desc_el is not None and desc_el.text else name
+        variants = [
+            variant.text
+            for variant in layout.findall("./variantList/variant/configItem/name")
+            if variant.text
+        ]
+        families.append((name, description, variants))
+    return families
 
 
-def parse_selection(tokens: list[str]) -> list[tuple[str, str]]:
-    pairs: list[tuple[str, str]] = []
+def select_families(
+    tokens: list[str], db: list[tuple[str, str, list[str]]]
+) -> list[tuple[str, str, list[str]]]:
+    """Restrict the layout database to the requested layout[:variant] tokens."""
+    descriptions = {name: desc for name, desc, _ in db}
+    order: list[str] = []
+    chosen: dict[str, list[str]] = {}
     for token in tokens:
         layout, _, variant = token.partition(":")
-        pairs.append((layout, variant))
-    return pairs
+        if layout not in chosen:
+            chosen[layout] = []
+            order.append(layout)
+        if variant and variant not in chosen[layout]:
+            chosen[layout].append(variant)
+    return [(name, descriptions.get(name, name), chosen[name]) for name in order]
 
 
-def layout_key(layout: str, variant: str) -> str:
-    return f"{layout}:{variant}" if variant else layout
+def write_map(out: bytearray, mapping: dict[str, int]) -> None:
+    out += struct.pack("<H", len(mapping))
+    for char in sorted(mapping):
+        out += struct.pack("<IB", ord(char), mapping[char])
 
 
-def build_blob(layouts: dict[str, dict[str, int]]) -> bytes:
+def write_str(out: bytearray, value: str) -> None:
+    data = value.encode("utf-8")
+    if len(data) > 0xFF:
+        raise ValueError(f"string too long for u8 length prefix: {value!r}")
+    out += struct.pack("<B", len(data))
+    out += data
+
+
+def build_blob(
+    families: dict[str, tuple[str, dict[str, int], list[tuple[str, dict[str, int]]]]],
+) -> bytes:
     out = bytearray(MAGIC)
-    out += struct.pack("<H", len(layouts))
-    for name in sorted(layouts):
-        mapping = layouts[name]
-        name_bytes = name.encode("utf-8")
-        out += struct.pack("<B", len(name_bytes))
-        out += name_bytes
-        out += struct.pack("<H", len(mapping))
-        for char in sorted(mapping):
-            out += struct.pack("<IB", ord(char), mapping[char])
+    out += struct.pack("<H", len(families))
+    for name in sorted(families):
+        description, base, variants = families[name]
+        write_str(out, name)
+        write_str(out, description)
+        write_map(out, base)
+        out += struct.pack("<H", len(variants))
+        for vname, vmap in sorted(variants, key=lambda item: item[0]):
+            write_str(out, vname)
+            write_map(out, vmap)
     return bytes(out)
+
+
+def is_usable(mapping: dict[str, int]) -> bool:
+    # A usable mapping must produce at least one character beyond the
+    # layout-invariant whitespace constants.
+    return len(mapping) > len(CONSTANT_KEYS)
 
 
 def main() -> int:
@@ -297,43 +341,53 @@ def main() -> int:
     parser.add_argument(
         "--list",
         action="store_true",
-        help="List the layouts that would be generated and exit.",
+        help="List the layouts (and variants) that would be generated and exit.",
     )
     args = parser.parse_args()
 
+    db = load_layout_db(args.rules)
     if args.layouts:
-        selection = parse_selection(args.layouts)
+        selection = select_families(args.layouts, db)
     else:
-        selection = enumerate_layouts(args.rules)
+        selection = db
 
     if args.list:
-        for layout, variant in selection:
-            print(layout_key(layout, variant))
+        for name, description, variants in selection:
+            suffix = f" (variants: {', '.join(variants)})" if variants else ""
+            print(f"{name} - {description}{suffix}")
         return 0
 
     xkb = Xkb()
-    layouts: dict[str, dict[str, int]] = {}
+    families: dict[
+        str, tuple[str, dict[str, int], list[tuple[str, dict[str, int]]]]
+    ] = {}
     skipped = 0
-    for layout, variant in selection:
-        mapping = xkb.layout_map(layout, variant)
-        key = layout_key(layout, variant)
-        # A useful layout must produce at least the ASCII letters; skip
-        # non-Latin-only or unmappable layouts that yield nothing typable.
-        if mapping is None or len(mapping) <= len(CONSTANT_KEYS):
+    for name, description, variant_names in selection:
+        base = xkb.layout_map(name, "")
+        if base is None or not is_usable(base):
             skipped += 1
-            print(f"skip  {key}", file=sys.stderr)
+            print(f"skip  {name}", file=sys.stderr)
             continue
-        layouts[key] = mapping
+        variant_maps: list[tuple[str, dict[str, int]]] = []
+        for variant in variant_names:
+            mapping = xkb.layout_map(name, variant)
+            if mapping is None or not is_usable(mapping):
+                skipped += 1
+                print(f"skip  {name}:{variant}", file=sys.stderr)
+                continue
+            variant_maps.append((variant, mapping))
+        families[name] = (description, base, variant_maps)
 
-    if not layouts:
+    if not families:
         print("error: no layouts generated", file=sys.stderr)
         return 1
 
-    blob = build_blob(layouts)
+    total_variants = sum(len(v) for _, _, v in families.values())
+    blob = build_blob(families)
     args.output.write_bytes(blob)
     print(
-        f"wrote {len(layouts)} layouts ({skipped} skipped) "
-        f"= {len(blob)} bytes to {args.output}"
+        f"wrote {len(families)} layouts + {total_variants} variants "
+        f"({skipped} skipped) = {len(blob)} bytes to {args.output}"
     )
     return 0
 
