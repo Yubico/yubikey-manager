@@ -71,6 +71,16 @@ pub fn prompt_secret(prompt: &str) -> Result<String> {
         .map_err(|e| anyhow!("Failed to read input: {e}"))
 }
 
+/// Prompt for a secret value on the terminal, echoing a `*` for each
+/// character typed. Reads from the controlling terminal like [`prompt_secret`].
+pub fn prompt_secret_masked(prompt: &str) -> Result<String> {
+    let config = rpassword::ConfigBuilder::new()
+        .password_feedback_mask('*')
+        .build();
+    rpassword::prompt_password_with_config(format!("{prompt}: "), config)
+        .map_err(|e| anyhow!("Failed to read input: {e}"))
+}
+
 /// Prompt for a new secret value with confirmation. Re-prompts on mismatch.
 pub fn prompt_new_secret(prompt: &str) -> Result<String> {
     loop {
@@ -212,7 +222,7 @@ impl ByteFormat {
 pub fn prompt_bytes(label: &str, spec: &ByteFormat) -> Result<Vec<u8>> {
     let prompt_line = format!("{label} ({})", spec.describe());
     let input = if spec.masked {
-        prompt_secret(&prompt_line)?
+        prompt_secret_masked(&prompt_line)?
     } else {
         prompt(&prompt_line)?
     };
