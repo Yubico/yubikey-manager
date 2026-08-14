@@ -15,7 +15,7 @@ use yubikit::yubiotp::{
 
 use crate::cancel;
 use crate::cli_enums::{CliCalcDigits, CliHotpDigits, CliOtpSlot, CliPacing};
-use crate::keyboard::{KeyboardLayout, LayoutSelection, MODHEX_CHARS};
+use crate::keyboard::{KeyboardLayout, LayoutSelection};
 use crate::scp::{self, ScpParams};
 use crate::util::{
     self, b32_encode, confirm, format_session_error, format_smartcard_connection_error,
@@ -32,7 +32,8 @@ pub fn effective_access_code<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{effective_access_code, format_otp_write_error};
+    use super::{effective_access_code, format_otp_write_error, generate_static_pw};
+    use crate::keyboard::LayoutSelection;
 
     #[test]
     fn parent_access_code_overrides_subcommand_access_code() {
@@ -63,6 +64,20 @@ mod tests {
             err.to_string(),
             "Failed to write to the YubiKey. Slot(s) may be protected with an access code."
         );
+    }
+
+    #[test]
+    fn generated_modhex_static_pw_uses_both_cases() {
+        // A long generated password should contain both upper and lower case
+        // modhex characters. The probability of an all-single-case result is
+        // negligible (~2 * 2^-256).
+        let pw = generate_static_pw(256, LayoutSelection::modhex()).unwrap();
+        assert!(
+            pw.chars()
+                .all(|c| "cbdefghijklnrtuv".contains(c.to_ascii_lowercase()))
+        );
+        assert!(pw.chars().any(|c| c.is_ascii_uppercase()));
+        assert!(pw.chars().any(|c| c.is_ascii_lowercase()));
     }
 }
 
@@ -533,16 +548,12 @@ fn encode_password(password: &str, layout: LayoutSelection) -> Result<Vec<u8>> {
 }
 
 fn generate_static_pw(length: usize, layout: LayoutSelection) -> Result<String> {
-    let chars: Vec<char> = if layout.is_modhex() {
-        MODHEX_CHARS.chars().collect()
-    } else {
-        layout
-            .scancodes()
-            .keys()
-            .copied()
-            .filter(|c| !"\t\n ".contains(*c))
-            .collect()
-    };
+    let chars: Vec<char> = layout
+        .scancodes()
+        .keys()
+        .copied()
+        .filter(|c| !"\t\n ".contains(*c))
+        .collect();
     let mut pw = String::with_capacity(length);
     let mut rand_bytes = vec![0u8; length];
     getrandom::fill(&mut rand_bytes).map_err(|e| anyhow!("Failed to generate random: {e}"))?;
