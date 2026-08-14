@@ -831,7 +831,7 @@ pub fn run_yubiotp(
     } else {
         let bytes = util::prompt_bytes(
             "Enter private ID",
-            &util::ByteFormat::hex(util::ByteLen::Exact(UID_SIZE)),
+            &util::ByteFormat::hex(util::ByteLen::Exact(UID_SIZE)).masked(),
         )?;
         let mut arr = [0u8; UID_SIZE];
         arr.copy_from_slice(&bytes);
@@ -862,7 +862,7 @@ pub fn run_yubiotp(
     } else {
         let bytes = util::prompt_bytes(
             "Enter secret key",
-            &util::ByteFormat::hex(util::ByteLen::Exact(KEY_SIZE)),
+            &util::ByteFormat::hex(util::ByteLen::Exact(KEY_SIZE)).masked(),
         )?;
         let mut arr = [0u8; KEY_SIZE];
         arr.copy_from_slice(&bytes);
@@ -1064,7 +1064,7 @@ pub fn run_chalresp(
         loop {
             match util::prompt_bytes(
                 "Enter a secret key",
-                &util::ByteFormat::base32(util::ByteLen::Any),
+                &util::ByteFormat::base32(util::ByteLen::Any).masked(),
             ) {
                 Ok(k) => break k,
                 Err(e) => eprintln!("{e}"),
@@ -1073,7 +1073,7 @@ pub fn run_chalresp(
     } else {
         util::prompt_bytes(
             "Enter a secret key",
-            &util::ByteFormat::hex(util::ByteLen::Any),
+            &util::ByteFormat::hex(util::ByteLen::Any).masked(),
         )?
     };
 
@@ -1250,7 +1250,7 @@ pub fn run_hotp(
         loop {
             match util::prompt_bytes(
                 "Enter a secret key",
-                &util::ByteFormat::hex(util::ByteLen::Any),
+                &util::ByteFormat::hex(util::ByteLen::Any).masked(),
             ) {
                 Ok(k) => break k,
                 Err(e) => eprintln!("{e}"),

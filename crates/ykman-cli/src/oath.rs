@@ -683,7 +683,7 @@ pub fn run_accounts_add(
         loop {
             match crate::util::prompt_bytes(
                 "Enter a secret key",
-                &crate::util::ByteFormat::base32(crate::util::ByteLen::Any),
+                &crate::util::ByteFormat::base32(crate::util::ByteLen::Any).masked(),
             ) {
                 Ok(k) => break k,
                 Err(e) => eprintln!("{e}"),
