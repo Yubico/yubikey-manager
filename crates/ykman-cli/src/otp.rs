@@ -118,13 +118,13 @@ pub enum OtpAction {
     Yubiotp {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
-        /// Public ID (modhex)
+        /// Public ID (modhex, 0-16 bytes)
         #[arg(short = 'P', long)]
         public_id: Option<String>,
-        /// Private ID (hex)
+        /// Private ID (hex, 6 bytes)
         #[arg(short = 'p', long)]
         private_id: Option<String>,
-        /// AES key (hex)
+        /// AES key (hex, 16 bytes)
         #[arg(short = 'k', long)]
         key: Option<String>,
         /// Use serial number as public ID
@@ -801,13 +801,10 @@ pub fn run_yubiotp(
             "Public ID not given. Remove the --force flag, or add the --serial-public-id flag or --public-id option."
         ));
     } else {
-        let pid = util::prompt("Enter public ID")?;
-        if pid.len() % 2 != 0 {
-            return Err(anyhow!(
-                "Invalid public ID, length must be a multiple of 2."
-            ));
-        }
-        modhex_decode(&pid).map_err(|_| anyhow!("Invalid modhex public ID."))?
+        util::prompt_bytes(
+            "Enter public ID",
+            &util::ByteFormat::modhex(util::ByteLen::Range(0, 16)),
+        )?
     };
 
     // Resolve private ID
@@ -832,14 +829,10 @@ pub fn run_yubiotp(
             "Private ID not given. Remove the --force flag, or add the --generate-private-id flag or --private-id option."
         ));
     } else {
-        let pid = util::prompt("Enter private ID")?;
-        let bytes = hex::decode(&pid).map_err(|_| anyhow!("Private ID must be hex-encoded."))?;
-        if bytes.len() != UID_SIZE {
-            return Err(anyhow!(
-                "Private ID must be {UID_SIZE} bytes ({} hex chars).",
-                UID_SIZE * 2
-            ));
-        }
+        let bytes = util::prompt_bytes(
+            "Enter private ID",
+            &util::ByteFormat::hex(util::ByteLen::Exact(UID_SIZE)),
+        )?;
         let mut arr = [0u8; UID_SIZE];
         arr.copy_from_slice(&bytes);
         arr
@@ -867,14 +860,10 @@ pub fn run_yubiotp(
             "Secret key not given. Remove the --force flag, or add the --generate-key flag or --key option."
         ));
     } else {
-        let k = util::prompt("Enter secret key")?;
-        let bytes = hex::decode(&k).map_err(|_| anyhow!("Key must be hex-encoded."))?;
-        if bytes.len() != KEY_SIZE {
-            return Err(anyhow!(
-                "Key must be {KEY_SIZE} bytes ({} hex chars).",
-                KEY_SIZE * 2
-            ));
-        }
+        let bytes = util::prompt_bytes(
+            "Enter secret key",
+            &util::ByteFormat::hex(util::ByteLen::Exact(KEY_SIZE)),
+        )?;
         let mut arr = [0u8; KEY_SIZE];
         arr.copy_from_slice(&bytes);
         arr
@@ -1160,8 +1149,10 @@ pub fn run_calculate(
     } else if let Some(c) = challenge {
         hex::decode(c).map_err(|_| anyhow!("Challenge must be hex-encoded."))?
     } else {
-        let input = util::prompt("Enter a challenge (hex)")?;
-        hex::decode(&input).map_err(|_| anyhow!("Challenge must be hex-encoded."))?
+        util::prompt_bytes(
+            "Enter a challenge",
+            &util::ByteFormat::hex(util::ByteLen::Any),
+        )?
     };
 
     struct Calculate {
@@ -1253,8 +1244,10 @@ pub fn run_hotp(
         parse_hex_key(k)?
     } else {
         loop {
-            let input = util::prompt("Enter a secret key (hex)")?;
-            match parse_hex_key(&input) {
+            match util::prompt_bytes(
+                "Enter a secret key",
+                &util::ByteFormat::hex(util::ByteLen::Any),
+            ) {
                 Ok(k) => break k,
                 Err(e) => eprintln!("{e}"),
             }

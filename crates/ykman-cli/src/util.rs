@@ -4,6 +4,7 @@ use std::io::{self, Read, Write};
 
 use yubikit::device::{DeviceError, YubiKeyDevice};
 use yubikit::management::Capability;
+use yubikit::otp::modhex_decode;
 use yubikit::smartcard::{ScpKeyParams, SmartCardConnection, SmartCardError, Sw};
 
 use crate::scp::{self, ScpParams};
@@ -79,6 +80,103 @@ pub fn prompt_new_secret(prompt: &str) -> Result<String> {
         }
         eprintln!("Values do not match, try again.");
     }
+}
+
+/// Encoding of a binary value entered on the command line.
+#[derive(Clone, Copy)]
+pub enum ByteEncoding {
+    Hex,
+    Modhex,
+}
+
+impl ByteEncoding {
+    fn label(self) -> &'static str {
+        match self {
+            ByteEncoding::Hex => "hex",
+            ByteEncoding::Modhex => "modhex",
+        }
+    }
+
+    fn decode(self, input: &str) -> Result<Vec<u8>> {
+        let input = input.trim();
+        match self {
+            ByteEncoding::Hex => {
+                hex::decode(input).map_err(|_| anyhow!("Value must be hex-encoded."))
+            }
+            ByteEncoding::Modhex => {
+                modhex_decode(input).map_err(|_| anyhow!("Value must be modhex-encoded."))
+            }
+        }
+    }
+}
+
+/// Expected length, in bytes, of a binary value.
+#[derive(Clone, Copy)]
+pub enum ByteLen {
+    /// Any length is accepted.
+    Any,
+    /// Exactly `n` bytes.
+    Exact(usize),
+    /// Between `min` and `max` bytes, inclusive.
+    Range(usize, usize),
+}
+
+/// Describes an expected hex/modhex byte value for prompts, help text and parsing.
+#[derive(Clone, Copy)]
+pub struct ByteFormat {
+    encoding: ByteEncoding,
+    len: ByteLen,
+}
+
+impl ByteFormat {
+    pub fn hex(len: ByteLen) -> Self {
+        Self {
+            encoding: ByteEncoding::Hex,
+            len,
+        }
+    }
+
+    pub fn modhex(len: ByteLen) -> Self {
+        Self {
+            encoding: ByteEncoding::Modhex,
+            len,
+        }
+    }
+
+    /// A human-readable description, e.g. "modhex, 0-16 bytes" or "hex, 6 bytes".
+    pub fn describe(&self) -> String {
+        let label = self.encoding.label();
+        match self.len {
+            ByteLen::Any => label.to_string(),
+            ByteLen::Exact(n) => format!("{label}, {n} bytes"),
+            ByteLen::Range(min, max) => format!("{label}, {min}-{max} bytes"),
+        }
+    }
+
+    /// Decode and length-validate a user-entered value.
+    pub fn parse(&self, input: &str) -> Result<Vec<u8>> {
+        let bytes = self.encoding.decode(input)?;
+        let ok = match self.len {
+            ByteLen::Any => true,
+            ByteLen::Exact(n) => bytes.len() == n,
+            ByteLen::Range(min, max) => (min..=max).contains(&bytes.len()),
+        };
+        if !ok {
+            return Err(anyhow!(
+                "Expected {} but got {} bytes.",
+                self.describe(),
+                bytes.len()
+            ));
+        }
+        Ok(bytes)
+    }
+}
+
+/// Prompt for a hex/modhex value, showing its expected format, and return the
+/// decoded bytes. Errors if the input is not valid for the given format.
+pub fn prompt_bytes(label: &str, spec: &ByteFormat) -> Result<Vec<u8>> {
+    let input = prompt(&format!("{label} ({})", spec.describe()))?;
+    spec.parse(&input)
 }
 
 /// Read from a file, or from stdin if path is "-".
@@ -221,5 +319,38 @@ where
         Some(params) => {
             new_session_with_scp(conn, &params).map_err(|(e, _)| format_session_error(app_name, e))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn describe_formats() {
+        assert_eq!(
+            ByteFormat::modhex(ByteLen::Range(0, 16)).describe(),
+            "modhex, 0-16 bytes"
+        );
+        assert_eq!(
+            ByteFormat::hex(ByteLen::Exact(6)).describe(),
+            "hex, 6 bytes"
+        );
+        assert_eq!(ByteFormat::hex(ByteLen::Any).describe(), "hex");
+    }
+
+    #[test]
+    fn parse_validates_length_and_encoding() {
+        let spec = ByteFormat::hex(ByteLen::Exact(6));
+        assert_eq!(spec.parse("aabbccddeeff").unwrap().len(), 6);
+        assert!(spec.parse("aabbcc").is_err()); // too short
+        assert!(spec.parse("zz").is_err()); // not hex
+
+        let modhex = ByteFormat::modhex(ByteLen::Range(0, 16));
+        assert!(modhex.parse("").unwrap().is_empty()); // empty allowed
+        assert!(modhex.parse("vvincredible").is_ok());
+
+        let any = ByteFormat::hex(ByteLen::Any);
+        assert_eq!(any.parse("00112233").unwrap().len(), 4);
     }
 }
