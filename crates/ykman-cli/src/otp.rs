@@ -993,7 +993,7 @@ pub fn run_static(
     } else if generate {
         generate_static_pw(length, keyboard_layout)?
     } else {
-        util::prompt("Enter a static password")?
+        util::prompt_new_secret("Static password")?
     };
 
     let scan_codes = encode_password(&pw, keyboard_layout)?;
