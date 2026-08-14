@@ -125,8 +125,6 @@ pub enum ByteLen {
     Exact(usize),
     /// Between `min` and `max` bytes, inclusive.
     Range(usize, usize),
-    /// One of the listed byte lengths.
-    OneOf(&'static [usize]),
 }
 
 impl ByteLen {
@@ -135,15 +133,6 @@ impl ByteLen {
             ByteLen::Any => None,
             ByteLen::Exact(n) => Some(format!("{n} bytes")),
             ByteLen::Range(min, max) => Some(format!("{min}-{max} bytes")),
-            ByteLen::OneOf(lens) => {
-                let parts: Vec<String> = lens.iter().map(|n| n.to_string()).collect();
-                let list = match parts.as_slice() {
-                    [] => return None,
-                    [only] => only.clone(),
-                    [head @ .., last] => format!("{}, or {last}", head.join(", ")),
-                };
-                Some(format!("{list} bytes"))
-            }
         }
     }
 
@@ -152,7 +141,6 @@ impl ByteLen {
             ByteLen::Any => true,
             ByteLen::Exact(n) => len == *n,
             ByteLen::Range(min, max) => (*min..=*max).contains(&len),
-            ByteLen::OneOf(lens) => lens.contains(&len),
         }
     }
 }
@@ -391,14 +379,6 @@ mod tests {
         assert_eq!(ByteFormat::hex(ByteLen::Any).describe(), "hex");
         assert_eq!(ByteFormat::base32(ByteLen::Any).describe(), "base32");
         assert_eq!(
-            ByteFormat::hex(ByteLen::OneOf(&[16, 24, 32])).describe(),
-            "hex, 16, 24, or 32 bytes"
-        );
-        assert_eq!(
-            ByteFormat::hex(ByteLen::OneOf(&[16])).describe(),
-            "hex, 16 bytes"
-        );
-        assert_eq!(
             ByteFormat::hex(ByteLen::Exact(16)).masked().describe(),
             "hex, 16 bytes"
         );
@@ -417,10 +397,6 @@ mod tests {
 
         let any = ByteFormat::hex(ByteLen::Any);
         assert_eq!(any.parse("00112233").unwrap().len(), 4);
-
-        let mgmt = ByteFormat::hex(ByteLen::OneOf(&[16, 24, 32]));
-        assert_eq!(mgmt.parse(&"aa".repeat(24)).unwrap().len(), 24);
-        assert!(mgmt.parse(&"aa".repeat(20)).is_err());
 
         let b32 = ByteFormat::base32(ByteLen::Any);
         assert!(b32.parse("gezdgnbvgy3tqoi").is_ok());

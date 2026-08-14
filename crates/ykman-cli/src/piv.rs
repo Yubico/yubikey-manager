@@ -732,11 +732,12 @@ fn authenticate_session(
     {
         return Ok(false);
     }
+    let key_type = session.management_key_type();
     let key = prompt_bytes(
         "Enter the current management key",
-        &ByteFormat::hex(ByteLen::OneOf(&[16, 24, 32])).masked(),
+        &ByteFormat::hex(ByteLen::Exact(key_type.key_len())).masked(),
     )?;
-    let management_key = to_management_key(session.management_key_type(), &key)?;
+    let management_key = to_management_key(key_type, &key)?;
     session
         .authenticate(&management_key)
         .map_err(|e| format_management_key_auth_error(e, false))?;
