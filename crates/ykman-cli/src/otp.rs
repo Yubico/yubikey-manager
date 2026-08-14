@@ -215,7 +215,7 @@ pub enum OtpAction {
     Hotp {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
-        /// HMAC key (hex)
+        /// HMAC key (hex, or Base32 with --totp)
         key: Option<String>,
         /// Number of digits (6 or 8)
         #[arg(long, default_value = "6")]
@@ -1062,15 +1062,19 @@ pub fn run_chalresp(
         ));
     } else if totp {
         loop {
-            let input = util::prompt("Enter a secret key (base32)")?;
-            match parse_b32_key(&input) {
+            match util::prompt_bytes(
+                "Enter a secret key",
+                &util::ByteFormat::base32(util::ByteLen::Any),
+            ) {
                 Ok(k) => break k,
                 Err(e) => eprintln!("{e}"),
             }
         }
     } else {
-        let input = util::prompt("Enter a secret key")?;
-        parse_hex_key(&input)?
+        util::prompt_bytes(
+            "Enter a secret key",
+            &util::ByteFormat::hex(util::ByteLen::Any),
+        )?
     };
 
     let cred_type = if totp { "TOTP" } else { "challenge-response" };

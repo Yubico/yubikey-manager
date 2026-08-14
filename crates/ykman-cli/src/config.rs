@@ -9,8 +9,8 @@ use yubikit::management::{
 
 use crate::cli_enums::CliCapability;
 use crate::util::{
-    confirm, format_session_error, format_smartcard_connection_error, prompt_new_secret,
-    prompt_secret,
+    ByteFormat, ByteLen, confirm, format_session_error, format_smartcard_connection_error,
+    prompt_bytes, prompt_new_secret,
 };
 
 #[derive(Subcommand)]
@@ -306,11 +306,12 @@ fn current_lock_code(
     prompt: &str,
 ) -> Result<Option<Vec<u8>>> {
     if is_locked {
+        let spec = ByteFormat::hex(ByteLen::Exact(16)).masked();
         let code = match lock_code {
-            Some(code) => code.to_string(),
-            None => prompt_secret(prompt)?,
+            Some(code) => spec.parse(code)?,
+            None => prompt_bytes(prompt, &spec)?,
         };
-        Ok(Some(parse_lock_code(&code)?))
+        Ok(Some(code))
     } else {
         reject_lock_code_if_unlocked(is_locked, lock_code)?;
         Ok(None)
@@ -463,11 +464,7 @@ pub fn run_usb(
         changes.push("The YubiKey will reboot".into());
     }
 
-    let lc = current_lock_code(
-        info.is_locked,
-        lock_code,
-        "Enter lock code (32 hex characters)",
-    )?;
+    let lc = current_lock_code(info.is_locked, lock_code, "Enter lock code")?;
 
     confirm_config_changes("USB", &changes, force)?;
 
@@ -519,11 +516,7 @@ pub fn run_nfc(
             nfc_restricted: Some(true),
             ..Default::default()
         };
-        let lc = current_lock_code(
-            info.is_locked,
-            lock_code,
-            "Enter lock code (32 hex characters)",
-        )?;
+        let lc = current_lock_code(info.is_locked, lock_code, "Enter lock code")?;
         confirm_config_changes(
             "NFC",
             &["Disable NFC until next USB power cycle".into()],
@@ -551,11 +544,7 @@ pub fn run_nfc(
         return Err(anyhow!("No configuration changes specified."));
     }
 
-    let lc = current_lock_code(
-        info.is_locked,
-        lock_code,
-        "Enter lock code (32 hex characters)",
-    )?;
+    let lc = current_lock_code(info.is_locked, lock_code, "Enter lock code")?;
 
     confirm_config_changes("NFC", &changes, force)?;
 
@@ -584,7 +573,7 @@ pub fn run_set_lock_code(
     }
 
     let cur = if is_locked {
-        current_lock_code(true, lock_code, "Current lock code (32 hex characters)")?
+        current_lock_code(true, lock_code, "Current lock code")?
     } else {
         lock_code.map(parse_lock_code).transpose()?
     };

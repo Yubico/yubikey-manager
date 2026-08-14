@@ -4,6 +4,7 @@ use std::io::{self, Read, Write};
 
 use yubikit::device::{DeviceError, YubiKeyDevice};
 use yubikit::management::Capability;
+use yubikit::oath::parse_b32_key;
 use yubikit::otp::modhex_decode;
 use yubikit::smartcard::{ScpKeyParams, SmartCardConnection, SmartCardError, Sw};
 
@@ -87,6 +88,7 @@ pub fn prompt_new_secret(prompt: &str) -> Result<String> {
 pub enum ByteEncoding {
     Hex,
     Modhex,
+    Base32,
 }
 
 impl ByteEncoding {
@@ -94,6 +96,7 @@ impl ByteEncoding {
         match self {
             ByteEncoding::Hex => "hex",
             ByteEncoding::Modhex => "modhex",
+            ByteEncoding::Base32 => "base32",
         }
     }
 
@@ -105,6 +108,9 @@ impl ByteEncoding {
             }
             ByteEncoding::Modhex => {
                 modhex_decode(input).map_err(|_| anyhow!("Value must be modhex-encoded."))
+            }
+            ByteEncoding::Base32 => {
+                parse_b32_key(input).map_err(|_| anyhow!("Value must be Base32-encoded."))
             }
         }
     }
@@ -119,13 +125,44 @@ pub enum ByteLen {
     Exact(usize),
     /// Between `min` and `max` bytes, inclusive.
     Range(usize, usize),
+    /// One of the listed byte lengths.
+    OneOf(&'static [usize]),
 }
 
-/// Describes an expected hex/modhex byte value for prompts, help text and parsing.
+impl ByteLen {
+    fn describe(&self) -> Option<String> {
+        match self {
+            ByteLen::Any => None,
+            ByteLen::Exact(n) => Some(format!("{n} bytes")),
+            ByteLen::Range(min, max) => Some(format!("{min}-{max} bytes")),
+            ByteLen::OneOf(lens) => {
+                let parts: Vec<String> = lens.iter().map(|n| n.to_string()).collect();
+                let list = match parts.as_slice() {
+                    [] => return None,
+                    [only] => only.clone(),
+                    [head @ .., last] => format!("{}, or {last}", head.join(", ")),
+                };
+                Some(format!("{list} bytes"))
+            }
+        }
+    }
+
+    fn accepts(&self, len: usize) -> bool {
+        match self {
+            ByteLen::Any => true,
+            ByteLen::Exact(n) => len == *n,
+            ByteLen::Range(min, max) => (*min..=*max).contains(&len),
+            ByteLen::OneOf(lens) => lens.contains(&len),
+        }
+    }
+}
+
+/// Describes an expected binary value for prompts, help text and parsing.
 #[derive(Clone, Copy)]
 pub struct ByteFormat {
     encoding: ByteEncoding,
     len: ByteLen,
+    masked: bool,
 }
 
 impl ByteFormat {
@@ -133,6 +170,7 @@ impl ByteFormat {
         Self {
             encoding: ByteEncoding::Hex,
             len,
+            masked: false,
         }
     }
 
@@ -140,28 +178,37 @@ impl ByteFormat {
         Self {
             encoding: ByteEncoding::Modhex,
             len,
+            masked: false,
         }
+    }
+
+    pub fn base32(len: ByteLen) -> Self {
+        Self {
+            encoding: ByteEncoding::Base32,
+            len,
+            masked: false,
+        }
+    }
+
+    /// Mask the input when prompting (for secret values).
+    pub fn masked(mut self) -> Self {
+        self.masked = true;
+        self
     }
 
     /// A human-readable description, e.g. "modhex, 0-16 bytes" or "hex, 6 bytes".
     pub fn describe(&self) -> String {
         let label = self.encoding.label();
-        match self.len {
-            ByteLen::Any => label.to_string(),
-            ByteLen::Exact(n) => format!("{label}, {n} bytes"),
-            ByteLen::Range(min, max) => format!("{label}, {min}-{max} bytes"),
+        match self.len.describe() {
+            Some(len) => format!("{label}, {len}"),
+            None => label.to_string(),
         }
     }
 
     /// Decode and length-validate a user-entered value.
     pub fn parse(&self, input: &str) -> Result<Vec<u8>> {
         let bytes = self.encoding.decode(input)?;
-        let ok = match self.len {
-            ByteLen::Any => true,
-            ByteLen::Exact(n) => bytes.len() == n,
-            ByteLen::Range(min, max) => (min..=max).contains(&bytes.len()),
-        };
-        if !ok {
+        if !self.len.accepts(bytes.len()) {
             return Err(anyhow!(
                 "Expected {} but got {} bytes.",
                 self.describe(),
@@ -172,10 +219,15 @@ impl ByteFormat {
     }
 }
 
-/// Prompt for a hex/modhex value, showing its expected format, and return the
-/// decoded bytes. Errors if the input is not valid for the given format.
+/// Prompt for a hex/modhex/base32 value, showing its expected format, and
+/// return the decoded bytes. Errors if the input is not valid for the format.
 pub fn prompt_bytes(label: &str, spec: &ByteFormat) -> Result<Vec<u8>> {
-    let input = prompt(&format!("{label} ({})", spec.describe()))?;
+    let prompt_line = format!("{label} ({})", spec.describe());
+    let input = if spec.masked {
+        prompt_secret(&prompt_line)?
+    } else {
+        prompt(&prompt_line)?
+    };
     spec.parse(&input)
 }
 
@@ -337,6 +389,19 @@ mod tests {
             "hex, 6 bytes"
         );
         assert_eq!(ByteFormat::hex(ByteLen::Any).describe(), "hex");
+        assert_eq!(ByteFormat::base32(ByteLen::Any).describe(), "base32");
+        assert_eq!(
+            ByteFormat::hex(ByteLen::OneOf(&[16, 24, 32])).describe(),
+            "hex, 16, 24, or 32 bytes"
+        );
+        assert_eq!(
+            ByteFormat::hex(ByteLen::OneOf(&[16])).describe(),
+            "hex, 16 bytes"
+        );
+        assert_eq!(
+            ByteFormat::hex(ByteLen::Exact(16)).masked().describe(),
+            "hex, 16 bytes"
+        );
     }
 
     #[test]
@@ -352,5 +417,12 @@ mod tests {
 
         let any = ByteFormat::hex(ByteLen::Any);
         assert_eq!(any.parse("00112233").unwrap().len(), 4);
+
+        let mgmt = ByteFormat::hex(ByteLen::OneOf(&[16, 24, 32]));
+        assert_eq!(mgmt.parse(&"aa".repeat(24)).unwrap().len(), 24);
+        assert!(mgmt.parse(&"aa".repeat(20)).is_err());
+
+        let b32 = ByteFormat::base32(ByteLen::Any);
+        assert!(b32.parse("gezdgnbvgy3tqoi").is_ok());
     }
 }

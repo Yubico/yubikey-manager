@@ -29,7 +29,8 @@ use crate::cli_enums::{
 };
 use crate::scp::ScpParams;
 use crate::util::{
-    confirm, open_smartcard_session, print_table, read_file_or_stdin, write_file_or_stdout,
+    ByteFormat, ByteLen, confirm, open_smartcard_session, print_table, prompt_bytes,
+    read_file_or_stdin, write_file_or_stdout,
 };
 
 #[derive(Subcommand)]
@@ -102,7 +103,7 @@ pub enum PivAccessAction {
         pin_retries: u8,
         /// PUK retry count
         puk_retries: u8,
-        /// Current management key
+        /// Current management key (hex, 16, 24, or 32 bytes)
         #[arg(short = 'm', long)]
         management_key: Option<String>,
         /// PIN used to authorize with a PIN-protected management key
@@ -114,10 +115,10 @@ pub enum PivAccessAction {
     },
     /// Change the management key
     ChangeManagementKey {
-        /// Current management key
+        /// Current management key (hex, 16, 24, or 32 bytes)
         #[arg(short = 'm', long)]
         management_key: Option<String>,
-        /// New management key
+        /// New management key (hex, 16, 24, or 32 bytes)
         #[arg(short = 'n', long)]
         new_management_key: Option<String>,
         /// Algorithm for the new management key
@@ -155,7 +156,7 @@ pub enum PivKeysAction {
         /// Touch policy for the generated key
         #[arg(long, default_value = "default")]
         touch_policy: CliTouchPolicy,
-        /// Management key
+        /// Management key (hex, 16, 24, or 32 bytes)
         #[arg(short = 'm', long)]
         management_key: Option<String>,
         /// PIN used to authorize with a PIN-protected management key
@@ -177,7 +178,7 @@ pub enum PivKeysAction {
         /// Touch policy for the imported key
         #[arg(long, default_value = "default")]
         touch_policy: CliTouchPolicy,
-        /// Management key
+        /// Management key (hex, 16, 24, or 32 bytes)
         #[arg(short = 'm', long)]
         management_key: Option<String>,
         /// PIN used to authorize with a PIN-protected management key
@@ -224,7 +225,7 @@ pub enum PivKeysAction {
         source: String,
         /// Destination slot
         dest: String,
-        /// Management key
+        /// Management key (hex, 16, 24, or 32 bytes)
         #[arg(short = 'm', long)]
         management_key: Option<String>,
         /// PIN used to authorize with a PIN-protected management key
@@ -235,7 +236,7 @@ pub enum PivKeysAction {
     Delete {
         /// PIV slot
         slot: String,
-        /// Management key
+        /// Management key (hex, 16, 24, or 32 bytes)
         #[arg(short = 'm', long)]
         management_key: Option<String>,
         /// PIN used to authorize with a PIN-protected management key
@@ -262,7 +263,7 @@ pub enum PivCertAction {
         slot: String,
         /// Certificate file
         cert_file: String,
-        /// Management key
+        /// Management key (hex, 16, 24, or 32 bytes)
         #[arg(short = 'm', long)]
         management_key: Option<String>,
         /// PIN used to authorize with a PIN-protected management key
@@ -285,7 +286,7 @@ pub enum PivCertAction {
     Delete {
         /// PIV slot
         slot: String,
-        /// Management key
+        /// Management key (hex, 16, 24, or 32 bytes)
         #[arg(short = 'm', long)]
         management_key: Option<String>,
         /// PIN used to authorize with a PIN-protected management key
@@ -311,7 +312,7 @@ pub enum PivCertAction {
         /// Hash algorithm
         #[arg(short = 'a', long, default_value = "sha256")]
         hash_algorithm: CliHashAlgorithm,
-        /// Management key
+        /// Management key (hex, 16, 24, or 32 bytes)
         #[arg(short = 'm', long)]
         management_key: Option<String>,
         /// PIN used to authorize with a PIN-protected management key
@@ -360,7 +361,7 @@ pub enum PivObjectAction {
         object: String,
         /// Data file
         data: String,
-        /// Management key
+        /// Management key (hex, 16, 24, or 32 bytes)
         #[arg(short = 'm', long)]
         management_key: Option<String>,
         /// PIN used to authorize with a PIN-protected management key
@@ -371,7 +372,7 @@ pub enum PivObjectAction {
     Generate {
         /// Object type: CHUID or CCC
         object: String,
-        /// Management key
+        /// Management key (hex, 16, 24, or 32 bytes)
         #[arg(short = 'm', long)]
         management_key: Option<String>,
         /// PIN used to authorize with a PIN-protected management key
@@ -731,8 +732,10 @@ fn authenticate_session(
     {
         return Ok(false);
     }
-    let input = crate::util::prompt_secret("Enter the current management key")?;
-    let key = parse_management_key(&input)?;
+    let key = prompt_bytes(
+        "Enter the current management key",
+        &ByteFormat::hex(ByteLen::OneOf(&[16, 24, 32])).masked(),
+    )?;
     let management_key = to_management_key(session.management_key_type(), &key)?;
     session
         .authenticate(&management_key)

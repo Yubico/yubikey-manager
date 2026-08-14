@@ -681,8 +681,10 @@ pub fn run_accounts_add(
         key
     } else {
         loop {
-            let input = crate::util::prompt("Enter a secret key (base32)")?;
-            match parse_b32_key(&input) {
+            match crate::util::prompt_bytes(
+                "Enter a secret key",
+                &crate::util::ByteFormat::base32(crate::util::ByteLen::Any),
+            ) {
                 Ok(k) => break k,
                 Err(e) => eprintln!("{e}"),
             }
