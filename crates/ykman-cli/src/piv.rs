@@ -1219,17 +1219,13 @@ pub fn run_change_management_key(
     } else if let Some(k) = provided_new_key {
         k
     } else {
-        let input = crate::util::prompt_new_secret(&format!(
-            "New management key ({}, in hex)",
-            management_key_type_prompt_name(key_type)
-        ))?;
-        let bytes = parse_management_key(&input)?;
-        if bytes.len() != key_len {
-            return Err(anyhow!(
-                "Management key must be {key_len} bytes for {key_type}."
-            ));
-        }
-        bytes
+        prompt_bytes(
+            &format!(
+                "New management key ({})",
+                management_key_type_prompt_name(key_type)
+            ),
+            &ByteFormat::hex(ByteLen::Exact(key_len)).masked(),
+        )?
     };
 
     pivman_set_mgm_key(&mut session, key_type, &new_key, touch, protect)
