@@ -497,7 +497,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
             let key_ref = KeyRef::from_bytes(&inner[..2]).expect("inner has at least 2 bytes");
             let mut components = HashMap::new();
             let pairs = &inner[2..];
-            for chunk in pairs.chunks_exact(2) {
+            for chunk in pairs.as_chunks::<2>().0 {
                 components.insert(chunk[0], chunk[1]);
             }
             keys.insert(key_ref, components);
