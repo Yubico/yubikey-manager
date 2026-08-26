@@ -53,6 +53,7 @@ serde_json = "1"
 anyhow = "1"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
+clap_complete = { version = "4" }
 ctrlc = "3.5"
 dirs = "6"
 fernet = { version = "0.2", default-features = false, features = ["rustcrypto"] }

@@ -27,6 +27,7 @@ ykman.workspace = true
 yubikit.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+clap_complete.workspace = true
 chrono.workspace = true
 getrandom.workspace = true
 hex.workspace = true

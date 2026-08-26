@@ -2,7 +2,9 @@
 use anyhow::{Result, anyhow};
 use std::process;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{Shell, generate};
+
 use yubikit::core::Version;
 use yubikit::management::Capability;
 
@@ -77,6 +79,10 @@ struct Cli {
     #[arg(long)]
     licenses: bool,
 
+    /// Generate shell completion
+    #[arg(long)]
+    completion: Option<Shell>,
+
     /// Enable logging at given verbosity level
     #[arg(short = 'l', long, global = true)]
     log_level: Option<logging::LogLevel>,
@@ -117,11 +123,17 @@ fn print_licenses() {
     print!("{text}");
 }
 
+fn print_completion(shell: Shell) {
+    use std::io;
+    let mut cmd = Cli::command();
+    let bin_name = cmd.get_name().to_string();
+    generate(shell, &mut cmd, bin_name, &mut io::stdout());
+}
+
 fn command_or_help(command: Option<Commands>) -> Commands {
     match command {
         Some(command) => command,
         None => {
-            use clap::CommandFactory;
             let mut cmd = Cli::command();
             cmd.print_help().ok();
             println!();
@@ -283,6 +295,11 @@ fn run() -> Result<()> {
 
     if cli.licenses {
         print_licenses();
+        return Ok(());
+    }
+
+    if let Some(shell) = cli.completion {
+        print_completion(shell);
         return Ok(());
     }
 
