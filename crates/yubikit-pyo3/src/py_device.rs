@@ -147,6 +147,7 @@ pub fn get_name(
         fps_version: None,
         stm_version: None,
         version_qualifier: VersionQualifier::final_release(ver),
+        name: None,
     };
 
     let _ = py;

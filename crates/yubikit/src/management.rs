@@ -101,6 +101,7 @@ const TAG_RESET_BLOCKED: u32 = 0x18;
 const TAG_VERSION_QUALIFIER: u32 = 0x19;
 const TAG_FPS_VERSION: u32 = 0x20;
 const TAG_STM_VERSION: u32 = 0x21;
+const TAG_NAME: u32 = 0xB1;
 
 // ---------------------------------------------------------------------------
 // Capability (bitflags)
@@ -662,6 +663,8 @@ pub struct DeviceInfo {
     pub stm_version: Option<Version>,
     /// Fully qualified firmware version with release type.
     pub version_qualifier: VersionQualifier,
+    /// Device name reported by the device, if available.
+    pub name: Option<String>,
 }
 
 impl DeviceInfo {
@@ -780,6 +783,11 @@ impl DeviceInfo {
             .map(|v| Version::from_bytes(v))
             .filter(|&v| v != Version(0, 0, 0));
 
+        let name = data.get(&TAG_NAME).and_then(|v| {
+            let s = String::from_utf8(v.clone()).ok()?;
+            if s.is_empty() { None } else { Some(s) }
+        });
+
         let config = DeviceConfig {
             enabled_capabilities: enabled,
             auto_eject_timeout: Some(auto_eject_to),
@@ -805,6 +813,7 @@ impl DeviceInfo {
             fps_version,
             stm_version,
             version_qualifier,
+            name,
         })
     }
 

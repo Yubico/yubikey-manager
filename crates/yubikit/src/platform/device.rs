@@ -1225,6 +1225,7 @@ mod tests {
             fps_version: None,
             stm_version: None,
             version_qualifier: crate::management::VersionQualifier::final_release(version),
+            name: None,
         }
     }
 

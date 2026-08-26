@@ -573,6 +573,7 @@ impl RpcDevice {
             fps_version: opt_version("fps_version")?,
             stm_version: opt_version("stm_version")?,
             version_qualifier,
+            name: optional_str(data, "name")?,
         })
     }
 }

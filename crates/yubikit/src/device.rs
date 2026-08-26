@@ -256,6 +256,10 @@ pub(crate) fn fido_only(cap: Capability) -> bool {
 
 /// Determine the product name of a YubiKey from its [`DeviceInfo`].
 pub fn get_name(info: &DeviceInfo) -> String {
+    if let Some(name) = &info.name {
+        return name.clone();
+    }
+
     let usb_supported = info
         .supported_capabilities
         .get(&Transport::Usb)
@@ -426,6 +430,7 @@ fn synthesize_info(pid: u16, version: Version, serial: Option<u32>) -> DeviceInf
         fps_version: None,
         stm_version: None,
         version_qualifier: crate::management::VersionQualifier::final_release(version),
+        name: None,
     }
 }
 
@@ -570,6 +575,7 @@ fn synthesize_info_ccid<C: SmartCardConnection + Send + 'static>(
         fps_version: None,
         stm_version: None,
         version_qualifier: crate::management::VersionQualifier::final_release(version),
+        name: None,
     };
     Ok((info, conn))
 }
@@ -761,6 +767,7 @@ mod tests {
             fps_version: None,
             stm_version: None,
             version_qualifier: crate::management::VersionQualifier::final_release(version),
+            name: None,
         }
     }
 
