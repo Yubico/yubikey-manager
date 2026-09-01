@@ -155,7 +155,10 @@ pub struct DeviceInfoDiag {
     pub fips_approved: CapabilityDiag,
     pub pin_complexity: bool,
     pub reset_blocked: CapabilityDiag,
+    pub fps_version: Option<String>,
+    pub stm_version: Option<String>,
     pub version_qualifier: Option<VersionQualifierDiag>,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -401,7 +404,10 @@ fn device_info_diag(info: &DeviceInfo) -> DeviceInfoDiag {
         fips_approved: cap_diag(info.fips_approved),
         pin_complexity: info.pin_complexity,
         reset_blocked: cap_diag(info.reset_blocked),
+        fps_version: info.fps_version.map(|v| v.to_string()),
+        stm_version: info.stm_version.map(|v| v.to_string()),
         version_qualifier: vq,
+        name: info.name.clone(),
     }
 }
 

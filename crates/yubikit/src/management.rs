@@ -101,7 +101,7 @@ const TAG_RESET_BLOCKED: u32 = 0x18;
 const TAG_VERSION_QUALIFIER: u32 = 0x19;
 const TAG_FPS_VERSION: u32 = 0x20;
 const TAG_STM_VERSION: u32 = 0x21;
-const TAG_NAME: u32 = 0xB1;
+const TAG_NAME: u32 = 0x1B;
 
 // ---------------------------------------------------------------------------
 // Capability (bitflags)
@@ -1799,6 +1799,21 @@ mod tests {
         assert!(!info.fips_approved.contains(Capability::OPENPGP));
         assert!(info.pin_complexity);
         assert!(info.is_locked);
+    }
+
+    #[test]
+    fn test_device_info_parse_name() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&tlv_encode(TAG_VERSION, &[6, 0, 0]));
+        payload.extend_from_slice(&tlv_encode(TAG_USB_SUPPORTED, &[0x02, 0x3F]));
+        payload.extend_from_slice(&tlv_encode(TAG_NAME, b"A Custom Name"));
+
+        let mut encoded = vec![payload.len() as u8];
+        encoded.extend_from_slice(&payload);
+
+        let info = DeviceInfo::parse(&encoded, Version(0, 0, 0)).unwrap();
+        assert_eq!(info.name.as_deref(), Some("A Custom Name"));
+        assert_eq!(crate::device::get_name(&info), "A Custom Name");
     }
 
     #[test]
