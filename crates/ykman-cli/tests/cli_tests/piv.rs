@@ -891,7 +891,7 @@ fn test_piv_objects_import_too_large_error() {
 
     let temp_dir = tempfile::tempdir().expect("failed to create temporary directory");
     let data_path = temp_dir.path().join("piv_large_object.bin");
-    std::fs::write(&data_path, vec![0u8; 8000]).expect("failed to write fixture");
+    std::fs::write(&data_path, vec![0u8; 20000]).expect("failed to write fixture");
 
     ykman_dev()
         .args([
