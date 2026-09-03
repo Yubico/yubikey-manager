@@ -1,6 +1,6 @@
 [package]
 name = "ykman-cli"
-version = "6.0.0-dev.0"
+version = "6.0.0-dev.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

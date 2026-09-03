@@ -47,7 +47,8 @@ impl<T: Serialize> From<Result<T, String>> for ResultOrError<T> {
 
 #[derive(Debug, Serialize)]
 pub struct DiagnosticsReport {
-    pub version: String,
+    pub app_version: String,
+    pub lib_version: String,
     pub features: Vec<String>,
     pub platform: String,
     pub arch: String,
@@ -1096,14 +1097,19 @@ fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
 }
 
 /// Run full diagnostics across all transports and return a serializable report.
-pub fn run_diagnostics() -> DiagnosticsReport {
+///
+/// `app_version` should be the version of the top-level application, passed in
+/// by the caller. The `lib_version` is the version of this (`ykman`) library
+/// crate.
+pub fn run_diagnostics(app_version: &str) -> DiagnosticsReport {
     let mut features = Vec::new();
     if cfg!(feature = "hardware") {
         features.push("hardware".to_string());
     }
 
     DiagnosticsReport {
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        app_version: app_version.to_string(),
+        lib_version: env!("CARGO_PKG_VERSION").to_string(),
         features,
         platform: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
