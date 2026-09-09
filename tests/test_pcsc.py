@@ -8,12 +8,14 @@ from ykman.pcsc import kill_scdaemon, kill_yubikey_agent
 def test_kill_yubikey_agent_success(platform):
     with (
         patch("ykman.pcsc.sys.platform", platform),
+        patch("ykman.pcsc.shutil.which", return_value="/usr/bin/pkill"),
+        patch("ykman.pcsc.os.path.exists", return_value=True),
         patch("ykman.pcsc.subprocess.call", return_value=0) as mock_call,
         patch("ykman.pcsc.sleep") as mock_sleep,
     ):
         result = kill_yubikey_agent()
         assert result is True
-        mock_call.assert_called_once_with(["pkill", "-HUP", "yubikey-agent"])
+        mock_call.assert_called_once_with(["/usr/bin/pkill", "-HUP", "yubikey-agent"])
         mock_sleep.assert_called_once_with(0.1)
 
 
@@ -21,12 +23,14 @@ def test_kill_yubikey_agent_success(platform):
 def test_kill_yubikey_agent_failure(platform):
     with (
         patch("ykman.pcsc.sys.platform", platform),
+        patch("ykman.pcsc.shutil.which", return_value="/usr/bin/pkill"),
+        patch("ykman.pcsc.os.path.exists", return_value=True),
         patch("ykman.pcsc.subprocess.call", return_value=1) as mock_call,
         patch("ykman.pcsc.sleep") as mock_sleep,
     ):
         result = kill_yubikey_agent()
         assert result is False
-        mock_call.assert_called_once_with(["pkill", "-HUP", "yubikey-agent"])
+        mock_call.assert_called_once_with(["/usr/bin/pkill", "-HUP", "yubikey-agent"])
         mock_sleep.assert_not_called()
 
 
@@ -46,12 +50,14 @@ def test_kill_yubikey_agent_windows():
 def test_kill_scdaemon_non_win_success(platform):
     with (
         patch("ykman.pcsc.sys.platform", platform),
+        patch("ykman.pcsc.shutil.which", return_value="/usr/bin/pkill"),
+        patch("ykman.pcsc.os.path.exists", return_value=True),
         patch("ykman.pcsc.subprocess.call", return_value=0) as mock_call,
         patch("ykman.pcsc.sleep") as mock_sleep,
     ):
         result = kill_scdaemon()
         assert result is True
-        mock_call.assert_called_once_with(["pkill", "-9", "scdaemon"])
+        mock_call.assert_called_once_with(["/usr/bin/pkill", "-9", "scdaemon"])
         mock_sleep.assert_called_once_with(0.1)
 
 
@@ -59,12 +65,14 @@ def test_kill_scdaemon_non_win_success(platform):
 def test_kill_scdaemon_non_win_failure(platform):
     with (
         patch("ykman.pcsc.sys.platform", platform),
+        patch("ykman.pcsc.shutil.which", return_value="/usr/bin/pkill"),
+        patch("ykman.pcsc.os.path.exists", return_value=True),
         patch("ykman.pcsc.subprocess.call", return_value=1) as mock_call,
         patch("ykman.pcsc.sleep") as mock_sleep,
     ):
         result = kill_scdaemon()
         assert result is False
-        mock_call.assert_called_once_with(["pkill", "-9", "scdaemon"])
+        mock_call.assert_called_once_with(["/usr/bin/pkill", "-9", "scdaemon"])
         mock_sleep.assert_not_called()
 
 
