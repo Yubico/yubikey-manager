@@ -4,11 +4,12 @@ from datetime import date
 
 import pytest
 
+from cryptography import x509
+
 from ykman.piv import (
     derive_management_key,
     generate_chuid,
     generate_random_management_key,
-    _parse_rfc4514_string,
 )
 from yubikit.core import BadResponseError, NotSupportedError, Version
 from yubikit.piv import (
@@ -36,8 +37,8 @@ from yubikit.piv import (
     ],
 )
 def test_parse_rfc4514_string(value):
-    name = _parse_rfc4514_string(value)
-    name2 = _parse_rfc4514_string(name.rfc4514_string())
+    name = x509.Name.from_rfc4514_string(value)
+    name2 = x509.Name.from_rfc4514_string(name.rfc4514_string())
     assert name == name2
 
 

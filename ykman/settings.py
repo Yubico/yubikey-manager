@@ -67,18 +67,18 @@ class Settings(dict):
         if not conf_dir.is_dir():
             conf_dir.mkdir(0o700, parents=True)
         if os.name == "posix":
-            conf_dir.chmod(0o700)
-
-        # SECURITY: Create settings and appdata files with restricted permissions
-        # (0o600) from creation to prevent race conditions exposing sensitive data.
-        def _opener(path, flags):
-            return os.open(path, flags, 0o600)
-
-        kwargs = {"opener": _opener} if os.name == "posix" else {}
-        with open(self.fname, "w", **kwargs) as fd:
-            json.dump(self, fd, indent=2)
-        if os.name == "posix":
+            # Open with mode 0o600 to ensure restrictive permissions on creation
+            fd_num = os.open(
+                self.fname,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o600,
+            )
+            with os.fdopen(fd_num, "w") as fd:
+                json.dump(self, fd, indent=2)
             self.fname.chmod(0o600)
+        else:
+            with self.fname.open("w") as fd:
+                json.dump(self, fd, indent=2)
 
     __hash__ = None
 
