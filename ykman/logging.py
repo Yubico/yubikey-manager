@@ -44,7 +44,10 @@ class RestrictiveFileHandler(logging.FileHandler):
                 os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                 0o600,
             )
-            os.chmod(self.baseFilename, 0o600)
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd_num, 0o600)
+            else:
+                os.chmod(self.baseFilename, 0o600)
             return os.fdopen(
                 fd_num, self.mode, encoding=self.encoding, errors=self.errors
             )
