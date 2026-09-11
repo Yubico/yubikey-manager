@@ -66,8 +66,19 @@ class Settings(dict):
         conf_dir = self.fname.parent
         if not conf_dir.is_dir():
             conf_dir.mkdir(0o700, parents=True)
-        with self.fname.open("w") as fd:
-            json.dump(self, fd, indent=2)
+        if os.name == "posix":
+            # Open with mode 0o600 to ensure restrictive permissions on creation
+            fd_num = os.open(
+                self.fname,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o600,
+            )
+            with os.fdopen(fd_num, "w") as fd:
+                json.dump(self, fd, indent=2)
+            self.fname.chmod(0o600)
+        else:
+            with self.fname.open("w") as fd:
+                json.dump(self, fd, indent=2)
 
     __hash__ = None
 

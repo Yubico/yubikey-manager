@@ -79,9 +79,10 @@ def parse_private_key(data, password):
             return serialization.load_pem_private_key(
                 data, password, backend=default_backend()
             )
-        except ValueError as e:
-            # Cryptography raises ValueError if decryption fails.
-            if encrypted:
+        except (TypeError, ValueError) as e:
+            # Cryptography raises TypeError or ValueError if decryption
+            # fails / password missing.
+            if encrypted or password is not None:
                 raise InvalidPasswordError(e)
             logger.debug("Failed to parse PEM private key ", exc_info=True)
         except Exception:

@@ -228,6 +228,10 @@ def _hmac_sha1(key, message):
 
 
 def _derive_key(salt, passphrase):
+    # PBKDF2 with SHA-1 (1000 iterations, 16 bytes output) is required by the
+    # YubiKey OATH application specification for deriving access keys.
+    # Changing this algorithm would break compatibility with YubiKey hardware
+    # devices and existing access keys.
     return hashlib.pbkdf2_hmac("sha1", passphrase.encode(), salt, 1000, 16)
 
 

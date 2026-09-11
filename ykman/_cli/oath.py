@@ -31,10 +31,9 @@ from base64 import b32encode
 from typing import Any
 
 import click
+from cryptography import x509
 from cryptography.x509 import NameOID
 from pskc import PSKC
-
-from ykman.piv import parse_rfc4514_string
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SW, ApduError, SmartCardConnection
 from yubikit.management import CAPABILITY
@@ -754,7 +753,7 @@ def import_pskc(ctx, import_file, touch, force, password, remember):
         if key.key_userid:
             try:
                 # Use the CN field if the userid is a DN
-                dn = parse_rfc4514_string(key.key_userid)
+                dn = x509.Name.from_rfc4514_string(key.key_userid)
                 name = dn.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
                 assert isinstance(name, str)  # noqa: S101
             except (ValueError, IndexError):
