@@ -6,6 +6,7 @@ import pytest
 from ykman import __version__ as version
 from ykman.otp import format_oath_code, generate_static_pw, time_challenge
 from ykman.util import (
+    InvalidPasswordError,
     _parse_pkcs12,
     is_pem,
     is_pkcs12,
@@ -165,6 +166,17 @@ def test_parse_pkcs12():
     key, certs = _parse_pkcs12(data, None)
     assert key is not None
     assert len(certs) == 1
+
+
+def test_parse_private_key_encrypted_pem_raises_invalid_password_error():
+    with open_file("rsa_2048_key_encrypted.pem") as fh:
+        data = fh.read()
+
+    with pytest.raises(InvalidPasswordError):
+        parse_private_key(data, None)
+
+    with pytest.raises(InvalidPasswordError):
+        parse_private_key(data, b"wrong-password")
 
 
 @pytest.mark.parametrize(
