@@ -123,7 +123,14 @@ pub(crate) fn list_setupdi_devices() -> Vec<SetupDiDeviceInfo> {
 
         // Extract the device path string
         let path = unsafe {
-            let path_ptr = (*detail).DevicePath.as_ptr();
+            // `SP_DEVICE_INTERFACE_DETAIL_DATA_W` is packed (mirrors the
+            // `#pragma pack(1)` around it in the real setupapi.h, kept for
+            // ANSI/Unicode layout compatibility), so `DevicePath` may not be
+            // 2-byte aligned. `.as_ptr()` would first form a `&[u16; 1]`
+            // reference to the field, which is UB for an unaligned packed
+            // field even if never dereferenced — use `&raw const` to get a
+            // pointer to the field directly instead.
+            let path_ptr = (&raw const (*detail).DevicePath).cast::<u16>();
             // Calculate the number of WCHARs in the path
             let path_bytes = required_size as usize
                 - mem::offset_of!(SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath);
