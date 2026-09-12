@@ -1,5 +1,7 @@
 use yubikit::__internal::tlv::{parse_tlv_list, tlv_encode, tlv_unpack};
-use yubikit::piv::{ManagementKey, ManagementKeyType, ObjectId, PivError, PivSession};
+use yubikit::piv::{
+    Chuid, FascN, ManagementKey, ManagementKeyType, ObjectId, PivError, PivSession,
+};
 use yubikit::smartcard::SmartCardConnection;
 
 const PIVMAN_OBJ_ID: u32 = 0x5FFF00;
@@ -12,6 +14,43 @@ const TAG_PIVMAN_PROTECTED: u32 = 0x88;
 pub const TAG_PIVMAN_KEY: u32 = 0x89;
 
 const PIVMAN_FLAG_KEY_PROTECTED: u8 = 0x02;
+
+/// Generate a CHUID (Cardholder Unique Identifier).
+///
+/// Uses a Non-Federal Issuer FASC-N, a random (version 4) GUID, and a fixed 2030-01-01 expiry.
+pub fn generate_chuid() -> Result<Vec<u8>, PivError> {
+    let mut guid = [0u8; 16];
+    getrandom::fill(&mut guid).map_err(|e| PivError::InvalidData(format!("RNG error: {e}")))?;
+    // Set the UUID version (4) and variant bits
+    guid[6] = (guid[6] & 0x0f) | 0x40;
+    guid[8] = (guid[8] & 0x3f) | 0x80;
+
+    let chuid = Chuid {
+        buffer_length: None,
+        // Non-Federal Issuer FASC-N.
+        fasc_n: FascN {
+            agency_code: 9999,
+            system_code: 9999,
+            credential_number: 999999,
+            credential_series: 0,
+            individual_credential_issue: 1,
+            person_identifier: 0,
+            organizational_category: 3,
+            organizational_identifier: 0,
+            organization_association_category: 1,
+        },
+        agency_code: None,
+        organizational_identifier: None,
+        duns: None,
+        guid: guid.to_vec(),
+        // Expires on: 2030-01-01
+        expiration_date: (2030, 1, 1),
+        authentication_key_map: None,
+        asymmetric_signature: Vec::new(),
+        lrc: None,
+    };
+    Ok(chuid.to_bytes())
+}
 
 /// Read the pivman public data object.
 ///

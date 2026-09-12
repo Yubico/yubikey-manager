@@ -1639,23 +1639,8 @@ pub fn run_objects_import(
 fn generate_chuid(
     session: &mut PivSession<impl yubikit::smartcard::SmartCardConnection>,
 ) -> Result<()> {
-    let mut chuid = Vec::new();
-    chuid.extend_from_slice(&[0x30, 0x19]);
-    chuid.extend_from_slice(&[0x9E; 25]);
-    chuid.push(0x34);
-    chuid.push(0x10);
-    let mut guid = [0u8; 16];
-    getrandom::fill(&mut guid).map_err(|e| anyhow!("RNG error: {e}"))?;
-    guid[6] = (guid[6] & 0x0f) | 0x40;
-    guid[8] = (guid[8] & 0x3f) | 0x80;
-    chuid.extend_from_slice(&guid);
-    chuid.push(0x35);
-    chuid.push(0x08);
-    chuid.extend_from_slice(b"20301231");
-    chuid.push(0x3E);
-    chuid.push(0x00);
-    chuid.push(0xFE);
-    chuid.push(0x00);
+    let chuid =
+        ykman::piv::generate_chuid().map_err(|e| anyhow!("Failed to generate CHUID: {e}"))?;
 
     session
         .put_object(ObjectId::Chuid, Some(&chuid))
@@ -1678,30 +1663,8 @@ pub fn run_objects_generate(
 
     match object.to_uppercase().as_str() {
         "CHUID" => {
-            // Generate CHUID per SP 800-73-4
-            let mut chuid = Vec::new();
-            // FASC-N (tag 0x30, 25 bytes, all 0x9E = default)
-            chuid.extend_from_slice(&[0x30, 0x19]);
-            chuid.extend_from_slice(&[0x9E; 25]);
-            // GUID (tag 0x34, 16 bytes random UUID v4)
-            chuid.push(0x34);
-            chuid.push(0x10);
-            let mut guid = [0u8; 16];
-            getrandom::fill(&mut guid).map_err(|e| anyhow!("RNG error: {e}"))?;
-            guid[6] = (guid[6] & 0x0f) | 0x40;
-            guid[8] = (guid[8] & 0x3f) | 0x80;
-            chuid.extend_from_slice(&guid);
-            // Expiry date (tag 0x35, 8 bytes YYYYMMDD)
-            chuid.push(0x35);
-            chuid.push(0x08);
-            chuid.extend_from_slice(b"20301231");
-            // Issuer asymmetric signature (empty, tag 0x3E)
-            chuid.push(0x3E);
-            chuid.push(0x00);
-            // Error Detection Code (tag 0xFE)
-            chuid.push(0xFE);
-            chuid.push(0x00);
-
+            let chuid = ykman::piv::generate_chuid()
+                .map_err(|e| anyhow!("Failed to generate CHUID: {e}"))?;
             session
                 .put_object(ObjectId::Chuid, Some(&chuid))
                 .map_err(|e| anyhow!("Failed to write CHUID: {e}"))?;

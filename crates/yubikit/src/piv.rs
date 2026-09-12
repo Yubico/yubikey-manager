@@ -61,7 +61,7 @@ use x509_cert::spki::{
 use zeroize::Zeroizing;
 
 use crate::__internal::tlv::{parse_tlv_dict, tlv_append, tlv_encode, tlv_parse, tlv_unpack};
-use crate::core::{Version, int2bytes, patch_version};
+use crate::core::{Version, bytes2int, int2bytes, patch_version};
 use crate::keys::{
     EcCurve, EcPublicKey, Ed25519PublicKey, KeyAlgorithm, KeyError, MlDsaParameterSet,
     MlDsaPublicKey, MlKemParameterSet, MlKemPublicKey, PrivateKey, PublicKey, RsaKeySize,
@@ -625,6 +625,295 @@ impl TouchPolicy {
 // ---------------------------------------------------------------------------
 // Data structures
 // ---------------------------------------------------------------------------
+
+const FASCN_LENS: [usize; 9] = [4, 4, 6, 1, 1, 10, 1, 4, 1];
+const BCD_SS: [u8; 5] = [1, 1, 0, 1, 0];
+const BCD_FS: [u8; 5] = [1, 0, 1, 1, 0];
+const BCD_ES: [u8; 5] = [1, 1, 1, 1, 1];
+
+/// Encode `val` as `ln` BCD digits (most-significant first), each digit being
+/// 4 data bits (least-significant first) followed by an odd-parity bit.
+fn bcd(val: u64, ln: usize) -> Vec<u8> {
+    let mut digits = Vec::with_capacity(ln);
+    let mut v = val;
+    for _ in 0..ln {
+        digits.push((v % 10) as u8);
+        v /= 10;
+    }
+    digits.reverse();
+    let mut bits = Vec::with_capacity(ln * 5);
+    for d in digits {
+        let data = [d & 1, (d >> 1) & 1, (d >> 2) & 1, (d >> 3) & 1];
+        let ones = data.iter().filter(|&&b| b == 1).count();
+        let parity = ((ones + 1) % 2) as u8;
+        bits.extend_from_slice(&data);
+        bits.push(parity);
+    }
+    bits
+}
+
+/// FASC-N (Federal Agency Smart Credential Number) data structure.
+///
+/// See <https://www.idmanagement.gov/docs/pacs-tig-scepacs.pdf>.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FascN {
+    /// Agency code (4 digits).
+    pub agency_code: u32,
+    /// System code (4 digits).
+    pub system_code: u32,
+    /// Credential number (6 digits).
+    pub credential_number: u32,
+    /// Credential series (1 digit).
+    pub credential_series: u32,
+    /// Individual credential issue (1 digit).
+    pub individual_credential_issue: u32,
+    /// Person identifier (10 digits).
+    pub person_identifier: u64,
+    /// Organizational category (1 digit).
+    pub organizational_category: u32,
+    /// Organizational identifier (4 digits).
+    pub organizational_identifier: u32,
+    /// Organization association category (1 digit).
+    pub organization_association_category: u32,
+}
+
+impl FascN {
+    /// Serialize the FASC-N to its 25-byte packed BCD representation.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let vals: [u64; 9] = [
+            self.agency_code as u64,
+            self.system_code as u64,
+            self.credential_number as u64,
+            self.credential_series as u64,
+            self.individual_credential_issue as u64,
+            self.person_identifier,
+            self.organizational_category as u64,
+            self.organizational_identifier as u64,
+            self.organization_association_category as u64,
+        ];
+        let f: Vec<Vec<u8>> = vals
+            .iter()
+            .zip(FASCN_LENS)
+            .map(|(v, ln)| bcd(*v, ln))
+            .collect();
+
+        let mut bits: Vec<u8> = Vec::new();
+        bits.extend_from_slice(&BCD_SS);
+        bits.extend_from_slice(&f[0]);
+        bits.extend_from_slice(&BCD_FS);
+        bits.extend_from_slice(&f[1]);
+        bits.extend_from_slice(&BCD_FS);
+        bits.extend_from_slice(&f[2]);
+        bits.extend_from_slice(&BCD_FS);
+        bits.extend_from_slice(&f[3]);
+        bits.extend_from_slice(&BCD_FS);
+        bits.extend_from_slice(&f[4]);
+        bits.extend_from_slice(&BCD_FS);
+        bits.extend_from_slice(&f[5]);
+        bits.extend_from_slice(&f[6]);
+        bits.extend_from_slice(&f[7]);
+        bits.extend_from_slice(&f[8]);
+        bits.extend_from_slice(&BCD_ES);
+
+        // Longitudinal redundancy check over each 5-bit group.
+        let mut lrc: u8 = 0;
+        for chunk in bits.chunks(5) {
+            let mut g = 0u8;
+            for &b in chunk {
+                g = (g << 1) | b;
+            }
+            lrc ^= g;
+        }
+        for i in (0..5).rev() {
+            bits.push((lrc >> i) & 1);
+        }
+
+        // Pack the 200 bits big-endian into 25 bytes.
+        bits.chunks(8)
+            .map(|c| c.iter().fold(0u8, |acc, &b| (acc << 1) | b))
+            .collect()
+    }
+
+    /// Parse a FASC-N from its 25-byte packed BCD representation.
+    pub fn from_bytes(value: &[u8]) -> Result<Self, PivError> {
+        if value.len() != 25 {
+            return Err(PivError::InvalidData(format!(
+                "FASC-N must be 25 bytes, got {}",
+                value.len()
+            )));
+        }
+        let mut bits = Vec::with_capacity(200);
+        for &byte in value {
+            for i in (0..8).rev() {
+                bits.push((byte >> i) & 1);
+            }
+        }
+        // Decode the 4 data bits of each 5-bit group into a digit.
+        let mut ds = Vec::with_capacity(40);
+        for i in (0..200).step_by(5) {
+            let d = bits[i] as u32
+                + (bits[i + 1] as u32) * 2
+                + (bits[i + 2] as u32) * 4
+                + (bits[i + 3] as u32) * 8;
+            ds.push(d as u64);
+        }
+        let offsets = [1usize, 6, 11, 18, 20, 22, 32, 33, 37];
+        let mut fields = [0u64; 9];
+        for (fi, (&offs, &ln)) in offsets.iter().zip(FASCN_LENS.iter()).enumerate() {
+            let mut val = 0u64;
+            for j in 0..ln {
+                val = val * 10 + ds[offs + j];
+            }
+            fields[fi] = val;
+        }
+        Ok(FascN {
+            agency_code: fields[0] as u32,
+            system_code: fields[1] as u32,
+            credential_number: fields[2] as u32,
+            credential_series: fields[3] as u32,
+            individual_credential_issue: fields[4] as u32,
+            person_identifier: fields[5],
+            organizational_category: fields[6] as u32,
+            organizational_identifier: fields[7] as u32,
+            organization_association_category: fields[8] as u32,
+        })
+    }
+}
+
+impl fmt::Display for FascN {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "[{:04}-{:04}-{:06}-{}-{}-{:010}{}{:04}{}]",
+            self.agency_code,
+            self.system_code,
+            self.credential_number,
+            self.credential_series,
+            self.individual_credential_issue,
+            self.person_identifier,
+            self.organizational_category,
+            self.organizational_identifier,
+            self.organization_association_category,
+        )
+    }
+}
+
+/// CHUID (Cardholder Unique Identifier) data structure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chuid {
+    /// Optional buffer length (tag `0xEE`).
+    pub buffer_length: Option<u64>,
+    /// FASC-N (tag `0x30`).
+    pub fasc_n: FascN,
+    /// Optional agency code (tag `0x31`).
+    pub agency_code: Option<Vec<u8>>,
+    /// Optional organizational identifier (tag `0x32`).
+    pub organizational_identifier: Option<Vec<u8>>,
+    /// Optional DUNS (tag `0x33`).
+    pub duns: Option<Vec<u8>>,
+    /// GUID (tag `0x34`).
+    pub guid: Vec<u8>,
+    /// Expiration date as `(year, month, day)` (tag `0x35`).
+    pub expiration_date: (u16, u8, u8),
+    /// Optional authentication key map (tag `0x3D`).
+    pub authentication_key_map: Option<Vec<u8>>,
+    /// Asymmetric signature (tag `0x3E`).
+    pub asymmetric_signature: Vec<u8>,
+    /// Optional LRC byte (tag `0xFE`).
+    pub lrc: Option<u8>,
+}
+
+impl Chuid {
+    fn get_bytes(&self, include_signature: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        if let Some(bl) = self.buffer_length {
+            out.extend_from_slice(&tlv_encode(0xEE, &int2bytes(bl)));
+        }
+        out.extend_from_slice(&tlv_encode(0x30, &self.fasc_n.to_bytes()));
+        if let Some(v) = &self.agency_code {
+            out.extend_from_slice(&tlv_encode(0x31, v));
+        }
+        if let Some(v) = &self.organizational_identifier {
+            out.extend_from_slice(&tlv_encode(0x32, v));
+        }
+        if let Some(v) = &self.duns {
+            out.extend_from_slice(&tlv_encode(0x33, v));
+        }
+        out.extend_from_slice(&tlv_encode(0x34, &self.guid));
+        let (y, m, d) = self.expiration_date;
+        let exp = format!("{:04}{:02}{:02}", y, m, d);
+        out.extend_from_slice(&tlv_encode(0x35, exp.as_bytes()));
+        if let Some(v) = &self.authentication_key_map {
+            out.extend_from_slice(&tlv_encode(0x3D, v));
+        }
+        if include_signature {
+            out.extend_from_slice(&tlv_encode(0x3E, &self.asymmetric_signature));
+        }
+        // The LRC tag is always emitted, as an empty TLV when no LRC is set.
+        let lrc_val = match self.lrc {
+            Some(l) => vec![l],
+            None => Vec::new(),
+        };
+        out.extend_from_slice(&tlv_encode(TAG_LRC, &lrc_val));
+        out
+    }
+
+    /// Serialize the full CHUID, including the asymmetric signature.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.get_bytes(true)
+    }
+
+    /// Serialize the "to-be-signed" bytes, omitting the asymmetric signature.
+    pub fn tbs_bytes(&self) -> Vec<u8> {
+        self.get_bytes(false)
+    }
+
+    /// Parse a CHUID from its TLV representation.
+    pub fn from_bytes(value: &[u8]) -> Result<Self, PivError> {
+        let data = parse_tlv_dict(value)
+            .map_err(|e| PivError::InvalidData(format!("Invalid CHUID: {e}")))?;
+        let buffer_length = data.get(&0xEE).map(|v| bytes2int(v));
+        let lrc = data.get(&TAG_LRC).and_then(|v| v.first().copied());
+        let fasc_n = FascN::from_bytes(
+            data.get(&0x30)
+                .ok_or_else(|| PivError::InvalidData("CHUID missing FASC-N".into()))?,
+        )?;
+        let d = data
+            .get(&0x35)
+            .ok_or_else(|| PivError::InvalidData("CHUID missing expiration date".into()))?;
+        if d.len() != 8 {
+            return Err(PivError::InvalidData(
+                "CHUID expiration date must be 8 bytes".into(),
+            ));
+        }
+        let parse = |s: &[u8]| -> Result<u32, PivError> {
+            std::str::from_utf8(s)
+                .ok()
+                .and_then(|t| t.parse::<u32>().ok())
+                .ok_or_else(|| PivError::InvalidData("Invalid CHUID expiration date".into()))
+        };
+        let expiration_date = (
+            parse(&d[0..4])? as u16,
+            parse(&d[4..6])? as u8,
+            parse(&d[6..8])? as u8,
+        );
+        Ok(Chuid {
+            buffer_length,
+            fasc_n,
+            agency_code: data.get(&0x31).cloned(),
+            organizational_identifier: data.get(&0x32).cloned(),
+            duns: data.get(&0x33).cloned(),
+            guid: data
+                .get(&0x34)
+                .cloned()
+                .ok_or_else(|| PivError::InvalidData("CHUID missing GUID".into()))?,
+            expiration_date,
+            authentication_key_map: data.get(&0x3D).cloned(),
+            asymmetric_signature: data.get(&0x3E).cloned().unwrap_or_default(),
+            lrc,
+        })
+    }
+}
 
 /// Metadata about the PIV PIN or PUK.
 #[derive(Debug, Clone)]
@@ -2659,6 +2948,68 @@ impl<C: SmartCardConnection> signature::Signer<PivSignature> for PivSigner<'_, C
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fascn_matches_python_reference() {
+        fn to_hex(b: &[u8]) -> String {
+            b.iter().map(|x| format!("{x:02x}")).collect()
+        }
+        let f = FascN {
+            agency_code: 9999,
+            system_code: 9999,
+            credential_number: 999999,
+            credential_series: 0,
+            individual_credential_issue: 1,
+            person_identifier: 0,
+            organizational_category: 3,
+            organizational_identifier: 0,
+            organization_association_category: 1,
+        };
+        let bytes = f.to_bytes();
+        assert_eq!(
+            to_hex(&bytes),
+            "d4e739da739ced39ce739d836858210842108421c84210c3eb"
+        );
+        assert_eq!(FascN::from_bytes(&bytes).unwrap(), f);
+        assert_eq!(f.to_string(), "[9999-9999-999999-0-1-0000000000300001]");
+    }
+
+    #[test]
+    fn chuid_matches_python_reference() {
+        fn to_hex(b: &[u8]) -> String {
+            b.iter().map(|x| format!("{x:02x}")).collect()
+        }
+        let f = FascN {
+            agency_code: 9999,
+            system_code: 9999,
+            credential_number: 999999,
+            credential_series: 0,
+            individual_credential_issue: 1,
+            person_identifier: 0,
+            organizational_category: 3,
+            organizational_identifier: 0,
+            organization_association_category: 1,
+        };
+        let guid: Vec<u8> = (0u8..16).collect();
+        let c = Chuid {
+            buffer_length: None,
+            fasc_n: f,
+            agency_code: None,
+            organizational_identifier: None,
+            duns: None,
+            guid,
+            expiration_date: (2030, 1, 1),
+            authentication_key_map: None,
+            asymmetric_signature: Vec::new(),
+            lrc: None,
+        };
+        let bytes = c.to_bytes();
+        assert_eq!(
+            to_hex(&bytes),
+            "3019d4e739da739ced39ce739d836858210842108421c84210c3eb3410000102030405060708090a0b0c0d0e0f350832303330303130313e00fe00"
+        );
+        assert_eq!(Chuid::from_bytes(&bytes).unwrap(), c);
+    }
 
     #[test]
     fn extended_length_detected_in_idone_select() {
