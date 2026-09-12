@@ -1614,10 +1614,7 @@ pub fn run_objects_import(
     let data = read_file_or_stdin(data_file)?;
 
     let mut session = open_session(dev, scp_params)?;
-    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
-    if !pin_verified {
-        ensure_pin(&mut session, pin)?;
-    }
+    authenticate_session(&mut session, mgmt_key, pin)?;
     session
         .put_object_raw(obj_id, Some(&data))
         .map_err(|e| match &e {
@@ -1656,10 +1653,7 @@ pub fn run_objects_generate(
     pin: Option<&str>,
 ) -> Result<()> {
     let mut session = open_session(dev, scp_params)?;
-    let pin_verified = authenticate_session(&mut session, management_key, pin)?;
-    if !pin_verified {
-        ensure_pin(&mut session, pin)?;
-    }
+    authenticate_session(&mut session, management_key, pin)?;
 
     match object.to_uppercase().as_str() {
         "CHUID" => {
