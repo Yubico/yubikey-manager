@@ -26,7 +26,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import logging
-import random
+import secrets
 import struct
 from datetime import datetime
 from typing import Iterable
@@ -62,9 +62,12 @@ def generate_static_pw(
     :param keyboard_layout: The keyboard layout.
     :param blocklist: The list of characters to block.
     """
+    if length < 0:
+        raise ValueError("Password length cannot be negative")
     chars = [k for k in keyboard_layout.value.keys() if k not in blocklist]
-    sr = random.SystemRandom()
-    return "".join([sr.choice(chars) for _ in range(length)])
+    if not chars:
+        raise ValueError("No valid characters available for password generation")
+    return "".join([secrets.choice(chars) for _ in range(length)])
 
 
 def parse_oath_key(val: str) -> bytes:

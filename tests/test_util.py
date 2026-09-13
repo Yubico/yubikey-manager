@@ -5,6 +5,7 @@ import re
 import pytest
 from ykman import __version__ as version
 from ykman.otp import format_oath_code, generate_static_pw, time_challenge
+from ykman.scancodes import KEYBOARD_LAYOUT
 from ykman.util import (
     InvalidPasswordError,
     _parse_pkcs12,
@@ -55,6 +56,15 @@ def test_generate_static_pw():
         assert pattern.fullmatch(generate_static_pw(length)), (
             f"Length {length} failed regex check"
         )
+
+    with pytest.raises(ValueError, match="Password length cannot be negative"):
+        generate_static_pw(-1)
+
+    all_chars = set(KEYBOARD_LAYOUT.MODHEX.value.keys())
+    with pytest.raises(
+        ValueError, match="No valid characters available for password generation"
+    ):
+        generate_static_pw(10, blocklist=all_chars)
 
 
 @pytest.mark.parametrize(
