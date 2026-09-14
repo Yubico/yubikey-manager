@@ -34,6 +34,7 @@ import click
 from cryptography import x509
 from cryptography.x509 import NameOID
 from pskc import PSKC
+
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SW, ApduError, SmartCardConnection
 from yubikit.management import CAPABILITY
@@ -47,7 +48,7 @@ from yubikit.oath import (
 )
 
 from ..oath import calculate_steam, delete_broken_credential, is_hidden, is_steam
-from ..settings import AppData
+from ..settings import AppData, KeystoreError
 from .util import (
     CliFail,
     EnumChoice,
@@ -284,7 +285,7 @@ def change(ctx, password, clear, new_password, remember):
         if remember:
             try:
                 keys.ensure_unlocked()
-            except ValueError:
+            except (KeystoreError, ValueError):
                 raise CliFail(
                     "Failed to remember password, the keyring is locked or unavailable."
                 )
@@ -328,7 +329,7 @@ def remember(ctx, password):
     else:
         try:
             keys.ensure_unlocked()
-        except ValueError:
+        except (KeystoreError, ValueError):
             raise CliFail(
                 "Failed to remember password, the keyring is locked or unavailable."
             )

@@ -96,3 +96,50 @@ def test_parse_uri_full_payload():
     assert data.digits == 7
     assert data.period == 20
     assert data.counter == 5
+
+
+def test_oath_keystore_error_handling(monkeypatch):
+    from unittest.mock import MagicMock
+    from click.testing import CliRunner
+    from ykman._cli.oath import oath
+    from ykman._cli.util import CliFail, YkmanContextObject
+    from ykman.settings import AppData, KeystoreError
+
+    mock_app_data = MagicMock(spec=AppData)
+    mock_app_data.ensure_unlocked.side_effect = KeystoreError("Locked")
+
+    mock_session = MagicMock()
+    mock_session.locked = True
+    mock_session.device_id = "test_device_id"
+    mock_session.version = (5, 4, 0)
+
+    mock_info = MagicMock()
+    mock_info.fips_capable = ()
+    mock_info.fips_approved = ()
+
+    runner = CliRunner()
+    mock_dev = MagicMock()
+    mock_conn = MagicMock()
+    mock_conn.send_and_receive.return_value = (b"\x05\x04\x00", 0x9000)
+    mock_dev.open_connection.return_value = mock_conn
+
+    ctx_obj = YkmanContextObject()
+    ctx_obj.add_resolver("device", lambda: mock_dev)
+    ctx_obj.add_resolver("info", lambda: mock_info)
+    ctx_obj.add_resolver("session", lambda: mock_session)
+    ctx_obj.add_resolver("oath_keys", lambda: mock_app_data)
+    ctx_obj.add_resolver("fips_unready", lambda: False)
+    ctx_obj.add_resolver("no_scp", lambda: False)
+    ctx_obj.resolve()
+
+    monkeypatch.setattr("ykman._cli.oath.OathSession", lambda conn, scp: mock_session)
+
+    # Test 'access remember' when ensure_unlocked raises KeystoreError
+    res = runner.invoke(
+        oath,
+        ["access", "remember", "-p", "password"],
+        obj=ctx_obj,
+    )
+    assert res.exit_code != 0
+    assert isinstance(res.exception, CliFail)
+    assert "Failed to remember password, the keyring is locked or unavailable." in str(res.exception)
