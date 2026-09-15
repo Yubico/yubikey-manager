@@ -4,6 +4,7 @@ import re
 
 import pytest
 from ykman import __version__ as version
+from ykman._cli.otp import parse_access_code_hex
 from ykman.otp import format_oath_code, generate_static_pw, time_challenge
 from ykman.scancodes import KEYBOARD_LAYOUT
 from ykman.util import (
@@ -47,6 +48,16 @@ def test_format_oath_code(payload, digits, expected):
         assert format_oath_code(payload) == expected
     else:
         assert format_oath_code(payload, digits) == expected
+
+
+def test_parse_access_code_hex():
+    assert parse_access_code_hex("010203040506") == b"\x01\x02\x03\x04\x05\x06"
+
+    with pytest.raises(ValueError, match="Must be exactly 6 bytes."):
+        parse_access_code_hex("010203")
+
+    with pytest.raises(ValueError):
+        parse_access_code_hex("not_hex")
 
 
 def test_generate_static_pw():

@@ -95,7 +95,7 @@ def parse_hex(length):
 def parse_access_code_hex(access_code_hex):
     try:
         access_code = bytes.fromhex(access_code_hex)
-    except TypeError as e:
+    except (TypeError, ValueError) as e:
         raise ValueError(e)
     if len(access_code) != 6:
         raise ValueError("Must be exactly 6 bytes.")
