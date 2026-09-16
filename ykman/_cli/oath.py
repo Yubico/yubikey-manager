@@ -34,6 +34,7 @@ import click
 from cryptography import x509
 from cryptography.x509 import NameOID
 from pskc import PSKC
+
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SW, ApduError, SmartCardConnection
 from yubikit.management import CAPABILITY
@@ -57,6 +58,7 @@ from .util import (
     click_parse_b32_key,
     click_postpone_execution,
     click_prompt,
+    ensure_restrictive_file_mode,
     get_scp_params,
     is_yk4_fips,
     log_or_echo,
@@ -596,6 +598,7 @@ def add(
     log_or_echo("OATH account added", logger, output)
 
     if output:
+        ensure_restrictive_file_mode(output)
         pskc = PSKC()
         if pskc_passphrase:
             pskc.encryption.setup_pbkdf2(pskc_passphrase)

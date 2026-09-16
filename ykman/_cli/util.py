@@ -27,6 +27,7 @@
 
 import functools
 import logging
+import os
 import sys
 from collections import OrderedDict
 from collections.abc import MutableMapping
@@ -346,6 +347,19 @@ def log_or_echo(message: str, log: logging.Logger, *files) -> None:
         log.info(message)
     else:
         click.echo(f"{message}.")
+
+
+def ensure_restrictive_file_mode(f) -> None:
+    """Ensure that file f has restrictive permissions (0o600) on POSIX platforms."""
+    if os.name == "posix" and not _is_stdout(f):
+        try:
+            fd = f.fileno()
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, 0o600)
+            else:
+                os.chmod(f.name, 0o600)
+        except Exception:
+            logger.debug("Failed to set restrictive permissions on file", exc_info=True)
 
 
 def find_scp11_params(
