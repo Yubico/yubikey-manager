@@ -6,6 +6,7 @@ import pytest
 from ykman import __version__ as version
 from ykman.otp import format_oath_code, generate_static_pw, time_challenge
 from ykman.scancodes import KEYBOARD_LAYOUT
+from ykman._cli.util import ensure_restrictive_file_mode
 from ykman.util import (
     InvalidPasswordError,
     _parse_pkcs12,
@@ -230,3 +231,20 @@ def test_form_factor_from_code(code, expected):
 def test_form_factor_from_code_rejects_invalid_type():
     with pytest.raises(ValueError):
         FORM_FACTOR.from_code("im a string")
+
+
+def test_ensure_restrictive_file_mode(tmp_path):
+    import os
+    import stat
+
+    test_file = tmp_path / "test.file"
+    test_file.write_text("test")
+    if os.name == "posix":
+        os.chmod(test_file, 0o644)
+
+    with open(test_file, "r+") as f:
+        ensure_restrictive_file_mode(f)
+
+    if os.name == "posix":
+        mode = test_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600

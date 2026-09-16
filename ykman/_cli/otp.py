@@ -73,6 +73,7 @@ from .util import (
     click_parse_b32_key,
     click_postpone_execution,
     click_prompt,
+    ensure_restrictive_file_mode,
     is_yk4_fips,
     log_or_echo,
     prompt_for_touch,
@@ -518,6 +519,7 @@ def yubiotp(
         raise CliFail(_WRITE_FAIL_MSG)
 
     if config_output:
+        ensure_restrictive_file_mode(config_output)
         serial = serial or session.get_serial()
         csv = format_csv(serial, public_id_bytes, private_id, key, access_code)
         config_output.write(csv + "\n")
