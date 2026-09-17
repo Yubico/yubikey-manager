@@ -79,6 +79,7 @@ from .util import (
     click_group,
     click_postpone_execution,
     click_prompt,
+    ensure_restrictive_file_mode,
     get_scp_params,
     log_or_echo,
     pretty_print,
@@ -1358,6 +1359,7 @@ def read_object(ctx, pin, object_id, output):
 
     def do_read_object(retry=True):
         try:
+            ensure_restrictive_file_mode(output)
             output.write(session.get_object(object_id))
             log_or_echo(
                 f"Exported object {object_id} to {_fname(output)}", logger, output

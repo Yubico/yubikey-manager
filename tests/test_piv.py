@@ -255,3 +255,32 @@ class TestDecompressCertificate:
 
         result = decompress_certificate(gzip_data)
         assert result == original_data
+
+
+def test_read_object_restrictive_file_mode(tmp_path):
+    import os
+    import stat
+    from unittest.mock import MagicMock
+    from click.testing import CliRunner
+    from ykman._cli.piv import read_object
+
+    out_file = tmp_path / "exported_object.bin"
+    mock_session = MagicMock()
+    mock_session.get_object.return_value = b"sensitive_piv_data"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        read_object,
+        ["0x5f0001", str(out_file)],
+        obj={
+            "session": mock_session,
+            "pivman_data": MagicMock(),
+            "fips_unready": False,
+        },
+    )
+
+    assert result.exit_code == 0
+    assert out_file.read_bytes() == b"sensitive_piv_data"
+    if os.name == "posix":
+        mode = out_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
