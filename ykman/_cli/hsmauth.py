@@ -55,6 +55,7 @@ from .util import (
     click_group,
     click_postpone_execution,
     click_prompt,
+    ensure_restrictive_file_mode,
     get_scp_params,
     log_or_echo,
     pretty_print,
@@ -485,6 +486,7 @@ def export(ctx, label, public_key_output, format):
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
 
+        ensure_restrictive_file_mode(public_key_output)
         public_key_output.write(public_key_encoded)
 
         log_or_echo(
