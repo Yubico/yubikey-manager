@@ -57,6 +57,7 @@ from .util import (
     click_group,
     click_postpone_execution,
     click_prompt,
+    ensure_restrictive_file_mode,
     get_scp_params,
     log_or_echo,
     organize_scp11_certificates,
@@ -252,6 +253,7 @@ def generate_key(ctx, key, public_key_output, replace_kvn):
         raise
 
     key_encoding = serialization.Encoding.PEM
+    ensure_restrictive_file_mode(public_key_output)
     public_key_output.write(
         public_key.public_bytes(
             encoding=key_encoding,
@@ -378,6 +380,7 @@ def export(ctx, key, certificates_output):
         for cert in reversed(session.get_certificate_bundle(key))
     ]
     if pems:
+        ensure_restrictive_file_mode(certificates_output)
         certificates_output.write(b"".join(pems))
         log_or_echo(
             f"Certificate chain for {key} written to {_fname(certificates_output)}",
