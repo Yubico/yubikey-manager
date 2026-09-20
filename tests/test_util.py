@@ -259,3 +259,25 @@ def test_ensure_restrictive_file_mode(tmp_path):
     if os.name == "posix":
         mode = test_file.stat().st_mode
         assert stat.S_IMODE(mode) == 0o600
+
+
+def test_ensure_restrictive_file_mode_click_file(tmp_path):
+    import os
+    import stat
+    import click
+
+    test_file = tmp_path / "test_click.file"
+    test_file.write_text("test")
+    if os.name == "posix":
+        os.chmod(test_file, 0o644)
+
+    click_file_param = click.File("wb")
+    f = click_file_param.convert(str(test_file), None, None)
+    try:
+        ensure_restrictive_file_mode(f)
+    finally:
+        f.close()
+
+    if os.name == "posix":
+        mode = test_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
