@@ -96,10 +96,12 @@ def derive_management_key(pin: str, salt: bytes, iterations: int = 10000) -> byt
 
     :param pin: The PIN.
     :param salt: The salt.
-    :param iterations: The number of PBKDF2 iterations (defaults to 10000 for legacy compatibility).
+    :param iterations: The number of PBKDF2 iterations (defaults to 10000 for
+        legacy compatibility).
     """
     warnings.warn(
-        "derive_management_key is deprecated, protect the management key using PivmanProtectedData instead.",
+        "derive_management_key is deprecated, protect the management key "
+        "using PivmanProtectedData instead.",
         DeprecationWarning,
         stacklevel=2,
     )

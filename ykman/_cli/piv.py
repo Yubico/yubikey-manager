@@ -703,6 +703,7 @@ def generate_key(
     public_key = session.generate_key(slot, algorithm, pin_policy, touch_policy)
 
     key_encoding = format
+    ensure_restrictive_file_mode(public_key_output)
     public_key_output.write(
         public_key.public_bytes(
             encoding=key_encoding,
@@ -797,6 +798,7 @@ def attest(ctx, slot, certificate, format):
         cert = session.attest_key(slot)
     except ApduError:
         raise CliFail("Attestation failed.")
+    ensure_restrictive_file_mode(certificate)
     certificate.write(cert.public_bytes(encoding=format))
     log_or_echo(
         f"Attestation certificate for slot {slot} written to {_fname(certificate)}",
@@ -897,6 +899,7 @@ def export(ctx, slot, public_key_output, format, verify, pin):
                 raise CliFail(f"Unable to export public key from slot {slot}.")
 
     key_encoding = format
+    ensure_restrictive_file_mode(public_key_output)
     public_key_output.write(
         public_key.public_bytes(
             encoding=key_encoding,
@@ -1119,6 +1122,7 @@ def export_certificate(ctx, format, slot, certificate):
     session = ctx.obj["session"]
     try:
         cert = session.get_certificate(slot)
+        ensure_restrictive_file_mode(certificate)
         certificate.write(cert.public_bytes(encoding=format))
         log_or_echo(
             f"Certificate from slot {slot} exported to {_fname(certificate)}",
@@ -1281,6 +1285,7 @@ def generate_certificate_signing_request(
     except ApduError:
         raise CliFail("Certificate Signing Request generation failed.")
 
+    ensure_restrictive_file_mode(csr_output)
     csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
     log_or_echo(
         f"CSR for slot {slot} written to {_fname(csr_output)}", logger, csr_output
