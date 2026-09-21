@@ -902,7 +902,11 @@ def bio_rename(ctx, template_id, name, pin):
     bio = _init_bio(ctx, pin)
     enrollments = bio.enumerate_enrollments()
 
-    key = bytes.fromhex(template_id)
+    try:
+        key = bytes.fromhex(template_id)
+    except ValueError:
+        raise CliFail(f"No fingerprint matching ID={template_id}.")
+
     if key not in enrollments:
         raise CliFail(f"No fingerprint matching ID={template_id}.")
 

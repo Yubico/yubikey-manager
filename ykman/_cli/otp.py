@@ -729,7 +729,10 @@ def calculate(ctx, slot, challenge, totp, digits):
                 logger.exception("Error parsing challenge")
                 raise CliFail("Timestamp challenge for TOTP must be an integer.")
     else:  # Challenge is hex
-        challenge = bytes.fromhex(challenge)
+        try:
+            challenge = bytes.fromhex(challenge)
+        except ValueError:
+            raise CliFail("Challenge must be valid hexadecimal.")
 
     try:
         event = Event()
