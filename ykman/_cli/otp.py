@@ -430,6 +430,9 @@ def yubiotp(
     Program a Yubico OTP credential.
     """
 
+    if config_output:
+        ensure_restrictive_file_mode(config_output)
+
     session = _get_session(ctx)
     serial = None
 
@@ -519,7 +522,6 @@ def yubiotp(
         raise CliFail(_WRITE_FAIL_MSG)
 
     if config_output:
-        ensure_restrictive_file_mode(config_output)
         serial = serial or session.get_serial()
         csv = format_csv(serial, public_id_bytes, private_id, key, access_code)
         config_output.write(csv + "\n")

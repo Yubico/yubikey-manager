@@ -475,6 +475,7 @@ def export(ctx, label, public_key_output, format):
     LABEL      label for the YubiHSM Auth credential
     PUBLIC-KEY file to write the public key to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(public_key_output)
 
     session = ctx.obj["session"]
 
@@ -486,7 +487,6 @@ def export(ctx, label, public_key_output, format):
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
 
-        ensure_restrictive_file_mode(public_key_output)
         public_key_output.write(public_key_encoded)
 
         log_or_echo(
