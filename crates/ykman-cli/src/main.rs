@@ -10,6 +10,7 @@ use yubikit::management::Capability;
 
 mod apdu;
 mod cli_enums;
+mod color;
 mod config;
 mod context;
 mod diagnose;
@@ -70,6 +71,14 @@ struct Cli {
     /// Password for SCP credential file
     #[arg(long, global = true)]
     scp_password: Option<String>,
+
+    /// Disable coloured output (shorthand for `--color=never`)
+    #[arg(long, global = true, conflicts_with = "color")]
+    no_color: bool,
+
+    /// Control coloured output
+    #[arg(long, global = true, value_enum, default_value = "auto")]
+    color: color::ColorChoice,
 
     /// Show diagnostic information
     #[arg(long)]
@@ -286,6 +295,7 @@ enum Commands {
 fn run() -> Result<()> {
     let cli = Cli::parse();
 
+    color::init(cli.no_color, cli.color);
     init_logging(&cli)?;
 
     if cli.diagnose {

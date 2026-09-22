@@ -294,7 +294,11 @@ where
     }
 }
 
-/// Print rows with columns aligned to the widest cell in each column.
+/// Print label/value rows with columns aligned to the widest cell in each
+/// column. The last cell of each row (the value, in a label/value table) is
+/// bolded via [`crate::color::bright`], matching the styling used throughout
+/// `ykman info`. Column widths are computed from the plain, uncoloured text
+/// first so bolding (which embeds ANSI codes) doesn't throw off alignment.
 pub(crate) fn print_table<R>(rows: impl IntoIterator<Item = R>)
 where
     R: TableRow,
@@ -314,12 +318,18 @@ where
 }
 
 fn print_table_row(row: &[String], widths: &[usize]) {
+    let last = row.len().saturating_sub(1);
     for (i, width) in widths.iter().enumerate() {
         if i > 0 {
             print!(" ");
         }
         let cell = row.get(i).map(String::as_str).unwrap_or("");
-        print!("{cell:<width$}");
+        if i == last {
+            let pad = " ".repeat(width.saturating_sub(cell.len()));
+            print!("{}{pad}", crate::color::bright(cell));
+        } else {
+            print!("{cell:<width$}");
+        }
     }
     println!();
 }

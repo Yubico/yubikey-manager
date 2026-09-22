@@ -87,6 +87,8 @@ pyo3 = { version = "0.29", features = ["extension-module"] }
 # CLI
 p12-keystore = "0.2"
 rpassword = "7"
+owo-colors = "4"
+terminal_size = "0.4"
 
 # Testing
 assert_cmd = "2"
