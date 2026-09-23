@@ -870,6 +870,8 @@ def export(ctx, slot, public_key_output, format, verify, pin):
     SLOT        PIV slot of the private key
     PUBLIC-KEY  file to write the public key to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(public_key_output)
+
     session = ctx.obj["session"]
     try:  # Prefer metadata if available
         public_key = session.get_slot_metadata(slot).public_key
@@ -899,8 +901,6 @@ def export(ctx, slot, public_key_output, format, verify, pin):
                     _verify_pin_if_needed(ctx, session, do_verify, pin)
             except ApduError:
                 raise CliFail(f"Unable to export public key from slot {slot}.")
-
-    ensure_restrictive_file_mode(public_key_output)
 
     key_encoding = format
     public_key_output.write(
