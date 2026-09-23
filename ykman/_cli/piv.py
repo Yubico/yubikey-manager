@@ -697,13 +697,14 @@ def generate_key(
         )
     _check_key_support_fips(ctx, algorithm, pin_policy)
 
+    ensure_restrictive_file_mode(public_key_output)
+
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
 
     public_key = session.generate_key(slot, algorithm, pin_policy, touch_policy)
 
     key_encoding = format
-    ensure_restrictive_file_mode(public_key_output)
     public_key_output.write(
         public_key.public_bytes(
             encoding=key_encoding,
@@ -793,12 +794,13 @@ def attest(ctx, slot, certificate, format):
     SLOT         PIV slot of the private key
     CERTIFICATE  file to write attestation certificate to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(certificate)
+
     session = ctx.obj["session"]
     try:
         cert = session.attest_key(slot)
     except ApduError:
         raise CliFail("Attestation failed.")
-    ensure_restrictive_file_mode(certificate)
     certificate.write(cert.public_bytes(encoding=format))
     log_or_echo(
         f"Attestation certificate for slot {slot} written to {_fname(certificate)}",
@@ -898,8 +900,9 @@ def export(ctx, slot, public_key_output, format, verify, pin):
             except ApduError:
                 raise CliFail(f"Unable to export public key from slot {slot}.")
 
-    key_encoding = format
     ensure_restrictive_file_mode(public_key_output)
+
+    key_encoding = format
     public_key_output.write(
         public_key.public_bytes(
             encoding=key_encoding,
@@ -1119,10 +1122,11 @@ def export_certificate(ctx, format, slot, certificate):
     SLOT            PIV slot of the certificate
     CERTIFICATE     file to write certificate to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(certificate)
+
     session = ctx.obj["session"]
     try:
         cert = session.get_certificate(slot)
-        ensure_restrictive_file_mode(certificate)
         certificate.write(cert.public_bytes(encoding=format))
         log_or_echo(
             f"Certificate from slot {slot} exported to {_fname(certificate)}",
@@ -1279,13 +1283,14 @@ def generate_certificate_signing_request(
     # This verifies PIN, make sure next action is sign
     _verify_pin(ctx, session, pivman, pin)
 
+    ensure_restrictive_file_mode(csr_output)
+
     try:
         with prompt_timeout(timeout=timeout):
             csr = generate_csr(session, slot, public_key, subject, hash_algorithm)
     except ApduError:
         raise CliFail("Certificate Signing Request generation failed.")
 
-    ensure_restrictive_file_mode(csr_output)
     csr_output.write(csr.public_bytes(encoding=serialization.Encoding.PEM))
     log_or_echo(
         f"CSR for slot {slot} written to {_fname(csr_output)}", logger, csr_output
@@ -1362,9 +1367,10 @@ def read_object(ctx, pin, object_id, output):
             "YubiKey FIPS must be in FIPS approved mode to export this object."
         )
 
+    ensure_restrictive_file_mode(output)
+
     def do_read_object(retry=True):
         try:
-            ensure_restrictive_file_mode(output)
             output.write(session.get_object(object_id))
             log_or_echo(
                 f"Exported object {object_id} to {_fname(output)}", logger, output

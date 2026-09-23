@@ -243,6 +243,8 @@ def generate_key(ctx, key, public_key_output, replace_kvn):
         values_str = ", ".join(f"0x{v:x} ({v.name})" for v in valid)
         raise CliFail(f"KID must be one of {values_str}.")
 
+    ensure_restrictive_file_mode(public_key_output)
+
     session = ctx.obj["session"]
 
     try:
@@ -253,7 +255,6 @@ def generate_key(ctx, key, public_key_output, replace_kvn):
         raise
 
     key_encoding = serialization.Encoding.PEM
-    ensure_restrictive_file_mode(public_key_output)
     public_key_output.write(
         public_key.public_bytes(
             encoding=key_encoding,
@@ -374,13 +375,14 @@ def export(ctx, key, certificates_output):
     KID KVN     key reference to output certificate chain for
     OUTPUT      file to write the certificate chain to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(certificates_output)
+
     session = ctx.obj["session"]
     pems = [
         cert.public_bytes(encoding=serialization.Encoding.PEM)
         for cert in reversed(session.get_certificate_bundle(key))
     ]
     if pems:
-        ensure_restrictive_file_mode(certificates_output)
         certificates_output.write(b"".join(pems))
         log_or_echo(
             f"Certificate chain for {key} written to {_fname(certificates_output)}",

@@ -530,6 +530,9 @@ def add(
     SECRET  base32-encoded secret/key value provided by the server
     """
 
+    if output:
+        ensure_restrictive_file_mode(output)
+
     if ctx.obj["fips_unready"]:
         raise CliFail(
             "YubiKey FIPS must be in FIPS approved mode prior to adding accounts."
@@ -598,7 +601,6 @@ def add(
     log_or_echo("OATH account added", logger, output)
 
     if output:
-        ensure_restrictive_file_mode(output)
         pskc = PSKC()
         if pskc_passphrase:
             pskc.encryption.setup_pbkdf2(pskc_passphrase)

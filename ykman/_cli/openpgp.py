@@ -549,6 +549,8 @@ def attest(ctx, key, certificate, pin, format):
     except ValueError:
         cert = None
 
+    ensure_restrictive_file_mode(certificate)
+
     if not cert or click.confirm(
         f"There is already data stored in the certificate slot for {key.value}, "
         "do you want to overwrite it?"
@@ -559,7 +561,6 @@ def attest(ctx, key, certificate, pin, format):
         try:
             session.verify_pin(pin)
             cert = session.attest_key(key)
-            ensure_restrictive_file_mode(certificate)
             certificate.write(cert.public_bytes(encoding=format))
             log_or_echo(
                 f"Attestation certificate for slot {key.name} written to "
@@ -591,13 +592,13 @@ def export_certificate(ctx, key, format, certificate):
     KEY          key slot to read from (sig, dec, aut, or att)
     CERTIFICATE  file to write certificate to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(certificate)
     session = ctx.obj["session"]
 
     try:
         cert = session.get_certificate(key)
     except ValueError:
         raise CliFail(f"Failed to read certificate from slot {key.name}.")
-    ensure_restrictive_file_mode(certificate)
     certificate.write(cert.public_bytes(encoding=format))
     log_or_echo(
         f"Certificate for slot {key.name} exported to {_fname(certificate)}",
