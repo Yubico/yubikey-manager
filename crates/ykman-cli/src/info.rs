@@ -44,7 +44,7 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
     // NFC status
     if info.supported_capabilities.contains_key(&Transport::Nfc) {
         let nfc_status = match info.config.nfc_restricted {
-            Some(true) => "Restricted",
+            Some(true) => "restricted",
             _ => {
                 if info
                     .config
@@ -52,13 +52,13 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
                     .get(&Transport::Nfc)
                     .is_some_and(|c| !c.is_empty())
                 {
-                    "Enabled"
+                    "enabled"
                 } else {
-                    "Disabled"
+                    "disabled"
                 }
             }
         };
-        print_field("NFC transport", nfc_status);
+        println!("NFC transport is {nfc_status}");
     }
     if info.pin_complexity {
         println!("PIN complexity is enforced");
@@ -71,7 +71,6 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
     print_applications(
         &info.supported_capabilities,
         &info.config.enabled_capabilities,
-        unicode,
     );
 
     print_storage_section(&info.version, unicode);
@@ -143,37 +142,17 @@ fn pad_label(label: &str) -> String {
     format!("{}{}", color::dim(&plain_label), " ".repeat(pad))
 }
 
-/// Glyphs for the enabled/disabled application dots. In colour mode, both
-/// are filled since green/red alone conveys the state; without colour, shape
-/// carries the distinction instead (filled vs. hollow dot).
-fn dot_glyphs(color_on: bool) -> (&'static str, &'static str) {
-    if color_on {
-        ("\u{25cf}", "\u{25cf}")
-    } else {
-        ("\u{25cf}", "\u{25cb}")
-    }
-}
-
+/// Width of the application name column, matching [`LABEL_WIDTH`] so the
+/// APPLICATIONS section lines up with the device details above it.
+const APP_NAME_WIDTH: usize = LABEL_WIDTH;
 /// Column width for each USB/NFC status cell in the two-transport
-/// applications table, including its right-padding. ASCII mode spells out
-/// `Enabled`/`Disabled` (matching the original table), so it needs a wider
-/// column than the single-character dot used in Unicode mode.
-const APP_NAME_WIDTH: usize = 20;
-const APP_COL_WIDTH_UNICODE: usize = 6;
-const APP_COL_WIDTH_ASCII: usize = 10;
-
-fn app_col_width(unicode: bool) -> usize {
-    if unicode {
-        APP_COL_WIDTH_UNICODE
-    } else {
-        APP_COL_WIDTH_ASCII
-    }
-}
+/// applications table (including its right-padding), wide enough for the
+/// spelled-out `Enabled`/`Disabled`/`Not available` status text.
+const APP_COL_WIDTH: usize = 15;
 
 fn print_applications(
     supported: &std::collections::HashMap<Transport, Capability>,
     enabled: &std::collections::HashMap<Transport, Capability>,
-    unicode: bool,
 ) {
     let usb_supported = supported
         .get(&Transport::Usb)
@@ -194,37 +173,23 @@ fn print_applications(
     let apps: Vec<Capability> = Capability::ALL
         .iter()
         .copied()
-        // FIDO_CCID is an interface flag, not a user-facing application.
-        .filter(|&cap| cap != Capability::FIDOCCID)
         .filter(|&cap| usb_supported.contains(cap) || nfc_supported.contains(cap))
         .collect();
 
-    // Always show a USB column (and an NFC column when the key supports it)
-    // with the heading on the same row as the column labels, for
-    // consistency between USB-only and NFC-capable keys.
-    let col_width = app_col_width(unicode);
+    // Left-align the USB/NFC columns, matching the label column above the
+    // APPLICATIONS section ([`LABEL_WIDTH`]) so the whole screen lines up.
+    let header = format!("{:<APP_NAME_WIDTH$}", "APPLICATIONS");
     let header = if has_nfc {
-        format!(
-            "{:<APP_NAME_WIDTH$}{:>col_width$}{:>col_width$}",
-            "APPLICATIONS", "USB", "NFC"
-        )
+        format!("{header}{:<APP_COL_WIDTH$}{:<APP_COL_WIDTH$}", "USB", "NFC")
     } else {
-        format!("{:<APP_NAME_WIDTH$}{:>col_width$}", "APPLICATIONS", "USB")
+        format!("{header}{:<APP_COL_WIDTH$}", "USB")
     };
-    println!("{}", color::dim(&header));
+    println!("{header}");
     for cap in apps {
-        let name = color::bright(&format!("{:<APP_NAME_WIDTH$}", cap.display_name()));
-        let usb_cell = dot_cell(
-            usb_supported.contains(cap),
-            usb_enabled.contains(cap),
-            unicode,
-        );
+        let name = format!("{:<APP_NAME_WIDTH$}", cap.display_name());
+        let usb_cell = usb_status_cell(cap, usb_supported.contains(cap), usb_enabled);
         if has_nfc {
-            let nfc_cell = dot_cell(
-                nfc_supported.contains(cap),
-                nfc_enabled.contains(cap),
-                unicode,
-            );
+            let nfc_cell = nfc_status_cell(cap, nfc_supported.contains(cap), nfc_enabled);
             println!("{name}{usb_cell}{nfc_cell}");
         } else {
             println!("{name}{usb_cell}");
@@ -232,36 +197,47 @@ fn print_applications(
     }
 }
 
-/// Render one USB/NFC status cell: a dim placeholder (`\u{2013}`/`-`) when the
-/// capability isn't available on that transport at all, otherwise the
-/// enabled/disabled state for that transport. In Unicode mode this is a
-/// single coloured dot; in ASCII mode it spells out `Enabled`/`Disabled`,
-/// matching the original table.
-fn dot_cell(available: bool, is_enabled: bool, unicode: bool) -> String {
-    let col_width = app_col_width(unicode);
-    if !available {
-        let dash = if unicode { "\u{2013}" } else { "-" };
-        let pad = " ".repeat(col_width - dash.chars().count());
-        return format!("{pad}{}", color::muted(dash));
-    }
-    if unicode {
-        let (dot_enabled, dot_disabled) = dot_glyphs(color::enabled());
-        let glyph = if is_enabled {
-            color::green(dot_enabled)
+/// USB status text for one application row: `Enabled`/`Disabled` in the
+/// general case; FIDO_CCID is a special-cased USB interface flag that's
+/// `Inactive` when it's enabled but FIDO2 itself isn't (matching the
+/// original table's vocabulary).
+fn usb_status_cell(cap: Capability, available: bool, usb_enabled: Capability) -> String {
+    let text = if !available {
+        "Not available"
+    } else if usb_enabled.contains(cap) {
+        if cap == Capability::FIDOCCID && !usb_enabled.contains(Capability::FIDO2) {
+            "Inactive"
         } else {
-            color::red(dot_disabled)
-        };
-        let pad = " ".repeat(col_width - 1);
-        format!("{pad}{glyph}")
+            "Enabled"
+        }
     } else {
-        let (text, colored) = if is_enabled {
-            ("Enabled", color::green("Enabled"))
-        } else {
-            ("Disabled", color::red("Disabled"))
-        };
-        let pad = " ".repeat(col_width.saturating_sub(text.len()));
-        format!("{pad}{colored}")
-    }
+        "Disabled"
+    };
+    status_cell(text)
+}
+
+/// NFC status text for one application row: FIDO_CCID is a USB-only
+/// interface flag, so it's always `N/A` over NFC regardless of support.
+fn nfc_status_cell(cap: Capability, available: bool, nfc_enabled: Capability) -> String {
+    let text = if cap == Capability::FIDOCCID {
+        "N/A"
+    } else if !available {
+        "Not available"
+    } else if nfc_enabled.contains(cap) {
+        "Enabled"
+    } else {
+        "Disabled"
+    };
+    status_cell(text)
+}
+
+/// Left-align and bold a status cell's text within [`APP_COL_WIDTH`],
+/// matching the label/value alignment used elsewhere in `ykman info`. No
+/// colour is used here (storage is currently the only coloured section);
+/// bold alone distinguishes the value from the plain application name.
+fn status_cell(text: &str) -> String {
+    let pad = " ".repeat(APP_COL_WIDTH.saturating_sub(text.len()));
+    format!("{}{pad}", color::bright(text))
 }
 
 struct StorageApp {
@@ -445,13 +421,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dot_glyphs_are_filled_for_both_states_when_color_on() {
-        assert_eq!(dot_glyphs(true), ("\u{25cf}", "\u{25cf}"));
+    fn usb_status_marks_unsupported_transport_as_not_available() {
+        assert!(
+            usb_status_cell(Capability::PIV, false, Capability::NONE).contains("Not available")
+        );
     }
 
     #[test]
-    fn dot_glyphs_distinguish_state_by_shape_when_color_off() {
-        assert_eq!(dot_glyphs(false), ("\u{25cf}", "\u{25cb}"));
+    fn usb_status_spells_out_enabled_and_disabled() {
+        assert!(usb_status_cell(Capability::PIV, true, Capability::PIV).contains("Enabled"));
+        assert!(usb_status_cell(Capability::PIV, true, Capability::NONE).contains("Disabled"));
+    }
+
+    #[test]
+    fn usb_status_marks_fido_ccid_inactive_when_fido2_is_disabled() {
+        let enabled_without_fido2 = Capability::FIDOCCID;
+        assert!(
+            usb_status_cell(Capability::FIDOCCID, true, enabled_without_fido2).contains("Inactive")
+        );
+        let enabled_with_fido2 = Capability::FIDOCCID | Capability::FIDO2;
+        assert!(
+            usb_status_cell(Capability::FIDOCCID, true, enabled_with_fido2).contains("Enabled")
+        );
+    }
+
+    #[test]
+    fn nfc_status_marks_fido_ccid_as_not_applicable() {
+        assert!(nfc_status_cell(Capability::FIDOCCID, false, Capability::NONE).contains("N/A"));
+        assert!(nfc_status_cell(Capability::FIDOCCID, true, Capability::FIDOCCID).contains("N/A"));
     }
 
     #[test]

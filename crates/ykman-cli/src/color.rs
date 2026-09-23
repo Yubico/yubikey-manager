@@ -91,15 +91,6 @@ pub fn muted(s: &str) -> String {
     }
 }
 
-/// Green, typically used to indicate an enabled/positive state.
-pub fn green(s: &str) -> String {
-    if enabled() {
-        s.green().to_string()
-    } else {
-        s.to_string()
-    }
-}
-
 /// Red, typically used to indicate a disabled/negative state or an error.
 pub fn red(s: &str) -> String {
     if enabled() {
