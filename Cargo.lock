@@ -3359,6 +3359,7 @@ dependencies = [
 name = "ykman-cli"
 version = "6.0.0-dev.1"
 dependencies = [
+ "anstream",
  "anyhow",
  "assert_cmd",
  "base32",

@@ -28,6 +28,7 @@ yubikit.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
+anstream.workspace = true
 chrono.workspace = true
 getrandom.workspace = true
 hex.workspace = true

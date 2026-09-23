@@ -17,7 +17,7 @@ fn assert_help(path: &[&str]) {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Usage:"), "missing Usage for {path:?}");
+    assert!(stdout.contains("USAGE"), "missing Usage for {path:?}");
     assert!(stdout.contains("--help"), "missing --help for {path:?}");
     assert_no_missing_arg_descriptions(path, &stdout);
 }
@@ -28,8 +28,13 @@ fn assert_no_missing_arg_descriptions(path: &[&str], help: &str) {
 
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-        if line.ends_with(':') && !line.starts_with(' ') {
-            in_arg_section = matches!(trimmed, "Arguments:" | "Options:");
+        if !line.starts_with(' ')
+            && matches!(
+                trimmed,
+                "USAGE" | "COMMANDS" | "OPTIONS" | "ARGUMENTS" | "EXAMPLES"
+            )
+        {
+            in_arg_section = matches!(trimmed, "ARGUMENTS" | "OPTIONS");
             continue;
         }
 
