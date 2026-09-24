@@ -261,6 +261,28 @@ def test_ensure_restrictive_file_mode(tmp_path):
         assert stat.S_IMODE(mode) == 0o600
 
 
+def test_ensure_restrictive_file_mode_hsmauth_import(tmp_path):
+    import os
+    import stat
+    import click
+
+    key_file = tmp_path / "private_key.pem"
+    key_file.write_text("dummy private key")
+    if os.name == "posix":
+        os.chmod(key_file, 0o644)
+
+    click_file_param = click.File("rb")
+    f = click_file_param.convert(str(key_file), None, None)
+    try:
+        ensure_restrictive_file_mode(f)
+    finally:
+        f.close()
+
+    if os.name == "posix":
+        mode = key_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
+
+
 def test_ensure_restrictive_file_mode_click_file(tmp_path):
     import os
     import stat

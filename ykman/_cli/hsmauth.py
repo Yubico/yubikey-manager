@@ -411,6 +411,8 @@ def import_credential(
     LABEL        label for the YubiHSM Auth credential
     PRIVATE-KEY  file containing the private key (use '-' to use stdin)
     """
+    ensure_restrictive_file_mode(private_key)
+
     if ctx.obj["fips_unready"]:
         raise CliFail(
             "YubiKey FIPS must be in FIPS approved mode prior to adding credentials."
