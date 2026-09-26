@@ -1257,6 +1257,8 @@ def generate_certificate_signing_request(
     PUBLIC-KEY  file containing a public key (use '-' to use stdin)
     CSR         file to write CSR to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(csr_output)
+
     session = ctx.obj["session"]
     pivman = ctx.obj["pivman_data"]
 
@@ -1282,8 +1284,6 @@ def generate_certificate_signing_request(
 
     # This verifies PIN, make sure next action is sign
     _verify_pin(ctx, session, pivman, pin)
-
-    ensure_restrictive_file_mode(csr_output)
 
     try:
         with prompt_timeout(timeout=timeout):
