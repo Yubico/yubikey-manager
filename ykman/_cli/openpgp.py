@@ -53,6 +53,7 @@ from .util import (
     click_group,
     click_postpone_execution,
     click_prompt,
+    ensure_restrictive_file_mode,
     get_scp_params,
     log_or_echo,
     pretty_print,
@@ -548,6 +549,8 @@ def attest(ctx, key, certificate, pin, format):
     except ValueError:
         cert = None
 
+    ensure_restrictive_file_mode(certificate)
+
     if not cert or click.confirm(
         f"There is already data stored in the certificate slot for {key.value}, "
         "do you want to overwrite it?"
@@ -589,6 +592,7 @@ def export_certificate(ctx, key, format, certificate):
     KEY          key slot to read from (sig, dec, aut, or att)
     CERTIFICATE  file to write certificate to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(certificate)
     session = ctx.obj["session"]
 
     try:

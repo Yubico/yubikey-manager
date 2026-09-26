@@ -55,6 +55,7 @@ from .util import (
     click_group,
     click_postpone_execution,
     click_prompt,
+    ensure_restrictive_file_mode,
     get_scp_params,
     log_or_echo,
     pretty_print,
@@ -410,6 +411,8 @@ def import_credential(
     LABEL        label for the YubiHSM Auth credential
     PRIVATE-KEY  file containing the private key (use '-' to use stdin)
     """
+    ensure_restrictive_file_mode(private_key)
+
     if ctx.obj["fips_unready"]:
         raise CliFail(
             "YubiKey FIPS must be in FIPS approved mode prior to adding credentials."
@@ -474,6 +477,7 @@ def export(ctx, label, public_key_output, format):
     LABEL      label for the YubiHSM Auth credential
     PUBLIC-KEY file to write the public key to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(public_key_output)
 
     session = ctx.obj["session"]
 

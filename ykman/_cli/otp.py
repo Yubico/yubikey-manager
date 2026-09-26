@@ -73,6 +73,7 @@ from .util import (
     click_parse_b32_key,
     click_postpone_execution,
     click_prompt,
+    ensure_restrictive_file_mode,
     is_yk4_fips,
     log_or_echo,
     prompt_for_touch,
@@ -95,7 +96,7 @@ def parse_hex(length):
 def parse_access_code_hex(access_code_hex):
     try:
         access_code = bytes.fromhex(access_code_hex)
-    except TypeError as e:
+    except (TypeError, ValueError) as e:
         raise ValueError(e)
     if len(access_code) != 6:
         raise ValueError("Must be exactly 6 bytes.")
@@ -429,6 +430,9 @@ def yubiotp(
     Program a Yubico OTP credential.
     """
 
+    if config_output:
+        ensure_restrictive_file_mode(config_output)
+
     session = _get_session(ctx)
     serial = None
 
@@ -727,7 +731,10 @@ def calculate(ctx, slot, challenge, totp, digits):
                 logger.exception("Error parsing challenge")
                 raise CliFail("Timestamp challenge for TOTP must be an integer.")
     else:  # Challenge is hex
-        challenge = bytes.fromhex(challenge)
+        try:
+            challenge = bytes.fromhex(challenge)
+        except ValueError:
+            raise CliFail("Challenge must be valid hexadecimal.")
 
     try:
         event = Event()

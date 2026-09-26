@@ -27,6 +27,7 @@
 
 import logging
 import os
+import shutil
 import subprocess  # nosec
 import sys
 from time import sleep
@@ -238,9 +239,11 @@ def kill_scdaemon():
                     killed = True
     else:
         # Works for Linux and OS X.
-        return_code = subprocess.call(["pkill", "-9", "scdaemon"])  # noqa: S603, S607
-        if return_code == 0:
-            killed = True
+        pkill = shutil.which("pkill") or "/usr/bin/pkill"
+        if os.path.exists(pkill):
+            return_code = subprocess.call([pkill, "-9", "scdaemon"])  # noqa: S603
+            if return_code == 0:
+                killed = True
     if killed:
         sleep(0.1)
     return killed
@@ -249,9 +252,11 @@ def kill_scdaemon():
 def kill_yubikey_agent():
     killed = False
     if sys.platform != "win32":
-        return_code = subprocess.call(["pkill", "-HUP", "yubikey-agent"])  # noqa: S603, S607
-        if return_code == 0:
-            killed = True
+        pkill = shutil.which("pkill") or "/usr/bin/pkill"
+        if os.path.exists(pkill):
+            return_code = subprocess.call([pkill, "-HUP", "yubikey-agent"])  # noqa: S603
+            if return_code == 0:
+                killed = True
     if killed:
         sleep(0.1)
 

@@ -57,6 +57,7 @@ from .util import (
     click_group,
     click_postpone_execution,
     click_prompt,
+    ensure_restrictive_file_mode,
     get_scp_params,
     log_or_echo,
     organize_scp11_certificates,
@@ -242,6 +243,8 @@ def generate_key(ctx, key, public_key_output, replace_kvn):
         values_str = ", ".join(f"0x{v:x} ({v.name})" for v in valid)
         raise CliFail(f"KID must be one of {values_str}.")
 
+    ensure_restrictive_file_mode(public_key_output)
+
     session = ctx.obj["session"]
 
     try:
@@ -372,6 +375,8 @@ def export(ctx, key, certificates_output):
     KID KVN     key reference to output certificate chain for
     OUTPUT      file to write the certificate chain to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(certificates_output)
+
     session = ctx.obj["session"]
     pems = [
         cert.public_bytes(encoding=serialization.Encoding.PEM)

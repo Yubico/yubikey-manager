@@ -4,8 +4,12 @@ import re
 
 import pytest
 from ykman import __version__ as version
+from ykman._cli.otp import parse_access_code_hex
 from ykman.otp import format_oath_code, generate_static_pw, time_challenge
+from ykman.scancodes import KEYBOARD_LAYOUT
+from ykman._cli.util import ensure_restrictive_file_mode
 from ykman.util import (
+    InvalidPasswordError,
     _parse_pkcs12,
     is_pem,
     is_pkcs12,
@@ -47,6 +51,16 @@ def test_format_oath_code(payload, digits, expected):
         assert format_oath_code(payload, digits) == expected
 
 
+def test_parse_access_code_hex():
+    assert parse_access_code_hex("010203040506") == b"\x01\x02\x03\x04\x05\x06"
+
+    with pytest.raises(ValueError, match="Must be exactly 6 bytes."):
+        parse_access_code_hex("010203")
+
+    with pytest.raises(ValueError):
+        parse_access_code_hex("not_hex")
+
+
 def test_generate_static_pw():
     template = r"^[cbdefghijklnrtuvCBDEFGHIJKLNRTUV]{%d}$"
     for length in range(0, 38):
@@ -54,6 +68,15 @@ def test_generate_static_pw():
         assert pattern.fullmatch(generate_static_pw(length)), (
             f"Length {length} failed regex check"
         )
+
+    with pytest.raises(ValueError, match="Password length cannot be negative"):
+        generate_static_pw(-1)
+
+    all_chars = set(KEYBOARD_LAYOUT.MODHEX.value.keys())
+    with pytest.raises(
+        ValueError, match="No valid characters available for password generation"
+    ):
+        generate_static_pw(10, blocklist=all_chars)
 
 
 @pytest.mark.parametrize(
@@ -167,6 +190,17 @@ def test_parse_pkcs12():
     assert len(certs) == 1
 
 
+def test_parse_private_key_encrypted_pem_raises_invalid_password_error():
+    with open_file("rsa_2048_key_encrypted.pem") as fh:
+        data = fh.read()
+
+    with pytest.raises(InvalidPasswordError):
+        parse_private_key(data, None)
+
+    with pytest.raises(InvalidPasswordError):
+        parse_private_key(data, b"wrong-password")
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
@@ -208,3 +242,64 @@ def test_form_factor_from_code(code, expected):
 def test_form_factor_from_code_rejects_invalid_type():
     with pytest.raises(ValueError):
         FORM_FACTOR.from_code("im a string")
+
+
+def test_ensure_restrictive_file_mode(tmp_path):
+    import os
+    import stat
+
+    test_file = tmp_path / "test.file"
+    test_file.write_text("test")
+    if os.name == "posix":
+        os.chmod(test_file, 0o644)
+
+    with open(test_file, "r+") as f:
+        ensure_restrictive_file_mode(f)
+
+    if os.name == "posix":
+        mode = test_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
+
+
+def test_ensure_restrictive_file_mode_hsmauth_import(tmp_path):
+    import os
+    import stat
+    import click
+
+    key_file = tmp_path / "private_key.pem"
+    key_file.write_text("dummy private key")
+    if os.name == "posix":
+        os.chmod(key_file, 0o644)
+
+    click_file_param = click.File("rb")
+    f = click_file_param.convert(str(key_file), None, None)
+    try:
+        ensure_restrictive_file_mode(f)
+    finally:
+        f.close()
+
+    if os.name == "posix":
+        mode = key_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
+
+
+def test_ensure_restrictive_file_mode_click_file(tmp_path):
+    import os
+    import stat
+    import click
+
+    test_file = tmp_path / "test_click.file"
+    test_file.write_text("test")
+    if os.name == "posix":
+        os.chmod(test_file, 0o644)
+
+    click_file_param = click.File("wb")
+    f = click_file_param.convert(str(test_file), None, None)
+    try:
+        ensure_restrictive_file_mode(f)
+    finally:
+        f.close()
+
+    if os.name == "posix":
+        mode = test_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600

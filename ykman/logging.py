@@ -26,11 +26,32 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import logging
+import os
 
 from yubikit.logging import LOG_LEVEL
 
 logging.addLevelName(LOG_LEVEL.TRAFFIC, LOG_LEVEL.TRAFFIC.name)
 logger = logging.getLogger(__name__)
+
+
+class RestrictiveFileHandler(logging.FileHandler):
+    """FileHandler that creates files with restrictive (0o600) permissions on POSIX."""
+
+    def _open(self):
+        if os.name == "posix":
+            fd_num = os.open(
+                self.baseFilename,
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                0o600,
+            )
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd_num, 0o600)
+            else:
+                os.chmod(self.baseFilename, 0o600)
+            return os.fdopen(
+                fd_num, self.mode, encoding=self.encoding, errors=self.errors
+            )
+        return super()._open()
 
 
 def _print_box(*lines):
@@ -72,7 +93,7 @@ def init_logging(log_level: LOG_LEVEL, log_file=None, replace=False):
         "%",
     )
     if log_file:
-        handler: logging.Handler = logging.FileHandler(log_file)
+        handler: logging.Handler = RestrictiveFileHandler(log_file)
     else:
         handler = logging.StreamHandler()
     handler.setFormatter(formatter)

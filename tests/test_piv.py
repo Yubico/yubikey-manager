@@ -4,10 +4,12 @@ from datetime import date
 
 import pytest
 
+from cryptography import x509
+
 from ykman.piv import (
+    derive_management_key,
     generate_chuid,
     generate_random_management_key,
-    _parse_rfc4514_string,
 )
 from yubikit.core import BadResponseError, NotSupportedError, Version
 from yubikit.piv import (
@@ -35,12 +37,29 @@ from yubikit.piv import (
     ],
 )
 def test_parse_rfc4514_string(value):
-    name = _parse_rfc4514_string(value)
-    name2 = _parse_rfc4514_string(name.rfc4514_string())
+    name = x509.Name.from_rfc4514_string(value)
+    name2 = x509.Name.from_rfc4514_string(name.rfc4514_string())
     assert name == name2
 
 
 class TestPivFunctions:
+    def test_derive_management_key(self):
+        pin = "123456"
+        salt = b"0123456789abcdef"
+        with pytest.deprecated_call():
+            key = derive_management_key(pin, salt)
+        assert isinstance(key, bytes)
+        assert len(key) == 24
+        # Verify deterministic output
+        with pytest.deprecated_call():
+            assert key == derive_management_key(pin, salt)
+
+        # Test custom iterations
+        with pytest.deprecated_call():
+            key_custom = derive_management_key(pin, salt, iterations=100000)
+        assert len(key_custom) == 24
+        assert key_custom != key
+
     def test_generate_random_management_key(self):
         output1 = generate_random_management_key(MANAGEMENT_KEY_TYPE.TDES)
         output2 = generate_random_management_key(MANAGEMENT_KEY_TYPE.TDES)
@@ -236,3 +255,32 @@ class TestDecompressCertificate:
 
         result = decompress_certificate(gzip_data)
         assert result == original_data
+
+
+def test_read_object_restrictive_file_mode(tmp_path):
+    import os
+    import stat
+    from unittest.mock import MagicMock
+    from click.testing import CliRunner
+    from ykman._cli.piv import read_object
+
+    out_file = tmp_path / "exported_object.bin"
+    mock_session = MagicMock()
+    mock_session.get_object.return_value = b"sensitive_piv_data"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        read_object,
+        ["0x5f0001", str(out_file)],
+        obj={
+            "session": mock_session,
+            "pivman_data": MagicMock(),
+            "fips_unready": False,
+        },
+    )
+
+    assert result.exit_code == 0
+    assert out_file.read_bytes() == b"sensitive_piv_data"
+    if os.name == "posix":
+        mode = out_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600

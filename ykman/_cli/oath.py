@@ -31,10 +31,10 @@ from base64 import b32encode
 from typing import Any
 
 import click
+from cryptography import x509
 from cryptography.x509 import NameOID
 from pskc import PSKC
 
-from ykman.piv import parse_rfc4514_string
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import SW, ApduError, SmartCardConnection
 from yubikit.management import CAPABILITY
@@ -48,7 +48,7 @@ from yubikit.oath import (
 )
 
 from ..oath import calculate_steam, delete_broken_credential, is_hidden, is_steam
-from ..settings import AppData
+from ..settings import AppData, KeystoreError
 from .util import (
     CliFail,
     EnumChoice,
@@ -58,6 +58,7 @@ from .util import (
     click_parse_b32_key,
     click_postpone_execution,
     click_prompt,
+    ensure_restrictive_file_mode,
     get_scp_params,
     is_yk4_fips,
     log_or_echo,
@@ -285,7 +286,7 @@ def change(ctx, password, clear, new_password, remember):
         if remember:
             try:
                 keys.ensure_unlocked()
-            except ValueError:
+            except (KeystoreError, ValueError):
                 raise CliFail(
                     "Failed to remember password, the keyring is locked or unavailable."
                 )
@@ -329,7 +330,7 @@ def remember(ctx, password):
     else:
         try:
             keys.ensure_unlocked()
-        except ValueError:
+        except (KeystoreError, ValueError):
             raise CliFail(
                 "Failed to remember password, the keyring is locked or unavailable."
             )
@@ -528,6 +529,9 @@ def add(
     NAME    human readable name of the account, such as a username or e-mail address
     SECRET  base32-encoded secret/key value provided by the server
     """
+
+    if output:
+        ensure_restrictive_file_mode(output)
 
     if ctx.obj["fips_unready"]:
         raise CliFail(
@@ -754,7 +758,7 @@ def import_pskc(ctx, import_file, touch, force, password, remember):
         if key.key_userid:
             try:
                 # Use the CN field if the userid is a DN
-                dn = parse_rfc4514_string(key.key_userid)
+                dn = x509.Name.from_rfc4514_string(key.key_userid)
                 name = dn.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
                 assert isinstance(name, str)  # noqa: S101
             except (ValueError, IndexError):

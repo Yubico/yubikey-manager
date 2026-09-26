@@ -79,6 +79,7 @@ from .util import (
     click_group,
     click_postpone_execution,
     click_prompt,
+    ensure_restrictive_file_mode,
     get_scp_params,
     log_or_echo,
     pretty_print,
@@ -696,6 +697,8 @@ def generate_key(
         )
     _check_key_support_fips(ctx, algorithm, pin_policy)
 
+    ensure_restrictive_file_mode(public_key_output)
+
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
 
@@ -791,6 +794,8 @@ def attest(ctx, slot, certificate, format):
     SLOT         PIV slot of the private key
     CERTIFICATE  file to write attestation certificate to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(certificate)
+
     session = ctx.obj["session"]
     try:
         cert = session.attest_key(slot)
@@ -865,6 +870,8 @@ def export(ctx, slot, public_key_output, format, verify, pin):
     SLOT        PIV slot of the private key
     PUBLIC-KEY  file to write the public key to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(public_key_output)
+
     session = ctx.obj["session"]
     try:  # Prefer metadata if available
         public_key = session.get_slot_metadata(slot).public_key
@@ -1115,6 +1122,8 @@ def export_certificate(ctx, format, slot, certificate):
     SLOT            PIV slot of the certificate
     CERTIFICATE     file to write certificate to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(certificate)
+
     session = ctx.obj["session"]
     try:
         cert = session.get_certificate(slot)
@@ -1248,6 +1257,8 @@ def generate_certificate_signing_request(
     PUBLIC-KEY  file containing a public key (use '-' to use stdin)
     CSR         file to write CSR to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(csr_output)
+
     session = ctx.obj["session"]
     pivman = ctx.obj["pivman_data"]
 
@@ -1355,6 +1366,8 @@ def read_object(ctx, pin, object_id, output):
         raise CliFail(
             "YubiKey FIPS must be in FIPS approved mode to export this object."
         )
+
+    ensure_restrictive_file_mode(output)
 
     def do_read_object(retry=True):
         try:
