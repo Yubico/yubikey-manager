@@ -538,6 +538,7 @@ def attest(ctx, key, certificate, pin, format):
     KEY          key slot to attest (sig, dec, aut)
     CERTIFICATE  file to write attestation certificate to (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(certificate)
 
     session = ctx.obj["session"]
 
@@ -548,8 +549,6 @@ def attest(ctx, key, certificate, pin, format):
         cert = session.get_certificate(key)
     except ValueError:
         cert = None
-
-    ensure_restrictive_file_mode(certificate)
 
     if not cert or click.confirm(
         f"There is already data stored in the certificate slot for {key.value}, "

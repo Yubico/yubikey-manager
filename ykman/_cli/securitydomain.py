@@ -237,13 +237,13 @@ def generate_key(ctx, key, public_key_output, replace_kvn):
     PUBLIC-KEY  file containing the generated public key (use '-' to use stdout)
     """
 
+    ensure_restrictive_file_mode(public_key_output)
+
     _require_auth(ctx)
     valid = (ScpKid.SCP11a, ScpKid.SCP11b, ScpKid.SCP11c)
     if key.kid not in valid:
         values_str = ", ".join(f"0x{v:x} ({v.name})" for v in valid)
         raise CliFail(f"KID must be one of {values_str}.")
-
-    ensure_restrictive_file_mode(public_key_output)
 
     session = ctx.obj["session"]
 

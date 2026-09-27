@@ -691,13 +691,13 @@ def generate_key(
     PUBLIC-KEY  file containing the generated public key (use '-' to use stdout)
     """
 
+    ensure_restrictive_file_mode(public_key_output)
+
     if ctx.obj["fips_unready"]:
         raise CliFail(
             "YubiKey FIPS must be in FIPS approved mode prior to key generation."
         )
     _check_key_support_fips(ctx, algorithm, pin_policy)
-
-    ensure_restrictive_file_mode(public_key_output)
 
     session = ctx.obj["session"]
     _ensure_authenticated(ctx, pin, management_key)
@@ -1355,6 +1355,8 @@ def read_object(ctx, pin, object_id, output):
     OUTPUT          file to write object to (use '-' to use stdout)
     """
 
+    ensure_restrictive_file_mode(output)
+
     session = ctx.obj["session"]
     pivman = ctx.obj["pivman_data"]
     if ctx.obj["fips_unready"] and object_id in (
@@ -1366,8 +1368,6 @@ def read_object(ctx, pin, object_id, output):
         raise CliFail(
             "YubiKey FIPS must be in FIPS approved mode to export this object."
         )
-
-    ensure_restrictive_file_mode(output)
 
     def do_read_object(retry=True):
         try:
