@@ -261,6 +261,106 @@ def test_ensure_restrictive_file_mode(tmp_path):
         assert stat.S_IMODE(mode) == 0o600
 
 
+def test_piv_generate_key_file_mode_on_error(tmp_path):
+    import os
+    import stat
+    from click.testing import CliRunner
+    from ykman._cli.piv import generate_key
+
+    out_file = tmp_path / "pubkey.pem"
+    runner = CliRunner()
+    result = runner.invoke(
+        generate_key,
+        ["9a", str(out_file)],
+        obj={"fips_unready": True},
+    )
+
+    assert result.exit_code != 0
+    assert "YubiKey FIPS must be in FIPS approved mode" in str(result.exception)
+    if os.name == "posix":
+        mode = out_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
+
+
+def test_piv_csr_file_mode_before_prompt(tmp_path):
+    import os
+    import stat
+    from unittest.mock import MagicMock
+    from click.testing import CliRunner
+    from ykman._cli.piv import generate_certificate_signing_request
+
+    pub_key_file = tmp_path / "pub.pem"
+    pub_key_file.write_text(
+        "-----BEGIN PUBLIC KEY-----\n"
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1234\n"
+        "-----END PUBLIC KEY-----\n"
+    )
+    csr_file = tmp_path / "out.csr"
+
+    mock_session = MagicMock()
+    mock_session.get_slot_metadata.side_effect = Exception("Metadata error")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        generate_certificate_signing_request,
+        ["9a", str(pub_key_file), str(csr_file), "--subject", "CN=Test"],
+        obj={
+            "session": mock_session,
+            "pivman_data": MagicMock(),
+        },
+    )
+
+    assert result.exit_code != 0
+    if os.name == "posix":
+        mode = csr_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
+
+
+def test_openpgp_attest_file_mode_before_prompt(tmp_path):
+    import os
+    import stat
+    from unittest.mock import MagicMock
+    from click.testing import CliRunner
+    from ykman._cli.openpgp import attest
+
+    cert_file = tmp_path / "attest.crt"
+    mock_session = MagicMock()
+    mock_session.get_certificate.side_effect = Exception("Cert error")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        attest,
+        ["sig", str(cert_file), "-P", "123456"],
+        obj={"session": mock_session},
+    )
+
+    assert result.exit_code != 0
+    if os.name == "posix":
+        mode = cert_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
+
+
+def test_securitydomain_generate_key_file_mode_on_auth_error(tmp_path):
+    import os
+    import stat
+    from click.testing import CliRunner
+    from ykman._cli.securitydomain import generate_key
+
+    out_file = tmp_path / "sd_pubkey.pem"
+    runner = CliRunner()
+    result = runner.invoke(
+        generate_key,
+        ["SCP11a", "1", str(out_file)],
+        obj={"authenticated": False},
+    )
+
+    assert result.exit_code != 0
+    assert "This command requires authentication" in str(result.exception)
+    if os.name == "posix":
+        mode = out_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
+
+
 def test_ensure_restrictive_file_mode_hsmauth_import(tmp_path):
     import os
     import stat

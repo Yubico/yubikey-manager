@@ -236,6 +236,7 @@ def generate_key(ctx, key, public_key_output, replace_kvn):
     KID KVN     key reference for the new key
     PUBLIC-KEY  file containing the generated public key (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(public_key_output)
 
     ensure_restrictive_file_mode(public_key_output)
 

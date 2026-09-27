@@ -690,6 +690,7 @@ def generate_key(
     SLOT        PIV slot of the private key
     PUBLIC-KEY  file containing the generated public key (use '-' to use stdout)
     """
+    ensure_restrictive_file_mode(public_key_output)
 
     ensure_restrictive_file_mode(public_key_output)
 
