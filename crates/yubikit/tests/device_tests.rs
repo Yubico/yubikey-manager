@@ -7,8 +7,8 @@
 //! The device is found automatically whether it is connected over USB or NFC.
 //!
 //! ```sh
-//! YUBIKEY_SERIAL=12345678 cargo test -p yubikit --test device_tests -- --test-threads=1
-//! YUBIKEY_SERIAL=-1 cargo test -p yubikit --test device_tests -- --test-threads=1
+//! YUBIKEY_SERIAL=12345678 cargo test -p yubikit --test device_tests
+//! YUBIKEY_SERIAL=-1 cargo test -p yubikit --test device_tests
 //! ```
 //!
 //! **WARNING**: Some tests are destructive (they reset applications).
@@ -224,18 +224,43 @@ fn usb_enabled_capabilities(dev: &LocalYubiKeyDevice) -> Capability {
         .unwrap_or(Capability::NONE)
 }
 
+fn open_enabled_usb(dev: &LocalYubiKeyDevice, enabled: Capability) -> Result<(), String> {
+    if !(enabled
+        & (Capability::PIV
+            | Capability::OATH
+            | Capability::OPENPGP
+            | Capability::HSMAUTH
+            | Capability::FIDOCCID))
+        .is_empty()
+    {
+        dev.open_smartcard()
+            .map_err(|e| format!("open CCID: {e}"))?;
+    }
+    if enabled.contains(Capability::OTP) {
+        dev.open_otp().map_err(|e| format!("open OTP: {e}"))?;
+    }
+    if !(enabled & (Capability::FIDO2 | Capability::U2F)).is_empty() {
+        dev.open_fido().map_err(|e| format!("open FIDO: {e}"))?;
+    }
+    Ok(())
+}
+
 fn try_wait_for_usb_enabled(
     enabled: Capability,
     interfaces: UsbInterface,
 ) -> Result<LocalYubiKeyDevice, String> {
     let deadline = Instant::now() + Duration::from_secs(30);
+    let mut last_error = String::new();
     loop {
         match find_test_device(interfaces) {
             Some(dev)
                 if dev.info().version >= Version(5, 0, 0)
                     && usb_enabled_capabilities(&dev) == enabled =>
             {
-                return Ok(dev);
+                match open_enabled_usb(&dev, enabled) {
+                    Ok(()) => return Ok(dev),
+                    Err(e) => last_error = e,
+                }
             }
             Some(dev) => {
                 log::debug!(
@@ -248,7 +273,7 @@ fn try_wait_for_usb_enabled(
         }
         if Instant::now() >= deadline {
             return Err(format!(
-                "YubiKey did not settle with USB capabilities {enabled:?} and interfaces {interfaces:?}"
+                "YubiKey did not settle with USB capabilities {enabled:?} and interfaces {interfaces:?}: {last_error}"
             ));
         }
         std::thread::sleep(Duration::from_millis(250));
@@ -324,26 +349,37 @@ fn try_write_usb_enabled_once(dev: &LocalYubiKeyDevice, enabled: Capability) -> 
     }
 }
 
-fn write_usb_enabled(dev: &LocalYubiKeyDevice, enabled: Capability) {
+fn try_write_usb_enabled(
+    dev: Option<&LocalYubiKeyDevice>,
+    enabled: Capability,
+) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(30);
-    let mut candidate = Some(dev.clone());
+    let mut candidate = dev.cloned();
     let mut last_error = String::new();
     loop {
         let current = candidate.take().or_else(|| {
             find_test_device(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
         });
         if let Some(dev) = current {
+            if usb_enabled_capabilities(&dev) == enabled {
+                return Ok(());
+            }
             match try_write_usb_enabled_once(&dev, enabled) {
-                Ok(()) => return,
+                Ok(()) => return Ok(()),
                 Err(e) => last_error = e,
             }
         }
-        assert!(
-            Instant::now() < deadline,
-            "write USB config failed after retries: {last_error}"
-        );
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "write USB config failed after retries: {last_error}"
+            ));
+        }
         std::thread::sleep(Duration::from_millis(250));
     }
+}
+
+fn write_usb_enabled(dev: &LocalYubiKeyDevice, enabled: Capability) {
+    try_write_usb_enabled(Some(dev), enabled).unwrap_or_else(|e| panic!("{e}"));
 }
 
 struct RestoreUsbConfig {
@@ -352,19 +388,14 @@ struct RestoreUsbConfig {
 
 impl Drop for RestoreUsbConfig {
     fn drop(&mut self) {
-        if let Some(dev) =
-            find_test_device(UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO)
-        {
-            write_usb_enabled(&dev, self.enabled);
-            match try_wait_for_usb_enabled(
+        match try_write_usb_enabled(None, self.enabled).and_then(|_| {
+            try_wait_for_usb_enabled(
                 self.enabled,
                 UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO,
-            ) {
-                Ok(dev) => replace_cached_device(dev),
-                Err(e) => eprintln!("Failed to restore USB interfaces: {e}"),
-            }
-        } else {
-            eprintln!("Failed to restore USB interfaces: YubiKey not found");
+            )
+        }) {
+            Ok(dev) => replace_cached_device(dev),
+            Err(e) => eprintln!("Failed to restore USB interfaces: {e}"),
         }
     }
 }
@@ -733,6 +764,13 @@ fn test_reinsert_usb_single_interface(#[case] case: UsbReinsertCase) {
         enabled: supported_usb,
     };
 
+    write_usb_enabled(&initial, supported_usb);
+    let initial = wait_for_usb_enabled(
+        supported_usb,
+        UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO,
+    );
+    replace_cached_device(initial.clone());
+
     let Some(enabled) = case.capabilities(supported_usb) else {
         skip!("{} interface is not supported on this YubiKey", case.name());
     };
@@ -745,15 +783,12 @@ fn test_reinsert_usb_single_interface(#[case] case: UsbReinsertCase) {
     match case {
         UsbReinsertCase::Ccid => {
             assert!(dev.reader_name.is_some(), "CCID reader missing");
-            assert!(dev.open_smartcard().is_ok(), "open smartcard failed");
         }
         UsbReinsertCase::Otp => {
             assert!(dev.hid_path.is_some(), "OTP HID path missing");
-            assert!(dev.open_otp().is_ok(), "open OTP failed");
         }
         UsbReinsertCase::Fido => {
             assert!(dev.fido_path.is_some(), "FIDO HID path missing");
-            assert!(dev.open_fido().is_ok(), "open FIDO failed");
         }
     }
 
