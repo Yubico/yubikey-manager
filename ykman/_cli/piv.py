@@ -692,8 +692,6 @@ def generate_key(
     """
     ensure_restrictive_file_mode(public_key_output)
 
-    ensure_restrictive_file_mode(public_key_output)
-
     if ctx.obj["fips_unready"]:
         raise CliFail(
             "YubiKey FIPS must be in FIPS approved mode prior to key generation."

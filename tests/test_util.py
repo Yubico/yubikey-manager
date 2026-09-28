@@ -261,6 +261,55 @@ def test_ensure_restrictive_file_mode(tmp_path):
         assert stat.S_IMODE(mode) == 0o600
 
 
+def test_hsmauth_export_file_mode(tmp_path):
+    import os
+    import stat
+    from unittest.mock import MagicMock
+    from click.testing import CliRunner
+    from ykman._cli.hsmauth import export
+
+    pubkey_file = tmp_path / "pubkey.pem"
+    mock_session = MagicMock()
+    mock_session.get_public_key.side_effect = Exception("Export error")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        export,
+        ["label1", str(pubkey_file)],
+        obj={"session": mock_session},
+    )
+
+    assert result.exit_code != 0
+    if os.name == "posix":
+        mode = pubkey_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
+
+
+def test_hsmauth_import_file_mode(tmp_path):
+    import os
+    import stat
+    from click.testing import CliRunner
+    from ykman._cli.hsmauth import import_credential
+
+    privkey_file = tmp_path / "privkey.pem"
+    privkey_file.write_text("dummy key material")
+    if os.name == "posix":
+        os.chmod(privkey_file, 0o644)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        import_credential,
+        ["label1", str(privkey_file)],
+        obj={"fips_unready": True},
+    )
+
+    assert result.exit_code != 0
+    assert "YubiKey FIPS must be in FIPS approved mode" in str(result.exception)
+    if os.name == "posix":
+        mode = privkey_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
+
+
 def test_piv_generate_key_file_mode_on_error(tmp_path):
     import os
     import stat
