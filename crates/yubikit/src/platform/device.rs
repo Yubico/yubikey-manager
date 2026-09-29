@@ -244,7 +244,9 @@ impl LocalYubiKeyDevice {
 
     /// Wait for the user to remove and reinsert this YubiKey.
     ///
-    /// On success, updates this device's transport paths and info.
+    /// On success, updates this device's transport paths and info. Active
+    /// device monitors reuse the verified info for serial-numbered keys
+    /// instead of probing the same interfaces concurrently.
     ///
     /// * `status_cb` – called with [`ReinsertStatus`] variants to indicate
     ///   what the user should do.
@@ -254,10 +256,13 @@ impl LocalYubiKeyDevice {
         status_cb: &dyn Fn(ReinsertStatus),
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DeviceError> {
-        match self.transport {
-            Transport::Usb => self.reinsert_usb(status_cb, cancelled),
-            Transport::Nfc => self.reinsert_nfc(status_cb, cancelled),
-        }
+        super::monitor::with_paused_monitors(|| {
+            match self.transport {
+                Transport::Usb => self.reinsert_usb(status_cb, cancelled)?,
+                Transport::Nfc => self.reinsert_nfc(status_cb, cancelled)?,
+            }
+            Ok(self.clone())
+        })
     }
 
     fn reinsert_usb(
