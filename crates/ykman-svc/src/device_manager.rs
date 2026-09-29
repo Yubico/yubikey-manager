@@ -9,7 +9,7 @@
 //! `update_devices()` simply projects that inventory into the RPC device map.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
@@ -45,7 +45,8 @@ pub struct DeviceManager {
     monitor: Mutex<MonitorLifecycle>,
     /// Live device inventory, keyed by stable monitor id. Updated by the
     /// monitor's event callback.
-    monitored: Arc<Mutex<HashMap<YubiKeyId, LocalYubiKeyDevice>>>,
+    monitored: Arc<Mutex<HashMap<YubiKeyId, (LocalYubiKeyDevice, u64)>>>,
+    next_revision: Arc<AtomicU64>,
 }
 
 #[derive(Default)]
@@ -62,6 +63,7 @@ struct ManagerState {
     devices: BTreeMap<String, Value>,
     /// Cached device objects for fast re-open without re-enumeration.
     device_objects: BTreeMap<String, LocalYubiKeyDevice>,
+    device_revisions: BTreeMap<String, u64>,
     /// Devices that are currently opened by a client session.
     locked_devices: HashSet<String>,
 }
@@ -72,11 +74,13 @@ impl DeviceManager {
             state: Mutex::new(ManagerState {
                 devices: BTreeMap::new(),
                 device_objects: BTreeMap::new(),
+                device_revisions: BTreeMap::new(),
                 locked_devices: HashSet::new(),
             }),
             client_count: AtomicUsize::new(0),
             monitor: Mutex::new(MonitorLifecycle::default()),
             monitored: Arc::new(Mutex::new(HashMap::new())),
+            next_revision: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -88,13 +92,15 @@ impl DeviceManager {
         }
 
         let monitored = Arc::clone(&self.monitored);
+        let next_revision = Arc::clone(&self.next_revision);
         let interfaces = UsbInterface::CCID | UsbInterface::FIDO | UsbInterface::OTP;
         let handle = monitor_yubikeys(interfaces, move |event| {
             let mut inv = recover_lock(monitored.lock(), "monitored inventory");
             match event {
                 YubiKeyEvent::Added(yk) | YubiKeyEvent::Changed(yk) => {
                     let id = yk.id();
-                    inv.insert(id, yk.into_device());
+                    let revision = next_revision.fetch_add(1, Ordering::Relaxed) + 1;
+                    inv.insert(id, (yk.into_device(), revision));
                 }
                 YubiKeyEvent::Removed(yk) => {
                     inv.remove(&yk.id());
@@ -200,6 +206,7 @@ impl DeviceManager {
                 let mut state = recover_lock(this.state.lock(), "device manager state");
                 state.devices.clear();
                 state.device_objects.clear();
+                state.device_revisions.clear();
                 log::info!("Device monitor stopped after linger");
             }
         });
@@ -210,18 +217,20 @@ impl DeviceManager {
     pub fn update_devices(&self) -> BTreeMap<String, Value> {
         // Snapshot the monitored devices, ordered by stable id for
         // deterministic duplicate-naming.
-        let mut devices: Vec<(YubiKeyId, LocalYubiKeyDevice)> = {
+        let mut devices: Vec<(YubiKeyId, LocalYubiKeyDevice, u64)> = {
             let inv = recover_lock(self.monitored.lock(), "monitored inventory");
-            inv.iter().map(|(id, dev)| (*id, dev.clone())).collect()
+            inv.iter()
+                .map(|(id, (dev, revision))| (*id, dev.clone(), *revision))
+                .collect()
         };
-        devices.sort_by_key(|(id, _)| *id);
-        let devices: Vec<LocalYubiKeyDevice> = devices.into_iter().map(|(_, dev)| dev).collect();
+        devices.sort_by_key(|(id, _, _)| *id);
 
         let mut new_devices = BTreeMap::new();
         let mut new_device_objects: BTreeMap<String, LocalYubiKeyDevice> = BTreeMap::new();
+        let mut new_revisions = BTreeMap::new();
         let mut serial_counts: HashMap<String, usize> = HashMap::new();
 
-        for dev in &devices {
+        for (_, dev, revision) in &devices {
             let name = device_name(dev, &mut serial_counts);
             let info = dev.info();
             let version = &info.version;
@@ -242,7 +251,8 @@ impl DeviceManager {
                     "transport": transport_str,
                 }),
             );
-            new_device_objects.insert(name, dev.clone());
+            new_device_objects.insert(name.clone(), dev.clone());
+            new_revisions.insert(name, *revision);
         }
 
         // Deduplicate: remove name-based entries (no serial in key) whose
@@ -286,6 +296,7 @@ impl DeviceManager {
                         ver.2
                     );
                     new_device_objects.remove(name);
+                    new_revisions.remove(name);
                     return false;
                 }
             }
@@ -301,17 +312,19 @@ impl DeviceManager {
 
         state.devices = new_devices.clone();
         state.device_objects = new_device_objects;
+        state.device_revisions = new_revisions;
         new_devices
     }
 
-    /// Check if a device name is still in the current inventory.
-    pub fn is_device_present(&self, name: &str) -> bool {
+    /// Return the current monitor revision, refreshing the projected inventory.
+    pub fn device_revision(&self, name: &str) -> Option<u64> {
+        self.update_devices();
         let state = self.lock_state();
-        state.devices.contains_key(name)
+        state.device_revisions.get(name).copied()
     }
 
     /// Try to open a device exclusively for a client session.
-    pub fn open_device(&self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
+    pub fn open_device(&self, name: &str) -> Result<(Box<dyn RpcNode>, u64), RpcError> {
         let mut state = self.lock_state();
 
         if !state.devices.contains_key(name) {
@@ -330,10 +343,13 @@ impl DeviceManager {
             .get(name)
             .ok_or_else(|| RpcError::new("device-error", format!("Device '{name}' not cached")))?
             .clone();
+        let revision = *state.device_revisions.get(name).ok_or_else(|| {
+            RpcError::new("device-error", format!("Device '{name}' has no revision"))
+        })?;
 
         state.locked_devices.insert(name.to_string());
         log::debug!("Opened device '{name}' from cache");
-        Ok(Box::new(DeviceNode::new(device)))
+        Ok((Box::new(DeviceNode::new(device)), revision))
     }
 
     /// Release a device lock when a client disconnects or closes the device.

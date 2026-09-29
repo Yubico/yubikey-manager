@@ -13,6 +13,10 @@ use crate::device_manager::DeviceManager;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn matches_revision(opened: Option<&u64>, current: Option<u64>) -> bool {
+    matches!((opened, current), (Some(opened), Some(current)) if *opened == current)
+}
+
 /// Root node of the service RPC tree.
 pub struct ServiceRootNode {
     manager: Arc<DeviceManager>,
@@ -20,6 +24,7 @@ pub struct ServiceRootNode {
     cached_children: BTreeMap<String, Value>,
     /// Device names locked by this session (released on drop).
     opened_devices: Vec<String>,
+    opened_revisions: BTreeMap<String, u64>,
 }
 
 impl ServiceRootNode {
@@ -28,6 +33,7 @@ impl ServiceRootNode {
             manager,
             cached_children: BTreeMap::new(),
             opened_devices: Vec::new(),
+            opened_revisions: BTreeMap::new(),
         }
     }
 }
@@ -54,6 +60,7 @@ impl RpcNode for ServiceRootNode {
     }
 
     fn on_child_closed(&mut self, name: &str) {
+        self.opened_revisions.remove(name);
         if self.opened_devices.contains(&name.to_string()) {
             self.manager.release_device(name);
             self.opened_devices.retain(|n| n != name);
@@ -148,12 +155,29 @@ impl RpcNode for ServiceRootNode {
     }
 
     fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
-        let node = self.manager.open_device(name)?;
+        let (node, revision) = self.manager.open_device(name)?;
         self.opened_devices.push(name.to_string());
+        self.opened_revisions.insert(name.to_string(), revision);
         Ok(node)
     }
 
     fn is_child_valid(&self, name: &str) -> bool {
-        self.manager.is_device_present(name)
+        matches_revision(
+            self.opened_revisions.get(name),
+            self.manager.device_revision(name),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::matches_revision;
+
+    #[test]
+    fn reconnected_device_invalidates_cached_child_with_same_name() {
+        assert!(matches_revision(Some(&1), Some(1)));
+        assert!(!matches_revision(Some(&1), Some(2)));
+        assert!(!matches_revision(Some(&1), None));
+        assert!(!matches_revision(None, None));
     }
 }
