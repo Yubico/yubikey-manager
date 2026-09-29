@@ -502,6 +502,8 @@ def import_key(ctx, key, private_key, admin_pin):
     KEY          key slot to import to (only 'att' supported)
     PRIVATE-KEY  file containing the private key (use '-' to use stdin)
     """
+    ensure_restrictive_file_mode(private_key)
+
     session = ctx.obj["session"]
 
     if key != KEY_REF.ATT:
