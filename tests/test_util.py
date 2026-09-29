@@ -261,6 +261,75 @@ def test_ensure_restrictive_file_mode(tmp_path):
         assert stat.S_IMODE(mode) == 0o600
 
 
+def test_ensure_restrictive_file_mode_fifo_ignored(tmp_path):
+    import os
+    import stat
+
+    if os.name != "posix":
+        pytest.skip("FIFO test only applicable on POSIX")
+
+    fifo_path = tmp_path / "test.fifo"
+    os.mkfifo(fifo_path)
+    os.chmod(fifo_path, 0o644)
+
+    # Open FIFO non-blocking
+    fd = os.open(fifo_path, os.O_RDONLY | os.O_NONBLOCK)
+    with os.fdopen(fd, "r") as f:
+        ensure_restrictive_file_mode(f)
+
+    mode = fifo_path.stat().st_mode
+    assert stat.S_IMODE(mode) == 0o644
+
+
+def test_piv_import_key_file_mode_on_error(tmp_path):
+    import os
+    import stat
+    from click.testing import CliRunner
+    from ykman._cli.piv import import_key
+
+    privkey_file = tmp_path / "privkey.pem"
+    privkey_file.write_text("dummy key material")
+    if os.name == "posix":
+        os.chmod(privkey_file, 0o644)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        import_key,
+        ["9a", str(privkey_file)],
+        obj={"fips_unready": True},
+    )
+
+    assert result.exit_code != 0
+    assert "YubiKey FIPS must be in FIPS approved mode" in str(result.exception)
+    if os.name == "posix":
+        mode = privkey_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
+
+
+def test_openpgp_import_key_file_mode_on_error(tmp_path):
+    import os
+    import stat
+    from click.testing import CliRunner
+    from ykman._cli.openpgp import import_key
+
+    privkey_file = tmp_path / "privkey.pem"
+    privkey_file.write_text("dummy key material")
+    if os.name == "posix":
+        os.chmod(privkey_file, 0o644)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        import_key,
+        ["att", str(privkey_file)],
+        obj={"session": None},
+    )
+
+    assert result.exit_code != 0
+    if os.name == "posix":
+        mode = privkey_file.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
+
+
 def test_hsmauth_export_file_mode(tmp_path):
     import os
     import stat
