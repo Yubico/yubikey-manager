@@ -69,6 +69,9 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Test signed artifact extraction
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+
       - name: download artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -107,11 +110,8 @@ jobs:
         run: |
           mkdir -p signed
           mv scribe-download/*/sign-source/1.zip signed/
-          rm -rf scribe-download
-          cd signed
-          unzip -j 1.zip || true
-          rm 1.zip
-          cd ..
+          python3 .github/scripts/extract_signed_zip.py signed/1.zip signed
+          rm signed/1.zip
           cp signed/ykman.exe ykman-builds-windows/ykman/ykman.exe
           cp signed/ykman-svc.exe ykman-builds-windows/ykman/ykman-svc.exe
 
@@ -188,11 +188,8 @@ jobs:
       run: |
         mkdir -p signed
         mv scribe-download/*/sign-source/1.zip signed/
-        rm -rf scribe-download
-        cd signed
-        unzip -j 1.zip || true
-        rm 1.zip
-        cd ..
+        python3 .github/scripts/extract_signed_zip.py signed/1.zip signed
+        rm signed/1.zip
         cp signed/ykman.msi ykman-builds-windows/ykman.msi
 
     - name: upload signed artifacts
@@ -200,3 +197,176 @@ jobs:
       with:
         name: signed-files-and-msi
         path: ykman-builds-windows
+
+  sign-exe-arm64:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tag format
+        run: |
+          [[ "${GITHUB_REF}" =~ ^refs/tags/[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Test signed artifact extraction
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+
+      - name: Download ARM64 build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ykman-builds-windows-arm64
+          path: ykman-builds-windows-arm64
+
+      - name: Docker login
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ci@yubico.com
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write service account credentials
+        env:
+          GAC: ${{ secrets.SCRIBE_SA }}
+        run: |
+          echo "${GAC}" > scribe_sa.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/scribe/scribe_sa.json" >> $GITHUB_ENV
+
+      - name: Sign ARM64 executables
+        run: >
+          docker run
+          --user $(id -u):$(id -g)
+          --volume $(pwd):/scribe
+          --env-file <(env)
+          ghcr.io/yubico/scribe-ci:v1
+          --project-id scribe-prod-987134
+          --bucket scribe-u-pub-ykman-fqj0hy
+          --config /scribe/.github/scribe-sign-exe-dll-arm64.yml
+          submit .
+          --synchronous
+          --download-artifacts
+
+      - name: Replace unsigned executables
+        run: |
+          mkdir -p signed
+          mv scribe-download/*/sign-source/1.zip signed/
+          python3 .github/scripts/extract_signed_zip.py signed/1.zip signed
+          rm signed/1.zip
+          cp signed/ykman.exe ykman-builds-windows-arm64/ykman/ykman.exe
+          cp signed/ykman-svc.exe ykman-builds-windows-arm64/ykman/ykman-svc.exe
+
+      - name: Upload signed ARM64 executables
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-files-arm64
+          path: ykman-builds-windows-arm64
+          if-no-files-found: error
+          compression-level: 0
+
+  build-msi-arm64:
+    needs: [sign-exe-arm64]
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download signed ARM64 executables
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-files-arm64
+          path: ykman-builds-windows-arm64
+
+      - name: Install WiX 3.14.1
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'wix314-binaries.zip'
+          Invoke-WebRequest 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip' -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne '6AC824E1642D6F7277D0ED7EA09411A508F6116BA6FAE0AA5F2C7DAA2FF43D31') {
+            throw 'WiX download checksum mismatch'
+          }
+          $wixDir = Join-Path $env:RUNNER_TEMP 'wix314'
+          Expand-Archive $archive -DestinationPath $wixDir
+          "WIX_BIN=$wixDir" >> $env:GITHUB_ENV
+
+      - name: Build ARM64 MSI from signed executables
+        working-directory: .\ykman-builds-windows-arm64
+        run: .\scripts\make_msi.ps1 -SourceDir .\ykman -Architecture arm64 -WixBin $env:WIX_BIN
+
+      - name: Upload unsigned ARM64 MSI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ykman-installer-windows-arm64
+          path: .\ykman-builds-windows-arm64
+          if-no-files-found: error
+
+  sign-msi-arm64:
+    needs: [build-msi-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download unsigned ARM64 MSI
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ykman-installer-windows-arm64
+          path: ykman-builds-windows-arm64
+
+      - name: Docker login
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ci@yubico.com
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write service account credentials
+        env:
+          GAC: ${{ secrets.SCRIBE_SA }}
+        run: |
+          echo "${GAC}" > scribe_sa.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/scribe/scribe_sa.json" >> $GITHUB_ENV
+
+      - name: Sign ARM64 MSI
+        run: >
+          docker run
+          --user $(id -u):$(id -g)
+          --volume $(pwd):/scribe
+          --env-file <(env)
+          ghcr.io/yubico/scribe-ci:v1
+          --project-id scribe-prod-987134
+          --bucket scribe-u-pub-ykman-fqj0hy
+          --config /scribe/.github/scribe-sign-msi-arm64.yml
+          submit .
+          --synchronous
+          --download-artifacts
+
+      - name: Replace unsigned MSI
+        run: |
+          mkdir -p signed
+          mv scribe-download/*/sign-source/1.zip signed/
+          python3 .github/scripts/extract_signed_zip.py signed/1.zip signed
+          rm signed/1.zip
+          cp signed/ykman-arm64.msi ykman-builds-windows-arm64/ykman-arm64.msi
+
+      - name: Upload signed ARM64 installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-files-and-msi-arm64
+          path: ykman-builds-windows-arm64
+          if-no-files-found: error
+          compression-level: 0
+
+  verify-arm64-signatures:
+    needs: [sign-msi-arm64]
+    runs-on: windows-11-arm
+    steps:
+      - name: Download signed ARM64 installer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-files-and-msi-arm64
+          path: signed
+
+      - name: Verify signatures
+        run: |
+          foreach ($file in @('signed\ykman\ykman.exe', 'signed\ykman\ykman-svc.exe', 'signed\ykman-arm64.msi')) {
+            if ((Get-AuthenticodeSignature $file).Status -ne 'Valid') {
+              throw "$file does not have a valid signature"
+            }
+          }
