@@ -507,6 +507,9 @@ impl MlKemPrivateKey {
 
 impl PrivateKey {
     /// Parse a PKCS#8 PrivateKeyInfo DER encoding.
+    ///
+    /// For ML-DSA and ML-KEM, both seed-only and seed-plus-expanded-key
+    /// encodings are imported using the seed.
     pub fn from_pkcs8(pkcs8_der: &[u8]) -> Result<Self, KeyError> {
         let (algorithm, key_data) = parse_pkcs8(pkcs8_der)?;
 
@@ -1165,19 +1168,138 @@ fn parse_pkcs8(pkcs8_der: &[u8]) -> Result<(KeyAlgorithm, Zeroizing<Vec<u8>>), K
             SPKI_OID_ML_KEM_1024 => KeyAlgorithm::MlKem(MlKemParameterSet::MlKem1024),
             _ => return Err(KeyError("Unsupported key algorithm")),
         };
-        // Raw key is wrapped in an OCTET STRING inside the outer OCTET STRING
-        let (_, key_off, key_len, _) =
-            tlv_parse(private_key_data, 0).map_err(|_| KeyError("Invalid key OCTET STRING"))?;
-        Ok((
-            algorithm,
-            Zeroizing::new(private_key_data[key_off..key_off + key_len].to_vec()),
-        ))
+        let key = match &algorithm {
+            KeyAlgorithm::MlDsa(parameter_set) => {
+                let expanded_len = match parameter_set {
+                    MlDsaParameterSet::MlDsa44 => 2560,
+                    MlDsaParameterSet::MlDsa65 => 4032,
+                    MlDsaParameterSet::MlDsa87 => 4896,
+                };
+                parse_pqc_seed(private_key_data, 32, expanded_len)?
+            }
+            KeyAlgorithm::MlKem(parameter_set) => {
+                let expanded_len = match parameter_set {
+                    MlKemParameterSet::MlKem512 => 1632,
+                    MlKemParameterSet::MlKem768 => 2400,
+                    MlKemParameterSet::MlKem1024 => 3168,
+                };
+                parse_pqc_seed(private_key_data, 64, expanded_len)?
+            }
+            _ => {
+                // Raw key is wrapped in an OCTET STRING inside the outer OCTET STRING
+                let (_, key_off, key_len, _) = tlv_parse(private_key_data, 0)
+                    .map_err(|_| KeyError("Invalid key OCTET STRING"))?;
+                &private_key_data[key_off..key_off + key_len]
+            }
+        };
+        Ok((algorithm, Zeroizing::new(key.to_vec())))
+    }
+}
+
+fn parse_pqc_seed(
+    private_key_data: &[u8],
+    seed_len: usize,
+    expanded_len: usize,
+) -> Result<&[u8], KeyError> {
+    let invalid = || KeyError("Invalid ML-DSA or ML-KEM private key encoding");
+    let (tag, value_off, value_len, end) = tlv_parse(private_key_data, 0).map_err(|_| invalid())?;
+    if end != private_key_data.len() {
+        return Err(invalid());
+    }
+    match tag {
+        // OpenSSL's seed-only encoding uses a context-specific implicit OCTET STRING.
+        0x80 | 0x04 if value_len == seed_len => {
+            Ok(&private_key_data[value_off..value_off + value_len])
+        }
+        // The default OpenSSL encoding contains the seed followed by the expanded key.
+        0x30 => {
+            let fields = &private_key_data[value_off..value_off + value_len];
+            let (seed_tag, seed_off, seed_size, seed_end) =
+                tlv_parse(fields, 0).map_err(|_| invalid())?;
+            let (expanded_tag, _, expanded_size, expanded_end) =
+                tlv_parse(fields, seed_end).map_err(|_| invalid())?;
+            if seed_tag != 0x04
+                || seed_size != seed_len
+                || expanded_tag != 0x04
+                || expanded_size != expanded_len
+                || expanded_end != fields.len()
+            {
+                return Err(invalid());
+            }
+            Ok(&fields[seed_off..seed_off + seed_size])
+        }
+        _ => Err(invalid()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::__internal::tlv::tlv_encode;
+
+    fn pqc_pkcs8(oid: ObjectIdentifier, key: &[u8]) -> Vec<u8> {
+        let algorithm = tlv_encode(0x30, &tlv_encode(0x06, oid.as_bytes()));
+        let mut fields = tlv_encode(0x02, &[0]);
+        fields.extend_from_slice(&algorithm);
+        fields.extend_from_slice(&tlv_encode(0x04, key));
+        tlv_encode(0x30, &fields)
+    }
+
+    #[test]
+    fn openssl_pqc_pkcs8_import_uses_seed() {
+        for (oid, seed_len, expanded_len) in [
+            (SPKI_OID_ML_DSA_44, 32, 2560),
+            (SPKI_OID_ML_DSA_65, 32, 4032),
+            (SPKI_OID_ML_DSA_87, 32, 4896),
+            (SPKI_OID_ML_KEM_512, 64, 1632),
+            (SPKI_OID_ML_KEM_768, 64, 2400),
+            (SPKI_OID_ML_KEM_1024, 64, 3168),
+        ] {
+            let seed = vec![0x42; seed_len];
+            let mut expanded_fields = tlv_encode(0x04, &seed);
+            expanded_fields.extend_from_slice(&tlv_encode(0x04, &vec![0x53; expanded_len]));
+            for key in [
+                tlv_encode(0x80, &seed),
+                tlv_encode(0x30, &expanded_fields),
+                tlv_encode(0x04, &seed),
+            ] {
+                let parsed = PrivateKey::from_pkcs8(&pqc_pkcs8(oid, &key)).unwrap();
+                let imported_seed = match &parsed {
+                    PrivateKey::MlDsa(k) => k.private_key.expose_secret(),
+                    PrivateKey::MlKem(k) => k.private_key.expose_secret(),
+                    _ => panic!("Expected PQC key"),
+                };
+                assert_eq!(imported_seed, &seed);
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_pqc_pkcs8_is_rejected() {
+        let seed = vec![0x42; 32];
+        let valid_expanded = tlv_encode(0x04, &vec![0x53; 2560]);
+        for inner in [
+            tlv_encode(0x80, &seed[..31]),
+            tlv_encode(0x81, &seed),
+            tlv_encode(0x04, &vec![0x53; 2560]),
+            tlv_encode(0x30, &tlv_encode(0x04, &seed)),
+            tlv_encode(
+                0x30,
+                &[tlv_encode(0x04, &seed), tlv_encode(0x04, &[0x53])].concat(),
+            ),
+            tlv_encode(
+                0x30,
+                &[tlv_encode(0x04, &seed), valid_expanded.clone(), vec![0]].concat(),
+            ),
+            [tlv_encode(0x80, &seed), vec![0]].concat(),
+        ] {
+            assert!(PrivateKey::from_pkcs8(&pqc_pkcs8(SPKI_OID_ML_DSA_44, &inner)).is_err());
+        }
+        assert!(
+            PrivateKey::from_pkcs8(&pqc_pkcs8(SPKI_OID_ML_KEM_512, &tlv_encode(0x80, &seed)))
+                .is_err()
+        );
+    }
 
     fn assert_spki_roundtrip(public_key: PublicKey) {
         let spki = public_key.to_spki().expect("encode SPKI");
