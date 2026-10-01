@@ -13,7 +13,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::windows::io::AsRawHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -30,6 +30,9 @@ use crate::device_manager::DeviceManager;
 use crate::root_node::ServiceRootNode;
 
 const MAX_RPC_LINE_LEN: usize = 1_048_576;
+const ACTIVE_POLL_INTERVAL: Duration = Duration::from_millis(1);
+const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const ACTIVE_WINDOW: Duration = Duration::from_millis(100);
 
 #[cfg(target_os = "windows")]
 pub(crate) trait SessionIo: Read + Write + Send + AsRawHandle {}
@@ -57,8 +60,11 @@ impl ClientSession {
         let (command_tx, command_rx) = mpsc::channel::<WorkerCommand>();
         let (event_tx, event_rx) = mpsc::channel::<WorkerEvent>();
         let manager = self.manager.clone();
-        let worker = std::thread::spawn(move || run_worker(manager, command_rx, event_tx));
+        let io_thread = std::thread::current();
+        let worker =
+            std::thread::spawn(move || run_worker(manager, command_rx, event_tx, io_thread));
         let mut active_cancel: Option<Arc<AtomicBool>> = None;
+        let mut last_activity = None;
         let mut handshaken = false;
         let mut pending_line = SecretValue::new(Vec::new());
 
@@ -75,6 +81,7 @@ impl ClientSession {
                         }
                     }
                     ReadRequest::Request(request) => {
+                        last_activity = Some(Instant::now());
                         if !handle_request(
                             request,
                             reader.get_mut(),
@@ -113,6 +120,7 @@ impl ClientSession {
                         }
                     }
                     Ok(WorkerEvent::Response(response)) => {
+                        last_activity = Some(Instant::now());
                         active_cancel = None;
                         if write_response(reader.get_mut(), &response).is_err() {
                             disconnected = true;
@@ -131,7 +139,15 @@ impl ClientSession {
                 break;
             }
 
-            std::thread::sleep(Duration::from_millis(10));
+            // Keep APDU bursts responsive without polling every millisecond while idle.
+            let interval = if active_cancel.is_some()
+                || last_activity.is_some_and(|instant: Instant| instant.elapsed() < ACTIVE_WINDOW)
+            {
+                ACTIVE_POLL_INTERVAL
+            } else {
+                IDLE_POLL_INTERVAL
+            };
+            std::thread::park_timeout(interval);
         }
 
         if let Some(cancel) = active_cancel {
@@ -381,17 +397,21 @@ fn run_worker(
     manager: Arc<DeviceManager>,
     command_rx: mpsc::Receiver<WorkerCommand>,
     event_tx: mpsc::Sender<WorkerEvent>,
+    io_thread: std::thread::Thread,
 ) {
     let root = Box::new(ServiceRootNode::new(manager));
     let mut host = NodeHost::new(root);
 
     for command in command_rx {
         let signal_tx = event_tx.clone();
+        let signal_thread = io_thread.clone();
         let signal_fn = move |status: &str, body: Value| {
             let signal = SignalMessage::new(status, body)
                 .map(ServerMessage::Signal)
                 .expect("signal body serializes to valid JSON");
-            let _ = signal_tx.send(WorkerEvent::Signal(signal));
+            if signal_tx.send(WorkerEvent::Signal(signal)).is_ok() {
+                signal_thread.unpark();
+            }
         };
 
         let mut params = match command.body.to_value() {
@@ -406,6 +426,7 @@ fn run_worker(
                 if event_tx.send(WorkerEvent::Response(response)).is_err() {
                     break;
                 }
+                io_thread.unpark();
                 continue;
             }
         };
@@ -441,6 +462,7 @@ fn run_worker(
         if event_tx.send(WorkerEvent::Response(response_json)).is_err() {
             break;
         }
+        io_thread.unpark();
     }
 }
 

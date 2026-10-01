@@ -269,7 +269,7 @@ impl RpcClient {
                 }
             }
 
-            match self.read_server_message(signal_handler)? {
+            match self.read_server_message(signal_handler, cancellable)? {
                 ServerMessage::Success(success) => {
                     let body = success.body.to_value().map_err(|e| {
                         RpcCallError::Transport(format!("Malformed RPC success body: {e}"))
@@ -304,20 +304,25 @@ impl RpcClient {
     fn read_server_message(
         &mut self,
         signal_handler: Option<&dyn Fn(&str, &Value)>,
+        cancellable: bool,
     ) -> Result<ServerMessage, RpcCallError> {
+        #[cfg(not(target_os = "windows"))]
+        let _ = cancellable;
         loop {
             #[cfg(target_os = "windows")]
-            match self.windows_read_state()? {
-                PipeReadState::NoData => {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                    continue;
+            if cancellable {
+                match self.windows_read_state()? {
+                    PipeReadState::NoData => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    PipeReadState::Disconnected => {
+                        return Err(RpcCallError::Transport(
+                            "RPC subprocess closed unexpectedly".into(),
+                        ));
+                    }
+                    PipeReadState::DataAvailable => {}
                 }
-                PipeReadState::Disconnected => {
-                    return Err(RpcCallError::Transport(
-                        "RPC subprocess closed unexpectedly".into(),
-                    ));
-                }
-                PipeReadState::DataAvailable => {}
             }
 
             let line = self.read_rpc_line()?;
