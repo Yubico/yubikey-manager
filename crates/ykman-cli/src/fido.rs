@@ -22,8 +22,8 @@ use yubikit::ctap2::{
     BioEnrollment, ClientPin, Config, CredentialManagement, Ctap2Error, Ctap2Pin, Ctap2Session,
     CtapStatus, Info, Permissions, PinProtocol,
 };
-use yubikit::device::{ReinsertStatus, YubiKeyDevice};
-use yubikit::management::Capability;
+use yubikit::device::{DeviceError, ReinsertStatus, YubiKeyDevice};
+use yubikit::management::{Capability, UsbInterface};
 use yubikit::smartcard::SmartCardError;
 
 use crate::cancel;
@@ -331,6 +331,20 @@ fn check_fido_ccid(dev: &dyn YubiKeyDevice) -> Result<()> {
     Ok(())
 }
 
+fn check_fido_fallback(
+    hid_error: DeviceError,
+    hid_enabled: bool,
+    ccid_result: Result<()>,
+) -> Result<()> {
+    if matches!(hid_error, DeviceError::InUse) {
+        return Err(anyhow!(hid_error));
+    }
+    match ccid_result {
+        Err(_) if hid_enabled => Err(anyhow!("Failed to connect to the YubiKey: {hid_error}")),
+        result => result,
+    }
+}
+
 fn format_ctap_init_error(e: CtapError<SmartCardError>) -> Error {
     if is_windows_fido_access_denied(&e) {
         anyhow!(FIDO_WINDOWS_ADMIN_MESSAGE)
@@ -370,9 +384,20 @@ macro_rules! with_fido_session {
             None
         };
 
-        if scp_config.is_none()
-            && let Ok(conn) = $dev.open_fido()
-        {
+        let mut hid_error = None;
+        let hid_connection = if scp_config.is_none() {
+            match $dev.open_fido() {
+                Ok(conn) => Some(conn),
+                Err(error) => {
+                    hid_error = Some(error);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        if let Some(conn) = hid_connection {
             let ctap = CtapSession::new_fido(conn)
                 .map_err(|(e, _)| anyhow!("Failed to initialize CTAP: {e}"))?;
             #[allow(unused_mut)]
@@ -384,7 +409,16 @@ macro_rules! with_fido_session {
             $body
         } else {
             if $dev.transport() == Transport::Usb {
-                check_fido_ccid($dev)?;
+                let ccid_result = check_fido_ccid($dev);
+                if let Some(error) = hid_error {
+                    check_fido_fallback(
+                        error,
+                        $dev.usb_interfaces().contains(UsbInterface::FIDO),
+                        ccid_result,
+                    )?;
+                } else {
+                    ccid_result?;
+                }
             }
             let conn = $dev
                 .open_smartcard()
@@ -1561,5 +1595,58 @@ fn csv_escape(field: &str) -> String {
         format!("\"{}\"", field.replace('"', "\"\""))
     } else {
         field.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::anyhow;
+    use yubikit::device::DeviceError;
+
+    use super::check_fido_fallback;
+
+    #[test]
+    fn failed_hid_with_no_ccid_reports_connection_failure() {
+        let error = check_fido_fallback(
+            DeviceError::NoDeviceFound,
+            true,
+            Err(anyhow!("FIDO over CCID is not supported by this YubiKey.")),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Failed to connect to the YubiKey: No YubiKey device found"
+        );
+        let disabled_ccid = check_fido_fallback(
+            DeviceError::NoDeviceFound,
+            true,
+            Err(anyhow!("FIDO over CCID is not enabled.")),
+        )
+        .unwrap_err();
+        assert_eq!(
+            disabled_ccid.to_string(),
+            "Failed to connect to the YubiKey: No YubiKey device found"
+        );
+    }
+
+    #[test]
+    fn ccid_only_device_keeps_capability_error() {
+        let error = check_fido_fallback(
+            DeviceError::NoDeviceFound,
+            false,
+            Err(anyhow!("FIDO over CCID is not supported by this YubiKey.")),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "FIDO over CCID is not supported by this YubiKey."
+        );
+    }
+
+    #[test]
+    fn enabled_ccid_fallback_and_busy_device() {
+        assert!(check_fido_fallback(DeviceError::NoDeviceFound, true, Ok(())).is_ok());
+        let error = check_fido_fallback(DeviceError::InUse, true, Ok(())).unwrap_err();
+        assert_eq!(error.to_string(), "YubiKey in use by another client");
     }
 }
