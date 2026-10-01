@@ -18,6 +18,7 @@
 //! interface, used by CCID applications such as PIV, OpenPGP, and OATH.
 
 use ::pcsc::{Card, Context, Protocols, Scope, ShareMode};
+use std::cell::Cell;
 use std::ffi::CString;
 use std::thread;
 use std::time::Duration;
@@ -76,13 +77,13 @@ impl From<PcscError> for SmartCardError {
     }
 }
 
-/// Some Windows PC/SC stacks return the raw Win32 code `ERROR_ACCESS_DENIED`
-/// (`0x5`) from `SCardListReaders`/`SCardGetStatusChange` when no reader is
-/// present. The `pcsc` crate does not recognise this code and panics while
-/// mapping it, which would otherwise tear down the calling thread (e.g. the
-/// device monitor's coordinator). We recover from that panic via
-/// `catch_unwind`; this hook keeps the panic message from being printed on
-/// every poll while leaving all other panics untouched.
+thread_local! {
+    static PCSC_GUARD_ACTIVE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The Windows PC/SC stack can return an unrecognised raw status (notably
+/// `ERROR_ACCESS_DENIED` during device removal), which makes `pcsc` panic.
+/// Suppress its panic message only when a guarded operation will recover it.
 fn install_pcsc_panic_filter() {
     use std::sync::Once;
     static HOOK: Once = Once::new();
@@ -92,23 +93,34 @@ fn install_pcsc_panic_filter() {
             let is_pcsc_code = info
                 .payload()
                 .downcast_ref::<String>()
-                .map(|s| s.contains("unknown PCSC error code"))
-                .unwrap_or(false);
-            if !is_pcsc_code {
+                .is_some_and(|s| s.starts_with("unknown PCSC error code:"));
+            if !is_pcsc_code || !PCSC_GUARD_ACTIVE.with(Cell::get) {
                 default(info);
             }
         }));
     });
 }
 
-/// Run a `pcsc` operation, converting the crate's panic on an unrecognised raw
-/// status code into a `NoReadersAvailable` error instead of unwinding into the
-/// caller.
+/// Convert the crate's panic on an unrecognised status into an unavailable
+/// reader error, while preserving unexpected panics.
 fn guard_pcsc<T>(f: impl FnOnce() -> Result<T, ::pcsc::Error>) -> Result<T, PcscError> {
     install_pcsc_panic_filter();
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+    let result = PCSC_GUARD_ACTIVE.with(|active| {
+        let previous = active.replace(true);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        active.set(previous);
+        result
+    });
+    match result {
         Ok(result) => result.map_err(PcscError::from),
-        Err(_) => Err(PcscError::Pcsc(::pcsc::Error::NoReadersAvailable)),
+        Err(payload)
+            if payload
+                .downcast_ref::<String>()
+                .is_some_and(|s| s.starts_with("unknown PCSC error code:")) =>
+        {
+            Err(PcscError::Pcsc(::pcsc::Error::NoReadersAvailable))
+        }
+        Err(payload) => std::panic::resume_unwind(payload),
     }
 }
 
@@ -274,18 +286,21 @@ impl PcscSmartCardConnection {
     /// Connect to a reader, optionally using exclusive mode.
     pub fn new(reader_name: &str, exclusive: bool) -> Result<Self, PcscError> {
         log_traffic!("Opening PCSC connection to '{}'", reader_name);
-        let ctx = Context::establish(Scope::User)?;
         let reader = CString::new(reader_name).map_err(|_| PcscError::InvalidReaderName)?;
         let share_mode = if exclusive {
             ShareMode::Exclusive
         } else {
             ShareMode::Shared
         };
-        let card = ctx.connect(&reader, share_mode, Protocols::ANY)?;
+        let card = guard_pcsc(|| {
+            let ctx = Context::establish(Scope::User)?;
+            ctx.connect(&reader, share_mode, Protocols::ANY)
+        })?;
         log_traffic!("PCSC connection opened to '{}'", reader_name);
 
         // Detect transport from ATR: USB YubiKeys have 0xFx as the second byte
-        let transport = match card.get_attribute_owned(::pcsc::Attribute::AtrString) {
+        let transport = match guard_pcsc(|| card.get_attribute_owned(::pcsc::Attribute::AtrString))
+        {
             Ok(atr) if atr.len() > 1 && atr[1] & 0xF0 == 0xF0 => Transport::Usb,
             _ => Transport::Nfc,
         };
@@ -356,14 +371,14 @@ impl PcscSmartCardConnection {
     /// Get the ATR (Answer-To-Reset) of the connected card.
     pub fn get_atr(&self) -> Result<Vec<u8>, PcscError> {
         let card = self.card.as_ref().ok_or(PcscError::ConnectionClosed)?;
-        Ok(card.get_attribute_owned(::pcsc::Attribute::AtrString)?)
+        guard_pcsc(|| card.get_attribute_owned(::pcsc::Attribute::AtrString))
     }
 
     /// Transmit an APDU command and return the response bytes.
     pub fn transmit(&self, apdu: &[u8]) -> Result<Vec<u8>, PcscError> {
         let card = self.card.as_ref().ok_or(PcscError::ConnectionClosed)?;
         let mut resp_buf = vec![0u8; 65538];
-        let resp = card.transmit(apdu, &mut resp_buf)?;
+        let resp = guard_pcsc(|| card.transmit(apdu, &mut resp_buf))?;
         Ok(resp.to_vec())
     }
 
@@ -371,8 +386,10 @@ impl PcscSmartCardConnection {
     pub fn disconnect(&mut self) -> Result<(), PcscError> {
         if let Some(card) = self.card.take() {
             log_traffic!("Closing PCSC connection to '{}'", self.reader_name);
-            card.disconnect(::pcsc::Disposition::ResetCard)
-                .map_err(|(_, e)| PcscError::Pcsc(e))?;
+            guard_pcsc(|| {
+                card.disconnect(::pcsc::Disposition::ResetCard)
+                    .map_err(|(_, e)| e)
+            })?;
         }
         Ok(())
     }
@@ -385,12 +402,16 @@ impl PcscSmartCardConnection {
             ShareMode::Shared
         };
         if let Some(card) = self.card.as_mut() {
-            card.reconnect(share_mode, Protocols::ANY, ::pcsc::Disposition::ResetCard)?;
+            guard_pcsc(|| {
+                card.reconnect(share_mode, Protocols::ANY, ::pcsc::Disposition::ResetCard)
+            })?;
         } else {
-            let ctx = Context::establish(Scope::User)?;
             let reader = CString::new(self.reader_name.as_str())
                 .map_err(|_| PcscError::InvalidReaderName)?;
-            let card = ctx.connect(&reader, share_mode, Protocols::ANY)?;
+            let card = guard_pcsc(|| {
+                let ctx = Context::establish(Scope::User)?;
+                ctx.connect(&reader, share_mode, Protocols::ANY)
+            })?;
             self.card = Some(card);
         }
         Ok(())
@@ -404,7 +425,7 @@ impl PcscSmartCardConnection {
         } else {
             ShareMode::Shared
         };
-        card.reconnect(share_mode, Protocols::ANY, ::pcsc::Disposition::ResetCard)?;
+        guard_pcsc(|| card.reconnect(share_mode, Protocols::ANY, ::pcsc::Disposition::ResetCard))?;
         Ok(())
     }
 }
@@ -441,5 +462,28 @@ impl SmartCardConnection for PcscSmartCardConnection {
 impl Drop for PcscSmartCardConnection {
     fn drop(&mut self) {
         let _ = self.disconnect();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_pcsc_status_is_recoverable() {
+        let result: Result<(), PcscError> =
+            guard_pcsc(|| std::panic::panic_any(String::from("unknown PCSC error code: 0x5")));
+        assert!(matches!(
+            result,
+            Err(PcscError::Pcsc(::pcsc::Error::NoReadersAvailable))
+        ));
+    }
+
+    #[test]
+    fn unexpected_panic_is_not_hidden() {
+        let result = std::panic::catch_unwind(|| {
+            let _: Result<(), PcscError> = guard_pcsc(|| panic!("unexpected PC/SC failure"));
+        });
+        assert!(result.is_err());
     }
 }

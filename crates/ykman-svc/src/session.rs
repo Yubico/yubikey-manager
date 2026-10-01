@@ -154,8 +154,15 @@ impl ClientSession {
             cancel.store(true, Ordering::Relaxed);
         }
         drop(command_tx);
-        if worker.join().is_err() {
-            log::warn!("Client session worker panicked");
+        if let Err(payload) = worker.join() {
+            if payload
+                .downcast_ref::<String>()
+                .is_some_and(|message| message.contains("unknown PCSC error code"))
+            {
+                log::warn!("Client session worker panicked on an unrecognised PC/SC status");
+            } else {
+                log::warn!("Client session worker panicked");
+            }
         }
         log::info!("Client disconnected");
     }
