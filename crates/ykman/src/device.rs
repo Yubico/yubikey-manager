@@ -179,6 +179,56 @@ fn rpc_to_device_error(e: RpcCallError) -> DeviceError {
     DeviceError::Transport(Box::new(e))
 }
 
+fn rpc_poisoned_device_error() -> DeviceError {
+    DeviceError::Transport(Box::new(RpcCallError::Transport(
+        "RPC client lock poisoned".into(),
+    )))
+}
+
+/// Get the best available device source for the current platform.
+///
+/// On Windows, attempts to connect to the ykman-svc Named Pipe service.
+/// On other platforms in debug builds, attempts a Unix socket connection.
+/// Falls back to direct local device access on failure or when the service
+/// is unavailable. When the `direct` feature is disabled, returns
+/// [`NoDeviceSource`] if no RPC service is available.
+pub fn get_device_source() -> Box<dyn DeviceSource> {
+    #[cfg(target_os = "windows")]
+    {
+        match RpcClient::connect_pipe() {
+            Ok(client) => {
+                log::debug!("Connected to ykman-svc service");
+                return Box::new(RpcDeviceSource::new(client));
+            }
+            Err(e) => {
+                log::debug!("ykman-svc not available ({e}), using direct access");
+            }
+        }
+    }
+
+    #[cfg(all(debug_assertions, not(target_os = "windows")))]
+    {
+        match RpcClient::connect_pipe() {
+            Ok(client) => {
+                log::debug!("Connected to ykman-svc socket (dev mode)");
+                return Box::new(RpcDeviceSource::new(client));
+            }
+            Err(e) => {
+                log::debug!("ykman-svc socket not available ({e}), using direct access");
+            }
+        }
+    }
+
+    #[cfg(feature = "hardware")]
+    {
+        Box::new(LocalDeviceSource)
+    }
+    #[cfg(not(feature = "hardware"))]
+    {
+        Box::new(NoDeviceSource)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -256,54 +306,152 @@ mod tests {
             assert_eq!(request["target"], json!(["123", connection]));
         }
     }
-}
 
-fn rpc_poisoned_device_error() -> DeviceError {
-    DeviceError::Transport(Box::new(RpcCallError::Transport(
-        "RPC client lock poisoned".into(),
-    )))
-}
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn closing_last_connection_releases_device_before_switching() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
 
-/// Get the best available device source for the current platform.
-///
-/// On Windows, attempts to connect to the ykman-svc Named Pipe service.
-/// On other platforms in debug builds, attempts a Unix socket connection.
-/// Falls back to direct local device access on failure or when the service
-/// is unavailable. When the `direct` feature is disabled, returns
-/// [`NoDeviceSource`] if no RPC service is available.
-pub fn get_device_source() -> Box<dyn DeviceSource> {
-    #[cfg(target_os = "windows")]
-    {
-        match RpcClient::connect_pipe() {
-            Ok(client) => {
-                log::debug!("Connected to ykman-svc service");
-                return Box::new(RpcDeviceSource::new(client));
+        use crate::rpc::client::RpcClient;
+        use crate::rpc::protocol::ServerMessage;
+
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let server_thread = std::thread::spawn(move || {
+            let mut reader = BufReader::new(server.try_clone().unwrap());
+            let mut requests = Vec::new();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap() == 0 {
+                    break;
+                }
+                let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                let response = if request["target"] == json!([]) {
+                    ServerMessage::success(
+                        json!({"children": {
+                            "123": {
+                                "name": "YubiKey 5 NFC", "version": [5, 4, 3],
+                                "usb_interfaces": 2, "serial": 123,
+                                "form_factor": 3, "transport": "usb"
+                            },
+                            "456": {
+                                "name": "YubiKey 5C", "version": [5, 7, 0],
+                                "usb_interfaces": 2, "serial": 456,
+                                "form_factor": 3, "transport": "usb"
+                            }
+                        }}),
+                        vec![],
+                    )
+                } else {
+                    ServerMessage::success(json!({"data": {}, "children": {}}), vec![])
+                }
+                .unwrap();
+                writeln!(server, "{}", serde_json::to_string(&response).unwrap()).unwrap();
+                requests.push((
+                    request["action"].clone(),
+                    request["target"].clone(),
+                    request["body"].clone(),
+                ));
             }
-            Err(e) => {
-                log::debug!("ykman-svc not available ({e}), using direct access");
+            requests
+        });
+
+        let mut source = RpcDeviceSource::new(RpcClient::from_test_stream(client));
+        let devices = source.list_devices().unwrap();
+        let first = devices
+            .iter()
+            .find(|d| d.info().serial == Some(123))
+            .unwrap();
+        let second = devices
+            .iter()
+            .find(|d| d.info().serial == Some(456))
+            .unwrap();
+        let mut first_connection = first.open_smartcard().unwrap();
+        let another_connection = first.open_smartcard().unwrap();
+        first_connection.close();
+        first_connection.close();
+        drop(another_connection);
+        let second_connection = second.open_smartcard().unwrap();
+        drop(second_connection);
+        drop(first_connection);
+        drop(devices);
+        drop(source);
+
+        let requests = server_thread.join().unwrap();
+        assert_eq!(
+            requests,
+            vec![
+                (json!("get"), json!([]), json!({})),
+                (json!("get"), json!(["123", "ccid"]), json!({})),
+                (json!("get"), json!(["123", "ccid"]), json!({})),
+                (json!("close"), json!(["123"]), json!({"child": "ccid"})),
+                (json!("get"), json!(["456", "ccid"]), json!({})),
+                (json!("close"), json!(["456"]), json!({"child": "ccid"})),
+            ]
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn dropped_fido_and_otp_connections_close_service_children() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        use crate::rpc::client::RpcClient;
+        use crate::rpc::protocol::ServerMessage;
+
+        for interface in ["ctap", "otp"] {
+            let (client, mut server) = UnixStream::pair().unwrap();
+            let server_thread = std::thread::spawn(move || {
+                let mut reader = BufReader::new(server.try_clone().unwrap());
+                let mut requests = Vec::new();
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap() == 0 {
+                        break;
+                    }
+                    let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                    let response = if request["target"] == json!([]) {
+                        ServerMessage::success(
+                            json!({"children": {"123": {
+                                "name": "YubiKey 5 NFC", "version": [5, 4, 3],
+                                "usb_interfaces": 7, "serial": 123,
+                                "form_factor": 3, "transport": "usb"
+                            }}}),
+                            vec![],
+                        )
+                    } else {
+                        ServerMessage::success(
+                            json!({"data": {
+                                "device_version": [5, 4, 3],
+                                "capabilities": 0
+                            }}),
+                            vec![],
+                        )
+                    }
+                    .unwrap();
+                    writeln!(server, "{}", serde_json::to_string(&response).unwrap()).unwrap();
+                    requests.push((request["action"].clone(), request["target"].clone()));
+                }
+                requests
+            });
+            let mut source = RpcDeviceSource::new(RpcClient::from_test_stream(client));
+            let devices = source.list_devices().unwrap();
+            if interface == "ctap" {
+                drop(devices[0].open_fido().unwrap());
+            } else {
+                drop(devices[0].open_otp().unwrap());
             }
+            drop(devices);
+            drop(source);
+            assert_eq!(
+                server_thread.join().unwrap(),
+                vec![
+                    (json!("get"), json!([])),
+                    (json!("get"), json!(["123", interface])),
+                    (json!("close"), json!(["123"])),
+                ]
+            );
         }
-    }
-
-    #[cfg(all(debug_assertions, not(target_os = "windows")))]
-    {
-        match RpcClient::connect_pipe() {
-            Ok(client) => {
-                log::debug!("Connected to ykman-svc socket (dev mode)");
-                return Box::new(RpcDeviceSource::new(client));
-            }
-            Err(e) => {
-                log::debug!("ykman-svc socket not available ({e}), using direct access");
-            }
-        }
-    }
-
-    #[cfg(feature = "hardware")]
-    {
-        Box::new(LocalDeviceSource)
-    }
-    #[cfg(not(feature = "hardware"))]
-    {
-        Box::new(NoDeviceSource)
     }
 }

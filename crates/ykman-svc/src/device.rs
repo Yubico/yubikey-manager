@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -22,6 +22,7 @@ pub struct DeviceNode {
     id: String,
     revision: u64,
     lock_held: bool,
+    active_connections: BTreeSet<String>,
     /// Incremented after each reinsert to invalidate cached children.
     generation: u64,
     /// Generation at which each child was created.
@@ -41,6 +42,7 @@ impl DeviceNode {
             id,
             revision,
             lock_held: false,
+            active_connections: BTreeSet::new(),
             generation: 0,
             child_generations: BTreeMap::new(),
         }
@@ -196,7 +198,7 @@ impl RpcNode for DeviceNode {
                     },
                     &|| cancel.load(Ordering::Relaxed),
                 );
-                if result.is_err() && locked_here {
+                if locked_here && self.active_connections.is_empty() {
                     self.release_lock();
                 }
                 result.map_err(|e| RpcError::new("device-error", format!("{e}")))?;
@@ -251,8 +253,16 @@ impl RpcNode for DeviceNode {
             self.release_lock();
         }
         let child = child?;
+        self.active_connections.insert(name.to_string());
         self.child_generations
             .insert(name.to_string(), self.generation);
         Ok(child)
+    }
+
+    fn on_child_closed(&mut self, name: &str) {
+        self.active_connections.remove(name);
+        if self.active_connections.is_empty() {
+            self.release_lock();
+        }
     }
 }

@@ -1,5 +1,6 @@
 //! RPC client — connects to ykman-svc Named Pipe.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::{Arc, Mutex};
 
@@ -29,6 +30,7 @@ enum Transport {
 /// An RPC client connected to a ykman RPC server.
 pub struct RpcClient {
     transport: Transport,
+    open_connections: HashMap<Vec<String>, usize>,
 }
 
 /// Thread-safe writer handle for sending cancel signals from the Ctrl+C handler.
@@ -55,6 +57,7 @@ impl RpcClient {
                 reader: BufReader::new(Box::new(reader)),
                 writer: Arc::new(Mutex::new(Box::new(stream))),
             },
+            open_connections: HashMap::new(),
         }
     }
 
@@ -97,6 +100,7 @@ impl RpcClient {
                     writer: Arc::new(Mutex::new(writer)),
                     reader_handle,
                 },
+                open_connections: HashMap::new(),
             };
             client.handshake()?;
 
@@ -126,6 +130,7 @@ impl RpcClient {
                     reader: BufReader::new(reader),
                     writer: Arc::new(Mutex::new(writer)),
                 },
+                open_connections: HashMap::new(),
             };
             client.handshake()?;
 
@@ -341,6 +346,37 @@ impl RpcClient {
     /// Call `get` on a target to retrieve node info.
     pub fn get(&mut self, target: &[impl AsRef<str>]) -> Result<RpcResult, RpcCallError> {
         self.call("get", target, json!({}), None, false)
+    }
+
+    pub(crate) fn track_connection(&mut self, target: &[String]) {
+        *self.open_connections.entry(target.to_vec()).or_default() += 1;
+    }
+
+    pub(crate) fn close_connection(&mut self, target: &[String]) -> Result<(), RpcCallError> {
+        let (device, connection) = match target {
+            [device, connection] => (device.clone(), connection.clone()),
+            _ => {
+                return Err(RpcCallError::Transport(
+                    "Invalid RPC connection target".into(),
+                ));
+            }
+        };
+        let count = self
+            .open_connections
+            .get_mut(target)
+            .ok_or_else(|| RpcCallError::Transport("RPC connection was not tracked".into()))?;
+        *count -= 1;
+        if *count == 0 {
+            self.open_connections.remove(target);
+            self.call(
+                "close",
+                &[device],
+                json!({"child": connection}),
+                None,
+                false,
+            )?;
+        }
+        Ok(())
     }
 
     fn read_line(&mut self, buf: &mut String) -> std::io::Result<usize> {
