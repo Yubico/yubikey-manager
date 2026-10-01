@@ -174,21 +174,23 @@ impl DeviceManager {
     /// When the last client leaves, schedules the monitor to stop after
     /// [`MONITOR_LINGER`] unless a client reconnects in the meantime.
     pub fn client_disconnected(self: &Arc<Self>) {
-        let prev = self
-            .client_count
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
-                count.checked_sub(1)
-            });
-        let remaining = match prev {
-            Ok(count) => {
-                log::debug!("Client disconnected (count: {})", count - 1);
-                count - 1
-            }
-            Err(_) => {
+        let mut current = self.client_count.load(Ordering::Relaxed);
+        let remaining = loop {
+            if current == 0 {
                 log::warn!("Client disconnect observed with count already at zero");
                 return;
             }
+            match self.client_count.compare_exchange_weak(
+                current,
+                current - 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break current - 1,
+                Err(actual) => current = actual,
+            }
         };
+        log::debug!("Client disconnected (count: {remaining})");
 
         if remaining > 0 {
             return;
