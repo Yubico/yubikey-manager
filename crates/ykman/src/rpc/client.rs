@@ -47,6 +47,17 @@ impl CancelWriter {
 }
 
 impl RpcClient {
+    #[cfg(all(test, not(target_os = "windows")))]
+    pub(crate) fn from_test_stream(stream: std::os::unix::net::UnixStream) -> Self {
+        let reader = stream.try_clone().expect("clone test socket");
+        Self {
+            transport: Transport::Stream {
+                reader: BufReader::new(Box::new(reader)),
+                writer: Arc::new(Mutex::new(Box::new(stream))),
+            },
+        }
+    }
+
     /// Connect to the ykman-svc Named Pipe (Windows) or Unix socket (dev).
     ///
     /// Returns `Err` if the service is not available.

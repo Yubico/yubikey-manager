@@ -22,6 +22,20 @@ use super::client::{RpcCallError, RpcClient};
 
 type SharedClient = Arc<Mutex<RpcClient>>;
 
+fn device_open_error(error: RpcCallError) -> DeviceError {
+    match error {
+        RpcCallError::Rpc(ref rpc) if rpc.status == "device-busy" => DeviceError::InUse,
+        other => DeviceError::Transport(Box::new(other)),
+    }
+}
+
+fn smartcard_device_error(error: RpcCallError) -> DeviceError {
+    match error {
+        RpcCallError::Rpc(ref rpc) if rpc.status == "device-busy" => DeviceError::InUse,
+        other => DeviceError::SmartCard(SmartCardError::Transport(Box::new(other))),
+    }
+}
+
 /// Build a full target path from a device prefix and a sub-path.
 fn target(prefix: &[String], path: &[&str]) -> Vec<String> {
     prefix
@@ -204,8 +218,7 @@ impl RpcFidoConnection {
         let info = client
             .lock()
             .map_err(|_| RpcCallError::Transport("RPC client lock poisoned".into()))?
-            .get(&target(&device_prefix, &["ctap"]))
-            .map_err(|e| RpcCallError::Transport(format!("{e}")))?;
+            .get(&target(&device_prefix, &["ctap"]))?;
         let data = required_field(&info.body, "data")?;
 
         let device_version =
@@ -372,6 +385,35 @@ pub struct RpcDevice {
 }
 
 impl RpcDevice {
+    /// Construct a device from the unlocked service inventory.
+    pub fn from_inventory(
+        client: Arc<Mutex<RpcClient>>,
+        device_name: &str,
+        data: &Value,
+    ) -> Result<Self, RpcCallError> {
+        let transport = match required_str(data, "transport")? {
+            "usb" => Transport::Usb,
+            "nfc" => Transport::Nfc,
+            other => {
+                return Err(RpcCallError::Transport(format!(
+                    "Malformed RPC response: unknown transport {other}"
+                )));
+            }
+        };
+        let ifaces = UsbInterface(as_u8(
+            required_u64(data, "usb_interfaces")?,
+            "usb_interfaces",
+        )?);
+        Self::from_data(
+            client,
+            vec![device_name.to_string()],
+            data,
+            transport == Transport::Nfc || ifaces.contains(UsbInterface::CCID),
+            transport == Transport::Usb && ifaces.contains(UsbInterface::FIDO),
+            transport == Transport::Usb && ifaces.contains(UsbInterface::OTP),
+        )
+    }
+
     /// Create an RPC device from an already-shared client, targeting a specific
     /// device by name.
     ///
@@ -398,13 +440,36 @@ impl RpcDevice {
             .lock()
             .map_err(|_| RpcCallError::Transport("RPC client lock poisoned".into()))?
             .get(&prefix)
-            .map_err(|e| RpcCallError::Transport(format!("Failed to get root node: {e}")))?;
+            .map_err(|e| match e {
+                RpcCallError::Transport(message) => {
+                    RpcCallError::Transport(format!("Failed to get root node: {message}"))
+                }
+                rpc_error => rpc_error,
+            })?;
         let data = required_field(&root.body, "data")?;
         let children = required_field(&root.body, "children")?;
         let children = children.as_object().ok_or_else(|| {
             RpcCallError::Transport("Malformed RPC response: children is not an object".into())
         })?;
 
+        Self::from_data(
+            client,
+            prefix,
+            data,
+            children.contains_key("ccid"),
+            children.contains_key("ctap"),
+            children.contains_key("otp"),
+        )
+    }
+
+    fn from_data(
+        client: SharedClient,
+        prefix: Vec<String>,
+        data: &Value,
+        has_ccid: bool,
+        has_ctap: bool,
+        has_otp: bool,
+    ) -> Result<Self, RpcCallError> {
         let transport = match required_str(data, "transport")? {
             "usb" => Transport::Usb,
             "nfc" => Transport::Nfc,
@@ -422,10 +487,6 @@ impl RpcDevice {
             .transpose()?;
 
         let reader_name = optional_str(data, "reader_name")?;
-
-        let has_ccid = children.get("ccid").is_some();
-        let has_ctap = children.get("ctap").is_some();
-        let has_otp = children.get("otp").is_some();
 
         let usb_ifaces = UsbInterface(as_u8(
             required_u64(data, "usb_interfaces")?,
@@ -608,6 +669,15 @@ impl YubiKeyDevice for RpcDevice {
             return Err(DeviceError::NoDeviceFound);
         }
         log::debug!("Opening RPC SmartCard connection");
+        self.client
+            .lock()
+            .map_err(|_| {
+                DeviceError::Transport(Box::new(RpcCallError::Transport(
+                    "RPC client lock poisoned".into(),
+                )))
+            })?
+            .get(&target(&self.prefix, &["ccid"]))
+            .map_err(device_open_error)?;
         Ok(Box::new(RpcSmartCardConnection {
             client: self.client.clone(),
             transport: self.transport,
@@ -621,11 +691,7 @@ impl YubiKeyDevice for RpcDevice {
         }
         log::debug!("Opening RPC FIDO connection");
         let conn = RpcFidoConnection::from_client(self.client.clone(), self.prefix.clone())
-            .map_err(|e| {
-                DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(
-                    format!("{e}"),
-                ))))
-            })?;
+            .map_err(smartcard_device_error)?;
         Ok(Box::new(conn))
     }
 
@@ -634,6 +700,15 @@ impl YubiKeyDevice for RpcDevice {
             return Err(DeviceError::NoDeviceFound);
         }
         log::debug!("Opening RPC OTP connection");
+        self.client
+            .lock()
+            .map_err(|_| {
+                DeviceError::Transport(Box::new(RpcCallError::Transport(
+                    "RPC client lock poisoned".into(),
+                )))
+            })?
+            .get(&target(&self.prefix, &["otp"]))
+            .map_err(device_open_error)?;
         Ok(Box::new(RpcOtpConnection {
             client: self.client.clone(),
             device_prefix: self.prefix.clone(),
@@ -670,11 +745,7 @@ impl YubiKeyDevice for RpcDevice {
                 Some(&signal_handler),
                 true,
             )
-            .map_err(|e| {
-                DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(
-                    format!("{e}"),
-                ))))
-            })?;
+            .map_err(smartcard_device_error)?;
 
         Ok(())
     }

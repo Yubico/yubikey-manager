@@ -14,6 +14,7 @@ use crate::scp::{self, ScpParams};
 pub fn format_smartcard_connection_error(app: &str, e: DeviceError) -> Error {
     match e {
         DeviceError::NoDeviceFound => anyhow!("No YubiKey detected!"),
+        DeviceError::InUse => anyhow!("YubiKey in use by another client"),
         DeviceError::NotYubiKey => anyhow!("Connected smart card is not a YubiKey."),
         DeviceError::Cancelled => anyhow!("Operation cancelled."),
         DeviceError::WrongDevice => {

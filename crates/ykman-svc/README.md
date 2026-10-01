@@ -39,6 +39,12 @@ The service limits concurrent clients and validates raw transport request sizes,
 but callers should still treat access to the service as equivalent to direct
 access to the connected YubiKey interfaces.
 
+Clients can enumerate attached YubiKeys and read cached device information
+without claiming them. The first connection or device reinsert request claims
+the YubiKey exclusively for that client session; other clients can still list
+it but cannot open a connection until the device node is closed or the session
+ends. FIDO touch selection reserves candidate devices while it runs.
+
 ## License
 
 Apache-2.0

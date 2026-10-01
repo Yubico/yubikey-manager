@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use yubikit::device::{DeviceError, YubiKeyDevice};
 
@@ -131,19 +131,20 @@ impl DeviceSource for RpcDeviceSource {
         let children = root
             .body
             .get("children")
-            .and_then(|v| v.as_object())
-            .cloned()
-            .unwrap_or_default();
-
-        let mut devices: Vec<Box<dyn YubiKeyDevice>> = Vec::new();
-        for (name, _info) in &children {
-            match RpcDevice::from_shared_at(self.client.clone(), name) {
-                Ok(dev) => devices.push(Box::new(dev)),
-                Err(e) => log::warn!("Failed to open service device '{name}': {e}"),
-            }
-        }
-
-        Ok(devices)
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                rpc_to_device_error(RpcCallError::Transport(
+                    "Malformed RPC response: children is not an object".into(),
+                ))
+            })?;
+        children
+            .iter()
+            .map(|(name, data)| {
+                RpcDevice::from_inventory(self.client.clone(), name, data)
+                    .map(|dev| Box::new(dev) as Box<dyn YubiKeyDevice>)
+                    .map_err(rpc_to_device_error)
+            })
+            .collect()
     }
 
     fn select_fido(
@@ -176,6 +177,85 @@ impl DeviceSource for RpcDeviceSource {
 fn rpc_to_device_error(e: RpcCallError) -> DeviceError {
     log::warn!("Service error: {e}");
     DeviceError::Transport(Box::new(e))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{DeviceSource, RpcDeviceSource};
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn service_listing_returns_devices_but_connections_report_busy() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        use crate::rpc::client::RpcClient;
+        use crate::rpc::protocol::ServerMessage;
+
+        for connection in ["ccid", "ctap", "otp"] {
+            let (client, mut server) = UnixStream::pair().unwrap();
+            let server_thread = std::thread::spawn(move || {
+                let mut reader = BufReader::new(server.try_clone().unwrap());
+                let mut root_request = String::new();
+                reader.read_line(&mut root_request).unwrap();
+                let response = ServerMessage::success(
+                    json!({
+                        "children": {
+                            "123": {
+                                "name": "YubiKey 5 NFC",
+                                "version": [5, 4, 3],
+                                "usb_interfaces": 7,
+                                "serial": 123,
+                                "form_factor": 3,
+                                "transport": "usb"
+                            },
+                            "456": {
+                                "name": "YubiKey 5C",
+                                "version": [5, 7, 0],
+                                "usb_interfaces": 7,
+                                "serial": 456,
+                                "form_factor": 3,
+                                "transport": "usb"
+                            }
+                        }
+                    }),
+                    vec![],
+                )
+                .unwrap();
+                writeln!(server, "{}", serde_json::to_string(&response).unwrap()).unwrap();
+                let mut connection_request = String::new();
+                reader.read_line(&mut connection_request).unwrap();
+                let response =
+                    ServerMessage::error("device-busy", "Device is in use", json!({})).unwrap();
+                writeln!(server, "{}", serde_json::to_string(&response).unwrap()).unwrap();
+                (root_request, connection_request)
+            });
+            let mut source = RpcDeviceSource::new(RpcClient::from_test_stream(client));
+            let devices = source.list_devices().unwrap();
+            assert_eq!(devices.len(), 2);
+            let selected = devices
+                .iter()
+                .find(|d| d.info().serial == Some(123))
+                .unwrap();
+            assert_eq!(selected.usb_interfaces().0, 7);
+            let error = match connection {
+                "ccid" => selected.open_smartcard().err().unwrap(),
+                "ctap" => selected.open_fido().err().unwrap(),
+                "otp" => selected.open_otp().err().unwrap(),
+                _ => unreachable!(),
+            };
+            assert!(matches!(error, yubikit::device::DeviceError::InUse));
+            let (root_request, connection_request) = server_thread.join().unwrap();
+            let root: serde_json::Value = serde_json::from_str(&root_request).unwrap();
+            let request: serde_json::Value = serde_json::from_str(&connection_request).unwrap();
+            assert_eq!(root["action"], "get");
+            assert_eq!(root["target"], json!([]));
+            assert_eq!(request["action"], "get");
+            assert_eq!(request["target"], json!(["123", connection]));
+        }
+    }
 }
 
 fn rpc_poisoned_device_error() -> DeviceError {

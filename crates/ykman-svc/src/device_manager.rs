@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
@@ -25,7 +25,7 @@ use yubikit::platform::monitor::{MonitorHandle, YubiKeyEvent, YubiKeyId, monitor
 use ykman::rpc::error::RpcError;
 use ykman::rpc::node::RpcNode;
 
-use crate::device::DeviceNode;
+use crate::device::{DeviceNode, device_data};
 
 const MAX_CLIENTS: usize = 16;
 
@@ -65,7 +65,20 @@ struct ManagerState {
     device_objects: BTreeMap<String, LocalYubiKeyDevice>,
     device_revisions: BTreeMap<String, u64>,
     /// Devices that are currently opened by a client session.
-    locked_devices: HashSet<String>,
+    locked_devices: HashMap<String, u64>,
+}
+
+pub(crate) struct FidoSelectionGuard {
+    manager: Arc<DeviceManager>,
+    reserved: Vec<(String, u64)>,
+}
+
+impl Drop for FidoSelectionGuard {
+    fn drop(&mut self) {
+        for (name, revision) in &self.reserved {
+            self.manager.release_device(name, *revision);
+        }
+    }
 }
 
 impl DeviceManager {
@@ -75,7 +88,7 @@ impl DeviceManager {
                 devices: BTreeMap::new(),
                 device_objects: BTreeMap::new(),
                 device_revisions: BTreeMap::new(),
-                locked_devices: HashSet::new(),
+                locked_devices: HashMap::new(),
             }),
             client_count: AtomicUsize::new(0),
             monitor: Mutex::new(MonitorLifecycle::default()),
@@ -232,25 +245,7 @@ impl DeviceManager {
 
         for (_, dev, revision) in &devices {
             let name = device_name(dev, &mut serial_counts);
-            let info = dev.info();
-            let version = &info.version;
-            let transport_str = match dev.transport() {
-                Transport::Usb => "usb",
-                Transport::Nfc => "nfc",
-            };
-            new_devices.insert(
-                name.clone(),
-                json!({
-                    "pid": dev.pid(),
-                    "serial": info.serial,
-                    "version": [version.0, version.1, version.2],
-                    "name": dev.name(),
-                    "reader_name": dev.reader_name(),
-                    "usb_interfaces": dev.usb_interfaces().0,
-                    "form_factor": info.form_factor as u8,
-                    "transport": transport_str,
-                }),
-            );
+            new_devices.insert(name.clone(), device_data(dev));
             new_device_objects.insert(name.clone(), dev.clone());
             new_revisions.insert(name, *revision);
         }
@@ -308,7 +303,7 @@ impl DeviceManager {
         // Remove locks for devices that are no longer present
         state
             .locked_devices
-            .retain(|name| new_devices.contains_key(name));
+            .retain(|name, revision| new_revisions.get(name) == Some(revision));
 
         state.devices = new_devices.clone();
         state.device_objects = new_device_objects;
@@ -323,46 +318,94 @@ impl DeviceManager {
         state.device_revisions.get(name).copied()
     }
 
-    /// Try to open a device exclusively for a client session.
-    pub fn open_device(&self, name: &str) -> Result<(Box<dyn RpcNode>, u64), RpcError> {
-        let mut state = self.lock_state();
+    /// Construct a device node without acquiring its exclusive lock.
+    pub fn open_device(self: &Arc<Self>, name: &str) -> Result<(Box<dyn RpcNode>, u64), RpcError> {
+        let state = self.lock_state();
+        let device = state
+            .device_objects
+            .get(name)
+            .ok_or_else(|| RpcError::no_such_node(name))?
+            .clone();
+        let revision = *state.device_revisions.get(name).ok_or_else(|| {
+            RpcError::new("device-error", format!("Device '{name}' has no revision"))
+        })?;
+        Ok((
+            Box::new(DeviceNode::new(
+                device,
+                Arc::clone(self),
+                name.to_string(),
+                revision,
+            )),
+            revision,
+        ))
+    }
 
-        if !state.devices.contains_key(name) {
+    /// Claim a device on its first connection request in a client session.
+    pub fn lock_device(&self, name: &str, revision: u64) -> Result<(), RpcError> {
+        let mut state = self.lock_state();
+        if state.device_revisions.get(name) != Some(&revision) {
             return Err(RpcError::no_such_node(name));
         }
-
-        if state.locked_devices.contains(name) {
+        if state.locked_devices.contains_key(name) {
             return Err(RpcError::new(
                 "device-busy",
                 format!("Device '{name}' is in use by another client"),
             ));
         }
+        state.locked_devices.insert(name.to_string(), revision);
+        Ok(())
+    }
 
-        let device = state
+    /// Reserve monitored FIDO devices while touch selection opens their connections.
+    pub(crate) fn reserve_fido_devices(self: &Arc<Self>) -> Result<FidoSelectionGuard, RpcError> {
+        self.update_devices();
+        let mut state = self.lock_state();
+        let reserved: Vec<(String, u64)> = state
             .device_objects
-            .get(name)
-            .ok_or_else(|| RpcError::new("device-error", format!("Device '{name}' not cached")))?
-            .clone();
-        let revision = *state.device_revisions.get(name).ok_or_else(|| {
-            RpcError::new("device-error", format!("Device '{name}' has no revision"))
-        })?;
-
-        state.locked_devices.insert(name.to_string());
-        log::debug!("Opened device '{name}' from cache");
-        Ok((Box::new(DeviceNode::new(device)), revision))
+            .iter()
+            .filter(|(_, dev)| {
+                dev.transport() == Transport::Usb
+                    && dev.usb_interfaces().contains(UsbInterface::FIDO)
+            })
+            .map(|(name, _)| {
+                state
+                    .device_revisions
+                    .get(name)
+                    .map(|revision| (name.clone(), *revision))
+                    .ok_or_else(|| RpcError::new("device-error", "Device has no revision"))
+            })
+            .collect::<Result<_, _>>()?;
+        if let Some((name, _)) = reserved
+            .iter()
+            .find(|(name, _)| state.locked_devices.contains_key(name))
+        {
+            return Err(RpcError::new(
+                "device-busy",
+                format!("Device '{name}' is in use by another client"),
+            ));
+        }
+        for (name, revision) in &reserved {
+            state.locked_devices.insert(name.clone(), *revision);
+        }
+        Ok(FidoSelectionGuard {
+            manager: Arc::clone(self),
+            reserved,
+        })
     }
 
     /// Release a device lock when a client disconnects or closes the device.
-    pub fn release_device(&self, name: &str) {
+    pub fn release_device(&self, name: &str, revision: u64) {
         let mut state = self.lock_state();
-        state.locked_devices.remove(name);
-        log::debug!("Released device lock: {name}");
+        if state.locked_devices.get(name) == Some(&revision) {
+            state.locked_devices.remove(name);
+            log::debug!("Released device lock: {name}");
+        }
     }
 
     /// Get the set of currently locked device names.
     #[allow(dead_code)]
     pub fn locked_devices(&self) -> HashSet<String> {
-        self.lock_state().locked_devices.clone()
+        self.lock_state().locked_devices.keys().cloned().collect()
     }
 
     fn lock_state(&self) -> MutexGuard<'_, ManagerState> {
@@ -402,5 +445,39 @@ fn device_name(dev: &LocalYubiKeyDevice, counts: &mut HashMap<String, usize>) ->
         format!("{base}-{}", *count - 1)
     } else {
         base
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DeviceManager;
+
+    #[test]
+    fn device_locks_are_exclusive_and_revision_scoped() {
+        let manager = DeviceManager::new();
+        manager
+            .lock_state()
+            .device_revisions
+            .insert("123".into(), 1);
+        assert!(manager.lock_device("123", 1).is_ok());
+        assert_eq!(
+            manager.lock_device("123", 1).unwrap_err().status,
+            "device-busy"
+        );
+        manager.release_device("123", 2);
+        assert_eq!(
+            manager.lock_device("123", 1).unwrap_err().status,
+            "device-busy"
+        );
+        manager.release_device("123", 1);
+        assert!(manager.lock_device("123", 1).is_ok());
+
+        manager
+            .lock_state()
+            .device_revisions
+            .insert("123".into(), 2);
+        assert!(manager.lock_device("123", 1).is_err());
+        manager.release_device("123", 1);
+        assert!(manager.lock_device("123", 2).is_ok());
     }
 }

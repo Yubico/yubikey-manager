@@ -22,8 +22,6 @@ pub struct ServiceRootNode {
     manager: Arc<DeviceManager>,
     /// Cached list of device names for list_children.
     cached_children: BTreeMap<String, Value>,
-    /// Device names locked by this session (released on drop).
-    opened_devices: Vec<String>,
     opened_revisions: BTreeMap<String, u64>,
 }
 
@@ -32,22 +30,7 @@ impl ServiceRootNode {
         Self {
             manager,
             cached_children: BTreeMap::new(),
-            opened_devices: Vec::new(),
             opened_revisions: BTreeMap::new(),
-        }
-    }
-}
-
-impl Drop for ServiceRootNode {
-    fn drop(&mut self) {
-        for name in &self.opened_devices {
-            self.manager.release_device(name);
-        }
-        if !self.opened_devices.is_empty() {
-            log::debug!(
-                "Released {} device lock(s) on session end",
-                self.opened_devices.len()
-            );
         }
     }
 }
@@ -61,11 +44,6 @@ impl RpcNode for ServiceRootNode {
 
     fn on_child_closed(&mut self, name: &str) {
         self.opened_revisions.remove(name);
-        if self.opened_devices.contains(&name.to_string()) {
-            self.manager.release_device(name);
-            self.opened_devices.retain(|n| n != name);
-            log::debug!("Released device lock for '{name}'");
-        }
     }
 
     fn list_actions(&self) -> Vec<&'static str> {
@@ -94,6 +72,7 @@ impl RpcNode for ServiceRootNode {
     ) -> Result<RpcResponse, RpcError> {
         match action {
             "select_fido" => {
+                let _selection = self.manager.reserve_fido_devices()?;
                 log::debug!("FIDO selection requested");
                 let cancel_fn = || cancel.load(Ordering::Relaxed);
                 let device = yubikit::platform::device::select_fido(Some(&cancel_fn))
@@ -156,7 +135,6 @@ impl RpcNode for ServiceRootNode {
 
     fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
         let (node, revision) = self.manager.open_device(name)?;
-        self.opened_devices.push(name.to_string());
         self.opened_revisions.insert(name.to_string(), revision);
         Ok(node)
     }

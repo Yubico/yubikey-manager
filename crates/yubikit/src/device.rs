@@ -54,6 +54,9 @@ pub enum DeviceError {
     /// No YubiKey device was found.
     #[error("No YubiKey device found")]
     NoDeviceFound,
+    /// The YubiKey is owned by another service client.
+    #[error("YubiKey in use by another client")]
+    InUse,
     /// The card is not a YubiKey.
     #[error("Not a YubiKey")]
     NotYubiKey,
