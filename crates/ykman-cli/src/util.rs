@@ -13,7 +13,10 @@ use crate::scp::{self, ScpParams};
 /// Format a failed CCID connection in a way that points at the selected application.
 pub fn format_smartcard_connection_error(app: &str, e: DeviceError) -> Error {
     match e {
-        DeviceError::NoDeviceFound => anyhow!("No YubiKey detected!"),
+        DeviceError::NoDeviceFound | DeviceError::CcidUnavailable => anyhow!(
+            "Failed to connect to {app} over CCID: smart-card reader unavailable \
+             (possibly in use by another process)."
+        ),
         DeviceError::InUse => anyhow!("YubiKey in use by another client"),
         DeviceError::NotYubiKey => anyhow!("Connected smart card is not a YubiKey."),
         DeviceError::Cancelled => anyhow!("Operation cancelled."),
@@ -376,6 +379,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_reader_does_not_claim_the_yubikey_is_absent() {
+        for error in [DeviceError::CcidUnavailable, DeviceError::NoDeviceFound] {
+            let message = format_smartcard_connection_error("PIV", error).to_string();
+            assert!(message.contains("smart-card reader unavailable"));
+            assert!(message.contains("another process"));
+            assert!(!message.contains("scdaemon"));
+            assert!(!message.contains("No YubiKey detected"));
+        }
+    }
 
     #[test]
     fn describe_formats() {

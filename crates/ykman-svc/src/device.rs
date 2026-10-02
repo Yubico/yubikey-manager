@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::{Value, json};
 
 use yubikit::core::Transport;
-use yubikit::device::{ReinsertStatus, YubiKeyDevice};
+use yubikit::device::{DeviceError, ReinsertStatus, YubiKeyDevice};
 use yubikit::management::Capability;
 use yubikit::platform::device::LocalYubiKeyDevice;
 
@@ -69,6 +69,15 @@ impl Drop for DeviceNode {
     fn drop(&mut self) {
         self.release_lock();
     }
+}
+
+fn ccid_open_error(device: &str, error: DeviceError) -> RpcError {
+    let unavailable = matches!(error, DeviceError::CcidUnavailable);
+    let mut rpc_error = RpcError::connection_error(device, "ccid", &format!("{error:?}"));
+    if unavailable {
+        rpc_error.body["reason"] = json!("ccid-unavailable");
+    }
+    rpc_error
 }
 
 pub(crate) fn device_data(device: &LocalYubiKeyDevice) -> Value {
@@ -225,9 +234,7 @@ impl RpcNode for DeviceNode {
                     Box::new(ConnectionNode::new_ccid(conn, self.device.clone()))
                         as Box<dyn RpcNode>
                 })
-                .map_err(|e| {
-                    RpcError::connection_error(&self.device.name(), "ccid", &format!("{e:?}"))
-                }),
+                .map_err(|e| ccid_open_error(&self.device.name(), e)),
             "ctap" => self
                 .device
                 .open_fido()
@@ -264,5 +271,17 @@ impl RpcNode for DeviceNode {
         if self.active_connections.is_empty() {
             self.release_lock();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_ccid_keeps_connection_error_status_with_reason() {
+        let error = ccid_open_error("YubiKey", DeviceError::CcidUnavailable);
+        assert_eq!(error.status, "connection-error");
+        assert_eq!(error.body["reason"], "ccid-unavailable");
     }
 }

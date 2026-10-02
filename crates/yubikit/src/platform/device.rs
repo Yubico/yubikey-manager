@@ -153,7 +153,7 @@ impl LocalYubiKeyDevice {
         let reader = self
             .reader_name
             .as_deref()
-            .ok_or(DeviceError::NoDeviceFound)?;
+            .ok_or(DeviceError::CcidUnavailable)?;
 
         let mut last_err = None;
         for attempt in 0..9 {
@@ -167,6 +167,8 @@ impl LocalYubiKeyDevice {
                         );
                         thread::sleep(Duration::from_millis(500));
                         last_err = Some(e);
+                    } else if e.is_sharing_violation() {
+                        return Err(DeviceError::CcidUnavailable);
                     } else {
                         return Err(e.into());
                     }
@@ -1315,6 +1317,23 @@ mod tests {
         assert!(matches!(
             dev.open_smartcard(),
             Err(DeviceError::UnsupportedFeature("pcsc"))
+        ));
+    }
+
+    #[cfg(feature = "pcsc")]
+    #[test]
+    fn test_open_smartcard_without_reader_reports_ccid_unavailable() {
+        let dev = make_device(
+            None,
+            None,
+            Some("/dev/hidraw1"),
+            Some(0x0407),
+            Version(5, 4, 3),
+            Some(12345),
+        );
+        assert!(matches!(
+            dev.open_smartcard(),
+            Err(DeviceError::CcidUnavailable)
         ));
     }
 

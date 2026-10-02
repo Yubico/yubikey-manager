@@ -47,6 +47,12 @@ fn closed_connection_error() -> RpcTransportError {
 fn device_open_error(error: RpcCallError) -> DeviceError {
     match error {
         RpcCallError::Rpc(ref rpc) if rpc.status == "device-busy" => DeviceError::InUse,
+        RpcCallError::Rpc(ref rpc)
+            if rpc.status == "connection-error"
+                && rpc.body.get("reason").and_then(Value::as_str) == Some("ccid-unavailable") =>
+        {
+            DeviceError::CcidUnavailable
+        }
         other => DeviceError::Transport(Box::new(other)),
     }
 }
@@ -829,3 +835,22 @@ impl Drop for RpcDevice {
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 struct RpcTransportError(String);
+
+#[cfg(test)]
+mod tests {
+    use super::super::client::RpcClientError;
+    use super::*;
+
+    #[test]
+    fn unavailable_ccid_rpc_error_preserves_device_reason() {
+        let error = RpcCallError::Rpc(RpcClientError {
+            status: "connection-error".into(),
+            message: "Error connecting to ccid interface".into(),
+            body: json!({"reason": "ccid-unavailable"}),
+        });
+        assert!(matches!(
+            device_open_error(error),
+            DeviceError::CcidUnavailable
+        ));
+    }
+}

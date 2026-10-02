@@ -54,6 +54,9 @@ pub enum DeviceError {
     /// No YubiKey device was found.
     #[error("No YubiKey device found")]
     NoDeviceFound,
+    /// The YubiKey is present, but its CCID reader cannot be accessed.
+    #[error("YubiKey CCID reader is unavailable")]
+    CcidUnavailable,
     /// The YubiKey is owned by another service client.
     #[error("YubiKey in use by another client")]
     InUse,
