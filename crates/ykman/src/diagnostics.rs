@@ -522,27 +522,15 @@ fn probe_piv<C: yubikit::smartcard::SmartCardConnection + 'static>(
                 .ok()
                 .map(|d| hex::encode(&d));
 
-            let slot_specs = [
-                (Slot::Authentication, "9A", "AUTHENTICATION"),
-                (Slot::Signature, "9C", "DIGITAL SIGNATURE"),
-                (Slot::KeyManagement, "9D", "KEY MANAGEMENT"),
-                (Slot::CardAuth, "9E", "CARD AUTH"),
-            ];
             let mut slots = BTreeMap::new();
-            for (slot, hex_id, name) in slot_specs {
-                if let Ok(meta) = session.get_slot_metadata(slot) {
-                    let fingerprint = session.get_certificate(slot).ok().map(|cert_bytes| {
-                        use sha2::{Digest, Sha256};
-                        let fp = Sha256::digest(&cert_bytes);
-                        hex::encode(fp)
-                    });
-                    slots.insert(
-                        format!("{hex_id} ({name})"),
-                        PivSlotDiag {
-                            key_type: format!("{}", meta.key_type),
-                            fingerprint,
-                        },
-                    );
+            for slot in Slot::key_slots() {
+                let key_type = session
+                    .get_slot_metadata(slot)
+                    .ok()
+                    .map(|meta| meta.key_type.to_string());
+                let cert = session.get_certificate(slot).ok();
+                if let Some((name, diag)) = piv_slot_diag(slot, key_type, cert) {
+                    slots.insert(name, diag);
                 }
             }
 
@@ -564,6 +552,35 @@ fn probe_piv<C: yubikit::smartcard::SmartCardConnection + 'static>(
         }
         Err((e, conn)) => (ResultOrError::Err(format!("{e}")), conn),
     }
+}
+
+fn piv_slot_diag(
+    slot: yubikit::piv::Slot,
+    key_type: Option<String>,
+    cert: Option<Vec<u8>>,
+) -> Option<(String, PivSlotDiag)> {
+    use yubikit::piv::Slot;
+    if key_type.is_none() && cert.is_none() {
+        return None;
+    }
+    let name = match slot {
+        Slot::Authentication => "AUTHENTICATION".to_string(),
+        Slot::Signature => "DIGITAL SIGNATURE".to_string(),
+        Slot::KeyManagement => "KEY MANAGEMENT".to_string(),
+        Slot::CardAuth => "CARD AUTH".to_string(),
+        _ => format!("{slot:?}").to_ascii_uppercase(),
+    };
+    let fingerprint = cert.map(|bytes| {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(&bytes))
+    });
+    Some((
+        format!("{:02X} ({name})", slot as u8),
+        PivSlotDiag {
+            key_type: key_type.unwrap_or_else(|| "EMPTY".to_string()),
+            fingerprint,
+        },
+    ))
 }
 
 fn probe_oath<C: yubikit::smartcard::SmartCardConnection + 'static>(
@@ -1296,4 +1313,28 @@ fn probe_svc_otp(dev: &dyn yubikit::device::YubiKeyDevice) -> ResultOrError<OtpD
         management: mgmt,
         otp,
     })
+}
+
+#[cfg(test)]
+mod piv_slot_tests {
+    use super::piv_slot_diag;
+    use yubikit::piv::Slot;
+
+    #[test]
+    fn retired_slots_include_keys_and_certificate_only_entries() {
+        assert!(piv_slot_diag(Slot::Retired1, None, None).is_none());
+
+        let (name, key) = piv_slot_diag(Slot::Retired1, Some("ECCP256".into()), None).unwrap();
+        assert_eq!(name, "82 (RETIRED1)");
+        assert_eq!(key.key_type, "ECCP256");
+        assert!(key.fingerprint.is_none());
+
+        let (name, cert) = piv_slot_diag(Slot::Retired20, None, Some(vec![])).unwrap();
+        assert_eq!(name, "95 (RETIRED20)");
+        assert_eq!(cert.key_type, "EMPTY");
+        assert_eq!(
+            cert.fingerprint.as_deref(),
+            Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        );
+    }
 }

@@ -935,14 +935,7 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     ]);
 
     // Slot details
-    let slots = [
-        (Slot::Authentication, "9A", "AUTHENTICATION"),
-        (Slot::Signature, "9C", "SIGNATURE"),
-        (Slot::KeyManagement, "9D", "KEY MANAGEMENT"),
-        (Slot::CardAuth, "9E", "CARD AUTH"),
-    ];
-
-    for (slot, hex_id, name) in slots {
+    for slot in Slot::key_slots() {
         let has_key = session.get_slot_metadata(slot).ok();
         let has_cert = session.get_certificate(slot).ok();
 
@@ -950,7 +943,7 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
             continue;
         }
 
-        println!("\nSlot {hex_id} ({name}):");
+        println!("\n{}:", slot_heading(slot));
 
         let mut rows = Vec::new();
         if let Some(ref meta) = has_key {
@@ -981,6 +974,17 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn slot_heading(slot: Slot) -> String {
+    let name = match slot {
+        Slot::Authentication => "AUTHENTICATION".to_string(),
+        Slot::Signature => "SIGNATURE".to_string(),
+        Slot::KeyManagement => "KEY MANAGEMENT".to_string(),
+        Slot::CardAuth => "CARD AUTH".to_string(),
+        _ => format!("{slot:?}").to_ascii_uppercase(),
+    };
+    format!("Slot {:02X} ({name})", slot as u8)
 }
 
 struct CertInfo {
@@ -2144,14 +2148,25 @@ fn write_cert_file(output: &str, cert_der: &[u8], format: CliFormat) -> Result<(
 mod tests {
     use yubikit::core::Version;
     use yubikit::keys::PrivateKey;
-    use yubikit::piv::{KeyType, ManagementKeyType, PivError};
+    use yubikit::piv::{KeyType, ManagementKeyType, PivError, Slot};
     use yubikit::smartcard::SmartCardError;
 
     use super::{
         check_management_key_type_supported, decrypt_private_key_data,
         format_management_key_auth_error, format_piv_credential_error,
-        management_key_type_prompt_name,
+        management_key_type_prompt_name, slot_heading,
     };
+
+    #[test]
+    fn piv_info_labels_retired_slots() {
+        assert_eq!(
+            slot_heading(Slot::Authentication),
+            "Slot 9A (AUTHENTICATION)"
+        );
+        assert_eq!(slot_heading(Slot::Retired1), "Slot 82 (RETIRED1)");
+        assert_eq!(slot_heading(Slot::Retired10), "Slot 8B (RETIRED10)");
+        assert_eq!(slot_heading(Slot::Retired20), "Slot 95 (RETIRED20)");
+    }
 
     #[test]
     fn openssl_pqc_pem_files_are_accepted_for_import() {

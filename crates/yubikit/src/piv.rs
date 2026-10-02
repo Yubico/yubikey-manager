@@ -405,6 +405,21 @@ pub enum Slot {
 }
 
 impl Slot {
+    /// Key slots reported by PIV info, excluding the attestation slot.
+    pub fn key_slots() -> impl Iterator<Item = Self> {
+        [
+            Self::Authentication,
+            Self::Signature,
+            Self::KeyManagement,
+            Self::CardAuth,
+        ]
+        .into_iter()
+        .chain(
+            (Self::Retired1 as u8..=Self::Retired20 as u8)
+                .map(|id| Self::from_u8(id).expect("retired key slot IDs are contiguous")),
+        )
+    }
+
     /// Convert a raw byte to a [`Slot`], returning `None` if unrecognized.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
@@ -3173,6 +3188,28 @@ mod tests {
             Some(ManagementKeyType::Aes256)
         );
         assert_eq!(ManagementKeyType::from_u8(0xFF), None);
+    }
+
+    #[test]
+    fn test_key_slots_include_all_retired_slots_without_attestation() {
+        let slots: Vec<_> = Slot::key_slots().collect();
+        assert_eq!(slots.len(), 24);
+        assert_eq!(
+            &slots[..4],
+            &[
+                Slot::Authentication,
+                Slot::Signature,
+                Slot::KeyManagement,
+                Slot::CardAuth
+            ]
+        );
+        for (index, slot) in slots[4..].iter().enumerate() {
+            assert_eq!(*slot as u8, 0x82 + index as u8);
+            assert_eq!(Slot::from_u8(*slot as u8), Some(*slot));
+        }
+        assert_eq!(slots[4], Slot::Retired1);
+        assert_eq!(slots[23], Slot::Retired20);
+        assert!(!slots.contains(&Slot::Attestation));
     }
 
     #[test]
