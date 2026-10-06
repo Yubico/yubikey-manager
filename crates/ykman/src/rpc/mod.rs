@@ -4,6 +4,8 @@ pub mod node;
 pub mod protocol;
 pub mod proxy;
 pub mod signing;
+#[cfg(any(target_os = "windows", test))]
+pub mod windows;
 
 #[cfg(not(target_os = "windows"))]
 #[derive(Debug, thiserror::Error)]

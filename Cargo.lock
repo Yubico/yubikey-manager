@@ -3389,6 +3389,7 @@ dependencies = [
  "serde_json",
  "windows-service",
  "windows-sys 0.61.2",
+ "winresource",
  "ykman",
  "yubikit",
  "zeroize",

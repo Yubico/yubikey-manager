@@ -14,13 +14,23 @@ mod session;
 #[cfg(target_os = "windows")]
 mod signing;
 
-pub const SERVICE_NAME: &str = "ykman-svc";
 #[cfg(target_os = "windows")]
-pub const PIPE_NAME: &str = r"\\.\pipe\ykman-svc";
+static WINDOWS_SERVICE: std::sync::OnceLock<ykman::rpc::windows::WindowsService> =
+    std::sync::OnceLock::new();
+
+#[cfg(target_os = "windows")]
+pub fn windows_service() -> ykman::rpc::windows::WindowsService {
+    *WINDOWS_SERVICE.get().expect("service identity initialized")
+}
 
 #[derive(Parser)]
 #[command(name = "ykman-svc", about = "YubiKey Manager Service")]
 struct Cli {
+    /// Use the isolated Yubico Authenticator MSIX service and named pipe
+    #[cfg(target_os = "windows")]
+    #[arg(long, global = true)]
+    authenticator_msix: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -47,6 +57,14 @@ enum Commands {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
+    #[cfg(target_os = "windows")]
+    WINDOWS_SERVICE
+        .set(if cli.authenticator_msix {
+            ykman::rpc::windows::WindowsService::AuthenticatorMsix
+        } else {
+            ykman::rpc::windows::WindowsService::Shared
+        })
+        .expect("service identity initialized only once");
 
     match &cli.command {
         Commands::Standalone {

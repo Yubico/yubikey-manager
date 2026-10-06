@@ -41,3 +41,6 @@ windows-sys = { workspace = true, features = [
 
 [lints]
 workspace = true
+
+[build-dependencies]
+winresource.workspace = true

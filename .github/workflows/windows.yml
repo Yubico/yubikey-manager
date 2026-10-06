@@ -42,6 +42,24 @@ jobs:
         shell: bash
         run: cp -r resources/win dist/scripts
 
+      - name: Install WiX for ARM64 validation
+        if: matrix.os == 'windows-11-arm'
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'wix314-binaries.zip'
+          Invoke-WebRequest 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip' -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne '6AC824E1642D6F7277D0ED7EA09411A508F6116BA6FAE0AA5F2C7DAA2FF43D31') {
+            throw 'WiX download checksum mismatch'
+          }
+          $wixDir = Join-Path $env:RUNNER_TEMP 'wix314'
+          Expand-Archive $archive -DestinationPath $wixDir
+          "WIX_BIN=$wixDir" >> $env:GITHUB_ENV
+
+      - name: Test shared service lifecycle
+        run: |
+          $arch = if ('${{ matrix.os }}' -eq 'windows-11-arm') { 'arm64' } else { 'x64' }
+          $wixBin = if ($env:WIX_BIN) { $env:WIX_BIN } else { "$env:WIX\bin" }
+          .\resources\win\test_service_msm.ps1 -Architecture $arch -WixBin $wixBin
+
       - name: Build installer
         if: matrix.os == 'windows-latest'
         working-directory: ./dist

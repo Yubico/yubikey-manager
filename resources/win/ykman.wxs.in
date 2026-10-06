@@ -12,6 +12,12 @@
       <WixVariable Id="WixUIBannerBmp" Value="yubico-msi-y-banner.png" />
 
       <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />
+      <Property Id="YKMANSERVICEARCH">
+        <RegistrySearch Id="ServiceArchitecture" Root="HKLM" Key="Software\Yubico\YubiKey Manager Service" Name="Architecture" Type="raw" Win64="yes" />
+      </Property>
+      <Condition Message="The installed YubiKey Manager Service has a different architecture. Use installers of the same architecture for YubiKey Manager and Yubico Authenticator.">
+        Installed OR NOT YKMANSERVICEARCH OR YKMANSERVICEARCH = "{ARCHITECTURE}"
+      </Condition>
 
       <Property Id="PREVIOUSVERSIONSINSTALLED" Secure="yes" />
 
@@ -60,28 +66,11 @@
          <Component Id="YkmanExe" Guid="{YKMAN_EXE_GUID}">
              <File Id="ykman.exe" Source="$(var.BinaryDir)\ykman.exe" KeyPath="yes" />
          </Component>
-         <Component Id="YkmanSvcExe" Guid="{YKMAN_SVC_GUID}">
-             <File Id="ykman_svc.exe" Name="ykman-svc.exe" Source="$(var.BinaryDir)\ykman-svc.exe" KeyPath="yes" />
-             <ServiceInstall
-                 Id="YkmanSvcInstall"
-                 Type="ownProcess"
-                 Name="ykman-svc"
-                 DisplayName="YubiKey Manager Service"
-                 Description="Provides device management services for YubiKey Manager."
-                 Start="auto"
-                 Account="LocalSystem"
-                 ErrorControl="normal"
-                 Arguments="run" />
-             <ServiceControl
-                 Id="YkmanSvcControl"
-                 Name="ykman-svc"
-                 Start="install"
-                 Stop="both"
-                 Remove="uninstall"
-                 Wait="yes" />
-         </Component>
       </DirectoryRef>
 
+      <DirectoryRef Id="TARGETDIR">
+        <Merge Id="YkmanService" SourceFile="$(var.ServiceModule)" DiskId="1" Language="1033" />
+      </DirectoryRef>
       <DirectoryRef Id="ApplicationProgramsFolder">
          <Component Id="ApplicationShortcut" Guid="{SHORTCUT_GUID}">
              <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall"/>
@@ -93,7 +82,7 @@
 
       <Feature Id="DefaultFeature" Level="1">
          <ComponentRef Id="YkmanExe" />
-         <ComponentRef Id="YkmanSvcExe" />
+         <MergeRef Id="YkmanService" />
       </Feature>
 
       <Feature Id="MainApplication" Title="Main Application" Level="1">

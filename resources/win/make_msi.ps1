@@ -46,14 +46,12 @@ $COMPONENT_GUIDS = if ($Architecture -eq 'arm64') {
     @{
         ENVVARS_GUID = '0bf71425-4599-5048-a9ff-440cc59e98fd'
         YKMAN_EXE_GUID = '114efd2a-4f7f-5c41-acdd-fba70fc1e709'
-        YKMAN_SVC_GUID = '085d53ef-8e28-5d07-82c8-fcf8a7ce74bd'
         SHORTCUT_GUID = '16c88500-b08b-52f7-9a0d-27b28f31c1bf'
     }
 } else {
     @{
         ENVVARS_GUID = '7e30efe4-dc8b-40ba-a182-76e490de4f37'
         YKMAN_EXE_GUID = 'a3d7c1e2-5f8a-4b9e-9c1d-2e4f6a8b0c3d'
-        YKMAN_SVC_GUID = 'b4e8d2f3-6a9b-4c0f-ad2e-3f5a7b9c1d4e'
         SHORTCUT_GUID = 'fba0ab59-48d1-4050-82eb-acad31cf2239'
     }
 }
@@ -67,7 +65,9 @@ if (-not (Test-Path "$WixBin\candle.exe") -or -not (Test-Path "$WixBin\light.exe
 }
 
 echo "Running candle..."
-& "$WixBin\candle.exe" "$SCRIPT_DIR\ykman.wxs" -ext WixUtilExtension -arch $Architecture -out "$SCRIPT_DIR\ykman.wixobj"
+$serviceModule = Join-Path (Get-Location) 'ykman-service.msm'
+& "$SCRIPT_DIR\make_service_msm.ps1" -ServiceSource "$SourceDir\ykman-svc.exe" -Architecture $Architecture -OutputPath $serviceModule -WixBin $WixBin
+& "$WixBin\candle.exe" "$SCRIPT_DIR\ykman.wxs" "-dServiceModule=$serviceModule" -ext WixUtilExtension -arch $Architecture -out "$SCRIPT_DIR\ykman.wixobj"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 echo "Running light..."

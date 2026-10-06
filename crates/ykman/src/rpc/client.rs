@@ -71,7 +71,10 @@ impl RpcClient {
             use std::os::windows::fs::OpenOptionsExt;
             use std::os::windows::io::AsRawHandle;
 
-            let pipe_path = r"\\.\pipe\ykman-svc";
+            let service = super::windows::client_service().map_err(|e| {
+                RpcCallError::Transport(format!("Failed to determine package identity: {e}"))
+            })?;
+            let pipe_path = service.pipe();
             log::debug!("Connecting to Named Pipe: {pipe_path}");
 
             let file = OpenOptions::new()
