@@ -255,8 +255,8 @@ fn strip_ansi(s: &str) -> String {
 /// text — from the line matching `heading` (ignoring baked-in ANSI codes) up
 /// to, but not including, the next blank line — leaving everything else
 /// untouched. `transform` returns `None` to leave a line as-is. Factors out
-/// the "find this heading, then walk its lines" boilerplate shared by
-/// [`add_command_colons`] and [`lowercase_usage`].
+/// the "find this heading, then walk its lines" boilerplate used by
+/// [`lowercase_usage`].
 fn transform_section(
     text: &str,
     heading: &str,
@@ -281,27 +281,6 @@ fn transform_section(
         out.push_str(line);
     }
     out
-}
-
-/// Adds a trailing colon after each subcommand name in the "COMMANDS"
-/// section (matching the style used by `gh <command> --help`), e.g.
-/// "  info     Show general information" becomes
-/// "  info:    Show general information". Consumes one space of the
-/// existing alignment padding for the colon so the description column
-/// stays aligned.
-fn add_command_colons(text: &str) -> String {
-    transform_section(text, "COMMANDS", |content| {
-        let rest = content.strip_prefix("  ")?;
-        let gap = rest.find(|c: char| c.is_whitespace())?;
-        let (name, after) = rest.split_at(gap);
-        let padding = after.len() - after.trim_start().len();
-        // Only rewrite if there's padding to spare for the colon, i.e. this
-        // really is a "name<spaces>description" row.
-        (padding > 1).then(|| {
-            let description = &after[padding..];
-            format!("  {name}:{}{description}", " ".repeat(padding - 1))
-        })
-    })
 }
 
 /// Lowercases the "USAGE" section's example line(s) (e.g.
@@ -346,7 +325,7 @@ fn finalize_help(cmd: &mut clap::Command) {
         // the built-in help text's own "--help shows more" hint no longer
         // applies since --help now renders identically to -h.
         .replace("Print help (see more with '--help')", "Print help");
-    let rendered = lowercase_usage(&add_command_colons(&rendered));
+    let rendered = lowercase_usage(&rendered);
     taken = taken.override_help(rendered);
 
     for sub in taken.get_subcommands_mut() {

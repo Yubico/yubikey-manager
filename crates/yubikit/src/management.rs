@@ -43,7 +43,7 @@ use std::fmt;
 
 use thiserror::Error;
 
-use crate::__internal::tlv::{parse_tlv_dict, tlv_encode};
+use crate::__internal::tlv::{parse_tlv_dict, tlv_encode, tlv_unpack};
 use crate::core::{Connection, Transport, Version, bytes2int, int2bytes};
 use crate::fido::FidoConnection;
 use crate::fido::FidoError;
@@ -61,6 +61,7 @@ const INS_SET_MODE: u8 = 0x16;
 const INS_READ_CONFIG: u8 = 0x1D;
 const INS_WRITE_CONFIG: u8 = 0x1C;
 const INS_DEVICE_RESET: u8 = 0x1F;
+const INS_READ_STORAGE_INFO: u8 = 0x30;
 const P1_DEVICE_CONFIG: u8 = 0x11;
 
 // OTP slot constant for NEO mode set
@@ -835,6 +836,66 @@ impl DeviceInfo {
 }
 
 // ---------------------------------------------------------------------------
+// StorageInfo
+// ---------------------------------------------------------------------------
+
+/// A single entry from [`StorageInfo`]: how many objects of a given type
+/// are currently stored, and how many storage pages they occupy in total.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StorageStatsEntry {
+    /// Object-type id. Id `0` is always "free space"; other ids are
+    /// assigned per application as they gain storage reporting support
+    /// (the mapping of id to application is not carried in the data
+    /// itself, so callers must track it separately).
+    pub id: u8,
+    /// Number of objects of this type currently stored.
+    pub objects: u16,
+    /// Number of storage pages these objects occupy in total.
+    pub pages: u16,
+}
+
+/// Storage usage statistics, read via
+/// [`ManagementSession::read_storage_info`] (requires YubiKey firmware
+/// with storage reporting support).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StorageInfo {
+    /// One entry per object-type id reported by the device.
+    pub entries: Vec<StorageStatsEntry>,
+}
+
+impl StorageInfo {
+    /// Tag wrapping the storage-stats payload in the `GET STORAGE INFO`
+    /// response (instruction `0x30`).
+    const TAG: u32 = 0x01;
+    /// Size in bytes of one encoded entry: `id (1) | objects (u16 BE) |
+    /// pages (u16 BE)`.
+    const ENTRY_SIZE: usize = 5;
+
+    /// Parse a `GET STORAGE INFO` response into [`StorageInfo`].
+    pub fn parse(encoded: &[u8]) -> Result<Self, SmartCardError> {
+        let payload = tlv_unpack(Self::TAG, encoded)
+            .map_err(|e| SmartCardError::InvalidData(e.to_string()))?;
+        // `as_chunks` (clippy's suggested alternative) is nightly-only;
+        // `chunks_exact` is the correct stable equivalent here.
+        #[allow(clippy::chunks_exact_to_as_chunks)]
+        let entries = payload
+            .chunks_exact(Self::ENTRY_SIZE)
+            .map(|chunk| StorageStatsEntry {
+                id: chunk[0],
+                objects: u16::from_be_bytes([chunk[1], chunk[2]]),
+                pages: u16::from_be_bytes([chunk[3], chunk[4]]),
+            })
+            .collect();
+        Ok(Self { entries })
+    }
+
+    /// Look up the entry for a given id, if the device reported one.
+    pub fn entry(&self, id: u8) -> Option<StorageStatsEntry> {
+        self.entries.iter().copied().find(|e| e.id == id)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ManagementError
 // ---------------------------------------------------------------------------
 
@@ -1017,6 +1078,11 @@ trait ManagementOps<E: std::error::Error + Send + Sync + 'static> {
             "device_reset is only supported over SmartCard (CCID)".into(),
         ))
     }
+    fn read_storage_info(&mut self) -> Result<Vec<u8>, ManagementError<E>> {
+        Err(ManagementError::NotSupported(
+            "read_storage_info is only supported over SmartCard (CCID)".into(),
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1135,6 +1201,14 @@ impl<C: SmartCardConnection + 'static> ManagementSession<C> {
         self.inner.device_reset()?;
         log::info!("Device reset complete");
         Ok(())
+    }
+
+    /// Read storage usage statistics (requires YubiKey firmware with
+    /// storage reporting support; SmartCard (CCID) only for now).
+    pub fn read_storage_info(&mut self) -> Result<StorageInfo, ManagementError<SmartCardError>> {
+        log::debug!("Reading storage info");
+        let encoded = self.inner.read_storage_info()?;
+        StorageInfo::parse(&encoded).map_err(ManagementError::from_parse)
     }
 }
 
@@ -1307,6 +1381,12 @@ impl<C: SmartCardConnection + 'static> ManagementOps<SmartCardError> for CcidMan
             .send_apdu(0, INS_DEVICE_RESET, 0, 0, &[])
             .map_err(ManagementError::Connection)?;
         Ok(())
+    }
+
+    fn read_storage_info(&mut self) -> Result<Vec<u8>, ManagementError<SmartCardError>> {
+        self.protocol
+            .send_apdu(0, INS_READ_STORAGE_INFO, 0, 0, &[])
+            .map_err(ManagementError::Connection)
     }
 }
 
@@ -1843,5 +1923,50 @@ mod tests {
         assert_eq!(ReleaseType::Alpha.to_string(), "alpha");
         assert_eq!(ReleaseType::Beta.to_string(), "beta");
         assert_eq!(ReleaseType::Final.to_string(), "final");
+    }
+
+    #[test]
+    fn test_storage_info_parse() {
+        // Real `GET STORAGE INFO` capture: free=145obj/405pages,
+        // PIV objects=2/7, PIV keys=3/24, OpenPGP=4/32, FIDO2=6/12, and a
+        // then-new id 5 with no usage yet (later reserved for OATH).
+        let encoded: &[u8] = &[
+            0x01, 0x1E, 0x00, 0x00, 0x91, 0x01, 0x95, 0x01, 0x00, 0x02, 0x00, 0x07, 0x02, 0x00,
+            0x03, 0x00, 0x18, 0x03, 0x00, 0x04, 0x00, 0x20, 0x04, 0x00, 0x06, 0x00, 0x0C, 0x05,
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        let info = StorageInfo::parse(encoded).unwrap();
+        assert_eq!(info.entries.len(), 6);
+        assert_eq!(
+            info.entry(0),
+            Some(StorageStatsEntry {
+                id: 0,
+                objects: 145,
+                pages: 405
+            })
+        );
+        assert_eq!(
+            info.entry(4),
+            Some(StorageStatsEntry {
+                id: 4,
+                objects: 6,
+                pages: 12
+            })
+        );
+        assert_eq!(
+            info.entry(5),
+            Some(StorageStatsEntry {
+                id: 5,
+                objects: 0,
+                pages: 0
+            })
+        );
+        assert_eq!(info.entry(99), None);
+    }
+
+    #[test]
+    fn test_storage_info_parse_wrong_tag() {
+        let encoded: &[u8] = &[0x02, 0x00];
+        assert!(StorageInfo::parse(encoded).is_err());
     }
 }

@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use yubikit::core::Transport;
 use yubikit::device::YubiKeyDevice;
-use yubikit::management::Capability;
+use yubikit::management::{Capability, ManagementSession, StorageInfo, StorageStatsEntry};
 
 use crate::color;
 use crate::util::print_table;
@@ -73,7 +73,7 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
         &info.config.enabled_capabilities,
     );
 
-    print_storage_section(&info.version, unicode);
+    print_storage_section(dev, &info.version, unicode);
 
     if !info.fips_capable.is_empty() {
         println!();
@@ -241,56 +241,276 @@ fn status_cell(text: &str) -> String {
 }
 
 struct StorageApp {
+    /// Row label. For grouped rows (see `group`) this is just the child's
+    /// own short label (e.g. "certificates", "keys"); the shared group
+    /// name (e.g. "PIV") is printed separately as a header above them.
     name: &'static str,
     used_bytes: u64,
     objects: u32,
     object_label: &'static str,
     color: color::Swatch,
+    /// If set, this row is a child of a named group (e.g. `Some("PIV")`
+    /// for both the certificates and keys rows): the legend prints one
+    /// combined header row for the group (summed bytes/objects across all
+    /// its currently-visible children) followed by each child indented
+    /// underneath, rather than showing this row as its own top-level
+    /// entry.
+    group: Option<&'static str>,
 }
 
-/// Static placeholder storage data. Firmware 6.x devices use a single
-/// dynamic pool with no fixed per-application capacities; there is no API
-/// yet to read real usage, so these figures are for UI purposes only.
-fn fake_storage() -> (u64, Vec<StorageApp>) {
-    let total_bytes = 61440u64; // 60.0 KB
+impl StorageApp {
+    /// A row is worth showing if it has *any* footprint — either flash
+    /// pages (`used_bytes`) or object/header slots (`objects`). These can
+    /// be nonzero independently: an object small enough to fit inline in
+    /// its header (reportedly under ~208 bytes) consumes an object slot
+    /// but zero pages, so checking `used_bytes` alone would wrongly hide
+    /// an app that's genuinely in use, just entirely inline.
+    fn is_visible(&self) -> bool {
+        self.used_bytes > 0 || self.objects > 0
+    }
+}
+
+/// Everything [`print_storage_section`] needs: the byte-level breakdown
+/// (`apps`/`total_bytes`), plus the separate "object slots" (headrar)
+/// capacity. Pages and object slots are two independent finite resources:
+/// an object always needs one free slot *and* enough free pages, so a
+/// device can be effectively full (no free slots) while still showing free
+/// page space, or vice versa. `total_objects`/`free_objects` let the UI
+/// respect the slot limit as its own tracked parameter, not just a detail
+/// folded into the free-space byte count.
+struct StorageSummary {
+    total_bytes: u64,
+    apps: Vec<StorageApp>,
+    total_objects: u32,
+    free_objects: u32,
+}
+
+/// Bytes per storage page. Every object rounds up to a whole number of
+/// pages, e.g. an object using 600 bytes still occupies 768 bytes (3
+/// pages) of the pool.
+const PAGE_SIZE: u64 = 256;
+
+/// Object-type id reported by the Management application's dedicated
+/// `GET STORAGE INFO` command (`00 30 00 00`, instruction `0x30`). Id 0 is
+/// always "free space"; the rest are assigned per application as new ones
+/// gain reporting support.
+const ID_FREE: u8 = 0x00;
+const ID_PIV_OBJECTS: u8 = 0x01;
+const ID_PIV_KEYS: u8 = 0x02;
+const ID_OPENPGP_KEYS: u8 = 0x03;
+const ID_FIDO_CREDENTIALS: u8 = 0x04;
+const ID_OATH: u8 = 0x05;
+
+/// A single decoded storage-stats entry: how many objects of this type are
+/// stored, and how many pages they occupy in total. Widened to `u32` from
+/// the SDK's [`StorageStatsEntry`] (`u16` fields, since a single id's
+/// count/pages always fits in 16 bits) to match [`StorageApp`]/
+/// [`StorageSummary`]'s totals, which can exceed that once summed.
+#[derive(Default, Clone, Copy)]
+struct StatsEntry {
+    objects: u32,
+    pages: u32,
+}
+
+impl From<StorageStatsEntry> for StatsEntry {
+    fn from(e: StorageStatsEntry) -> Self {
+        Self {
+            objects: e.objects as u32,
+            pages: e.pages as u32,
+        }
+    }
+}
+
+// Simulated response, captured from a real YubiKey 6 while the dedicated
+// `GET STORAGE INFO` management command was under development. Used as a
+// local fallback for demoing/visual verification (`YKMAN_FAKE_STORAGE=1`)
+// until an alpha key with real storage reporting is available.
+//
+// Layout: a single TLV — 1-byte tag (`0x01`), 1-byte length, then payload:
+// a run of 5-byte records, each `id (1 byte) | objects (u16 BE) | pages
+// (u16 BE)`. This used to be tag `0x1C` nested inside the larger
+// `GET DEVICE INFO` response (hence the extra wrapping seen in the two
+// older samples below); now that it's its own command, the response is
+// just this one TLV with no outer length byte or sibling tags to skip.
+//
+// Lighter-usage sample (mostly empty FIDO2, no PIV objects yet, plenty of
+// free object slots and page space), kept here for later re-use. Captured
+// while this was still nested under DeviceInfo tag `0x1C`:
+// const SAMPLE_STORAGE_INFO_RESPONSE: &[u8] = &[
+//     0x1D, 0x1B, 0x00, 0x1C, 0x19, 0x00, 0x00, 0x8D, 0x01, 0x9C, 0x01, 0x00, 0x00, 0x00, 0x00,
+//     0x02, 0x00, 0x01, 0x00, 0x08, 0x03, 0x00, 0x04, 0x00, 0x20, 0x04, 0x00, 0x0E, 0x00, 0x1C,
+// ];
+
+// Heavier-usage sample (154 FIDO2 passkeys). Also a useful edge case: 0
+// free *objects* (headrar) but 129 free *pages* (sidor) remain — all
+// object slots exhausted even though raw page space is not, exactly the
+// scenario the "Objects" line below is meant to surface. Also captured
+// while still nested under DeviceInfo tag `0x1C`, kept here for later
+// re-use:
+// const SAMPLE_STORAGE_INFO_RESPONSE: &[u8] = &[
+//     0x1D, 0x1B, 0x00, 0x1C, 0x19, 0x00, 0x00, 0x00, 0x00, 0x81, 0x01, 0x00, 0x01, 0x00, 0x03,
+//     0x02, 0x00, 0x01, 0x00, 0x08, 0x03, 0x00, 0x04, 0x00, 0x20, 0x04, 0x00, 0x9A, 0x01, 0x34,
+// ];
+
+/// Current sample: first capture from the new, standalone `GET STORAGE
+/// INFO` command. Same six real-world totals as the previous two samples
+/// underneath (480 pages / 120 KB, 160 object slots) — same physical
+/// device, different snapshot in time — plus the first appearance of id
+/// `0x05`, reserved for OATH ahead of it actually reporting any usage yet.
+const SAMPLE_STORAGE_INFO_RESPONSE: &[u8] = &[
+    0x01, 0x1E, 0x00, 0x00, 0x91, 0x01, 0x95, 0x01, 0x00, 0x02, 0x00, 0x07, 0x02, 0x00, 0x03, 0x00,
+    0x18, 0x03, 0x00, 0x04, 0x00, 0x20, 0x04, 0x00, 0x06, 0x00, 0x0C, 0x05, 0x00, 0x00, 0x00, 0x00,
+];
+
+/// Builds the STORAGE section's data from a decoded [`StorageInfo`] —
+/// either read live from a device over CCID (see
+/// [`read_device_storage_info`]), or the captured
+/// [`SAMPLE_STORAGE_INFO_RESPONSE`] when demoing without a storage-capable
+/// key (see [`sample_storage_info`]). Total and free space are derived
+/// from the data itself (free pages plus every used id's pages) rather
+/// than a fixed constant, since capacity is expected to grow as more
+/// object types gain reporting support. Ids with no reporting support yet
+/// (YubiHSM Auth) are left at zero usage, which keeps them out of the
+/// bar/legend until a real id exists for them.
+fn storage_summary_from_info(info: &StorageInfo) -> StorageSummary {
+    let entry = |id: u8| info.entry(id).map(StatsEntry::from).unwrap_or_default();
+    let bytes_of = |e: StatsEntry| e.pages as u64 * PAGE_SIZE;
+
+    let piv_objects = entry(ID_PIV_OBJECTS);
+    let piv_keys = entry(ID_PIV_KEYS);
+    let openpgp = entry(ID_OPENPGP_KEYS);
+    let fido = entry(ID_FIDO_CREDENTIALS);
+    let oath = entry(ID_OATH);
+    let free = entry(ID_FREE);
+
+    // Any id in the blob that this client doesn't recognise yet (e.g. a
+    // future app type added by newer firmware than this build knows about)
+    // is folded into a single "Other" bucket instead of silently vanishing
+    // from the totals. This keeps `total_bytes`/`total_objects` correct
+    // even when parsing data from firmware newer than this client.
+    const KNOWN_IDS: &[u8] = &[
+        ID_FREE,
+        ID_PIV_OBJECTS,
+        ID_PIV_KEYS,
+        ID_OPENPGP_KEYS,
+        ID_FIDO_CREDENTIALS,
+        ID_OATH,
+    ];
+    let other = info
+        .entries
+        .iter()
+        .filter(|e| !KNOWN_IDS.contains(&e.id))
+        .map(|&e| StatsEntry::from(e))
+        .fold(StatsEntry::default(), |acc, e| StatsEntry {
+            objects: acc.objects + e.objects,
+            pages: acc.pages + e.pages,
+        });
+
     let apps = vec![
         StorageApp {
             name: "FIDO2",
-            used_bytes: 24576,
-            objects: 18,
+            used_bytes: bytes_of(fido),
+            objects: fido.objects,
             object_label: "passkeys",
             color: color::Swatch::Red,
+            group: None,
         },
+        // PIV objects (certificates etc.) and PIV keys are reported as two
+        // separate ids; shown here as two child rows sharing both a colour
+        // (so the bar still reads as one seamless "PIV" block — adjacent
+        // same-coloured segments have no visible seam) and a group header
+        // (printed in the legend as a combined "PIV" row above them).
         StorageApp {
-            name: "PIV",
-            used_bytes: 9626,
-            objects: 5,
+            name: "certificates",
+            used_bytes: bytes_of(piv_objects),
+            objects: piv_objects.objects,
             object_label: "certificates",
             color: color::Swatch::Yellow,
+            group: Some("PIV"),
+        },
+        StorageApp {
+            name: "keys",
+            used_bytes: bytes_of(piv_keys),
+            objects: piv_keys.objects,
+            object_label: "keys",
+            color: color::Swatch::Yellow,
+            group: Some("PIV"),
         },
         StorageApp {
             name: "OATH",
-            used_bytes: 3994,
-            objects: 24,
+            used_bytes: bytes_of(oath),
+            objects: oath.objects,
             object_label: "accounts",
             color: color::Swatch::Green,
+            group: None,
         },
         StorageApp {
             name: "OpenPGP",
-            used_bytes: 922,
-            objects: 3,
+            used_bytes: bytes_of(openpgp),
+            objects: openpgp.objects,
             object_label: "keys",
             color: color::Swatch::Blue,
+            group: None,
         },
+        // YubiHSM Auth reporting isn't implemented yet either; same as OATH.
         StorageApp {
             name: "YubiHSM Auth",
-            used_bytes: 204,
-            objects: 2,
+            used_bytes: 0,
+            objects: 0,
             object_label: "credentials",
             color: color::Swatch::Magenta,
+            group: None,
+        },
+        // Catches ids this client build doesn't know about yet; stays
+        // hidden (like OATH/YubiHSM Auth above) unless the device actually
+        // reports an unrecognised id with nonzero usage.
+        StorageApp {
+            name: "Other",
+            used_bytes: bytes_of(other),
+            objects: other.objects,
+            object_label: "objects",
+            color: color::Swatch::Cyan,
+            group: None,
         },
     ];
-    (total_bytes, apps)
+
+    let used_bytes: u64 = apps.iter().map(|a| a.used_bytes).sum();
+    let total_bytes = bytes_of(free) + used_bytes;
+    // Object-slot capacity is derived the same way as byte capacity: free
+    // slots plus every used id's slots. Every sample seen so far puts this
+    // at a fixed 160 regardless of how pages are distributed, consistent
+    // with it being a separate, flash-independent limit.
+    let used_objects: u32 = apps.iter().map(|a| a.objects).sum();
+    let total_objects = free.objects + used_objects;
+
+    StorageSummary {
+        total_bytes,
+        apps,
+        total_objects,
+        free_objects: free.objects,
+    }
+}
+
+/// Decodes the captured [`SAMPLE_STORAGE_INFO_RESPONSE`] for local
+/// demoing/visual verification without a storage-capable key. Only used
+/// when `YKMAN_FAKE_STORAGE` is set (see [`print_storage_section`]); the
+/// sample bytes are a known-good capture, so a parse failure here would
+/// indicate a bug in this build rather than bad device data.
+fn sample_storage_info() -> StorageSummary {
+    let info =
+        StorageInfo::parse(SAMPLE_STORAGE_INFO_RESPONSE).expect("sample storage data is valid");
+    storage_summary_from_info(&info)
+}
+
+/// Reads storage stats from the connected key over CCID (the only
+/// transport storage reporting supports so far). Returns `None` on any
+/// failure — e.g. firmware without storage support, or no smartcard
+/// interface available — in which case the STORAGE section is simply
+/// omitted, same as it's always been for keys predating this feature.
+fn read_device_storage_info(dev: &dyn YubiKeyDevice) -> Option<StorageInfo> {
+    let conn = dev.open_smartcard().ok()?;
+    let mut session = ManagementSession::new(conn).ok()?;
+    session.read_storage_info().ok()
 }
 
 fn fmt_kb(bytes: u64) -> String {
@@ -315,18 +535,87 @@ fn pct_str(bytes: u64, total: u64) -> String {
     }
 }
 
-/// Minimum firmware version exposing the STORAGE section.
-const MIN_STORAGE_VERSION: yubikit::core::Version = yubikit::core::Version(6, 0, 0);
+/// Rounds each value's share of `total` to a whole percentage using the
+/// largest-remainder method, so the printed rows always sum to exactly
+/// 100% — unlike rounding each row independently with [`pct_str`], which
+/// can drift a point or two off (e.g. `48% + 31% + 21% = 100%` rounding to
+/// `48% + 31% + 22%` in isolation). A value that rounds down to `0%` but is
+/// still nonzero prints as `<1%`, same as `pct_str`.
+fn allocate_percentages(values: &[u64], total: u64) -> Vec<String> {
+    if total == 0 || values.is_empty() {
+        return values.iter().map(|_| "0%".to_string()).collect();
+    }
+    let exacts: Vec<f64> = values
+        .iter()
+        .map(|&v| v as f64 / total as f64 * 100.0)
+        .collect();
+    let floors: Vec<i64> = exacts.iter().map(|e| e.floor() as i64).collect();
+    let base_sum: i64 = floors.iter().sum();
+    let remaining = (100 - base_sum).clamp(0, values.len() as i64) as usize;
 
-fn print_storage_section(version: &yubikit::core::Version, unicode: bool) {
-    if *version < MIN_STORAGE_VERSION {
-        // Storage reporting isn't available on older firmware (and an
-        // unknown/uncertain version reads as 0.0.0, which also fails this
-        // check, so we don't show placeholder data for it either).
-        return;
+    let mut by_remainder: Vec<usize> = (0..values.len()).collect();
+    by_remainder.sort_by(|&a, &b| {
+        let ra = exacts[a] - floors[a] as f64;
+        let rb = exacts[b] - floors[b] as f64;
+        rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut finals = floors;
+    for &idx in by_remainder.iter().take(remaining) {
+        finals[idx] += 1;
     }
 
-    let (total_bytes, apps) = fake_storage();
+    finals
+        .iter()
+        .zip(exacts.iter())
+        .map(|(&f, &e)| {
+            if f == 0 && e > 0.0 {
+                "<1%".to_string()
+            } else {
+                format!("{f}%")
+            }
+        })
+        .collect()
+}
+
+/// Minimum firmware version expected to expose the STORAGE section once
+/// alpha-key version reporting is confirmed and this can be gated
+/// up-front rather than relying solely on `read_storage_info()` failing.
+/// Currently unused: no version check is applied yet (still exercised by
+/// `storage_requires_firmware_6_0_0_or_above`), since it's unclear what
+/// alpha firmware reports for its version. Failing the real
+/// `GET STORAGE INFO` read already hides the section for keys that don't
+/// support it, so this isn't needed for correctness yet.
+#[allow(dead_code)]
+const MIN_STORAGE_VERSION: yubikit::core::Version = yubikit::core::Version(6, 0, 0);
+
+/// Set to demo the STORAGE section with the captured sample dataset
+/// instead of attempting a real read — useful until an alpha key with
+/// storage support is in hand.
+const FAKE_STORAGE_ENV_VAR: &str = "YKMAN_FAKE_STORAGE";
+
+fn print_storage_section(
+    dev: &dyn YubiKeyDevice,
+    _version: &yubikit::core::Version,
+    unicode: bool,
+) {
+    let info = if std::env::var_os(FAKE_STORAGE_ENV_VAR).is_some() {
+        Some(sample_storage_info())
+    } else {
+        read_device_storage_info(dev).map(|info| storage_summary_from_info(&info))
+    };
+    let Some(StorageSummary {
+        total_bytes,
+        apps,
+        total_objects,
+        free_objects,
+    }) = info
+    else {
+        // No storage data available — e.g. firmware predating this
+        // feature, or a non-CCID transport. Nothing to show, same as
+        // it's always been for these keys.
+        return;
+    };
     let used_bytes: u64 = apps.iter().map(|a| a.used_bytes).sum();
     let free_bytes = total_bytes - used_bytes;
     let used_pct = used_bytes as f64 / total_bytes as f64 * 100.0;
@@ -353,6 +642,27 @@ fn print_storage_section(version: &yubikit::core::Version, unicode: bool) {
         pad_label("Free"),
         color::bright(&fmt_kb(free_bytes))
     );
+
+    // Object slots (headrar) are a separate, finite resource from page
+    // space: every object needs both a free slot *and* enough free pages,
+    // so the device can be effectively full on slots alone even while
+    // `free_bytes` above still shows room. Always shown (not just when
+    // critical) so this limit stays a visible, respected parameter rather
+    // than hidden inside the byte total.
+    let used_objects = total_objects - free_objects;
+    let objects_pct = used_objects as f64 / total_objects.max(1) as f64 * 100.0;
+    let objects_text = format!(
+        "{used_objects} of {total_objects}  ({})",
+        pct_str(used_objects as u64, total_objects as u64)
+    );
+    let objects_line = if free_objects == 0 {
+        color::red(&objects_text)
+    } else if objects_pct >= 80.0 {
+        color::yellow(&objects_text)
+    } else {
+        color::bright(&objects_text)
+    };
+    println!("{}{objects_line}", pad_label("Objects"));
     println!();
 
     // Narrow terminals (< 60 columns): drop the bar, keep the text.
@@ -376,6 +686,10 @@ fn print_bar(apps: &[StorageApp], total_bytes: u64, free_bytes: u64, unicode: bo
     let mut used_cells = 0usize;
     let mut bar = String::new();
     for app in apps {
+        // An app can be `is_visible()` (has object slots) while still
+        // having zero bytes (fully inline in its header, no pages used) —
+        // nothing to draw here since the bar represents byte/page usage,
+        // but it still gets a legend row below.
         if app.used_bytes == 0 {
             continue;
         }
@@ -396,14 +710,62 @@ fn print_bar(apps: &[StorageApp], total_bytes: u64, free_bytes: u64, unicode: bo
 
 fn print_legend(apps: &[StorageApp], total_bytes: u64, free_bytes: u64, unicode: bool) {
     let block = if unicode { "\u{2588}" } else { "#" };
+
+    // Percentages are allocated together across every visible leaf row
+    // plus the trailing "free" row via the largest-remainder method,
+    // rather than rounding each row in isolation with `pct_str`, so they
+    // always add up to exactly 100% instead of occasionally drifting to
+    // 99% or 101%. Group header rows (below) are a combined view of their
+    // own children's bytes, so they're deliberately left out of this pool
+    // and given their own independently-rounded percentage instead —
+    // otherwise the same bytes would be counted twice towards 100%.
+    let visible_bytes: Vec<u64> = apps
+        .iter()
+        .filter(|a| a.is_visible())
+        .map(|a| a.used_bytes)
+        .chain(std::iter::once(free_bytes))
+        .collect();
+    let mut percentages = allocate_percentages(&visible_bytes, total_bytes).into_iter();
+
+    // Tracks which group headers (e.g. "PIV") have already been printed,
+    // so the first visible child of a group prints a combined header row
+    // above it, and later children of the same group don't repeat it.
+    let mut printed_groups: std::collections::HashSet<&'static str> =
+        std::collections::HashSet::new();
     for app in apps {
-        if app.used_bytes == 0 {
+        if !app.is_visible() {
             continue;
         }
         let marker = color::swatch(block, app.color);
+
+        if let Some(group) = app.group {
+            if printed_groups.insert(group) {
+                let (group_bytes, group_objects) = apps
+                    .iter()
+                    .filter(|a| a.is_visible() && a.group == Some(group))
+                    .fold((0u64, 0u32), |(bytes, objects), a| {
+                        (bytes + a.used_bytes, objects + a.objects)
+                    });
+                let name = color::dim(&format!("{:<16}", group));
+                let size = color::bright(&format!("{:>12}", fmt_kb(group_bytes)));
+                let pct = color::dim(&format!("{:>7}", pct_str(group_bytes, total_bytes)));
+                let count = color::dim(&format!("{group_objects} objects"));
+                println!("{marker} {name}{size}{pct}   {count}");
+            }
+            // Children are indented one column under their group header.
+            let name = color::dim(&format!("{:<16}", format!(" {}", app.name)));
+            let size = color::bright(&format!("{:>12}", fmt_kb(app.used_bytes)));
+            let pct_value = percentages.next().unwrap_or_default();
+            let pct = color::dim(&format!("{:>7}", pct_value));
+            let count = color::dim(&format!("{} {}", app.objects, app.object_label));
+            println!("{marker} {name}{size}{pct}   {count}");
+            continue;
+        }
+
         let name = color::dim(&format!("{:<16}", app.name));
         let size = color::bright(&format!("{:>12}", fmt_kb(app.used_bytes)));
-        let pct = color::dim(&format!("{:>7}", pct_str(app.used_bytes, total_bytes)));
+        let pct_value = percentages.next().unwrap_or_default();
+        let pct = color::dim(&format!("{:>7}", pct_value));
         let count = color::dim(&format!("{} {}", app.objects, app.object_label));
         println!("{marker} {name}{size}{pct}   {count}");
     }
@@ -412,7 +774,8 @@ fn print_legend(apps: &[StorageApp], total_bytes: u64, free_bytes: u64, unicode:
     let marker = color::muted(block);
     let name = color::dim(&format!("{:<16}", "free"));
     let size = color::bright(&format!("{:>12}", fmt_kb(free_bytes)));
-    let pct = color::dim(&format!("{:>7}", pct_str(free_bytes, total_bytes)));
+    let pct_value = percentages.next().unwrap_or_default();
+    let pct = color::dim(&format!("{:>7}", pct_value));
     println!("{marker} {name}{size}{pct}");
 }
 

@@ -8,8 +8,6 @@
 use std::io::IsTerminal;
 use std::sync::OnceLock;
 
-use owo_colors::OwoColorize;
-
 /// Value for the global `--color` flag.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum ColorChoice {
@@ -60,12 +58,19 @@ pub fn enabled() -> bool {
     ENABLED.get().copied().unwrap_or(false)
 }
 
+/// Wraps `s` in the given raw ANSI SGR code(s) (e.g. `"1"` for bold, `"31"`
+/// for red), followed by a reset. Used instead of pulling in a colour crate
+/// for what's otherwise a handful of fixed, well-known escape sequences.
+fn sgr(code: &str, s: &str) -> String {
+    format!("\x1b[{code}m{s}\x1b[0m")
+}
+
 /// Emphasise a value with bold. Deliberately doesn't force an explicit
 /// foreground colour, so it renders in the terminal's own default
 /// foreground (respecting light/dark themes) with bold for contrast.
 pub fn bright(s: &str) -> String {
     if enabled() {
-        s.bold().to_string()
+        sgr("1", s)
     } else {
         s.to_string()
     }
@@ -85,7 +90,7 @@ pub fn dim(s: &str) -> String {
 /// theme.
 pub fn muted(s: &str) -> String {
     if enabled() {
-        s.bright_black().to_string()
+        sgr("90", s)
     } else {
         s.to_string()
     }
@@ -94,7 +99,7 @@ pub fn muted(s: &str) -> String {
 /// Red, typically used to indicate a disabled/negative state or an error.
 pub fn red(s: &str) -> String {
     if enabled() {
-        s.red().to_string()
+        sgr("31", s)
     } else {
         s.to_string()
     }
@@ -103,7 +108,7 @@ pub fn red(s: &str) -> String {
 /// Amber/yellow, typically used for a warning state.
 pub fn yellow(s: &str) -> String {
     if enabled() {
-        s.yellow().to_string()
+        sgr("33", s)
     } else {
         s.to_string()
     }
@@ -119,19 +124,22 @@ pub enum Swatch {
     Green,
     Blue,
     Magenta,
+    Cyan,
 }
 
 pub fn swatch(s: &str, color: Swatch) -> String {
     if !enabled() {
         return s.to_string();
     }
-    match color {
-        Swatch::Red => s.red().to_string(),
-        Swatch::Yellow => s.yellow().to_string(),
-        Swatch::Green => s.green().to_string(),
-        Swatch::Blue => s.blue().to_string(),
-        Swatch::Magenta => s.magenta().to_string(),
-    }
+    let code = match color {
+        Swatch::Red => "31",
+        Swatch::Yellow => "33",
+        Swatch::Green => "32",
+        Swatch::Blue => "34",
+        Swatch::Magenta => "35",
+        Swatch::Cyan => "36",
+    };
+    sgr(code, s)
 }
 
 #[cfg(test)]
