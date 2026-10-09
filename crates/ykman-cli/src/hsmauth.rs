@@ -1,12 +1,13 @@
 use anyhow::{Result, anyhow};
 use clap::Subcommand;
+use yubikit::core::Version;
 use yubikit::device::YubiKeyDevice;
 use yubikit::hsmauth::{CredentialPassword, HsmAuthManagementKey, HsmAuthSession};
 use yubikit::management::Capability;
 
 use crate::cli_enums::CliFormat;
 use crate::scp::ScpParams;
-use crate::util::{confirm, open_smartcard_session, print_table, write_file_or_stdout};
+use crate::util::{confirm, open_smartcard_session, print_table, usage_bar, write_file_or_stdout};
 
 const MANAGEMENT_KEY_LEN: usize = 16;
 
@@ -356,11 +357,28 @@ fn format_credential_error(e: &yubikit::hsmauth::HsmAuthError, default_msg: &str
     }
 }
 
+/// Maximum number of credentials stored on firmware before 6.0.
+const MAX_CREDENTIALS: u32 = 32;
+
 pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     let mut session = open_session(dev, scp_params)?;
     let mut rows = vec![("YubiHSM Auth version", session.version().to_string())];
     if let Ok(retries) = session.get_management_key_retries() {
         rows.push(("Management key retries remaining", format!("{retries}/8")));
+    }
+    // The 32-credential limit is fixed up to 5.x; from 6.0 the storage pool
+    // is shared with other applications.
+    if session.version() < Version(6, 0, 0)
+        && let Ok(creds) = session.list_credentials()
+    {
+        let used = creds.len() as u32;
+        rows.push((
+            "Credential storage",
+            format!(
+                "{} {used} of {MAX_CREDENTIALS} used",
+                usage_bar(used, MAX_CREDENTIALS, 20, crate::info::use_unicode(), true)
+            ),
+        ));
     }
     print_table(rows);
     Ok(())

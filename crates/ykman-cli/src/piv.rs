@@ -27,10 +27,11 @@ use yubikit::smartcard::{SmartCardConnection, SmartCardError, Sw};
 use crate::cli_enums::{
     CliFormat, CliHashAlgorithm, CliKeyType, CliMgmtKeyType, CliPinPolicy, CliTouchPolicy,
 };
+use crate::color;
 use crate::scp::ScpParams;
 use crate::util::{
     ByteFormat, ByteLen, confirm, open_smartcard_session, print_table, prompt_bytes,
-    read_file_or_stdin, write_file_or_stdout,
+    read_file_or_stdin, usage_bar, write_file_or_stdout,
 };
 
 #[derive(Subcommand)]
@@ -853,19 +854,17 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     let reset_blocked = dev.info().reset_blocked.contains(Capability::PIV);
     let version = session.version();
 
-    let mut warnings = Vec::new();
+    let default_hint = |what: &str| format!(" {}", color::yellow(&format!("(default {what}!)")));
     let mut rows = vec![("PIV version", version.to_string())];
 
     // PIN metadata
     match session.get_pin_metadata() {
         Ok(meta) => {
-            rows.push((
-                "PIN tries remaining",
-                format!("{}/{}", meta.attempts_remaining, meta.total_attempts),
-            ));
+            let mut tries = format!("{}/{}", meta.attempts_remaining, meta.total_attempts);
             if meta.default_value {
-                warnings.push("WARNING: Using default PIN!");
+                tries.push_str(&default_hint("PIN"));
             }
+            rows.push(("PIN tries remaining", tries));
         }
         Err(_) => {
             if let Ok(n) = session.get_pin_attempts() {
@@ -889,13 +888,11 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
         }
         Err(PivError::NotSupported(_)) => {
             if let Ok(meta) = session.get_puk_metadata() {
-                rows.push((
-                    "PUK tries remaining",
-                    format!("{}/{}", meta.attempts_remaining, meta.total_attempts),
-                ));
+                let mut tries = format!("{}/{}", meta.attempts_remaining, meta.total_attempts);
                 if meta.default_value {
-                    warnings.push("WARNING: Using default PUK!");
+                    tries.push_str(&default_hint("PUK"));
                 }
+                rows.push(("PUK tries remaining", tries));
             }
         }
         Err(_) => {}
@@ -903,36 +900,27 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
 
     // Management key metadata
     if let Ok(meta) = session.get_management_key_metadata() {
-        let algo = format!("{}", meta.key_type);
-        rows.push(("Management key algorithm", algo));
+        let mut algo = meta.key_type.to_string();
         if meta.default_value {
-            warnings.push("WARNING: Using default Management key!");
+            algo.push_str(&default_hint("key"));
         }
+        rows.push(("Management key algorithm", algo));
+    }
+
+    // Slot capacity is only fixed up to 5.x; from 6.0 the storage pool is
+    // shared with other applications.
+    if version < Version(6, 0, 0) {
+        let used = count_certificate_slots(&mut session);
+        rows.push((
+            "Slots in use",
+            format!(
+                "{} {used} of {PIV_SLOT_COUNT} used",
+                usage_bar(used, PIV_SLOT_COUNT, 20, crate::info::use_unicode(), true)
+            ),
+        ));
     }
 
     print_table(rows);
-
-    // Print collected warnings
-    for w in &warnings {
-        println!("{w}");
-    }
-
-    print_table([
-        (
-            "CHUID",
-            session
-                .get_object(ObjectId::Chuid)
-                .map(|data| hex::encode(&data))
-                .unwrap_or_else(|_| "No data available".to_string()),
-        ),
-        (
-            "CCC",
-            session
-                .get_object(ObjectId::Capability)
-                .map(|data| hex::encode(&data))
-                .unwrap_or_else(|_| "No data available".to_string()),
-        ),
-    ]);
 
     // Slot details
     let slots = [
@@ -950,18 +938,17 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
             continue;
         }
 
-        println!("\nSlot {hex_id} ({name}):");
+        println!("\n{}", color::dim(&format!("SLOT {hex_id}  {name}")));
 
         let mut rows = Vec::new();
-        if let Some(ref meta) = has_key {
-            rows.push(("  Private key type", meta.key_type.to_string()));
-        }
+        let private_type = has_key.as_ref().map(|meta| meta.key_type.to_string());
+        let mut public_type = None;
 
         if let Some(ref cert_der) = has_cert {
             // Parse certificate to show details
             if let Some(info) = parse_cert_info(cert_der) {
                 if has_key.is_some() {
-                    rows.push(("  Public key type", info.key_type));
+                    public_type = Some(info.key_type);
                 }
                 rows.extend([
                     ("  Subject DN", info.subject),
@@ -973,14 +960,54 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
                 ]);
             }
         }
-        print_table(rows);
+        // One "Key type" row when the private and public key agree.
+        let key_rows: Vec<(&str, String)> = match (private_type, public_type) {
+            (Some(private), Some(public)) if private != public => vec![
+                ("  Private key type", private),
+                ("  Public key type", public),
+            ],
+            (Some(private), _) => vec![("  Key type", private)],
+            (None, _) => vec![],
+        };
+        print_table(key_rows.into_iter().chain(rows));
     }
+
+    println!();
+    print_table([
+        (
+            "CHUID",
+            session
+                .get_object(ObjectId::Chuid)
+                .map(|data| hex::encode(&data))
+                .unwrap_or_else(|_| "No data available".to_string()),
+        ),
+        (
+            "CCC",
+            session
+                .get_object(ObjectId::Capability)
+                .map(|data| hex::encode(&data))
+                .unwrap_or_else(|_| "No data available".to_string()),
+        ),
+    ]);
 
     if reset_blocked {
         println!("Factory reset is blocked");
     }
 
     Ok(())
+}
+
+/// Slots that can hold a certificate: 9A, 9C, 9D, 9E and the 20 retired
+/// key management slots (82-95).
+const PIV_SLOT_COUNT: u32 = 24;
+
+fn count_certificate_slots(session: &mut PivSession<impl SmartCardConnection>) -> u32 {
+    [0x9A, 0x9C, 0x9D, 0x9E]
+        .into_iter()
+        .chain(0x82..=0x95)
+        .filter_map(Slot::from_u8)
+        .filter(|&slot| session.get_certificate(slot).is_ok())
+        .count() as u32
 }
 
 struct CertInfo {

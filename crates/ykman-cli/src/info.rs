@@ -71,29 +71,11 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
     print_applications(
         &info.supported_capabilities,
         &info.config.enabled_capabilities,
+        info.fips_capable,
+        info.fips_approved,
     );
 
     print_storage_section(dev, &info.version, unicode);
-
-    if !info.fips_capable.is_empty() {
-        println!();
-        println!("FIPS approved applications");
-        let mut rows = Vec::new();
-        for &cap in Capability::ALL {
-            if info.fips_capable.contains(cap) {
-                let approved = info.fips_approved.contains(cap);
-                rows.push((
-                    format!("  {}", cap.display_name()),
-                    if approved {
-                        "Yes".to_string()
-                    } else {
-                        "No".to_string()
-                    },
-                ));
-            }
-        }
-        print_table(rows);
-    }
 
     if check_fips {
         println!();
@@ -115,7 +97,7 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
 
 /// Whether the terminal is expected to support UTF-8 block characters. Falls
 /// back to plain ASCII (`#`/`-`) when the locale doesn't advertise UTF-8.
-fn use_unicode() -> bool {
+pub(crate) fn use_unicode() -> bool {
     for var in ["LC_ALL", "LC_CTYPE", "LANG"] {
         if let Ok(val) = std::env::var(var)
             && !val.is_empty()
@@ -153,6 +135,8 @@ const APP_COL_WIDTH: usize = 15;
 fn print_applications(
     supported: &std::collections::HashMap<Transport, Capability>,
     enabled: &std::collections::HashMap<Transport, Capability>,
+    fips_capable: Capability,
+    fips_approved: Capability,
 ) {
     let usb_supported = supported
         .get(&Transport::Usb)
@@ -184,16 +168,31 @@ fn print_applications(
     } else {
         format!("{header}{:<APP_COL_WIDTH$}", "USB")
     };
-    println!("{header}");
+    // FIPS devices get a third column with each application's approval.
+    let show_fips = !fips_capable.is_empty();
+    let header = if show_fips {
+        format!("{header}{:<APP_COL_WIDTH$}", "FIPS")
+    } else {
+        header
+    };
+    println!("{}", header.trim_end());
     for cap in apps {
         let name = format!("{:<APP_NAME_WIDTH$}", cap.display_name());
         let usb_cell = usb_status_cell(cap, usb_supported.contains(cap), usb_enabled);
-        if has_nfc {
-            let nfc_cell = nfc_status_cell(cap, nfc_supported.contains(cap), nfc_enabled);
-            println!("{name}{usb_cell}{nfc_cell}");
+        let nfc_cell = if has_nfc {
+            nfc_status_cell(cap, nfc_supported.contains(cap), nfc_enabled)
         } else {
-            println!("{name}{usb_cell}");
-        }
+            String::new()
+        };
+        let fips_cell = if show_fips {
+            fips_status_cell(fips_capable.contains(cap), fips_approved.contains(cap))
+        } else {
+            String::new()
+        };
+        println!(
+            "{}",
+            format!("{name}{usb_cell}{nfc_cell}{fips_cell}").trim_end()
+        );
     }
 }
 
@@ -231,13 +230,30 @@ fn nfc_status_cell(cap: Capability, available: bool, nfc_enabled: Capability) ->
     status_cell(text)
 }
 
-/// Left-align and bold a status cell's text within [`APP_COL_WIDTH`],
-/// matching the label/value alignment used elsewhere in `ykman info`. No
-/// colour is used here (storage is currently the only coloured section);
-/// bold alone distinguishes the value from the plain application name.
+/// FIPS status text for one application row: `Yes`/`No` for applications
+/// the device can run in a FIPS approved mode; anything else (e.g. Yubico
+/// OTP, which has no FIPS status) is `Not available`.
+fn fips_status_cell(capable: bool, approved: bool) -> String {
+    let text = if !capable {
+        "Not available"
+    } else if approved {
+        "Yes"
+    } else {
+        "No"
+    };
+    status_cell(text)
+}
+
+/// Left-align a status cell's text within [`APP_COL_WIDTH`]. Positive states
+/// (`Enabled`, `Yes`) are bold; negative ones (`Disabled`, `No`,
+/// `Not available`) stay plain so they recede.
 fn status_cell(text: &str) -> String {
     let pad = " ".repeat(APP_COL_WIDTH.saturating_sub(text.len()));
-    format!("{}{pad}", color::bright(text))
+    if matches!(text, "Enabled" | "Yes") {
+        format!("{}{pad}", color::bright(text))
+    } else {
+        format!("{text}{pad}")
+    }
 }
 
 struct StorageApp {

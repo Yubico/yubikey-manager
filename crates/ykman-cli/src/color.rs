@@ -58,11 +58,14 @@ pub fn enabled() -> bool {
     ENABLED.get().copied().unwrap_or(false)
 }
 
-/// Wraps `s` in the given raw ANSI SGR code(s) (e.g. `"1"` for bold, `"31"`
-/// for red), followed by a reset. Used instead of pulling in a colour crate
-/// for what's otherwise a handful of fixed, well-known escape sequences.
-fn sgr(code: &str, s: &str) -> String {
-    format!("\x1b[{code}m{s}\x1b[0m")
+/// Wraps `s` in the raw ANSI SGR code `open`, followed by the code `close`
+/// that undoes only that attribute (e.g. `39` for foreground colour, `22`
+/// for bold) rather than a full reset, so styles nest: a coloured bar
+/// inside a bold value doesn't switch the bold off for the text after it.
+/// Used instead of pulling in a colour crate for a handful of fixed,
+/// well-known escape sequences.
+fn sgr(open: &str, close: &str, s: &str) -> String {
+    format!("\x1b[{open}m{s}\x1b[{close}m")
 }
 
 /// Emphasise a value with bold. Deliberately doesn't force an explicit
@@ -70,7 +73,7 @@ fn sgr(code: &str, s: &str) -> String {
 /// foreground (respecting light/dark themes) with bold for contrast.
 pub fn bright(s: &str) -> String {
     if enabled() {
-        sgr("1", s)
+        sgr("1", "22", s)
     } else {
         s.to_string()
     }
@@ -90,7 +93,7 @@ pub fn dim(s: &str) -> String {
 /// theme.
 pub fn muted(s: &str) -> String {
     if enabled() {
-        sgr("90", s)
+        sgr("90", "39", s)
     } else {
         s.to_string()
     }
@@ -99,7 +102,7 @@ pub fn muted(s: &str) -> String {
 /// Red, typically used to indicate a disabled/negative state or an error.
 pub fn red(s: &str) -> String {
     if enabled() {
-        sgr("31", s)
+        sgr("31", "39", s)
     } else {
         s.to_string()
     }
@@ -108,7 +111,7 @@ pub fn red(s: &str) -> String {
 /// Amber/yellow, typically used for a warning state.
 pub fn yellow(s: &str) -> String {
     if enabled() {
-        sgr("33", s)
+        sgr("33", "39", s)
     } else {
         s.to_string()
     }
@@ -139,7 +142,7 @@ pub fn swatch(s: &str, color: Swatch) -> String {
         Swatch::Magenta => "35",
         Swatch::Cyan => "36",
     };
-    sgr(code, s)
+    sgr(code, "39", s)
 }
 
 #[cfg(test)]

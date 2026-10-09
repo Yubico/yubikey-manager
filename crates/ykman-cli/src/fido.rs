@@ -29,7 +29,7 @@ use yubikit::smartcard::SmartCardError;
 use crate::cancel;
 use crate::context;
 use crate::scp::{self, ScpParams};
-use crate::util::{format_smartcard_connection_error, print_table};
+use crate::util::{format_smartcard_connection_error, print_table, usage_bar};
 
 const KEEPALIVE_PROCESSING: u8 = 1;
 const KEEPALIVE_UPNEEDED: u8 = 2;
@@ -499,6 +499,18 @@ fn map_enroll_error<E: std::error::Error + Send + Sync + 'static>(
 // CLI command implementations
 // ---------------------------------------------------------------------------
 
+/// Fixed capacity for discoverable credentials, known only for firmware
+/// that also reports how many remain (5.7.x, 100 credentials). From 6.0 the
+/// storage pool is shared with other applications, so there is no fixed
+/// maximum; those keys (and older ones) fall back to showing just the
+/// remaining count, if reported at all.
+fn max_discoverable_credentials(version: &yubikit::core::Version) -> Option<u32> {
+    use yubikit::core::Version;
+    (Version(5, 7, 0)..Version(6, 0, 0))
+        .contains(version)
+        .then_some(100)
+}
+
 pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     let dev_info = dev.info();
     let transport = dev.transport();
@@ -599,7 +611,19 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
 
             // Remaining discoverable credentials
             if let Some(remaining) = ctap_info.remaining_disc_creds {
-                rows.push(("Credential storage remaining", remaining.to_string()));
+                match max_discoverable_credentials(&dev_info.version) {
+                    Some(max) => {
+                        let used = max.saturating_sub(remaining);
+                        rows.push((
+                            "Credential storage",
+                            format!(
+                                "{} {used} of {max} used ({remaining} left)",
+                                usage_bar(used, max, 20, crate::info::use_unicode(), true)
+                            ),
+                        ));
+                    }
+                    None => rows.push(("Credential storage remaining", remaining.to_string())),
+                }
             }
 
             // Enterprise Attestation

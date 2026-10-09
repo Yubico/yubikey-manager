@@ -272,7 +272,14 @@ where
     V: Into<String>,
 {
     fn into_table_row(self) -> Vec<String> {
-        vec![format!("{}:", self.0.into()), self.1.into()]
+        let label = self.0.into();
+        let value = self.1.into();
+        // An empty label and value is a blank separator row, so it can sit
+        // inside a table without breaking column alignment.
+        if label.is_empty() && value.is_empty() {
+            return vec![String::new(), String::new()];
+        }
+        vec![format!("{label}:"), value]
     }
 }
 
@@ -308,7 +315,7 @@ where
     let mut widths = vec![0; columns];
     for row in &rows {
         for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.len());
+            widths[i] = widths[i].max(visible_width(cell));
         }
     }
 
@@ -317,7 +324,47 @@ where
     }
 }
 
+/// Display width of `s`, ignoring ANSI escape sequences (e.g. a coloured
+/// usage bar) so columns still line up.
+fn visible_width(s: &str) -> usize {
+    anstream::adapter::strip_str(s).to_string().chars().count()
+}
+
+/// Renders a fixed-width usage bar for `used` out of `total`, with the unused
+/// part drawn muted. With `warn`, the bar is green while there's room, yellow
+/// from 80% and red once full; without it (for a fixed set of slots where
+/// being full is normal) it stays green. Any non-zero usage fills at least
+/// one cell.
+pub(crate) fn usage_bar(used: u32, total: u32, width: usize, unicode: bool, warn: bool) -> String {
+    let (used_ch, free_ch) = if unicode {
+        ("\u{2588}", "\u{2591}")
+    } else {
+        ("#", "-")
+    };
+    let used = used.min(total);
+    let mut cells = (used as usize * width).div_ceil(total.max(1) as usize);
+    if used < total {
+        cells = cells.min(width.saturating_sub(1));
+    }
+    let fill = used_ch.repeat(cells);
+    let fill = if warn && used >= total {
+        crate::color::red(&fill)
+    } else if warn && used as f64 / total as f64 >= 0.8 {
+        crate::color::yellow(&fill)
+    } else {
+        crate::color::swatch(&fill, crate::color::Swatch::Green)
+    };
+    format!(
+        "{fill}{}",
+        crate::color::muted(&free_ch.repeat(width - cells))
+    )
+}
+
 fn print_table_row(row: &[String], widths: &[usize]) {
+    if row.iter().all(String::is_empty) {
+        println!();
+        return;
+    }
     let last = row.len().saturating_sub(1);
     for (i, width) in widths.iter().enumerate() {
         if i > 0 {
@@ -325,10 +372,12 @@ fn print_table_row(row: &[String], widths: &[usize]) {
         }
         let cell = row.get(i).map(String::as_str).unwrap_or("");
         if i == last {
-            let pad = " ".repeat(width.saturating_sub(cell.len()));
-            print!("{}{pad}", crate::color::bright(cell));
+            print!("{}", crate::color::bright(cell));
         } else {
-            print!("{cell:<width$}");
+            print!(
+                "{cell}{}",
+                " ".repeat(width.saturating_sub(visible_width(cell)))
+            );
         }
     }
     println!();

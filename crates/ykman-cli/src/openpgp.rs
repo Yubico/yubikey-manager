@@ -10,7 +10,7 @@ use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
 use crate::scp::ScpParams;
 use crate::util::{
     confirm, format_smartcard_connection_error, open_smartcard_session, print_table,
-    read_file_or_stdin, write_file_or_stdout,
+    read_file_or_stdin, usage_bar, write_file_or_stdout,
 };
 
 #[derive(Subcommand)]
@@ -318,6 +318,9 @@ fn format_openpgp_credential_error(
     }
 }
 
+/// Signature, decryption and authentication key slots.
+const OPENPGP_KEY_SLOTS: u32 = 3;
+
 pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     let mut session = open_session(dev, scp_params)?;
 
@@ -369,9 +372,9 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     } else {
         rows.push(("KDF enabled", "False".to_string()));
     }
-    print_table(rows);
-
-    // Show key information
+    // Collect the key slots in use first so the summary row can sit in the
+    // header table above their details.
+    let mut keys = Vec::new();
     if let Ok(data) = session.get_application_related_data() {
         let disc = &data.discretionary;
         let ver = session.version();
@@ -402,11 +405,29 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
 
             let fp_str = format_fingerprint(fp.map(|v| v.as_slice()).unwrap_or(&[]));
             let touch = disc.get_uif(*key_ref).map_or("N/A".to_string(), format_uif);
-
-            println!("{name}:");
-            print_table([("  Fingerprint", fp_str), ("  Touch policy", touch)]);
+            keys.push((name, format!("{fp_str}  (touch: {touch})")));
         }
+
+        let used = keys.len() as u32;
+        rows.push((
+            "Key storage",
+            format!(
+                "{} {used} of {OPENPGP_KEY_SLOTS} used",
+                usage_bar(
+                    used,
+                    OPENPGP_KEY_SLOTS,
+                    20,
+                    crate::info::use_unicode(),
+                    false
+                )
+            ),
+        ));
     }
+    if !keys.is_empty() {
+        rows.push(("", String::new()));
+    }
+    rows.extend(keys);
+    print_table(rows);
 
     Ok(())
 }

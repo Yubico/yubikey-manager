@@ -3,6 +3,7 @@ use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Subcommand;
+use yubikit::core::Version;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::oath::{
@@ -15,6 +16,7 @@ use crate::cli_enums::{CliOathAlgorithm, CliOathDigits, CliOathType};
 use crate::scp::{self, ScpParams};
 use crate::util::{
     b32_encode, confirm, format_session_error, format_smartcard_connection_error, print_table,
+    usage_bar,
 };
 
 #[derive(Subcommand)]
@@ -485,12 +487,12 @@ pub fn run_info(
     scp_params: &ScpParams,
     password: Option<&str>,
 ) -> Result<()> {
-    // Open a raw session without unlocking — info doesn't require authentication
+    // Open a raw session without unlocking: info doesn't require authentication.
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
-    let session = new_oath_session(dev, &scp_config)?;
-    let _ = password; // Not needed for info
-    let keys = oath_keys()?;
-    print_table([
+    let mut session = new_oath_session(dev, &scp_config)?;
+    let mut keys = oath_keys()?;
+    let remembered = session.has_key() && keys.contains(session.device_id());
+    let mut rows = vec![
         ("OATH version", session.version().to_string()),
         (
             "Password protection",
@@ -500,11 +502,59 @@ pub fn run_info(
                 "disabled".to_string()
             },
         ),
-    ]);
-    if session.has_key() && keys.contains(session.device_id()) {
+    ];
+    if let Some(max) = max_accounts(&session.version())
+        && unlock_without_prompt(&mut session, password, &mut keys)
+        && let Ok(creds) = session.list_credentials()
+    {
+        let used = creds.len() as u32;
+        rows.push((
+            "Account storage",
+            format!(
+                "{} {used} of {max} used",
+                usage_bar(used, max, 20, crate::info::use_unicode(), true)
+            ),
+        ));
+    }
+    print_table(rows);
+    if remembered {
         println!("The password for this YubiKey is remembered by ykman.");
     }
     Ok(())
+}
+
+/// Fixed account capacity, known for 5.x firmware (64 from 5.7, 32 before).
+/// From 6.0 the storage pool is shared with other applications.
+fn max_accounts(version: &Version) -> Option<u32> {
+    if *version >= Version(6, 0, 0) || *version < Version(5, 0, 0) {
+        None
+    } else if *version >= Version(5, 7, 0) {
+        Some(64)
+    } else {
+        Some(32)
+    }
+}
+
+/// Unlocks the session using only a password given on the command line or
+/// the one remembered by ykman, never prompting (info must not block on
+/// input). Returns whether the session is now readable.
+fn unlock_without_prompt(
+    session: &mut OathSession<impl yubikit::smartcard::SmartCardConnection>,
+    password: Option<&str>,
+    keys: &mut AppData,
+) -> bool {
+    if !session.locked() {
+        return true;
+    }
+    if let Some(pw) = password {
+        let key = session.derive_key(pw);
+        return session.validate(&key).is_ok();
+    }
+    keys.get_secret(session.device_id())
+        .ok()
+        .and_then(|hex_key| hex::decode(hex_key).ok())
+        .and_then(|bytes| OathAccessKey::new(&bytes).ok())
+        .is_some_and(|key| session.validate(&key).is_ok())
 }
 
 pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {

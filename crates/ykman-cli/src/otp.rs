@@ -19,6 +19,7 @@ use crate::keyboard::{KeyboardLayout, LayoutSelection};
 use crate::scp::{self, ScpParams};
 use crate::util::{
     self, b32_encode, confirm, format_session_error, format_smartcard_connection_error,
+    print_table, usage_bar,
 };
 
 pub fn effective_access_code<'a>(
@@ -625,17 +626,30 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     impl YubiOtpOp<()> for Info {
         fn run<C: Connection + 'static>(self, session: &mut YubiOtpSession<C>) -> Result<()> {
             let state = session.get_config_state();
-            for slot in [Slot::One, Slot::Two] {
-                let num = slot.map(1, 2);
-                let configured = state.is_configured(slot).map_or("unknown".into(), |b| {
-                    if b {
-                        "programmed".to_string()
-                    } else {
-                        "empty".to_string()
-                    }
-                });
-                println!("Slot {num}: {configured}");
+            let slots = [Slot::One, Slot::Two];
+            let used = slots
+                .iter()
+                .filter(|&&slot| matches!(state.is_configured(slot), Ok(true)))
+                .count() as u32;
+            let total = slots.len() as u32;
+            let mut rows: Vec<(String, String)> =
+                vec![("OTP version".into(), session.version().to_string())];
+            for slot in slots {
+                let status = match state.is_configured(slot) {
+                    Ok(true) => "programmed",
+                    Ok(false) => "empty",
+                    Err(_) => "unknown",
+                };
+                rows.push((format!("Slot {}", slot.map(1, 2)), status.to_string()));
             }
+            rows.push((
+                "Slots in use".into(),
+                format!(
+                    "{} {used} of {total} used",
+                    usage_bar(used, total, 20, crate::info::use_unicode(), false)
+                ),
+            ));
+            print_table(rows);
             Ok(())
         }
     }
