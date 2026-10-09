@@ -10,7 +10,7 @@
 //!   tailed, which keeps them separate from the output.
 
 use anyhow::{Context, Result};
-use portable_pty::{ChildKiller, CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
     KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -25,10 +25,9 @@ use ratatui::widgets::{
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::HashSet;
 use std::io::{Read, Write};
-use std::process::{Command as Proc, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const TABS: [&str; 3] = ["Mixed", "Logs", "Output"];
@@ -45,6 +44,9 @@ const LEVELS: [(&str, &str); 5] = [
 ];
 const DEVICE_POLL: Duration = Duration::from_secs(5);
 const PROMPT_DELAY: Duration = Duration::from_millis(200);
+const MAX_ENTRIES: usize = 20_000;
+/// Options the pilot sets itself (or that make no sense in its UI).
+const PILOT_MANAGED_OPTS: [&str; 5] = ["color", "no-color", "log-level", "log-file", "device"];
 const POPUP_ROWS: usize = 8;
 // Colours come from the terminal's own palette so the pilot follows the
 // user's theme; "dim" text uses the DIM attribute on the default foreground.
@@ -54,9 +56,102 @@ const WARN: Color = Color::Yellow;
 const ERROR: Color = Color::Red;
 const OUTPUT_MARK: Color = Color::Blue;
 const ON_ACCENT: Color = Color::Black;
-const BAND: Color = Color::Indexed(235);
-const SELECTED: Color = Color::Indexed(238);
-const TAB_BG: Color = Color::Indexed(237);
+
+/// Background shades (input band, tab chip, selection), derived from the
+/// terminal's own background colour when it reports one.
+static SHADES: std::sync::OnceLock<[Color; 3]> = std::sync::OnceLock::new();
+const FALLBACK_SHADES: [Color; 3] = [
+    Color::Indexed(235),
+    Color::Indexed(237),
+    Color::Indexed(238),
+];
+
+fn band_bg() -> Color {
+    SHADES.get().unwrap_or(&FALLBACK_SHADES)[0]
+}
+fn tab_bg() -> Color {
+    SHADES.get().unwrap_or(&FALLBACK_SHADES)[1]
+}
+fn selected() -> Color {
+    SHADES.get().unwrap_or(&FALLBACK_SHADES)[2]
+}
+
+type Rgb = (u8, u8, u8);
+
+/// Blend the background towards the theme's foreground colour (or the
+/// opposite extreme when unknown), so the shades stay tinted by the theme.
+fn shades_from(bg: Rgb, fg: Option<Rgb>) -> [Color; 3] {
+    let lum =
+        |c: Rgb| (0.299 * f64::from(c.0) + 0.587 * f64::from(c.1) + 0.114 * f64::from(c.2)) / 255.0;
+    let target = match fg {
+        Some(fg) if (lum(fg) - lum(bg)).abs() > 0.3 => fg,
+        _ if lum(bg) < 0.5 => (255, 255, 255),
+        _ => (0, 0, 0),
+    };
+    let mix = |k: f64| {
+        let m = |b: u8, t: u8| (f64::from(b) + (f64::from(t) - f64::from(b)) * k).round() as u8;
+        Color::Rgb(m(bg.0, target.0), m(bg.1, target.1), m(bg.2, target.2))
+    };
+    [mix(0.07), mix(0.12), mix(0.18)]
+}
+
+/// Ask the terminal for its foreground and background colours (OSC 10/11). A
+/// DA1 request is sent right after so terminals that ignore OSC still answer
+/// and we never hang.
+#[cfg(unix)]
+fn query_terminal_colors() -> Option<(Rgb, Option<Rgb>)> {
+    let mut out = std::io::stdout();
+    out.write_all(b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b[c")
+        .ok()?;
+    out.flush().ok()?;
+    let deadline = Instant::now() + Duration::from_millis(250);
+    let mut buf = Vec::new();
+    while Instant::now() < deadline {
+        let mut fds = libc::pollfd {
+            fd: 0,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: `fds` is a valid pollfd and we pass a count of 1.
+        if unsafe { libc::poll(&mut fds, 1, 50) } <= 0 {
+            continue;
+        }
+        let mut chunk = [0u8; 256];
+        // SAFETY: `chunk` is a valid writable buffer of the given length.
+        let n = unsafe { libc::read(0, chunk.as_mut_ptr().cast(), chunk.len()) };
+        if n <= 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n as usize]);
+        if buf.windows(3).any(|w| w == b"\x1b[?") && buf.last() == Some(&b'c') {
+            break;
+        }
+    }
+    let text = String::from_utf8_lossy(&buf);
+    let parse = |s: &str| -> Option<Rgb> {
+        let mut parts = s.split('/');
+        let mut chan = || {
+            let p = parts.next()?;
+            let hex: String = p.chars().take_while(char::is_ascii_hexdigit).collect();
+            let max = 16f64.powi(hex.len() as i32) - 1.0;
+            let v = u32::from_str_radix(&hex, 16).ok()?;
+            Some((f64::from(v) / max * 255.0).round() as u8)
+        };
+        Some((chan()?, chan()?, chan()?))
+    };
+    // Replies arrive in request order: foreground first, then background.
+    let mut found = text.split("rgb:").skip(1).map(parse);
+    match (found.next()?, found.next()) {
+        (fg, Some(Some(bg))) => Some((bg, fg)),
+        (Some(bg), None) => Some((bg, None)),
+        _ => None,
+    }
+}
+
+#[cfg(not(unix))]
+fn query_terminal_colors() -> Option<(Rgb, Option<Rgb>)> {
+    None
+}
 
 fn dim() -> Style {
     Style::new().add_modifier(Modifier::DIM)
@@ -75,6 +170,8 @@ enum Kind {
     Err,
     Log,
     Note,
+    /// A command that exited with an error.
+    Fail,
 }
 
 struct Entry {
@@ -200,6 +297,14 @@ impl Editor {
     }
 }
 
+/// Incremental find in the log view (Ctrl+F).
+struct Search {
+    query: String,
+    idx: usize,
+    total: usize,
+    jump: bool,
+}
+
 /// Clickable regions recorded while drawing, in screen coordinates.
 #[derive(Default)]
 struct Hits {
@@ -227,11 +332,17 @@ struct App {
     partial_since: Instant,
     writer: Option<Box<dyn Write + Send>>,
     killer: Option<Box<dyn ChildKiller + Send + Sync>>,
+    master: Option<Arc<Mutex<Box<dyn MasterPty + Send>>>>,
+    /// Selected answer of a yes/no prompt; `None` means the prompt's default.
+    yn_sel: Option<usize>,
+    /// Commands persisted across sessions (command path only, never arguments).
+    saved: Vec<String>,
     log_level: &'static str,
     logs_expanded: bool,
     /// Runs whose log block differs from the global expanded/collapsed default.
     toggled: HashSet<usize>,
     hits: Hits,
+    search: Option<Search>,
     sidebar: bool,
     side_state: ListState,
     devices: Vec<Device>,
@@ -247,6 +358,9 @@ struct App {
 
 pub fn run(tree: clap::Command) -> Result<()> {
     let mut terminal = ratatui::init();
+    if let Some((bg, fg)) = query_terminal_colors() {
+        let _ = SHADES.set(shades_from(bg, fg));
+    }
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = ratatui::crossterm::execute!(std::io::stdout(), DisableMouseCapture);
@@ -279,10 +393,14 @@ impl App {
             partial_since: Instant::now(),
             writer: None,
             killer: None,
+            master: None,
+            yn_sel: None,
+            saved: Vec::new(),
             log_level: "debug",
             logs_expanded: true,
             toggled: HashSet::new(),
             hits: Hits::default(),
+            search: None,
             sidebar: false,
             side_state: ListState::default(),
             devices: Vec::new(),
@@ -295,6 +413,12 @@ impl App {
             polling: false,
             quit: false,
         };
+        let (level, saved) = load_state();
+        if let Some(level) = level {
+            app.log_level = level;
+        }
+        app.history = saved.clone();
+        app.saved = saved;
         app.refresh_devices();
         app
     }
@@ -304,13 +428,24 @@ impl App {
     }
 
     fn push(&mut self, kind: Kind, text: String) {
+        // Bound memory; run indices shift when old entries are dropped.
+        if self.entries.len() >= MAX_ENTRIES {
+            self.entries.drain(..MAX_ENTRIES / 10);
+            self.toggled.clear();
+        }
         self.entries.push(Entry { kind, text });
     }
 
     fn main_loop(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        let mut dirty = true;
         while !self.quit {
-            terminal.draw(|f| self.draw(f))?;
-            if event::poll(Duration::from_millis(60))? {
+            if dirty || self.running {
+                terminal.draw(|f| self.draw(f))?;
+                dirty = false;
+            }
+            let wait = if self.running { 60 } else { 200 };
+            if event::poll(Duration::from_millis(wait))? {
+                dirty = true;
                 match event::read()? {
                     Event::Key(key) if key.kind != KeyEventKind::Release => self.on_key(key),
                     Event::Mouse(m) => self.on_mouse(m),
@@ -324,6 +459,7 @@ impl App {
             }
             self.tick = self.tick.wrapping_add(1);
             while let Ok(msg) = self.rx.try_recv() {
+                dirty = true;
                 self.on_msg(msg);
             }
             if !self.running && !self.polling && self.last_poll.elapsed() > DEVICE_POLL {
@@ -360,12 +496,14 @@ impl App {
             Msg::Done(code) => {
                 self.running = false;
                 self.skip_echo = None;
+                self.master = None;
+                self.yn_sel = None;
                 self.writer = None;
                 self.killer = None;
                 self.partial.clear();
                 match code {
                     Some(0) => {}
-                    Some(c) => self.note(&format!("exited with code {c}")),
+                    Some(c) => self.push(Kind::Fail, format!("exited with code {c}")),
                     None => self.note("terminated"),
                 }
             }
@@ -427,20 +565,63 @@ impl App {
             && !p.contains("[y/n]")
     }
 
+    /// Whether the prompt hides its input. On Unix the pty's echo flag is
+    /// authoritative; elsewhere (or if unavailable) we guess from the text.
+    fn secret_prompt(&self, prompt: &str) -> bool {
+        #[cfg(unix)]
+        if let Some(m) = &self.master
+            && let Ok(m) = m.lock()
+            && let Some(t) = m.get_termios()
+        {
+            return t.local_flags.bits() & libc::ECHO == 0;
+        }
+        Self::prompt_is_secret(prompt)
+    }
+
+    fn is_yes_no(prompt: &str) -> bool {
+        let p = prompt.to_lowercase();
+        p.contains("[y/n]") || p.contains("(y/n)")
+    }
+
+    /// Index into [Yes, No]; destructive-by-default prompts start on "No".
+    fn yn_choice(&self, prompt: &str) -> usize {
+        self.yn_sel
+            .unwrap_or(usize::from(!prompt.contains("[Y/n]")))
+    }
+
+    fn send_reply(&mut self, reply: &str, secret: bool) {
+        if secret {
+            let prompt = strip_ansi(&self.partial);
+            self.skip_echo = Some(prompt.trim().to_string());
+        }
+        if let Some(w) = self.writer.as_mut() {
+            let _ = w.write_all(format!("{reply}\r").as_bytes());
+            let _ = w.flush();
+        }
+        self.partial.clear();
+        self.partial_since = Instant::now();
+        self.yn_sel = None;
+    }
+
+    fn on_yes_no_key(&mut self, key: KeyEvent, prompt: &str) {
+        let cur = self.yn_choice(prompt);
+        match key.code {
+            KeyCode::Char('y' | 'Y') => self.send_reply("y", false),
+            KeyCode::Char('n' | 'N') => self.send_reply("n", false),
+            KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
+                self.yn_sel = Some(1 - cur);
+            }
+            KeyCode::Enter => self.send_reply(if cur == 0 { "y" } else { "n" }, false),
+            KeyCode::Esc => self.cancel(),
+            _ => {}
+        }
+    }
+
     fn on_prompt_key(&mut self, key: KeyEvent, secret: bool) {
         match key.code {
             KeyCode::Enter => {
                 let reply = self.input.take();
-                if secret {
-                    let prompt = strip_ansi(&self.partial);
-                    self.skip_echo = Some(prompt.trim().to_string());
-                }
-                if let Some(w) = self.writer.as_mut() {
-                    let _ = w.write_all(format!("{reply}\r").as_bytes());
-                    let _ = w.flush();
-                }
-                self.partial.clear();
-                self.partial_since = Instant::now();
+                self.send_reply(&reply, secret);
             }
             KeyCode::Esc => self.cancel(),
             _ => {
@@ -503,6 +684,10 @@ impl App {
             });
         };
 
+        if (words == ["copy"] || words == ["save"]) && "all".starts_with(partial) {
+            add("all", "Include the whole session");
+            return out;
+        }
         if words == ["log"] {
             for (name, desc) in LEVELS {
                 if name.starts_with(partial) {
@@ -511,16 +696,24 @@ impl App {
             }
             return out;
         }
-        if words
-            .first()
-            .is_some_and(|w| matches!(*w, "clear" | "device" | "help" | "quit" | "exit" | "log"))
-        {
+        if words.first().is_some_and(|w| {
+            matches!(
+                *w,
+                "clear" | "device" | "help" | "quit" | "exit" | "log" | "copy" | "save"
+            )
+        }) {
             return out;
         }
         let (node, used) = self.resolve(&words);
         if used < words.len() || partial.starts_with('-') {
-            for arg in node.get_arguments() {
-                let Some(long) = arg.get_long().filter(|_| !arg.is_hide_set()) else {
+            // SCP options apply to every command, so keep them after the specific ones.
+            let mut args: Vec<&clap::Arg> = node.get_arguments().collect();
+            args.sort_by_key(|a| a.get_long().is_some_and(|l| l.starts_with("scp")));
+            for arg in args {
+                let Some(long) = arg
+                    .get_long()
+                    .filter(|l| !arg.is_hide_set() && !PILOT_MANAGED_OPTS.contains(l))
+                else {
                     continue;
                 };
                 let name = format!("--{long}");
@@ -533,20 +726,11 @@ impl App {
             }
             return out;
         }
+        let mut subs: Vec<&clap::Command> = node.get_subcommands().collect();
         if used == 0 {
-            for (name, desc) in [
-                ("clear", "Clear the screen"),
-                ("device", "Choose which YubiKey to use (also: ← key)"),
-                ("log", "Set the log level: /log [level]"),
-                ("help", "Show keyboard shortcuts"),
-                ("quit", "Exit pilot"),
-            ] {
-                if name.starts_with(partial) {
-                    add(name, desc);
-                }
-            }
+            subs.sort_by_key(|c| c.get_name() != "info");
         }
-        for sub in node.get_subcommands() {
+        for sub in subs {
             let name = sub.get_name();
             if sub.is_hide_set() || name == "help" || !name.starts_with(partial) {
                 continue;
@@ -556,7 +740,72 @@ impl App {
                 &sub.get_about().map(|s| s.to_string()).unwrap_or_default(),
             );
         }
+        if used == 0 {
+            for (name, desc) in [
+                ("clear", "Clear the screen"),
+                ("device", "Choose which YubiKey to use (also: ← key)"),
+                ("copy", "Copy the last command's output: /copy [all]"),
+                ("save", "Save the last command's output: /save [all] [file]"),
+                ("log", "Set the log level: /log [level]"),
+                ("help", "Show keyboard shortcuts"),
+                ("quit", "Exit pilot"),
+            ] {
+                if name.starts_with(partial) {
+                    add(name, desc);
+                }
+            }
+        }
         out
+    }
+
+    /// Usage hint (positionals, option value) shown as ghost text after a command.
+    fn arg_hint(&self) -> Option<String> {
+        let rest = self.input.buf.strip_prefix('/')?;
+        if self.input.cursor != self.input.len() || !rest.ends_with(char::is_whitespace) {
+            return None;
+        }
+        let words: Vec<&str> = rest.split_whitespace().collect();
+        let first = words.first()?;
+        if matches!(
+            *first,
+            "clear" | "device" | "help" | "quit" | "exit" | "log" | "copy" | "save"
+        ) {
+            return None;
+        }
+        let (node, used) = self.resolve(&words);
+        let value_name = |a: &clap::Arg| {
+            a.get_value_names()
+                .and_then(|v| v.first())
+                .map_or_else(|| a.get_id().as_str().to_uppercase(), |n| n.to_string())
+        };
+        if used < words.len() {
+            let long = words.last()?.strip_prefix("--")?;
+            let arg = node.get_arguments().find(|a| a.get_long() == Some(long))?;
+            return arg
+                .get_action()
+                .takes_values()
+                .then(|| format!("<{}>", value_name(arg)));
+        }
+        if node.has_subcommands() {
+            return None;
+        }
+        let mut parts: Vec<String> = node
+            .get_positionals()
+            .map(|a| {
+                if a.is_required_set() {
+                    format!("<{}>", value_name(a))
+                } else {
+                    format!("[{}]", value_name(a))
+                }
+            })
+            .collect();
+        if node.get_arguments().any(|a| {
+            a.get_long()
+                .is_some_and(|l| !a.is_hide_set() && !PILOT_MANAGED_OPTS.contains(&l))
+        }) {
+            parts.push("[--options]".to_string());
+        }
+        (!parts.is_empty()).then(|| parts.join(" "))
     }
 
     // ---------- input ----------
@@ -582,13 +831,30 @@ impl App {
             self.toggled.clear();
             return;
         }
+        if self.search.is_some() {
+            self.on_search_key(key);
+            return;
+        }
+        if ctrl && key.code == KeyCode::Char('f') && !self.sidebar && self.prompt().is_none() {
+            self.search = Some(Search {
+                query: String::new(),
+                idx: 0,
+                total: 0,
+                jump: false,
+            });
+            return;
+        }
         if self.sidebar {
             self.on_sidebar_key(key);
             return;
         }
-        if let Some(prompt) = self.prompt() {
-            let secret = Self::prompt_is_secret(prompt);
-            self.on_prompt_key(key, secret);
+        if let Some(prompt) = self.prompt().map(str::to_string) {
+            let secret = self.secret_prompt(&prompt);
+            if !secret && Self::is_yes_no(&prompt) {
+                self.on_yes_no_key(key, &prompt);
+            } else {
+                self.on_prompt_key(key, secret);
+            }
             return;
         }
         let sugg = self.suggestions();
@@ -610,8 +876,12 @@ impl App {
             }
             KeyCode::Tab if self.input.buf.is_empty() => self.tab = (self.tab + 1) % TABS.len(),
             KeyCode::BackTab => self.tab = (self.tab + TABS.len() - 1) % TABS.len(),
-            KeyCode::Up if popup => self.sel = (self.sel + sugg.len() - 1) % sugg.len(),
-            KeyCode::Down if popup => self.sel = (self.sel + 1) % sugg.len(),
+            KeyCode::Up if popup && self.hist_pos.is_none() => {
+                self.sel = (self.sel + sugg.len() - 1) % sugg.len()
+            }
+            KeyCode::Down if popup && self.hist_pos.is_none() => {
+                self.sel = (self.sel + 1) % sugg.len()
+            }
             KeyCode::Up => self.history_step(true),
             KeyCode::Down => self.history_step(false),
             KeyCode::PageUp => self.scroll += 10,
@@ -627,8 +897,49 @@ impl App {
             _ => {
                 if self.input.on_key(&key) {
                     self.sel = 0;
+                    self.hist_pos = None;
                 }
             }
+        }
+    }
+
+    fn on_search_key(&mut self, key: KeyEvent) {
+        let Some(sr) = self.search.as_mut() else {
+            return;
+        };
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let step = |sr: &mut Search, back: bool| {
+            if sr.total > 0 {
+                sr.idx = if back {
+                    (sr.idx + sr.total - 1) % sr.total
+                } else {
+                    (sr.idx + 1) % sr.total
+                };
+                sr.jump = true;
+            }
+        };
+        match key.code {
+            KeyCode::Esc => self.search = None,
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => step(sr, true),
+            KeyCode::Enter | KeyCode::Down => step(sr, false),
+            KeyCode::Up => step(sr, true),
+            KeyCode::Backspace => {
+                sr.query.pop();
+                sr.idx = 0;
+                sr.jump = true;
+            }
+            KeyCode::Char('u') if ctrl => {
+                sr.query.clear();
+                sr.idx = 0;
+            }
+            KeyCode::Char(c) if !ctrl => {
+                sr.query.push(c);
+                sr.idx = 0;
+                sr.jump = true;
+            }
+            KeyCode::PageUp => self.scroll += 10,
+            KeyCode::PageDown => self.scroll = self.scroll.saturating_sub(10),
+            _ => {}
         }
     }
 
@@ -724,7 +1035,7 @@ impl App {
             MouseEventKind::ScrollDown => self.scroll = self.scroll.saturating_sub(3),
             MouseEventKind::Down(MouseButton::Left) => {
                 if self.sidebar && inside(self.hits.side_items) {
-                    let row = (y - self.hits.side_items.y) as usize / 2 + self.side_state.offset();
+                    let row = (y - self.hits.side_items.y) as usize / 4 + self.side_state.offset();
                     if row < self.devices.len() {
                         self.side_state.select(Some(row));
                         self.choose_device(row);
@@ -759,7 +1070,10 @@ impl App {
         if args.is_empty() {
             return;
         }
-        self.history.push(line.trim().to_string());
+        if self.history.last().map(String::as_str) != Some(line.trim()) {
+            self.history.push(line.trim().to_string());
+        }
+        self.persist_command(&args);
         match args[0].as_str() {
             "quit" | "exit" => self.quit = true,
             "clear" => {
@@ -771,8 +1085,116 @@ impl App {
             "device" => self.open_sidebar(),
             "help" => self.help(),
             "log" => self.set_log_level(args.get(1).map(String::as_str)),
+            "copy" => self.copy_output(args.get(1).is_some_and(|a| a == "all")),
+            "save" => self.save_output(&args[1..]),
             _ if self.running => self.note("A command is already running."),
             _ => self.spawn(line.trim(), args),
+        }
+    }
+
+    /// Remember only the command path (never arguments, which may be secrets).
+    fn persist_command(&mut self, args: &[String]) {
+        let words: Vec<&str> = args.iter().map(String::as_str).collect();
+        let (_, used) = self.resolve(&words);
+        if used == 0 {
+            return;
+        }
+        let entry = format!("/{}", words[..used].join(" "));
+        if self.saved.last() != Some(&entry) {
+            self.saved.push(entry);
+            let excess = self.saved.len().saturating_sub(200);
+            self.saved.drain(..excess);
+            save_state(self.log_level, &self.saved);
+        }
+    }
+
+    /// Plain text of the current view for the last command (or the session).
+    fn export_text(&self, all: bool) -> String {
+        let start = if all {
+            0
+        } else {
+            self.entries
+                .iter()
+                .rposition(|e| e.kind == Kind::Cmd)
+                .unwrap_or(0)
+        };
+        let (logs, out) = (self.tab != 2, self.tab != 1);
+        let mut text = String::new();
+        let mut push = |kind: Kind, t: &str| {
+            let t = if matches!(kind, Kind::Out | Kind::Err) {
+                strip_ansi(t)
+            } else {
+                t.to_string()
+            };
+            text.push_str(t.trim_end());
+            text.push('\n');
+        };
+        let mut chunks: Vec<(Option<&Entry>, Vec<&Entry>, Vec<&Entry>)> =
+            vec![(None, vec![], vec![])];
+        for e in &self.entries[start..] {
+            match e.kind {
+                Kind::Cmd => chunks.push((Some(e), vec![], vec![])),
+                Kind::Log => chunks.last_mut().expect("non-empty").1.push(e),
+                _ => chunks.last_mut().expect("non-empty").2.push(e),
+            }
+        }
+        for (cmd, log_lines, rest) in chunks {
+            if let Some(c) = cmd {
+                push(Kind::Cmd, &format!("$ {}", c.text));
+            }
+            if logs {
+                for e in log_lines {
+                    push(Kind::Log, &e.text);
+                }
+            }
+            if out {
+                for e in rest.into_iter().filter(|e| e.kind != Kind::Note) {
+                    push(e.kind, &e.text);
+                }
+            }
+        }
+        text
+    }
+
+    fn copy_output(&mut self, all: bool) {
+        let text = self.export_text(all);
+        if text.trim().is_empty() {
+            self.note("Nothing to copy yet.");
+            return;
+        }
+        let lines = text.lines().count();
+        match copy_to_clipboard(&text) {
+            Ok(()) => self.note(&format!("Copied {lines} lines to the clipboard.")),
+            Err(e) => self.note(&format!("Couldn't copy: {e}")),
+        }
+    }
+
+    fn save_output(&mut self, args: &[String]) {
+        let all = args.first().is_some_and(|a| a == "all");
+        let file = args.get(usize::from(all));
+        let text = self.export_text(all);
+        if text.trim().is_empty() {
+            self.note("Nothing to save yet.");
+            return;
+        }
+        let path = file.map_or_else(
+            || {
+                std::path::PathBuf::from(format!(
+                    "ykman-pilot-{}.txt",
+                    chrono::Local::now().format("%Y%m%d-%H%M%S")
+                ))
+            },
+            std::path::PathBuf::from,
+        );
+        // Private and never overwrites: the output may contain sensitive data.
+        let res = create_private_file(&path).and_then(|()| std::fs::write(&path, &text));
+        match res {
+            Ok(()) => self.note(&format!(
+                "Saved {} lines to {}",
+                text.lines().count(),
+                path.display()
+            )),
+            Err(e) => self.note(&format!("Couldn't save {}: {e}", path.display())),
         }
     }
 
@@ -783,7 +1205,10 @@ impl App {
             "Tab, F1-F3   switch between Mixed, Logs and Output",
             "Ctrl+T       expand/collapse the log blocks in the Mixed view",
             "mouse        wheel scrolls; click tabs, log headers and devices",
+            "Ctrl+F       find in the output; Enter next, ↑ previous, Esc close",
             "PgUp/PgDn    scroll;  ↑/↓ browse history",
+            "/copy [all]  copy the current view of the last command (or all) to the clipboard",
+            "/save [all] [file]  save it to a file (default: ykman-pilot-<time>.txt)",
             "/log [level] change log verbosity (error, warning, info, debug, traffic)",
             "Ctrl+C       cancel running command / clear input / quit",
             "Esc          cancel a prompt or clear input",
@@ -796,6 +1221,7 @@ impl App {
         match level.and_then(|l| LEVELS.iter().find(|(n, _)| *n == l)) {
             Some((name, _)) => {
                 self.log_level = name;
+                save_state(name, &self.saved);
                 self.note(&format!("log level set to {name}"));
                 if *name == "traffic" {
                     self.note("Warning: traffic logs may include sensitive data.");
@@ -811,13 +1237,7 @@ impl App {
         self.polling = true;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let devices = Proc::new(exe())
-                .arg("list")
-                .stdin(Stdio::null())
-                .stderr(Stdio::null())
-                .output()
-                .map(|o| parse_devices(&String::from_utf8_lossy(&o.stdout)))
-                .unwrap_or_default();
+            let devices = list_devices();
             let _ = tx.send(Msg::Devices(devices));
         });
     }
@@ -880,7 +1300,8 @@ impl App {
         };
 
         let tx = self.tx.clone();
-        let master = pair.master;
+        let master = Arc::new(Mutex::new(pair.master));
+        self.master = Some(master.clone());
         std::thread::spawn(move || {
             let code = child.wait().ok().map(|s| s.exit_code());
             drop(master);
@@ -939,7 +1360,7 @@ impl App {
                     .bg(ACCENT)
                     .add_modifier(Modifier::BOLD)
             } else {
-                dim().bg(TAB_BG)
+                dim().bg(tab_bg())
             };
             let w = t.chars().count() as u16 + 2;
             self.hits.tabs.push((Rect::new(x, main[0].y, w, 1), i));
@@ -958,39 +1379,61 @@ impl App {
 
     fn draw_sidebar(&mut self, f: &mut Frame, area: Rect) {
         let active = self.active_device();
+        let chosen = self.side_state.selected();
+        let w = area.width.saturating_sub(2) as usize;
         let mut items: Vec<ListItem> = self
             .devices
             .iter()
-            .map(|d| {
+            .enumerate()
+            .map(|(i, d)| {
                 let mark = if active == Some(d.serial) { "●" } else { " " };
+                let is_sel = chosen == Some(i);
+                let fill = if is_sel {
+                    Style::new().bg(selected())
+                } else {
+                    Style::new()
+                };
+                // Half-block rows above and below give the selection vertical padding.
+                let edge = |c: &str| {
+                    if is_sel {
+                        Line::from(Span::styled(
+                            c.repeat(w),
+                            Style::new().fg(selected()).bg(Color::Reset),
+                        ))
+                    } else {
+                        Line::from("")
+                    }
+                };
                 ListItem::new(vec![
+                    edge("▄"),
                     Line::from(vec![
                         Span::styled(format!(" {mark} "), Style::new().fg(ACCENT)),
                         Span::styled(d.name.clone(), Style::new().add_modifier(Modifier::BOLD)),
-                    ]),
+                    ])
+                    .style(fill),
                     Line::from(Span::styled(
                         format!("   S/N: {}  F/W: {}", d.serial, d.version),
                         dim(),
-                    )),
+                    ))
+                    .style(fill),
+                    edge("▀"),
                 ])
             })
             .collect();
         if items.is_empty() {
             items.push(ListItem::new(Span::styled("  Insert a YubiKey", dim())));
         }
-        let list = List::new(items)
-            .block(
-                ratatui::widgets::Block::new()
-                    .borders(ratatui::widgets::Borders::RIGHT)
-                    .border_style(dim())
-                    .padding(ratatui::widgets::Padding::new(0, 1, 2, 0)),
-            )
-            .highlight_style(Style::new().bg(SELECTED));
+        let list = List::new(items).block(
+            ratatui::widgets::Block::new()
+                .borders(ratatui::widgets::Borders::RIGHT)
+                .border_style(dim())
+                .padding(ratatui::widgets::Padding::new(0, 1, 1, 0)),
+        );
         self.hits.side_items = Rect::new(
             area.x,
-            area.y + 2,
+            area.y + 1,
             area.width.saturating_sub(2),
-            area.height.saturating_sub(2),
+            area.height.saturating_sub(1),
         );
         f.render_stateful_widget(list, area, &mut self.side_state);
     }
@@ -1071,9 +1514,10 @@ impl App {
                     }
                 }
             }
+            let failed = run.rest.iter().any(|e| e.kind == Kind::Fail);
             let mut marked = false;
             for e in &run.rest {
-                let is_out = matches!(e.kind, Kind::Out | Kind::Err);
+                let is_out = matches!(e.kind, Kind::Out | Kind::Err | Kind::Fail);
                 if is_out && !show_out {
                     continue;
                 }
@@ -1082,11 +1526,43 @@ impl App {
                 render_entry(e, width, &mut lines);
                 if is_out && !marked {
                     marked = true;
-                    lines[start].spans[0] = Span::styled("● ", Style::new().fg(OUTPUT_MARK));
+                    let color = if failed { ERROR } else { OUTPUT_MARK };
+                    lines[start].spans[0] = Span::styled("● ", Style::new().fg(color));
                 }
             }
         }
         let h = area.height as usize;
+        if let Some(sr) = self.search.as_mut()
+            && !sr.query.is_empty()
+        {
+            let q: Vec<char> = sr.query.to_lowercase().chars().collect();
+            let hits: Vec<usize> = lines
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| !find_in_line(l, &q).is_empty())
+                .map(|(i, _)| i)
+                .collect();
+            sr.total = hits.len();
+            sr.idx = sr.idx.min(hits.len().saturating_sub(1));
+            if sr.jump && !hits.is_empty() {
+                let start = hits[sr.idx].saturating_sub(h / 2);
+                self.scroll = lines.len().saturating_sub(h).saturating_sub(start);
+            }
+            sr.jump = false;
+            for (n, &i) in hits.iter().enumerate() {
+                let style = if n == sr.idx {
+                    Style::new()
+                        .fg(ON_ACCENT)
+                        .bg(WARN)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::new().bg(selected())
+                };
+                lines[i] = highlight_line(&lines[i], &q, style);
+            }
+        } else if let Some(sr) = self.search.as_mut() {
+            sr.total = 0;
+        }
         let max_scroll = lines.len().saturating_sub(h);
         self.scroll = self.scroll.min(max_scroll);
         let start = lines.len().saturating_sub(h + self.scroll);
@@ -1182,10 +1658,11 @@ impl App {
             ("/", "browse commands"),
             ("←", "switch YubiKey"),
             ("Ctrl+T", "toggle logs"),
-            ("/help", "all keys"),
+            ("Ctrl+F", "find in output"),
+            ("/help", "show help"),
         ];
         if self.active_device().is_some() {
-            tips.insert(1, ("/info", "see what your key supports"));
+            tips.insert(tips.len() - 1, ("/info", "show general information"));
         }
         for (k, d) in tips {
             lines.push(Line::from(vec![
@@ -1198,14 +1675,29 @@ impl App {
     }
 
     fn draw_input(&self, f: &mut Frame, area: Rect) {
-        let band = Style::new().bg(BAND);
+        let band = Style::new().bg(band_bg());
         f.render_widget(Block::new().style(band), area);
+        // Half-block edges make the band look half a row shorter top and bottom.
+        if area.height >= 3 {
+            let edge = Style::new().fg(band_bg()).bg(Color::Reset);
+            let w = area.width as usize;
+            let top = Rect::new(area.x, area.y, area.width, 1);
+            let bottom = Rect::new(area.x, area.y + area.height - 1, area.width, 1);
+            f.render_widget(Paragraph::new(Span::styled("▄".repeat(w), edge)), top);
+            f.render_widget(Paragraph::new(Span::styled("▀".repeat(w), edge)), bottom);
+        }
         let row = Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), 1);
 
+        let searching = self.search.as_ref().map(|s| s.query.clone());
         let (label, text, ghost) = match self.prompt() {
+            _ if searching.is_some() => (
+                "Find: ".to_string(),
+                searching.clone().unwrap_or_default(),
+                String::new(),
+            ),
             Some(prompt) => {
                 let prompt = strip_ansi(prompt);
-                let shown = if Self::prompt_is_secret(&prompt) {
+                let shown = if self.secret_prompt(&prompt) {
                     "•".repeat(self.input.len())
                 } else {
                     self.input.buf.clone()
@@ -1220,27 +1712,51 @@ impl App {
                     .and_then(|s| s.name.strip_prefix(partial))
                     .unwrap_or("")
                     .to_string();
+                let ghost = if ghost.is_empty() && sugg.is_empty() {
+                    self.arg_hint().unwrap_or_default()
+                } else {
+                    ghost
+                };
                 ("❯ ".to_string(), self.input.buf.clone(), ghost)
             }
         };
         let mut spans = vec![Span::styled(
             label.clone(),
-            Style::new().fg(ACCENT).bg(BAND),
+            Style::new().fg(ACCENT).bg(band_bg()),
         )];
-        if text.is_empty() && ghost.is_empty() && self.prompt().is_none() {
-            spans.push(Span::styled("Type / for commands", dim().bg(BAND)));
+        if text.is_empty() && ghost.is_empty() && self.prompt().is_none() && searching.is_none() {
+            spans.push(Span::styled("Type / for commands", dim().bg(band_bg())));
         }
         spans.push(Span::styled(text, band));
-        spans.push(Span::styled(ghost, dim().bg(BAND)));
+        spans.push(Span::styled(ghost, dim().bg(band_bg())));
         f.render_widget(Paragraph::new(Line::from(spans)).style(band), row);
         if !self.sidebar {
-            let x = row.x + label.chars().count() as u16 + self.input.cursor as u16;
+            let col = searching
+                .as_ref()
+                .map_or(self.input.cursor, |q| q.chars().count());
+            let x = row.x + label.chars().count() as u16 + col as u16;
             f.set_cursor_position((x.min(row.right().saturating_sub(1)), row.y));
         }
     }
 
     fn draw_status(&self, f: &mut Frame, area: Rect) {
-        let left = if self.running {
+        let left = if let Some(sr) = &self.search {
+            let pos = if sr.total == 0 {
+                "no matches".to_string()
+            } else {
+                format!("{}/{}", sr.idx + 1, sr.total)
+            };
+            vec![
+                Span::styled(format!("find: {pos}"), Style::new().fg(WARN)),
+                Span::styled(" · ", dim()),
+                Span::styled("Enter", dim().add_modifier(Modifier::BOLD)),
+                Span::styled(" next · ", dim()),
+                Span::styled("↑", dim().add_modifier(Modifier::BOLD)),
+                Span::styled(" previous · ", dim()),
+                Span::styled("Esc", dim().add_modifier(Modifier::BOLD)),
+                Span::styled(" close", dim()),
+            ]
+        } else if self.running {
             let msg = if self.prompt().is_some() {
                 "waiting for input"
             } else {
@@ -1289,16 +1805,64 @@ impl App {
         let rw = right.chars().count();
         let avail = total.saturating_sub(rw + 2);
         let width = |v: &[Span]| v.iter().map(Span::width).sum::<usize>();
-        let spans = [full, short, left]
-            .into_iter()
-            .find(|v| width(v) <= avail)
-            .unwrap_or_default();
+        let spans = if self.search.is_some() {
+            left
+        } else {
+            [full, short, left]
+                .into_iter()
+                .find(|v| width(v) <= avail)
+                .unwrap_or_default()
+        };
         f.render_widget(Paragraph::new(Line::from(spans)), area);
         let right = Line::from(Span::styled(right, dim())).right_aligned();
         f.render_widget(Paragraph::new(right), area);
     }
 
+    fn draw_yes_no(&self, f: &mut Frame, input_area: Rect, prompt: &str) {
+        let h = 2u16.min(input_area.y);
+        if h == 0 {
+            return;
+        }
+        let area = Rect::new(input_area.x, input_area.y - h, input_area.width, h);
+        let cur = self.yn_choice(prompt);
+        let items: Vec<ListItem> = [("Yes", "y"), ("No", "n")]
+            .iter()
+            .enumerate()
+            .map(|(i, (name, key))| {
+                let is_sel = i == cur;
+                ListItem::new(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(if is_sel { "❯ " } else { "  " }, Style::new().fg(ACCENT)),
+                    Span::styled(
+                        format!("{name:<6}"),
+                        if is_sel {
+                            Style::new().add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::new()
+                        },
+                    ),
+                    Span::styled(format!("press {key}"), dim()),
+                ]))
+            })
+            .collect();
+        let mut state = ListState::default().with_selected(Some(cur));
+        f.render_widget(Clear, area);
+        f.render_stateful_widget(
+            List::new(items).highlight_style(Style::new().bg(selected())),
+            area,
+            &mut state,
+        );
+    }
+
     fn draw_popup(&self, f: &mut Frame, input_area: Rect) {
+        if let Some(prompt) = self.prompt()
+            && !self.secret_prompt(prompt)
+            && Self::is_yes_no(prompt)
+            && !self.sidebar
+        {
+            self.draw_yes_no(f, input_area, prompt);
+            return;
+        }
         let sugg = self.suggestions();
         if sugg.is_empty() || self.sidebar || self.prompt().is_some() {
             return;
@@ -1337,7 +1901,7 @@ impl App {
         let mut state = ListState::default().with_selected(Some(sel));
         f.render_widget(Clear, area);
         f.render_stateful_widget(
-            List::new(items).highlight_style(Style::new().bg(SELECTED)),
+            List::new(items).highlight_style(Style::new().bg(selected())),
             area,
             &mut state,
         );
@@ -1440,6 +2004,7 @@ fn render_entry(e: &Entry, width: usize, lines: &mut Vec<Line<'static>>) {
         Kind::Out => ("  ", Style::new()),
         Kind::Err => ("  ", Style::new().fg(ERROR)),
         Kind::Log => ("│ ", dim()),
+        Kind::Fail => ("  ", Style::new().fg(ERROR)),
         Kind::Note => ("  ", Style::new().fg(WARN).add_modifier(Modifier::ITALIC)),
     };
     let cells = if matches!(e.kind, Kind::Out | Kind::Err) {
@@ -1629,18 +2194,135 @@ fn split_args(s: &str) -> Vec<String> {
 }
 
 /// Parses `ykman list` lines such as `YubiKey 5 NFC (5.4.3) [OTP+FIDO+CCID] Serial: 123`.
-fn parse_devices(stdout: &str) -> Vec<Device> {
-    stdout
-        .lines()
-        .filter_map(|line| {
-            let (head, serial) = line.rsplit_once("Serial:")?;
-            let serial = serial.trim().parse().ok()?;
-            let (name, rest) = head.split_once('(')?;
-            let version = rest.split_once(')')?.0;
+/// Uses the OS clipboard tool where there is one, else the OSC 52 escape,
+/// which most modern terminals (including over SSH) honour.
+fn copy_to_clipboard(text: &str) -> std::result::Result<(), String> {
+    let tool = if cfg!(target_os = "macos") {
+        Some("pbcopy")
+    } else if cfg!(windows) {
+        Some("clip")
+    } else {
+        None
+    };
+    if let Some(tool) = tool {
+        let child = std::process::Command::new(tool)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        if let Ok(mut child) = child {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            if child.wait().is_ok_and(|s| s.success()) {
+                return Ok(());
+            }
+        }
+    }
+    use base64::Engine;
+    if text.len() > 100_000 {
+        return Err("too large for the terminal clipboard; use /save".to_string());
+    }
+    let b64 = base64::engine::general_purpose::STANDARD.encode(text);
+    let mut out = std::io::stdout();
+    write!(out, "\x1b]52;c;{b64}\x07")
+        .and_then(|()| out.flush())
+        .map_err(|e| e.to_string())
+}
+
+fn state_file() -> Option<std::path::PathBuf> {
+    let base = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(std::path::PathBuf::from)?
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config"))
+            })?
+    };
+    Some(base.join("ykman").join("pilot-state"))
+}
+
+/// Loads the saved log level and command history (best effort).
+fn load_state() -> (Option<&'static str>, Vec<String>) {
+    let Some(text) = state_file().and_then(|p| std::fs::read_to_string(p).ok()) else {
+        return (None, Vec::new());
+    };
+    let mut level = None;
+    let mut history = Vec::new();
+    for line in text.lines() {
+        if let Some(l) = line.strip_prefix("log=") {
+            level = LEVELS.iter().map(|(n, _)| *n).find(|n| *n == l);
+        } else if line.starts_with('/') {
+            history.push(line.to_string());
+        }
+    }
+    (level, history)
+}
+
+fn save_state(level: &str, history: &[String]) {
+    let Some(path) = state_file() else { return };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let mut text = format!("log={level}\n");
+    for h in history {
+        text.push_str(h);
+        text.push('\n');
+    }
+    let _ = std::fs::write(path, text);
+}
+
+/// Char ranges of case-insensitive matches of `q` in a rendered line.
+fn find_in_line(line: &Line, q: &[char]) -> Vec<usize> {
+    let text: Vec<char> = line
+        .spans
+        .iter()
+        .flat_map(|s| s.content.chars())
+        .map(|c| c.to_lowercase().next().unwrap_or(c))
+        .collect();
+    if q.is_empty() || text.len() < q.len() {
+        return Vec::new();
+    }
+    (0..=text.len() - q.len())
+        .filter(|&i| text[i..i + q.len()] == *q)
+        .collect()
+}
+
+fn highlight_line(line: &Line, q: &[char], style: Style) -> Line<'static> {
+    let starts = find_in_line(line, q);
+    let mut cells: Vec<(char, Style)> = line
+        .spans
+        .iter()
+        .flat_map(|s| s.content.chars().map(|c| (c, line.style.patch(s.style))))
+        .collect();
+    for st in starts {
+        for cell in &mut cells[st..st + q.len()] {
+            cell.1 = cell.1.patch(style);
+        }
+    }
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (c, st) in cells {
+        match spans.last_mut() {
+            Some(last) if last.style == st => last.content.to_mut().push(c),
+            _ => spans.push(Span::styled(c.to_string(), st)),
+        }
+    }
+    Line::from(spans)
+}
+
+fn list_devices() -> Vec<Device> {
+    let mut source = ykman::device::get_device_source();
+    source
+        .list_devices()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|d| {
+            let info = d.info();
             Some(Device {
-                serial,
-                name: name.trim().to_string(),
-                version: version.to_string(),
+                serial: info.serial?,
+                name: yubikit::device::get_name(info),
+                version: info.version_name(),
             })
         })
         .collect()
