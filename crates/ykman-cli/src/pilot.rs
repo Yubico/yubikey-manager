@@ -11,12 +11,19 @@
 
 use anyhow::{Context, Result};
 use portable_pty::{ChildKiller, CommandBuilder, PtySize, native_pty_system};
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{
+    Block, Clear, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+    ScrollbarState,
+};
 use ratatui::{DefaultTerminal, Frame};
+use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::process::{Command as Proc, Stdio};
 use std::sync::Arc;
@@ -193,6 +200,15 @@ impl Editor {
     }
 }
 
+/// Clickable regions recorded while drawing, in screen coordinates.
+#[derive(Default)]
+struct Hits {
+    tabs: Vec<(Rect, usize)>,
+    toggles: Vec<(Rect, usize)>,
+    side_items: Rect,
+    log: Rect,
+}
+
 struct App {
     tree: clap::Command,
     entries: Vec<Entry>,
@@ -213,6 +229,9 @@ struct App {
     killer: Option<Box<dyn ChildKiller + Send + Sync>>,
     log_level: &'static str,
     logs_expanded: bool,
+    /// Runs whose log block differs from the global expanded/collapsed default.
+    toggled: HashSet<usize>,
+    hits: Hits,
     sidebar: bool,
     side_state: ListState,
     devices: Vec<Device>,
@@ -228,7 +247,14 @@ struct App {
 
 pub fn run(tree: clap::Command) -> Result<()> {
     let mut terminal = ratatui::init();
+    let prev_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = ratatui::crossterm::execute!(std::io::stdout(), DisableMouseCapture);
+        prev_hook(info);
+    }));
+    let _ = ratatui::crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     let res = App::new(tree).main_loop(&mut terminal);
+    let _ = ratatui::crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     res
 }
@@ -255,6 +281,8 @@ impl App {
             killer: None,
             log_level: "debug",
             logs_expanded: true,
+            toggled: HashSet::new(),
+            hits: Hits::default(),
             sidebar: false,
             side_state: ListState::default(),
             devices: Vec::new(),
@@ -285,6 +313,7 @@ impl App {
             if event::poll(Duration::from_millis(60))? {
                 match event::read()? {
                     Event::Key(key) if key.kind != KeyEventKind::Release => self.on_key(key),
+                    Event::Mouse(m) => self.on_mouse(m),
                     Event::Paste(text) => {
                         for c in text.chars().filter(|c| !c.is_control()) {
                             self.input.insert(c);
@@ -550,6 +579,7 @@ impl App {
         }
         if ctrl && key.code == KeyCode::Char('t') {
             self.logs_expanded = !self.logs_expanded;
+            self.toggled.clear();
             return;
         }
         if self.sidebar {
@@ -672,16 +702,47 @@ impl App {
             KeyCode::Esc | KeyCode::Right | KeyCode::Left => self.sidebar = false,
             KeyCode::Up if count > 0 => self.side_state.select(Some((cur + count - 1) % count)),
             KeyCode::Down if count > 0 => self.side_state.select(Some((cur + 1) % count)),
-            KeyCode::Enter => {
-                let before = self.active_device();
-                if let Some(d) = self.devices.get(cur) {
-                    self.device = Some(d.serial);
+            KeyCode::Enter => self.choose_device(cur),
+            _ => {}
+        }
+    }
+
+    fn choose_device(&mut self, idx: usize) {
+        let before = self.active_device();
+        if let Some(d) = self.devices.get(idx) {
+            self.device = Some(d.serial);
+        }
+        self.announce_device_change(before);
+        self.sidebar = false;
+    }
+
+    fn on_mouse(&mut self, m: MouseEvent) {
+        let (x, y) = (m.column, m.row);
+        let inside = |r: Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+        match m.kind {
+            MouseEventKind::ScrollUp => self.scroll += 3,
+            MouseEventKind::ScrollDown => self.scroll = self.scroll.saturating_sub(3),
+            MouseEventKind::Down(MouseButton::Left) => {
+                if self.sidebar && inside(self.hits.side_items) {
+                    let row = (y - self.hits.side_items.y) as usize / 2 + self.side_state.offset();
+                    if row < self.devices.len() {
+                        self.side_state.select(Some(row));
+                        self.choose_device(row);
+                    }
+                } else if let Some(&(_, t)) = self.hits.tabs.iter().find(|(r, _)| inside(*r)) {
+                    self.tab = t;
+                } else if let Some(&(_, n)) = self.hits.toggles.iter().find(|(r, _)| inside(*r))
+                    && !self.toggled.remove(&n)
+                {
+                    self.toggled.insert(n);
                 }
-                self.announce_device_change(before);
-                self.sidebar = false;
             }
             _ => {}
         }
+    }
+
+    fn logs_collapsed(&self, run: usize) -> bool {
+        !self.logs_expanded != self.toggled.contains(&run)
     }
 
     fn submit(&mut self) {
@@ -703,6 +764,7 @@ impl App {
             "quit" | "exit" => self.quit = true,
             "clear" => {
                 self.entries.clear();
+                self.toggled.clear();
                 self.welcome = false;
                 self.scroll = 0;
             }
@@ -720,6 +782,7 @@ impl App {
             "←            (empty prompt) choose which YubiKey to use",
             "Tab, F1-F3   switch between Mixed, Logs and Output",
             "Ctrl+T       expand/collapse the log blocks in the Mixed view",
+            "mouse        wheel scrolls; click tabs, log headers and devices",
             "PgUp/PgDn    scroll;  ↑/↓ browse history",
             "/log [level] change log verbosity (error, warning, info, debug, traffic)",
             "Ctrl+C       cancel running command / clear input / quit",
@@ -867,6 +930,8 @@ impl App {
         .split(top);
 
         let mut tab_spans = Vec::new();
+        self.hits.tabs.clear();
+        let mut x = main[0].x;
         for (i, t) in TABS.iter().enumerate() {
             let style = if i == self.tab {
                 Style::new()
@@ -876,6 +941,9 @@ impl App {
             } else {
                 dim().bg(TAB_BG)
             };
+            let w = t.chars().count() as u16 + 2;
+            self.hits.tabs.push((Rect::new(x, main[0].y, w, 1), i));
+            x += w + 1;
             tab_spans.push(Span::styled(format!(" {t} "), style));
             tab_spans.push(Span::raw(" "));
         }
@@ -918,6 +986,12 @@ impl App {
                     .padding(ratatui::widgets::Padding::new(0, 1, 2, 0)),
             )
             .highlight_style(Style::new().bg(SELECTED));
+        self.hits.side_items = Rect::new(
+            area.x,
+            area.y + 2,
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(2),
+        );
         f.render_stateful_widget(list, area, &mut self.side_state);
     }
 
@@ -957,6 +1031,7 @@ impl App {
         let show_out = self.tab != 1;
         let show_logs = self.tab != 2;
         let last_run = runs.len() - 1;
+        let mut toggle_lines: Vec<(usize, usize)> = Vec::new();
         let mut prev: Option<u8> = None;
         let mut gap = |lines: &mut Vec<Line<'static>>, group: u8| {
             if prev.is_some_and(|p| p != group) {
@@ -971,7 +1046,10 @@ impl App {
             }
             if show_logs && !run.logs.is_empty() {
                 gap(&mut lines, 1);
-                if mixed && !self.logs_expanded {
+                if mixed {
+                    toggle_lines.push((lines.len(), n));
+                }
+                if mixed && self.logs_collapsed(n) {
                     let live_run = self.running && n == last_run;
                     let last = run.logs.last().map_or("", |e| e.text.as_str());
                     lines.push(log_summary(
@@ -984,7 +1062,7 @@ impl App {
                 } else {
                     if mixed {
                         lines.push(Line::from(Span::styled(
-                            "▼ Logs (Ctrl+T to collapse)",
+                            "▼ Logs (click to collapse)",
                             dim().add_modifier(Modifier::ITALIC),
                         )));
                     }
@@ -1014,6 +1092,29 @@ impl App {
         let start = lines.len().saturating_sub(h + self.scroll);
         let shown: Vec<Line> = lines.into_iter().skip(start).take(h).collect();
         f.render_widget(Paragraph::new(shown), area);
+
+        self.hits.log = area;
+        self.hits.toggles = toggle_lines
+            .into_iter()
+            .filter(|(i, _)| *i >= start && *i < start + h)
+            .map(|(i, n)| {
+                (
+                    Rect::new(area.x, area.y + (i - start) as u16, area.width, 1),
+                    n,
+                )
+            })
+            .collect();
+        if max_scroll > 0 {
+            let mut state = ScrollbarState::new(max_scroll).position(max_scroll - self.scroll);
+            f.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(None)
+                    .end_symbol(None)
+                    .style(dim()),
+                area,
+                &mut state,
+            );
+        }
     }
 
     fn welcome_lines(&self, width: usize, lines: &mut Vec<Line<'static>>) {
@@ -1155,15 +1256,23 @@ impl App {
                 Span::styled(" devices", dim()),
             ]
         };
-        let mut spans = left;
-        spans.extend([
-            Span::styled(" · ", dim()),
-            Span::styled("tab", dim().add_modifier(Modifier::BOLD)),
-            Span::styled(" next tab · ", dim()),
-            Span::styled("/help", dim().add_modifier(Modifier::BOLD)),
-            Span::styled(" show help", dim()),
-        ]);
-        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        let bold = dim().add_modifier(Modifier::BOLD);
+        let full = {
+            let mut v = left.clone();
+            v.extend([
+                Span::styled(" · ", dim()),
+                Span::styled("tab", bold),
+                Span::styled(" next tab · ", dim()),
+                Span::styled("/help", bold),
+                Span::styled(" show help", dim()),
+            ]);
+            v
+        };
+        let short = {
+            let mut v = left.clone();
+            v.extend([Span::styled(" · ", dim()), Span::styled("/help", bold)]);
+            v
+        };
 
         let dev = match self.active_device() {
             Some(s) => match self.devices.iter().find(|d| d.serial == s) {
@@ -1172,11 +1281,20 @@ impl App {
             },
             None => "no YubiKey detected".to_string(),
         };
-        let right = Line::from(Span::styled(
-            format!("{dev} · log: {}", self.log_level),
-            dim(),
-        ))
-        .right_aligned();
+        let total = area.width as usize;
+        let mut right = format!("{dev} · log: {}", self.log_level);
+        if right.chars().count() + 12 > total {
+            right = dev;
+        }
+        let rw = right.chars().count();
+        let avail = total.saturating_sub(rw + 2);
+        let width = |v: &[Span]| v.iter().map(Span::width).sum::<usize>();
+        let spans = [full, short, left]
+            .into_iter()
+            .find(|v| width(v) <= avail)
+            .unwrap_or_default();
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        let right = Line::from(Span::styled(right, dim())).right_aligned();
         f.render_widget(Paragraph::new(right), area);
     }
 
@@ -1308,7 +1426,7 @@ fn log_summary(count: usize, last: &str, live: bool, tick: usize, width: usize) 
     };
     let used = head.chars().count() + 2;
     let tail: String = last.chars().take(width.saturating_sub(used + 24)).collect();
-    let hint = if live { "" } else { " (Ctrl+T to expand)" };
+    let hint = if live { "" } else { " (click to expand)" };
     Line::from(vec![
         Span::styled(head, dim.add_modifier(Modifier::ITALIC)),
         Span::styled(format!("{hint}  {tail}"), dim),
