@@ -46,7 +46,34 @@ const DEVICE_POLL: Duration = Duration::from_secs(5);
 const PROMPT_DELAY: Duration = Duration::from_millis(200);
 const MAX_ENTRIES: usize = 20_000;
 /// Options the pilot sets itself (or that make no sense in its UI).
-const PILOT_MANAGED_OPTS: [&str; 5] = ["color", "no-color", "log-level", "log-file", "device"];
+const PILOT_MANAGED_OPTS: [&str; 8] = [
+    "color",
+    "no-color",
+    "log-level",
+    "log-file",
+    "device",
+    "version",
+    "licenses",
+    "diagnose",
+];
+/// Commands handled by the pilot itself (the first three wrap top-level flags).
+const BUILTINS: [(&str, &str); 10] = [
+    ("diagnose", "Run system diagnostics"),
+    ("licenses", "Show open source licenses"),
+    ("version", "Show the ykman version"),
+    ("clear", "Clear the screen"),
+    ("device", "Choose which YubiKey to use (also: ← key)"),
+    ("copy", "Copy the last command's output: /copy [all]"),
+    ("save", "Save the last command's output: /save [all] [file]"),
+    ("log", "Set the log level: /log [level]"),
+    ("help", "Show keyboard shortcuts"),
+    ("quit", "Exit pilot"),
+];
+
+fn is_builtin(word: &str) -> bool {
+    word == "exit" || BUILTINS.iter().any(|(n, _)| *n == word)
+}
+
 const POPUP_ROWS: usize = 8;
 // Colours come from the terminal's own palette so the pilot follows the
 // user's theme; "dim" text uses the DIM attribute on the default foreground.
@@ -54,7 +81,8 @@ const ACCENT: Color = Color::Green;
 const TEXT: Color = Color::Reset;
 const WARN: Color = Color::Yellow;
 const ERROR: Color = Color::Red;
-const OUTPUT_MARK: Color = Color::Blue;
+const OUTPUT_MARK: Color = Color::Green;
+const CMD_MARK: Color = Color::Blue;
 const ON_ACCENT: Color = Color::Black;
 
 /// Background shades (input band, tab chip, selection), derived from the
@@ -196,7 +224,7 @@ struct Device {
 
 impl Device {
     fn describe(&self) -> String {
-        format!("{}  S/N: {}  F/W: {}", self.name, self.serial, self.version)
+        format!("{} ({})  S/N: {}", self.name, self.version, self.serial)
     }
 }
 
@@ -578,6 +606,11 @@ impl App {
         Self::prompt_is_secret(prompt)
     }
 
+    /// A visible y/n question, answered through the Yes/No list.
+    fn is_choice(&self, prompt: &str) -> bool {
+        Self::is_yes_no(prompt) && !self.secret_prompt(prompt)
+    }
+
     fn is_yes_no(prompt: &str) -> bool {
         let p = prompt.to_lowercase();
         p.contains("[y/n]") || p.contains("(y/n)")
@@ -696,12 +729,7 @@ impl App {
             }
             return out;
         }
-        if words.first().is_some_and(|w| {
-            matches!(
-                *w,
-                "clear" | "device" | "help" | "quit" | "exit" | "log" | "copy" | "save"
-            )
-        }) {
+        if words.first().is_some_and(|w| is_builtin(w)) {
             return out;
         }
         let (node, used) = self.resolve(&words);
@@ -741,15 +769,7 @@ impl App {
             );
         }
         if used == 0 {
-            for (name, desc) in [
-                ("clear", "Clear the screen"),
-                ("device", "Choose which YubiKey to use (also: ← key)"),
-                ("copy", "Copy the last command's output: /copy [all]"),
-                ("save", "Save the last command's output: /save [all] [file]"),
-                ("log", "Set the log level: /log [level]"),
-                ("help", "Show keyboard shortcuts"),
-                ("quit", "Exit pilot"),
-            ] {
+            for (name, desc) in BUILTINS {
                 if name.starts_with(partial) {
                     add(name, desc);
                 }
@@ -766,10 +786,7 @@ impl App {
         }
         let words: Vec<&str> = rest.split_whitespace().collect();
         let first = words.first()?;
-        if matches!(
-            *first,
-            "clear" | "device" | "help" | "quit" | "exit" | "log" | "copy" | "save"
-        ) {
+        if is_builtin(first) {
             return None;
         }
         let (node, used) = self.resolve(&words);
@@ -849,10 +866,10 @@ impl App {
             return;
         }
         if let Some(prompt) = self.prompt().map(str::to_string) {
-            let secret = self.secret_prompt(&prompt);
-            if !secret && Self::is_yes_no(&prompt) {
+            if self.is_choice(&prompt) {
                 self.on_yes_no_key(key, &prompt);
             } else {
+                let secret = self.secret_prompt(&prompt);
                 self.on_prompt_key(key, secret);
             }
             return;
@@ -1035,7 +1052,7 @@ impl App {
             MouseEventKind::ScrollDown => self.scroll = self.scroll.saturating_sub(3),
             MouseEventKind::Down(MouseButton::Left) => {
                 if self.sidebar && inside(self.hits.side_items) {
-                    let row = (y - self.hits.side_items.y) as usize / 4 + self.side_state.offset();
+                    let row = (y - self.hits.side_items.y) as usize / 3 + self.side_state.offset();
                     if row < self.devices.len() {
                         self.side_state.select(Some(row));
                         self.choose_device(row);
@@ -1088,6 +1105,10 @@ impl App {
             "copy" => self.copy_output(args.get(1).is_some_and(|a| a == "all")),
             "save" => self.save_output(&args[1..]),
             _ if self.running => self.note("A command is already running."),
+            "version" | "licenses" | "diagnose" if args.len() == 1 => {
+                let flag = vec![format!("--{}", args[0])];
+                self.spawn(line.trim(), flag);
+            }
             _ => self.spawn(line.trim(), args),
         }
     }
@@ -1394,18 +1415,7 @@ impl App {
                     Style::new()
                 };
                 // Half-block rows above and below give the selection vertical padding.
-                let edge = |c: &str| {
-                    if is_sel {
-                        Line::from(Span::styled(
-                            c.repeat(w),
-                            Style::new().fg(selected()).bg(Color::Reset),
-                        ))
-                    } else {
-                        Line::from("")
-                    }
-                };
                 ListItem::new(vec![
-                    edge("▄"),
                     Line::from(vec![
                         Span::styled(format!(" {mark} "), Style::new().fg(ACCENT)),
                         Span::styled(d.name.clone(), Style::new().add_modifier(Modifier::BOLD)),
@@ -1416,7 +1426,15 @@ impl App {
                         dim(),
                     ))
                     .style(fill),
-                    edge("▀"),
+                    // The spacer row doubles as the half-row edge of the selection,
+                    // so every item keeps the same height and nothing shifts.
+                    if is_sel {
+                        half_edge('▀', w)
+                    } else if chosen == Some(i + 1) {
+                        half_edge('▄', w)
+                    } else {
+                        Line::from("")
+                    },
                 ])
             })
             .collect();
@@ -1436,6 +1454,10 @@ impl App {
             area.height.saturating_sub(1),
         );
         f.render_stateful_widget(list, area, &mut self.side_state);
+        if chosen == Some(0) && self.side_state.offset() == 0 && area.height > 0 {
+            let edge = Rect::new(area.x, area.y, area.width.saturating_sub(2), 1);
+            f.render_widget(Paragraph::new(half_edge('▄', w)), edge);
+        }
     }
 
     fn draw_log(&mut self, f: &mut Frame, area: Rect) {
@@ -1702,7 +1724,12 @@ impl App {
                 } else {
                     self.input.buf.clone()
                 };
-                (prompt, shown, String::new())
+                let hint = if self.is_choice(&prompt) {
+                    "  ↑/↓ choose · Enter confirm".to_string()
+                } else {
+                    String::new()
+                };
+                (prompt, shown, hint)
             }
             None => {
                 let sugg = self.suggestions();
@@ -1730,7 +1757,8 @@ impl App {
         spans.push(Span::styled(text, band));
         spans.push(Span::styled(ghost, dim().bg(band_bg())));
         f.render_widget(Paragraph::new(Line::from(spans)).style(band), row);
-        if !self.sidebar {
+        let choosing = self.prompt().is_some_and(|p| self.is_choice(p));
+        if !self.sidebar && !choosing {
             let col = searching
                 .as_ref()
                 .map_or(self.input.cursor, |q| q.chars().count());
@@ -1856,8 +1884,7 @@ impl App {
 
     fn draw_popup(&self, f: &mut Frame, input_area: Rect) {
         if let Some(prompt) = self.prompt()
-            && !self.secret_prompt(prompt)
-            && Self::is_yes_no(prompt)
+            && self.is_choice(prompt)
             && !self.sidebar
         {
             self.draw_yes_no(f, input_area, prompt);
@@ -1997,10 +2024,18 @@ fn log_summary(count: usize, last: &str, live: bool, tick: usize, width: usize) 
     ])
 }
 
+/// A row filled with a half block in the selection colour, for vertical padding.
+fn half_edge(c: char, width: usize) -> Line<'static> {
+    Line::from(Span::styled(
+        c.to_string().repeat(width),
+        Style::new().fg(selected()).bg(Color::Reset),
+    ))
+}
+
 fn render_entry(e: &Entry, width: usize, lines: &mut Vec<Line<'static>>) {
-    let pstyle_cmd = Style::new().fg(ACCENT);
+    let pstyle_cmd = Style::new().fg(CMD_MARK);
     let (prefix, base) = match e.kind {
-        Kind::Cmd => ("● ", Style::new().add_modifier(Modifier::BOLD)),
+        Kind::Cmd => ("❯ ", Style::new().add_modifier(Modifier::BOLD)),
         Kind::Out => ("  ", Style::new()),
         Kind::Err => ("  ", Style::new().fg(ERROR)),
         Kind::Log => ("│ ", dim()),
