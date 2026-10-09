@@ -49,6 +49,8 @@ ctrlc.workspace = true
 flate2.workspace = true
 pkcs8.workspace = true
 p12-keystore.workspace = true
+ratatui = "0.30.2"
+portable-pty.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell"] }
@@ -60,7 +62,6 @@ winresource.workspace = true
 [dev-dependencies]
 assert_cmd.workspace = true
 predicates.workspace = true
-portable-pty.workspace = true
 rstest.workspace = true
 tempfile.workspace = true
 ureq = "3"

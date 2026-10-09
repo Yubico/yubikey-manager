@@ -22,6 +22,7 @@ mod list;
 mod oath;
 mod openpgp;
 mod otp;
+mod pilot;
 mod piv;
 mod scp;
 mod securitydomain;
@@ -88,6 +89,10 @@ struct Cli {
     /// Show third-party license information
     #[arg(long)]
     licenses: bool,
+
+    /// Launch the interactive pilot (experimental TUI)
+    #[arg(long, hide = true)]
+    pilot: bool,
 
     /// Generate shell completion
     #[arg(long)]
@@ -499,6 +504,11 @@ fn run() -> Result<()> {
     let cli = Cli::from_arg_matches_mut(&mut matches).unwrap_or_else(|e| e.exit());
 
     color::init(cli.no_color, cli.color);
+
+    if cli.pilot {
+        return pilot::run(build_cli_command());
+    }
+
     init_logging(&cli)?;
 
     if cli.diagnose {
