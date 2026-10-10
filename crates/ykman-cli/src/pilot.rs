@@ -74,6 +74,15 @@ fn is_builtin(word: &str) -> bool {
     word == "exit" || BUILTINS.iter().any(|(n, _)| *n == word)
 }
 
+const LOGO: [&str; 6] = [
+    "       _                          ",
+    " _   _| | ___ __ ___   __ _ _ __  ",
+    "| | | | |/ / \'_ ` _ \\ / _` | \'_ \\ ",
+    "| |_| |   <| | | | | | (_| | | | |",
+    " \\__, |_|\\_\\_| |_| |_|\\__,_|_| |_|",
+    " |___/                            ",
+];
+
 const POPUP_ROWS: usize = 8;
 // Colours come from the terminal's own palette so the pilot follows the
 // user's theme; "dim" text uses the DIM attribute on the default foreground.
@@ -1643,6 +1652,8 @@ impl App {
                     Style::new().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(env!("CARGO_PKG_VERSION"), dim()),
+                Span::styled(" · ", dim()),
+                Span::styled("pilot mode", Style::new().fg(WARN)),
             ]),
             Line::from(Span::styled(
                 "Configure your YubiKey via the command line.",
@@ -1651,13 +1662,33 @@ impl App {
             Line::from(""),
             device,
         ];
+        let text_w = body.iter().map(Line::width).max().unwrap_or(0);
+        let logo_w = LOGO.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+        let avail = width.saturating_sub(4).max(1);
+        let body = if logo_w + 5 + text_w <= avail {
+            let top = (LOGO.len() - body.len()) / 2;
+            let mut rows = Vec::new();
+            for (i, art) in LOGO.iter().enumerate() {
+                let mut spans = vec![
+                    Span::styled(format!("{art:<logo_w$}"), Style::new().fg(ACCENT)),
+                    Span::styled(" │ ", dim()),
+                ];
+                if let Some(l) = i.checked_sub(top).and_then(|j| body.get(j)) {
+                    spans.extend(l.spans.clone());
+                }
+                rows.push(Line::from(spans));
+            }
+            rows
+        } else {
+            body
+        };
         let inner = body
             .iter()
             .map(Line::width)
             .max()
             .unwrap_or(0)
             .max(40)
-            .min(width.saturating_sub(4).max(1));
+            .min(avail);
         let border = dim();
         lines.push(Line::from(Span::styled(
             format!("╭{}╮", "─".repeat(inner + 2)),
