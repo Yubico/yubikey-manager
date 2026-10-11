@@ -167,6 +167,8 @@ pub(super) fn render_entry(e: &Entry, width: usize, lines: &mut Vec<Line<'static
         Kind::Err => ("  ", Style::new().fg(ERROR)),
         Kind::Log => ("│ ", dim()),
         Kind::Fail => ("  ", Style::new().fg(ERROR)),
+        Kind::Success => ("✓ ", Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Kind::RoundFail => ("✗ ", Style::new().fg(ERROR).add_modifier(Modifier::BOLD)),
         Kind::Note => ("  ", Style::new().fg(WARN).add_modifier(Modifier::ITALIC)),
     };
     let cells = if matches!(e.kind, Kind::Out | Kind::Err) {
@@ -554,7 +556,12 @@ impl App {
                 if is_out && !show_out {
                     continue;
                 }
-                gap(&mut lines, if is_out { 2 } else { 3 });
+                let group = match e.kind {
+                    _ if is_out => 2,
+                    Kind::Success | Kind::RoundFail => 4,
+                    _ => 3,
+                };
+                gap(&mut lines, group);
                 let start = lines.len();
                 render_entry(e, width, &mut lines);
                 if is_out && !marked {
@@ -709,16 +716,14 @@ impl App {
             border,
         )));
         lines.push(Line::from(""));
-        let mut tips: Vec<(&str, &str)> = vec![
+        let tips = [
             ("/", "browse commands"),
             ("←", "switch YubiKey"),
             ("Ctrl+T", "toggle logs"),
             ("Ctrl+F", "find in output"),
+            ("/info", "show general information"),
             ("/help", "show help"),
         ];
-        if self.active_device().is_some() {
-            tips.insert(tips.len() - 1, ("/info", "show general information"));
-        }
         for (k, d) in tips {
             lines.push(Line::from(vec![
                 Span::raw("  "),

@@ -387,9 +387,16 @@ impl App {
             ""
         };
         let rest = &words[prefix.len().min(1)..];
-        let (_, used) = self.resolve(rest);
+        let (node, used) = self.resolve(rest);
         let path = if used > 0 {
-            rest[..used].join(" ")
+            let mut path = rest[..used].join(" ");
+            if !prefix.is_empty() {
+                for tok in safe_batch_args(node, &rest[used..]) {
+                    path.push(' ');
+                    path.push_str(&tok);
+                }
+            }
+            path
         } else if prefix.is_empty() && is_builtin(words[0]) && !matches!(words[0], "quit" | "exit")
         {
             words[0].to_string()
@@ -529,4 +536,27 @@ impl App {
     }
 
     // ---------- background work ----------
+}
+
+/// Batch arguments that are safe to remember: boolean flags and single-digit
+/// positionals such as a slot number. Option values may be secrets, so they are dropped.
+fn safe_batch_args(node: &clap::Command, args: &[&str]) -> Vec<String> {
+    let flag = |a: &clap::Arg| !a.get_action().takes_values();
+    args.iter()
+        .filter(|tok| {
+            if let Some(long) = tok.strip_prefix("--") {
+                node.get_arguments()
+                    .any(|a| a.get_long() == Some(long) && flag(a))
+            } else if let Some(shorts) = tok.strip_prefix('-') {
+                !shorts.is_empty()
+                    && shorts.chars().all(|c| {
+                        node.get_arguments()
+                            .any(|a| a.get_short() == Some(c) && flag(a))
+                    })
+            } else {
+                tok.len() == 1 && tok.chars().all(|c| c.is_ascii_digit())
+            }
+        })
+        .map(|t| t.to_string())
+        .collect()
 }

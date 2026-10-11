@@ -43,6 +43,10 @@ enum Kind {
     Note,
     /// A command that exited with an error.
     Fail,
+    /// A batch round that completed successfully.
+    Success,
+    /// A batch round that failed.
+    RoundFail,
 }
 
 struct Entry {
@@ -391,10 +395,25 @@ impl App {
                 self.writer = None;
                 self.killer = None;
                 self.partial.clear();
+                let mut round_msg = None;
                 if let Some(b) = self.batch.as_mut()
                     && matches!(b.phase, BatchPhase::Running)
                 {
-                    b.results.push((b.current, code == Some(0)));
+                    let good = code == Some(0);
+                    b.results.push((b.current, good));
+                    let ok = b.results.iter().filter(|r| r.1).count();
+                    let tally = format!("{ok} ok, {} failed", b.results.len() - ok);
+                    round_msg = Some(if good {
+                        (
+                            Kind::Success,
+                            format!("Round {} done on S/N {} · {tally}", b.round, b.current),
+                        )
+                    } else {
+                        (
+                            Kind::RoundFail,
+                            format!("Round {} failed on S/N {} · {tally}", b.round, b.current),
+                        )
+                    });
                     b.phase = BatchPhase::Waiting {
                         prev: b.current,
                         absent: false,
@@ -404,6 +423,9 @@ impl App {
                     Some(0) => {}
                     Some(c) => self.push(Kind::Fail, format!("exited with code {c}")),
                     None => self.note("terminated"),
+                }
+                if let Some((kind, text)) = round_msg {
+                    self.push(kind, text);
                 }
             }
             Msg::Devices(list) => {
