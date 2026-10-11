@@ -254,7 +254,9 @@ pub fn run(tree: clap::Command) -> Result<()> {
 }
 
 impl App {
-    fn new(tree: clap::Command) -> Self {
+    fn new(mut tree: clap::Command) -> Self {
+        // Building resolves conflict declarations in both directions.
+        tree.build();
         let (tx, rx) = mpsc::channel();
         let mut app = App {
             tree,

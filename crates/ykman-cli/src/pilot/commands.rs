@@ -201,10 +201,28 @@ impl App {
         }
         let words = &words[off..];
         let (node, used) = self.resolve(words);
+        // An option that takes a value is waiting for it: offer the choices, if
+        // there are any, instead of the other options.
+        if used < words.len()
+            && !partial.starts_with('-')
+            && let Some(arg) = words.last().and_then(|t| value_option(node, t))
+        {
+            for pv in arg.get_possible_values() {
+                let name = pv.get_name();
+                if !pv.is_hide_set() && name.starts_with(partial) {
+                    add(
+                        name,
+                        &pv.get_help().map(|h| h.to_string()).unwrap_or_default(),
+                    );
+                }
+            }
+            return out;
+        }
         if used < words.len() || partial.starts_with('-') {
             // SCP options apply to every command, so keep them after the specific ones.
             let mut args: Vec<&clap::Arg> = node.get_arguments().collect();
             args.sort_by_key(|a| a.get_long().is_some_and(|l| l.starts_with("scp")));
+            let taken = used_options(node, &words[used..]);
             for arg in args {
                 let Some(long) = arg
                     .get_long()
@@ -213,7 +231,10 @@ impl App {
                     continue;
                 };
                 let name = format!("--{long}");
-                if name.starts_with(partial) && !words.contains(&name.as_str()) {
+                let repeatable = matches!(arg.get_action(), clap::ArgAction::Append);
+                let excluded = (!repeatable && taken.contains(&arg.get_id()))
+                    || conflicts_with_used(node, arg, &taken);
+                if name.starts_with(partial) && !excluded {
                     add(
                         &name,
                         &arg.get_help().map(|s| s.to_string()).unwrap_or_default(),
@@ -274,12 +295,8 @@ impl App {
                 .map_or_else(|| a.get_id().as_str().to_uppercase(), |n| n.to_string())
         };
         if used < words.len() {
-            let long = words.last()?.strip_prefix("--")?;
-            let arg = node.get_arguments().find(|a| a.get_long() == Some(long))?;
-            return arg
-                .get_action()
-                .takes_values()
-                .then(|| format!("<{}>", value_name(arg)));
+            let arg = value_option(node, words.last()?)?;
+            return Some(format!("<{}>", value_name(arg)));
         }
         if node.has_subcommands() {
             return None;
@@ -573,4 +590,59 @@ fn safe_batch_args(node: &clap::Command, args: &[&str]) -> Vec<String> {
         })
         .map(|t| t.to_string())
         .collect()
+}
+
+/// Options already typed on the line, by short or long name (`-x`, `-gG`, `--key=..`).
+fn used_options<'a>(node: &'a clap::Command, tokens: &[&str]) -> Vec<&'a clap::Id> {
+    let mut used = Vec::new();
+    for tok in tokens {
+        if let Some(long) = tok.strip_prefix("--") {
+            let long = long.split('=').next().unwrap_or(long);
+            used.extend(
+                node.get_arguments()
+                    .filter(|a| a.get_long() == Some(long))
+                    .map(|a| a.get_id()),
+            );
+        } else if let Some(shorts) = tok.strip_prefix('-') {
+            for c in shorts.chars() {
+                let Some(a) = node.get_arguments().find(|a| a.get_short() == Some(c)) else {
+                    break;
+                };
+                used.push(a.get_id());
+                if a.get_action().takes_values() {
+                    break;
+                }
+            }
+        }
+    }
+    used
+}
+
+/// Whether `arg` conflicts with an already typed option; clap records each
+/// declared conflict on one side only, so check both directions.
+fn conflicts_with_used(node: &clap::Command, arg: &clap::Arg, taken: &[&clap::Id]) -> bool {
+    node.get_arg_conflicts_with(arg)
+        .iter()
+        .any(|c| taken.contains(&c.get_id()))
+        || taken
+            .iter()
+            .filter_map(|id| node.get_arguments().find(|a| a.get_id() == *id))
+            .filter(|a| !a.is_global_set())
+            .any(|t| {
+                node.get_arg_conflicts_with(t)
+                    .iter()
+                    .any(|c| c.get_id() == arg.get_id())
+            })
+}
+
+/// The option a token names (`--long` or a single `-s`) if it takes a value.
+fn value_option<'a>(node: &'a clap::Command, tok: &str) -> Option<&'a clap::Arg> {
+    let arg = if let Some(long) = tok.strip_prefix("--") {
+        node.get_arguments().find(|a| a.get_long() == Some(long))
+    } else {
+        let mut chars = tok.strip_prefix('-')?.chars();
+        let c = chars.next().filter(|_| chars.next().is_none())?;
+        node.get_arguments().find(|a| a.get_short() == Some(c))
+    };
+    arg.filter(|a| a.get_action().takes_values())
 }
