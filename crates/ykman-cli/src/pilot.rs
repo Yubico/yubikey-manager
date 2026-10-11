@@ -57,10 +57,11 @@ const PILOT_MANAGED_OPTS: [&str; 8] = [
     "diagnose",
 ];
 /// Commands handled by the pilot itself (the first three wrap top-level flags).
-const BUILTINS: [(&str, &str); 10] = [
+const BUILTINS: [(&str, &str); 11] = [
     ("diagnose", "Run system diagnostics"),
     ("licenses", "Show open source licenses"),
     ("version", "Show the ykman version"),
+    ("batch", "Repeat a command on one YubiKey after another"),
     ("clear", "Clear the screen"),
     ("device", "Choose which YubiKey to use (also: ← key)"),
     ("copy", "Copy the last command's output: /copy [all]"),
@@ -83,6 +84,23 @@ const LOGO: [&str; 6] = [
     " |___/                            ",
 ];
 
+/// Command paths that make sense to repeat on many keys (plus any `reset`).
+const BATCH_ALLOWED: [&[&str]; 10] = [
+    &["otp", "yubiotp"],
+    &["otp", "static"],
+    &["otp", "chalresp"],
+    &["otp", "hotp"],
+    &["otp", "ndef"],
+    &["otp", "swap"],
+    &["config"],
+    &["oath", "accounts", "add"],
+    &["oath", "accounts", "import"],
+    &["oath", "accounts", "uri"],
+];
+const BATCH_POLL: Duration = Duration::from_millis(500);
+
+/// Recent commands shown while browsing history with Up/Down.
+const HISTORY_ROWS: usize = 5;
 const POPUP_ROWS: usize = 8;
 // Colours come from the terminal's own palette so the pilot follows the
 // user's theme; "dim" text uses the DIM attribute on the default foreground.
@@ -334,6 +352,44 @@ impl Editor {
     }
 }
 
+enum BatchPhase {
+    /// Waiting for the user to confirm the first run.
+    Confirm,
+    Running,
+    /// Waiting for the next key; `absent` once the previous one was seen gone.
+    Waiting {
+        prev: u32,
+        absent: bool,
+    },
+    /// The previous key came back; ask before running on it again.
+    SameKey(u32),
+}
+
+/// Repeat one command across keys, replaying the first run's answers.
+struct Batch {
+    args: Vec<String>,
+    shown: String,
+    phase: BatchPhase,
+    round: usize,
+    /// The current round runs on the same key as the previous one.
+    same_key: bool,
+    /// Serial of the key the current round runs on.
+    current: u32,
+    results: Vec<(u32, bool)>,
+    /// (normalised prompt, reply) recorded during round 1; memory only.
+    answers: Vec<(String, String)>,
+    used: Vec<bool>,
+}
+
+/// Prompt text without digits, so prompts that mention a serial still match.
+fn norm_prompt(p: &str) -> String {
+    strip_ansi(p)
+        .trim()
+        .chars()
+        .filter(|c| !c.is_ascii_digit())
+        .collect()
+}
+
 /// Incremental find in the log view (Ctrl+F).
 struct Search {
     query: String,
@@ -359,6 +415,8 @@ struct App {
     /// Prompt text whose echoed copy should be dropped from the output.
     skip_echo: Option<String>,
     tab: usize,
+    /// Tab last written to the state file.
+    saved_tab: usize,
     input: Editor,
     history: Vec<String>,
     hist_pos: Option<usize>,
@@ -390,6 +448,9 @@ struct App {
     tick: usize,
     last_poll: Instant,
     polling: bool,
+    batch: Option<Batch>,
+    /// Batch mode: typed commands are repeated on key after key.
+    batch_mode: bool,
     quit: bool,
 }
 
@@ -420,6 +481,7 @@ impl App {
             scanned: false,
             skip_echo: None,
             tab: 0,
+            saved_tab: 0,
             input: Editor::default(),
             history: Vec::new(),
             hist_pos: None,
@@ -448,14 +510,18 @@ impl App {
             tick: 0,
             last_poll: Instant::now(),
             polling: false,
+            batch: None,
+            batch_mode: false,
             quit: false,
         };
-        let (level, saved) = load_state();
-        if let Some(level) = level {
+        let state = load_state();
+        if let Some(level) = state.level {
             app.log_level = level;
         }
-        app.history = saved.clone();
-        app.saved = saved;
+        app.tab = state.tab;
+        app.saved_tab = state.tab;
+        app.history = state.history.clone();
+        app.saved = state.history;
         app.refresh_devices();
         app
     }
@@ -476,7 +542,7 @@ impl App {
     fn main_loop(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         let mut dirty = true;
         while !self.quit {
-            if dirty || self.running {
+            if dirty || self.running || self.batch_wait_msg().is_some() {
                 terminal.draw(|f| self.draw(f))?;
                 dirty = false;
             }
@@ -494,12 +560,21 @@ impl App {
                     _ => {}
                 }
             }
+            if self.tab != self.saved_tab {
+                self.save();
+            }
             self.tick = self.tick.wrapping_add(1);
             while let Ok(msg) = self.rx.try_recv() {
                 dirty = true;
                 self.on_msg(msg);
             }
-            if !self.running && !self.polling && self.last_poll.elapsed() > DEVICE_POLL {
+            self.auto_reply();
+            let interval = if self.batch_waiting() {
+                BATCH_POLL
+            } else {
+                DEVICE_POLL
+            };
+            if !self.running && !self.polling && self.last_poll.elapsed() > interval {
                 self.refresh_devices();
             }
         }
@@ -538,6 +613,15 @@ impl App {
                 self.writer = None;
                 self.killer = None;
                 self.partial.clear();
+                if let Some(b) = self.batch.as_mut()
+                    && matches!(b.phase, BatchPhase::Running)
+                {
+                    b.results.push((b.current, code == Some(0)));
+                    b.phase = BatchPhase::Waiting {
+                        prev: b.current,
+                        absent: false,
+                    };
+                }
                 match code {
                     Some(0) => {}
                     Some(c) => self.push(Kind::Fail, format!("exited with code {c}")),
@@ -560,6 +644,7 @@ impl App {
                 }
                 self.devices = list;
                 self.announce_device_change(before);
+                self.batch_devices();
                 if !self.scanned {
                     self.scanned = true;
                     let n = self.devices.len();
@@ -571,6 +656,254 @@ impl App {
                 }
             }
         }
+    }
+
+    // ---------- batch mode ----------
+
+    /// Whether the command path is (or leads to) something batch mode accepts.
+    fn batch_possible(&self, words: &[&str]) -> bool {
+        fn has_reset(c: &clap::Command) -> bool {
+            c.get_subcommands()
+                .any(|s| s.get_name() == "reset" || has_reset(s))
+        }
+        let (node, used) = self.resolve(words);
+        used < words.len()
+            || node.get_name() == "reset"
+            || BATCH_ALLOWED
+                .iter()
+                .any(|p| p.starts_with(words) || words.starts_with(p))
+            || has_reset(node)
+    }
+
+    fn enter_batch_mode(&mut self) {
+        if self.batch_mode {
+            self.note("Already in batch mode.");
+        } else {
+            self.batch_mode = true;
+            self.note("Batch mode: each command you enter repeats on one YubiKey after another.");
+        }
+    }
+
+    fn leave_batch_mode(&mut self) {
+        self.batch_mode = false;
+        self.note("Left batch mode.");
+    }
+
+    fn batch_waiting(&self) -> bool {
+        self.batch
+            .as_ref()
+            .is_some_and(|b| matches!(b.phase, BatchPhase::Waiting { .. } | BatchPhase::SameKey(_)))
+    }
+
+    /// `/batch <command...>` or `/batch stop`.
+    fn batch_command(&mut self, args: &[String]) {
+        if args.first().map(String::as_str) == Some("stop") {
+            if self.batch.is_some() {
+                self.cancel();
+                self.end_batch("Batch stopped");
+            } else {
+                self.note("No batch is running.");
+            }
+            return;
+        }
+        if self.batch.is_some() {
+            self.note("A batch is already active. Use /batch stop to end it.");
+            return;
+        }
+        let words: Vec<&str> = args.iter().map(String::as_str).collect();
+        let (node, used) = self.resolve(&words);
+        let force = node
+            .get_arguments()
+            .find(|a| a.get_long() == Some("force"))
+            .filter(|a| {
+                !args
+                    .iter()
+                    .any(|x| x == "--force" || a.get_short().is_some_and(|c| x == &format!("-{c}")))
+            })
+            .is_some();
+        let is_reset = used > 0 && words[used - 1] == "reset";
+        if !is_reset && !BATCH_ALLOWED.iter().any(|p| words.starts_with(p)) {
+            self.note(
+                "Batch supports OTP programming, OATH account adding, config and reset commands. Example: otp yubiotp 1 -S -g -G",
+            );
+            return;
+        }
+        if self.devices.len() != 1 {
+            self.note("Batch needs exactly one YubiKey inserted to start.");
+            return;
+        }
+        if self.running {
+            self.note("A command is already running.");
+            return;
+        }
+        if words.starts_with(&["otp", "yubiotp"])
+            && args.iter().any(|a| {
+                ["-P", "-p", "-k", "--public-id", "--private-id", "--key"].contains(&a.as_str())
+            })
+        {
+            self.note(
+                "Warning: a fixed public ID, private ID or key is identical on every key. Use -S -g -G to generate per key.",
+            );
+        }
+        let (serial, name) = (self.devices[0].serial, self.devices[0].describe());
+        let msg = format!(
+            "Batch: /{} on {}.{} Answers from the first run are repeated on every key.",
+            args.join(" "),
+            name,
+            if force { " Runs with --force." } else { "" }
+        );
+        self.note(&msg);
+        let mut run_args = args.to_vec();
+        if force {
+            run_args.push("--force".to_string());
+        }
+        self.batch = Some(Batch {
+            args: run_args,
+            shown: format!("/batch {}", args.join(" ")),
+            phase: BatchPhase::Confirm,
+            round: 0,
+            same_key: false,
+            current: serial,
+            results: Vec::new(),
+            answers: Vec::new(),
+            used: Vec::new(),
+        });
+    }
+
+    fn begin_round(&mut self, serial: u32) {
+        let Some(b) = self.batch.as_mut() else {
+            return;
+        };
+        b.round += 1;
+        b.same_key = b.results.iter().any(|r| r.0 == serial);
+        b.current = serial;
+        b.phase = BatchPhase::Running;
+        b.used = vec![false; b.answers.len()];
+        let (shown, args, round) = (b.shown.clone(), b.args.clone(), b.round);
+        self.device = Some(serial);
+        self.note(&format!("Batch round {round}: YubiKey S/N {serial}"));
+        self.spawn(&shown, args);
+    }
+
+    fn end_batch(&mut self, title: &str) {
+        let Some(b) = self.batch.take() else {
+            return;
+        };
+        let ok = b.results.iter().filter(|r| r.1).count();
+        let failed = b.results.len() - ok;
+        self.note(&format!("{title}: {ok} succeeded, {failed} failed"));
+        for (serial, good) in b.results {
+            self.note(&format!("  {} S/N {serial}", if good { "✓" } else { "✗" }));
+        }
+    }
+
+    /// Called with a fresh device list: start the next round on a new key.
+    fn batch_devices(&mut self) {
+        let Some(b) = self.batch.as_mut() else {
+            return;
+        };
+        let serials: Vec<u32> = self.devices.iter().map(|d| d.serial).collect();
+        match (&mut b.phase, serials.as_slice()) {
+            (BatchPhase::Waiting { absent, .. }, []) => *absent = true,
+            (BatchPhase::Waiting { prev, .. }, [s]) if s != prev => {
+                let s = *s;
+                self.next_key(s);
+            }
+            (BatchPhase::Waiting { prev, absent: true }, [s]) if s == prev => {
+                let s = *s;
+                b.phase = BatchPhase::SameKey(s);
+                self.note(&format!(
+                    "YubiKey S/N {s} was already programmed in this batch."
+                ));
+            }
+            (BatchPhase::SameKey(s), []) => {
+                let s = *s;
+                b.phase = BatchPhase::Waiting {
+                    prev: s,
+                    absent: true,
+                };
+            }
+            (BatchPhase::SameKey(prev), [s]) if s != prev => {
+                let s = *s;
+                self.next_key(s);
+            }
+            _ => {}
+        }
+    }
+
+    /// Start a round on a new key, or pause if it was already programmed in this batch.
+    fn next_key(&mut self, serial: u32) {
+        let Some(b) = self.batch.as_mut() else {
+            return;
+        };
+        if b.results.iter().any(|r| r.0 == serial) {
+            b.phase = BatchPhase::SameKey(serial);
+            self.note(&format!(
+                "YubiKey S/N {serial} was already programmed in this batch."
+            ));
+        } else {
+            self.begin_round(serial);
+        }
+    }
+
+    /// Answer prompts of later rounds with the replies recorded in round 1.
+    fn auto_reply(&mut self) {
+        let Some(b) = self.batch.as_ref() else {
+            return;
+        };
+        if b.round < 2 || !matches!(b.phase, BatchPhase::Running) {
+            return;
+        }
+        let Some(raw) = self.prompt().map(str::to_string) else {
+            return;
+        };
+        let norm = norm_prompt(&raw);
+        let Some(b) = self.batch.as_mut() else {
+            return;
+        };
+        let Some(i) = (0..b.answers.len()).find(|&i| !b.used[i] && b.answers[i].0 == norm) else {
+            return;
+        };
+        b.used[i] = true;
+        let reply = b.answers[i].1.clone();
+        let secret = self.secret_prompt(&raw);
+        self.send_reply(&reply, secret);
+    }
+
+    /// Short status-bar text while the batch waits for the user.
+    fn batch_wait_msg(&self) -> Option<&'static str> {
+        match self.batch.as_ref()?.phase {
+            BatchPhase::Confirm => Some("waiting for confirmation"),
+            BatchPhase::SameKey(_) => Some("same YubiKey, waiting for your decision"),
+            BatchPhase::Waiting { .. } if self.devices.len() > 1 => {
+                Some("waiting for a single YubiKey")
+            }
+            BatchPhase::Waiting { .. } => Some("waiting for the next YubiKey"),
+            BatchPhase::Running => None,
+        }
+    }
+
+    fn batch_label(&self) -> Option<String> {
+        let b = self.batch.as_ref()?;
+        let ok = b.results.iter().filter(|r| r.1).count();
+        let tally = format!("Batch {ok} ok, {} failed", b.results.len() - ok);
+        Some(match b.phase {
+            BatchPhase::Confirm => "Press Enter to start the batch, Esc to cancel".into(),
+            BatchPhase::Running if b.same_key => format!(
+                "{tally} · round {} running · warning: this YubiKey was already used in this batch",
+                b.round
+            ),
+            BatchPhase::Running => format!("{tally} · round {} running", b.round),
+            BatchPhase::SameKey(s) => format!(
+                "S/N {s} was already used in this batch · Enter to run anyway, or insert a different key (Esc to finish)"
+            ),
+            BatchPhase::Waiting { .. } if self.devices.len() > 1 => {
+                format!("{tally} · leave only one YubiKey inserted")
+            }
+            BatchPhase::Waiting { .. } => {
+                format!("{tally} · insert the next YubiKey (Esc to finish)")
+            }
+        })
     }
 
     // ---------- prompts ----------
@@ -632,6 +965,13 @@ impl App {
     }
 
     fn send_reply(&mut self, reply: &str, secret: bool) {
+        if let Some(b) = self.batch.as_mut()
+            && b.round == 1
+            && matches!(b.phase, BatchPhase::Running)
+        {
+            b.answers
+                .push((norm_prompt(&self.partial), reply.to_string()));
+        }
         if secret {
             let prompt = strip_ansi(&self.partial);
             self.skip_echo = Some(prompt.trim().to_string());
@@ -707,11 +1047,27 @@ impl App {
         }
         let trailing_space = rest.ends_with(char::is_whitespace);
         let mut words: Vec<&str> = rest.split_whitespace().collect();
-        let partial = if trailing_space {
+        let mut partial = if trailing_space {
             ""
         } else {
             words.pop().unwrap_or("")
         };
+        // A fully typed command group lists its subcommands without waiting for a space.
+        if !partial.is_empty() && !partial.starts_with('-') {
+            let skip = usize::from(words.first() == Some(&"batch"));
+            if !words
+                .get(skip..)
+                .is_some_and(|w| w.first().is_some_and(|f| is_builtin(f)))
+            {
+                let mut path = words[skip..].to_vec();
+                path.push(partial);
+                let (node, used) = self.resolve(&path);
+                if used == path.len() && node.get_subcommands().any(|c| !c.is_hide_set()) {
+                    words.push(partial);
+                    partial = "";
+                }
+            }
+        }
         let base = if words.is_empty() {
             "/".to_string()
         } else {
@@ -738,10 +1094,16 @@ impl App {
             }
             return out;
         }
-        if words.first().is_some_and(|w| is_builtin(w)) {
+        // After `/batch` the rest completes like a normal command.
+        let off = usize::from(words.first() == Some(&"batch"));
+        if off == 1 && words.len() == 1 && "stop".starts_with(partial) {
+            add("stop", "End the batch and show a summary");
+        }
+        if off == 0 && words.first().is_some_and(|w| is_builtin(w)) {
             return out;
         }
-        let (node, used) = self.resolve(&words);
+        let words = &words[off..];
+        let (node, used) = self.resolve(words);
         if used < words.len() || partial.starts_with('-') {
             // SCP options apply to every command, so keep them after the specific ones.
             let mut args: Vec<&clap::Arg> = node.get_arguments().collect();
@@ -772,12 +1134,19 @@ impl App {
             if sub.is_hide_set() || name == "help" || !name.starts_with(partial) {
                 continue;
             }
+            if self.batch_mode {
+                let mut path = words[..used].to_vec();
+                path.push(name);
+                if !self.batch_possible(&path) {
+                    continue;
+                }
+            }
             add(
                 name,
                 &sub.get_about().map(|s| s.to_string()).unwrap_or_default(),
             );
         }
-        if used == 0 {
+        if used == 0 && off == 0 {
             for (name, desc) in BUILTINS {
                 if name.starts_with(partial) {
                     add(name, desc);
@@ -793,7 +1162,10 @@ impl App {
         if self.input.cursor != self.input.len() || !rest.ends_with(char::is_whitespace) {
             return None;
         }
-        let words: Vec<&str> = rest.split_whitespace().collect();
+        let mut words: Vec<&str> = rest.split_whitespace().collect();
+        if words.first() == Some(&"batch") {
+            words.remove(0);
+        }
         let first = words.first()?;
         if is_builtin(first) {
             return None;
@@ -843,6 +1215,10 @@ impl App {
                 self.cancel();
             } else if !self.input.buf.is_empty() {
                 self.input.take();
+            } else if self.batch.is_some() {
+                self.end_batch("Batch finished");
+            } else if self.batch_mode {
+                self.leave_batch_mode();
             } else {
                 self.quit = true;
             }
@@ -851,6 +1227,46 @@ impl App {
         if ctrl && key.code == KeyCode::Char('d') && self.input.buf.is_empty() {
             self.quit = true;
             return;
+        }
+        if !self.running && self.input.buf.is_empty() && !self.sidebar {
+            let confirming = self
+                .batch
+                .as_ref()
+                .is_some_and(|b| matches!(b.phase, BatchPhase::Confirm));
+            let same = self.batch.as_ref().and_then(|b| match b.phase {
+                BatchPhase::SameKey(s) => Some(s),
+                _ => None,
+            });
+            match key.code {
+                KeyCode::Enter if same.is_some() => {
+                    if let Some(s) = same {
+                        self.begin_round(s);
+                    }
+                    return;
+                }
+                KeyCode::Enter if confirming => {
+                    if let [d] = self.devices.as_slice() {
+                        let serial = d.serial;
+                        self.begin_round(serial);
+                    } else {
+                        self.end_batch("Batch cancelled (the YubiKey changed)");
+                    }
+                    return;
+                }
+                KeyCode::Esc if self.batch.is_none() && self.batch_mode => {
+                    self.leave_batch_mode();
+                    return;
+                }
+                KeyCode::Esc if self.batch.is_some() => {
+                    self.end_batch(if confirming {
+                        "Batch cancelled"
+                    } else {
+                        "Batch finished"
+                    });
+                    return;
+                }
+                _ => {}
+            }
         }
         if ctrl && key.code == KeyCode::Char('t') {
             self.logs_expanded = !self.logs_expanded;
@@ -985,10 +1401,7 @@ impl App {
     }
 
     fn accept(&mut self, s: &Suggestion) {
-        let keep = self.input.buf.len() - current_partial(&self.input.buf).len();
-        self.input.buf.truncate(keep);
-        self.input.buf.push_str(&s.name);
-        self.input.buf.push(' ');
+        self.input.buf = format!("{} ", s.display);
         self.input.cursor = self.input.len();
         self.sel = 0;
     }
@@ -1092,15 +1505,22 @@ impl App {
             }
             return;
         };
-        let args = split_args(rest);
+        let mut args = split_args(rest);
         if args.is_empty() {
             return;
         }
+        let line = if self.batch_mode && !is_builtin(&args[0]) {
+            args.insert(0, "batch".to_string());
+            format!("/batch {}", rest.trim())
+        } else {
+            line
+        };
         if self.history.last().map(String::as_str) != Some(line.trim()) {
             self.history.push(line.trim().to_string());
         }
         self.persist_command(&args);
         match args[0].as_str() {
+            "exit" if self.batch_mode => self.leave_batch_mode(),
             "quit" | "exit" => self.quit = true,
             "clear" => {
                 self.entries.clear();
@@ -1113,6 +1533,11 @@ impl App {
             "log" => self.set_log_level(args.get(1).map(String::as_str)),
             "copy" => self.copy_output(args.get(1).is_some_and(|a| a == "all")),
             "save" => self.save_output(&args[1..]),
+            "batch" if args.len() == 1 => self.enter_batch_mode(),
+            "batch" => self.batch_command(&args[1..]),
+            _ if self.batch.is_some() => {
+                self.note("A batch is active. Use /batch stop to end it first.");
+            }
             _ if self.running => self.note("A command is already running."),
             "version" | "licenses" | "diagnose" if args.len() == 1 => {
                 let flag = vec![format!("--{}", args[0])];
@@ -1122,19 +1547,35 @@ impl App {
         }
     }
 
+    fn save(&mut self) {
+        self.saved_tab = self.tab;
+        save_state(self.log_level, self.tab, &self.saved);
+    }
+
     /// Remember only the command path (never arguments, which may be secrets).
     fn persist_command(&mut self, args: &[String]) {
         let words: Vec<&str> = args.iter().map(String::as_str).collect();
-        let (_, used) = self.resolve(&words);
-        if used == 0 {
+        let prefix = if words.first() == Some(&"batch") {
+            "batch "
+        } else {
+            ""
+        };
+        let rest = &words[prefix.len().min(1)..];
+        let (_, used) = self.resolve(rest);
+        let path = if used > 0 {
+            rest[..used].join(" ")
+        } else if prefix.is_empty() && is_builtin(words[0]) && !matches!(words[0], "quit" | "exit")
+        {
+            words[0].to_string()
+        } else {
             return;
-        }
-        let entry = format!("/{}", words[..used].join(" "));
+        };
+        let entry = format!("/{prefix}{path}");
         if self.saved.last() != Some(&entry) {
             self.saved.push(entry);
             let excess = self.saved.len().saturating_sub(200);
             self.saved.drain(..excess);
-            save_state(self.log_level, &self.saved);
+            self.save();
         }
     }
 
@@ -1251,7 +1692,7 @@ impl App {
         match level.and_then(|l| LEVELS.iter().find(|(n, _)| *n == l)) {
             Some((name, _)) => {
                 self.log_level = name;
-                save_state(name, &self.saved);
+                self.save();
                 self.note(&format!("log level set to {name}"));
                 if *name == "traffic" {
                     self.note("Warning: traffic logs may include sensitive data.");
@@ -1775,7 +2216,12 @@ impl App {
                 } else {
                     ghost
                 };
-                ("❯ ".to_string(), self.input.buf.clone(), ghost)
+                let mark = if self.batch_mode {
+                    "batch ❯ "
+                } else {
+                    "❯ "
+                };
+                (mark.to_string(), self.input.buf.clone(), ghost)
             }
         };
         let mut spans = vec![Span::styled(
@@ -1783,7 +2229,20 @@ impl App {
             Style::new().fg(ACCENT).bg(band_bg()),
         )];
         if text.is_empty() && ghost.is_empty() && self.prompt().is_none() && searching.is_none() {
-            spans.push(Span::styled("Type / for commands", dim().bg(band_bg())));
+            match self.batch_label() {
+                Some(hint) => spans.push(Span::styled(
+                    hint,
+                    Style::new().add_modifier(Modifier::BOLD).bg(band_bg()),
+                )),
+                None => {
+                    let hint = if self.batch_mode {
+                        "Type / to pick a command to repeat on many keys · Esc to leave"
+                    } else {
+                        "Type / for commands"
+                    };
+                    spans.push(Span::styled(hint, dim().bg(band_bg())));
+                }
+            }
         }
         spans.push(Span::styled(text, band));
         spans.push(Span::styled(ghost, dim().bg(band_bg())));
@@ -1815,11 +2274,11 @@ impl App {
                 Span::styled("Esc", dim().add_modifier(Modifier::BOLD)),
                 Span::styled(" close", dim()),
             ]
-        } else if self.running {
+        } else if self.running || self.batch_wait_msg().is_some() {
             let msg = if self.prompt().is_some() {
                 "waiting for input"
             } else {
-                "running…"
+                self.batch_wait_msg().unwrap_or("running…")
             };
             vec![Span::styled(
                 format!("{} {msg}", SPINNER[self.tick / 2 % SPINNER.len()]),
@@ -1921,7 +2380,23 @@ impl App {
             self.draw_yes_no(f, input_area, prompt);
             return;
         }
-        let sugg = self.suggestions();
+        let (sugg, sel) = match self.hist_pos {
+            Some(pos) if pos < self.history.len() => {
+                let n = self.history.len();
+                let size = n.min(HISTORY_ROWS);
+                let start = pos.min(n - size);
+                let items = self.history[start..start + size]
+                    .iter()
+                    .map(|h| Suggestion {
+                        display: h.clone(),
+                        name: h.clone(),
+                        desc: String::new(),
+                    })
+                    .collect();
+                (items, pos - start)
+            }
+            _ => (self.suggestions(), self.sel),
+        };
         if sugg.is_empty() || self.sidebar || self.prompt().is_some() {
             return;
         }
@@ -1936,7 +2411,7 @@ impl App {
             .max()
             .unwrap_or(0)
             + 3;
-        let sel = self.sel.min(sugg.len() - 1);
+        let sel = sel.min(sugg.len() - 1);
         let items: Vec<ListItem> = sugg
             .iter()
             .enumerate()
@@ -2310,28 +2785,36 @@ fn state_file() -> Option<std::path::PathBuf> {
 }
 
 /// Loads the saved log level and command history (best effort).
-fn load_state() -> (Option<&'static str>, Vec<String>) {
-    let Some(text) = state_file().and_then(|p| std::fs::read_to_string(p).ok()) else {
-        return (None, Vec::new());
-    };
-    let mut level = None;
-    let mut history = Vec::new();
-    for line in text.lines() {
-        if let Some(l) = line.strip_prefix("log=") {
-            level = LEVELS.iter().map(|(n, _)| *n).find(|n| *n == l);
-        } else if line.starts_with('/') {
-            history.push(line.to_string());
-        }
-    }
-    (level, history)
+#[derive(Default)]
+struct SavedState {
+    level: Option<&'static str>,
+    tab: usize,
+    history: Vec<String>,
 }
 
-fn save_state(level: &str, history: &[String]) {
+fn load_state() -> SavedState {
+    let mut state = SavedState::default();
+    let Some(text) = state_file().and_then(|p| std::fs::read_to_string(p).ok()) else {
+        return state;
+    };
+    for line in text.lines() {
+        if let Some(l) = line.strip_prefix("log=") {
+            state.level = LEVELS.iter().map(|(n, _)| *n).find(|n| *n == l);
+        } else if let Some(t) = line.strip_prefix("tab=") {
+            state.tab = t.parse().ok().filter(|t| *t < TABS.len()).unwrap_or(0);
+        } else if line.starts_with('/') {
+            state.history.push(line.to_string());
+        }
+    }
+    state
+}
+
+fn save_state(level: &str, tab: usize, history: &[String]) {
     let Some(path) = state_file() else { return };
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let mut text = format!("log={level}\n");
+    let mut text = format!("log={level}\ntab={tab}\n");
     for h in history {
         text.push_str(h);
         text.push('\n');
@@ -2377,18 +2860,30 @@ fn highlight_line(line: &Line, q: &[char], style: Style) -> Line<'static> {
     Line::from(spans)
 }
 
+/// Lists keys through a child process: enumerating HID devices inside the
+/// pilot crashes macOS IOKit when a key re-enumerates (e.g. after a reset).
 fn list_devices() -> Vec<Device> {
-    let mut source = ykman::device::get_device_source();
-    source
-        .list_devices()
+    std::process::Command::new(exe())
+        .arg("list")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map(|o| parse_devices(&String::from_utf8_lossy(&o.stdout)))
         .unwrap_or_default()
-        .iter()
-        .filter_map(|d| {
-            let info = d.info();
+}
+
+fn parse_devices(stdout: &str) -> Vec<Device> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let (head, serial) = line.rsplit_once("Serial:")?;
+            let serial = serial.trim().parse().ok()?;
+            let (name, rest) = head.split_once('(')?;
+            let version = rest.split_once(')')?.0;
             Some(Device {
-                serial: info.serial?,
-                name: yubikit::device::get_name(info),
-                version: info.version_name(),
+                serial,
+                name: name.trim().to_string(),
+                version: version.to_string(),
             })
         })
         .collect()
