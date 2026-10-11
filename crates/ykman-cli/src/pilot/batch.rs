@@ -74,12 +74,14 @@ impl App {
             self.note("Already in batch mode.");
         } else {
             self.batch_mode = true;
+            self.hist_pos = None;
             self.note("Batch mode: each command you enter repeats on one YubiKey after another.");
         }
     }
 
     pub(super) fn leave_batch_mode(&mut self) {
         self.batch_mode = false;
+        self.hist_pos = None;
         self.note("Left batch mode.");
     }
 

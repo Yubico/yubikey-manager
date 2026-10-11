@@ -16,7 +16,18 @@ pub(super) const HISTORY_ROWS: usize = 5;
 pub(super) const POPUP_ROWS: usize = 8;
 // Colours come from the terminal's own palette so the pilot follows the
 // user's theme; "dim" text uses the DIM attribute on the default foreground.
-pub(super) const ACCENT: Color = Color::Green;
+const ACCENT: Color = Color::Green;
+const BATCH_ACCENT: Color = Color::LightBlue;
+static BATCH_THEME: AtomicBool = AtomicBool::new(false);
+
+/// Primary colour: cyan while in batch mode so the mode is obvious.
+pub(super) fn accent() -> Color {
+    if BATCH_THEME.load(Ordering::Relaxed) {
+        BATCH_ACCENT
+    } else {
+        ACCENT
+    }
+}
 pub(super) const TEXT: Color = Color::Reset;
 pub(super) const WARN: Color = Color::Yellow;
 pub(super) const ERROR: Color = Color::Red;
@@ -167,7 +178,10 @@ pub(super) fn render_entry(e: &Entry, width: usize, lines: &mut Vec<Line<'static
         Kind::Err => ("  ", Style::new().fg(ERROR)),
         Kind::Log => ("│ ", dim()),
         Kind::Fail => ("  ", Style::new().fg(ERROR)),
-        Kind::Success => ("✓ ", Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Kind::Success => (
+            "✓ ",
+            Style::new().fg(OUTPUT_MARK).add_modifier(Modifier::BOLD),
+        ),
         Kind::RoundFail => ("✗ ", Style::new().fg(ERROR).add_modifier(Modifier::BOLD)),
         Kind::Note => ("  ", Style::new().fg(WARN).add_modifier(Modifier::ITALIC)),
     };
@@ -351,6 +365,7 @@ pub(super) fn highlight_line(line: &Line, q: &[char], style: Style) -> Line<'sta
 
 impl App {
     pub(super) fn draw(&mut self, f: &mut Frame) {
+        BATCH_THEME.store(self.batch_mode || self.batch.is_some(), Ordering::Relaxed);
         let mut area = f.area();
         // The device panel spans the full height; everything else sits to its right.
         if self.sidebar {
@@ -391,7 +406,7 @@ impl App {
             let style = if i == self.tab {
                 Style::new()
                     .fg(ON_ACCENT)
-                    .bg(ACCENT)
+                    .bg(accent())
                     .add_modifier(Modifier::BOLD)
             } else {
                 dim().bg(tab_bg())
@@ -430,7 +445,7 @@ impl App {
                 // Half-block rows above and below give the selection vertical padding.
                 ListItem::new(vec![
                     Line::from(vec![
-                        Span::styled(format!(" {mark} "), Style::new().fg(ACCENT)),
+                        Span::styled(format!(" {mark} "), Style::new().fg(accent())),
                         Span::styled(d.name.clone(), Style::new().add_modifier(Modifier::BOLD)),
                     ])
                     .style(fill),
@@ -639,7 +654,7 @@ impl App {
             .and_then(|s| self.devices.iter().find(|d| d.serial == s))
         {
             Some(d) => Line::from(vec![
-                Span::styled("● ", Style::new().fg(ACCENT)),
+                Span::styled("● ", Style::new().fg(accent())),
                 Span::styled(
                     format!("{} ({})", d.name, d.version),
                     Style::new().add_modifier(Modifier::BOLD),
@@ -658,7 +673,7 @@ impl App {
             Line::from(vec![
                 Span::styled(
                     "ykman ",
-                    Style::new().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    Style::new().fg(accent()).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(env!("CARGO_PKG_VERSION"), dim()),
                 Span::styled(" · ", dim()),
@@ -679,7 +694,7 @@ impl App {
             let mut rows = Vec::new();
             for (i, art) in LOGO.iter().enumerate() {
                 let mut spans = vec![
-                    Span::styled(format!("{art:<logo_w$}"), Style::new().fg(ACCENT)),
+                    Span::styled(format!("{art:<logo_w$}"), Style::new().fg(accent())),
                     Span::styled(" │ ", dim()),
                 ];
                 if let Some(l) = i.checked_sub(top).and_then(|j| body.get(j)) {
@@ -727,7 +742,7 @@ impl App {
         for (k, d) in tips {
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled(format!("{k:<8}"), Style::new().fg(ACCENT)),
+                Span::styled(format!("{k:<8}"), Style::new().fg(accent())),
                 Span::styled(d, dim()),
             ]));
         }
@@ -792,7 +807,7 @@ impl App {
         };
         let mut spans = vec![Span::styled(
             label.clone(),
-            Style::new().fg(ACCENT).bg(band_bg()),
+            Style::new().fg(accent()).bg(band_bg()),
         )];
         if text.is_empty() && ghost.is_empty() && self.prompt().is_none() && searching.is_none() {
             match self.batch_label() {
@@ -916,7 +931,7 @@ impl App {
                 let is_sel = i == cur;
                 ListItem::new(Line::from(vec![
                     Span::raw(" "),
-                    Span::styled(if is_sel { "❯ " } else { "  " }, Style::new().fg(ACCENT)),
+                    Span::styled(if is_sel { "❯ " } else { "  " }, Style::new().fg(accent())),
                     Span::styled(
                         format!("{name:<6}"),
                         if is_sel {
@@ -946,12 +961,13 @@ impl App {
             self.draw_yes_no(f, input_area, prompt);
             return;
         }
+        let history = self.visible_history();
         let (sugg, sel) = match self.hist_pos {
-            Some(pos) if pos < self.history.len() => {
-                let n = self.history.len();
+            Some(pos) if pos < history.len() => {
+                let n = history.len();
                 let size = n.min(HISTORY_ROWS);
                 let start = pos.min(n - size);
-                let items = self.history[start..start + size]
+                let items = history[start..start + size]
                     .iter()
                     .map(|h| Suggestion {
                         display: h.clone(),
@@ -991,7 +1007,7 @@ impl App {
                 let desc_style = if is_sel { Style::new() } else { dim() };
                 ListItem::new(Line::from(vec![
                     Span::raw(" "),
-                    Span::styled(if is_sel { "❯ " } else { "  " }, Style::new().fg(ACCENT)),
+                    Span::styled(if is_sel { "❯ " } else { "  " }, Style::new().fg(accent())),
                     Span::styled(format!("{:<name_w$}", s.display), name_style),
                     Span::styled(s.desc.clone(), desc_style),
                 ]))

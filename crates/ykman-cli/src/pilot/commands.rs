@@ -305,18 +305,32 @@ impl App {
 
     // ---------- input ----------
 
+    /// History as browsed with Up/Down. Batch mode shows only batch commands,
+    /// without the `/batch` prefix that is implied there.
+    pub(super) fn visible_history(&self) -> Vec<String> {
+        if !self.batch_mode {
+            return self.history.clone();
+        }
+        self.history
+            .iter()
+            .filter_map(|h| h.strip_prefix("/batch ").map(|r| format!("/{}", r.trim())))
+            .filter(|h| h.len() > 1)
+            .collect()
+    }
+
     pub(super) fn history_step(&mut self, back: bool) {
-        if self.history.is_empty() {
+        let history = self.visible_history();
+        if history.is_empty() {
             return;
         }
         let pos = match (self.hist_pos, back) {
-            (None, true) => Some(self.history.len() - 1),
+            (None, true) => Some(history.len() - 1),
             (Some(p), true) => Some(p.saturating_sub(1)),
-            (Some(p), false) if p + 1 < self.history.len() => Some(p + 1),
+            (Some(p), false) if p + 1 < history.len() => Some(p + 1),
             _ => None,
         };
         self.hist_pos = pos;
-        let text = pos.map(|p| self.history[p].clone()).unwrap_or_default();
+        let text = pos.map(|p| history[p].clone()).unwrap_or_default();
         self.input.set(text);
     }
 
