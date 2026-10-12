@@ -14,7 +14,7 @@ use ratatui::widgets::{
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::HashSet;
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -22,13 +22,17 @@ use std::time::{Duration, Instant};
 mod batch;
 mod commands;
 mod runner;
+mod scripts;
 mod state;
+mod table;
 mod ui;
 
 use self::batch::*;
 use self::commands::*;
 use self::runner::*;
+use self::scripts::*;
 use self::state::*;
+use self::table::*;
 use self::ui::*;
 
 const DEVICE_POLL: Duration = Duration::from_secs(5);
@@ -186,6 +190,7 @@ struct Hits {
     tabs: Vec<(Rect, usize)>,
     toggles: Vec<(Rect, usize)>,
     side_items: Rect,
+    side_tabs: Vec<(Rect, usize)>,
     log: Rect,
 }
 
@@ -221,6 +226,10 @@ struct App {
     hits: Hits,
     search: Option<Search>,
     sidebar: bool,
+    /// Side panel page: 0 = YubiKeys, 1 = Scripts.
+    side_tab: usize,
+    /// Saved scripts shown on the Scripts page: (name, step count, first step).
+    scripts: Vec<(String, usize, String)>,
     side_state: ListState,
     devices: Vec<Device>,
     device: Option<u32>,
@@ -233,6 +242,14 @@ struct App {
     batch: Option<Batch>,
     /// Batch mode: typed commands are repeated on key after key.
     batch_mode: bool,
+    /// Commands queued by `/record`, not run until the recording is finished.
+    recording: Option<Vec<Vec<String>>>,
+    /// The latest recorded or loaded sequence, so it can be saved afterwards.
+    last_sequence: Option<Sequence>,
+    /// A script name whose save awaits confirmation because of possible secrets.
+    confirm_save: Option<String>,
+    /// A CSV file whose columns are variables, one row per key or iteration.
+    csv: Option<Table>,
     quit: bool,
 }
 
@@ -285,6 +302,8 @@ impl App {
             hits: Hits::default(),
             search: None,
             sidebar: false,
+            side_tab: 0,
+            scripts: Vec::new(),
             side_state: ListState::default(),
             devices: Vec::new(),
             device: None,
@@ -296,6 +315,10 @@ impl App {
             polling: false,
             batch: None,
             batch_mode: false,
+            recording: None,
+            last_sequence: None,
+            confirm_save: None,
+            csv: None,
             quit: false,
         };
         let state = load_state();
@@ -352,6 +375,7 @@ impl App {
                 dirty = true;
                 self.on_msg(msg);
             }
+            self.batch_tick();
             let interval = if self.batch_waiting() {
                 BATCH_POLL
             } else {
@@ -396,44 +420,19 @@ impl App {
                 self.writer = None;
                 self.killer = None;
                 self.partial.clear();
-                let mut round_msg = None;
-                if let Some(b) = self.batch.as_mut()
-                    && matches!(b.phase, BatchPhase::Running)
-                {
-                    let good = code == Some(0);
-                    b.results.push((b.current, good));
-                    let ok = b.results.iter().filter(|r| r.1).count();
-                    let tally = format!("{ok} ok, {} failed", b.results.len() - ok);
-                    round_msg = Some(if good {
-                        (
-                            Kind::Success,
-                            format!("Round {} done on S/N {} · {tally}", b.round, b.current),
-                        )
-                    } else {
-                        (
-                            Kind::RoundFail,
-                            format!("Round {} failed on S/N {} · {tally}", b.round, b.current),
-                        )
-                    });
-                    b.phase = BatchPhase::Waiting {
-                        prev: b.current,
-                        absent: false,
-                    };
-                }
                 match code {
                     Some(0) => {}
                     Some(c) => self.push(Kind::Fail, format!("exited with code {c}")),
                     None => self.note("terminated"),
                 }
-                if let Some((kind, text)) = round_msg {
-                    self.push(kind, text);
-                }
+                self.batch_step_done(code);
             }
             Msg::Devices(list) => {
                 self.polling = false;
                 self.last_poll = Instant::now();
                 let before = self.active_device();
                 if let Some(serial) = self.device
+                    && self.batch.is_none()
                     && !list.iter().any(|d| d.serial == serial)
                 {
                     self.device = None;
@@ -485,6 +484,9 @@ impl App {
                 self.cancel();
             } else if !self.input.buf.is_empty() {
                 self.input.take();
+            } else if self.recording.is_some() {
+                self.recording = None;
+                self.note("Recording discarded.");
             } else if self.batch.is_some() {
                 self.end_batch("Batch finished");
             } else if self.batch_mode {
@@ -508,6 +510,19 @@ impl App {
                 _ => None,
             });
             match key.code {
+                KeyCode::Esc if self.recording.is_some() => {
+                    self.finish_recording();
+                    return;
+                }
+                KeyCode::Backspace if self.recording.is_some() => {
+                    if let Some(steps) = self.recording.as_mut()
+                        && steps.pop().is_some()
+                    {
+                        let n = steps.len() + 1;
+                        self.note(&format!("Removed step {n}."));
+                    }
+                    return;
+                }
                 KeyCode::Enter if same.is_some() => {
                     if let Some(s) = same {
                         self.begin_round(s);
@@ -515,12 +530,7 @@ impl App {
                     return;
                 }
                 KeyCode::Enter if confirming => {
-                    if let [d] = self.devices.as_slice() {
-                        let serial = d.serial;
-                        self.begin_round(serial);
-                    } else {
-                        self.end_batch("Batch cancelled (the YubiKey changed)");
-                    }
+                    self.confirm_start();
                     return;
                 }
                 KeyCode::Esc if self.batch.is_none() && self.batch_mode => {
@@ -677,17 +687,41 @@ impl App {
     }
 
     fn open_sidebar(&mut self) {
+        self.open_side(0);
+    }
+
+    fn open_side(&mut self, tab: usize) {
         self.sidebar = true;
         self.refresh_devices();
-        let idx = self
-            .active_device()
-            .and_then(|s| self.devices.iter().position(|d| d.serial == s))
-            .unwrap_or(0);
-        self.side_state.select(Some(idx));
+        self.set_side_tab(tab);
+    }
+
+    fn set_side_tab(&mut self, tab: usize) {
+        self.side_tab = tab;
+        if tab == 1 {
+            self.scripts = self.load_script_list();
+            self.side_state
+                .select((!self.scripts.is_empty()).then_some(0));
+        } else {
+            let idx = self
+                .active_device()
+                .and_then(|s| self.devices.iter().position(|d| d.serial == s))
+                .unwrap_or(0);
+            self.side_state.select(Some(idx));
+        }
+        *self.side_state.offset_mut() = 0;
+    }
+
+    fn side_count(&self) -> usize {
+        if self.side_tab == 1 {
+            self.scripts.len()
+        } else {
+            self.devices.len()
+        }
     }
 
     fn on_sidebar_key(&mut self, key: KeyEvent) {
-        let count = self.devices.len();
+        let count = self.side_count();
         let cur = self
             .side_state
             .selected()
@@ -695,10 +729,23 @@ impl App {
             .min(count.max(1) - 1);
         match key.code {
             KeyCode::Esc | KeyCode::Right | KeyCode::Left => self.sidebar = false,
+            KeyCode::Tab | KeyCode::BackTab => self.set_side_tab(1 - self.side_tab),
             KeyCode::Up if count > 0 => self.side_state.select(Some((cur + count - 1) % count)),
             KeyCode::Down if count > 0 => self.side_state.select(Some((cur + 1) % count)),
-            KeyCode::Enter => self.choose_device(cur),
+            KeyCode::Enter if count > 0 => self.choose_side(cur),
             _ => {}
+        }
+    }
+
+    fn choose_side(&mut self, idx: usize) {
+        if self.side_tab == 1 {
+            self.sidebar = false;
+            if let Some((name, ..)) = self.scripts.get(idx) {
+                let args = vec!["run".to_string(), name.clone()];
+                self.script_command(&args);
+            }
+        } else {
+            self.choose_device(idx);
         }
     }
 
@@ -720,10 +767,14 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 if self.sidebar && inside(self.hits.side_items) {
                     let row = (y - self.hits.side_items.y) as usize / 3 + self.side_state.offset();
-                    if row < self.devices.len() {
+                    if row < self.side_count() {
                         self.side_state.select(Some(row));
-                        self.choose_device(row);
+                        self.choose_side(row);
                     }
+                } else if self.sidebar
+                    && let Some(&(_, t)) = self.hits.side_tabs.iter().find(|(r, _)| inside(*r))
+                {
+                    self.set_side_tab(t);
                 } else if let Some(&(_, t)) = self.hits.tabs.iter().find(|(r, _)| inside(*r)) {
                     self.tab = t;
                 } else if let Some(&(_, n)) = self.hits.toggles.iter().find(|(r, _)| inside(*r))

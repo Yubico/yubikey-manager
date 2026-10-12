@@ -22,11 +22,22 @@ pub(super) const PILOT_MANAGED_OPTS: [&str; 8] = [
     "diagnose",
 ];
 /// Commands handled by the pilot itself (the first three wrap top-level flags).
-pub(super) const BUILTINS: [(&str, &str); 11] = [
+pub(super) const BUILTINS: [(&str, &str); 16] = [
     ("diagnose", "Run system diagnostics"),
     ("licenses", "Show open source licenses"),
     ("version", "Show the ykman version"),
     ("batch", "Repeat a command on one YubiKey after another"),
+    ("record", "Record a sequence of commands, then run it"),
+    ("scripts", "Browse saved scripts"),
+    ("csv", "Use a CSV file for variables: /csv <file>"),
+    (
+        "repeat",
+        "Run a command several times: /repeat <n> <command…>",
+    ),
+    (
+        "script",
+        "Save and run recorded sequences: /script save|run|list",
+    ),
     ("clear", "Clear the screen"),
     ("device", "Choose which YubiKey to use (also: ← key)"),
     ("copy", "Copy the last command's output: /copy [all]"),
@@ -139,6 +150,9 @@ impl App {
         let Some(rest) = self.input.buf.strip_prefix('/') else {
             return Vec::new();
         };
+        if self.var_prompt().is_some() {
+            return Vec::new();
+        }
         if self.input.cursor != self.input.len() {
             return Vec::new();
         }
@@ -183,6 +197,16 @@ impl App {
             add("all", "Include the whole session");
             return out;
         }
+        if words.first() == Some(&"script") {
+            for (name, desc) in self.script_suggestions(&words, partial) {
+                add(&name, &desc);
+            }
+            return out;
+        }
+        if words == ["help"] && "variables".starts_with(partial) {
+            add("variables", "Variables for recorded sequences");
+            return out;
+        }
         if words == ["log"] {
             for (name, desc) in LEVELS {
                 if name.starts_with(partial) {
@@ -192,7 +216,11 @@ impl App {
             return out;
         }
         // After `/batch` the rest completes like a normal command.
-        let off = usize::from(words.first() == Some(&"batch"));
+        let off = match words.first() {
+            Some(&"batch") => 1,
+            Some(&"repeat") if words.len() >= 2 => 2,
+            _ => 0,
+        };
         if off == 1 && words.len() == 1 && "stop".starts_with(partial) {
             add("stop", "End the batch and show a summary");
         }
@@ -361,6 +389,10 @@ impl App {
         let line = self.input.take();
         self.sel = 0;
         self.hist_pos = None;
+        if self.var_prompt().is_some() {
+            self.var_answer(&line);
+            return;
+        }
         let Some(rest) = line.trim().strip_prefix('/') else {
             if !line.trim().is_empty() {
                 self.note("Commands start with /. Type / to see what's available.");
@@ -371,7 +403,8 @@ impl App {
         if args.is_empty() {
             return;
         }
-        let line = if self.batch_mode && !is_builtin(&args[0]) {
+        let plain = !is_builtin(&args[0]);
+        let line = if self.batch_mode && plain {
             args.insert(0, "batch".to_string());
             format!("/batch {}", rest.trim())
         } else {
@@ -381,6 +414,11 @@ impl App {
             self.history.push(line.trim().to_string());
         }
         self.persist_command(&args);
+        if self.recording.is_some() && plain {
+            let skip = usize::from(self.batch_mode);
+            self.record_step(&args[skip..]);
+            return;
+        }
         match args[0].as_str() {
             "exit" if self.batch_mode => self.leave_batch_mode(),
             "quit" | "exit" => self.quit = true,
@@ -391,14 +429,22 @@ impl App {
                 self.scroll = 0;
             }
             "device" => self.open_sidebar(),
-            "help" => self.help(),
+            "scripts" => self.open_side(1),
+            "help" => self.help(args.get(1).map(String::as_str)),
             "log" => self.set_log_level(args.get(1).map(String::as_str)),
             "copy" => self.copy_output(args.get(1).is_some_and(|a| a == "all")),
             "save" => self.save_output(&args[1..]),
+            "record" => self.record_command(),
+            "repeat" => self.repeat_command(&args),
+            "script" => self.script_command(&args[1..]),
+            "csv" => self.csv_command(&args[1..]),
+            "batch" if self.recording.is_some() => {
+                self.note("Finish the recording first (Esc).");
+            }
             "batch" if args.len() == 1 => self.enter_batch_mode(),
             "batch" => self.batch_command(&args[1..]),
             _ if self.batch.is_some() => {
-                self.note("A batch is active. Use /batch stop to end it first.");
+                self.note("A batch or sequence is active. Use /batch stop to end it first.");
             }
             _ if self.running => self.note("A command is already running."),
             "version" | "licenses" | "diagnose" if args.len() == 1 => {
@@ -453,7 +499,7 @@ impl App {
                 .rposition(|e| e.kind == Kind::Cmd)
                 .unwrap_or(0)
         };
-        let (logs, out) = (self.tab != 2, self.tab != 1);
+        let (logs, out) = (self.tab != 0, self.tab != 2);
         let mut text = String::new();
         let mut push = |kind: Kind, t: &str| {
             let t = if matches!(kind, Kind::Out | Kind::Err) {
@@ -533,11 +579,14 @@ impl App {
         }
     }
 
-    pub(super) fn help(&mut self) {
+    pub(super) fn help(&mut self, topic: Option<&str>) {
+        if topic.is_some_and(|t| t.starts_with("var")) {
+            return self.help_variables();
+        }
         for l in [
             "/            browse commands; Tab/→ complete, ↑/↓ select, Enter run",
             "←            (empty prompt) choose which YubiKey to use",
-            "Tab, F1-F3   switch between Mixed, Logs and Output",
+            "Tab, F1-F3   switch between Normal, Mixed and Logs",
             "Ctrl+T       expand/collapse the log blocks in the Mixed view",
             "mouse        wheel scrolls; click tabs, log headers and devices",
             "Ctrl+F       find in the output; Enter next, ↑ previous, Esc close",
@@ -545,8 +594,42 @@ impl App {
             "/copy [all]  copy the current view of the last command (or all) to the clipboard",
             "/save [all] [file]  save it to a file (default: ykman-pilot-<time>.txt)",
             "/log [level] change log verbosity (error, warning, info, debug, traffic)",
+            "/record      queue several commands, then run them once (or on every key in batch)",
+            "/repeat <n> <command…>  run a command n times (1-100); ${i} is the iteration",
+            "/csv <file>  variables from a CSV (header row = names); one row per key in batch",
+            "/script      save, run, list or delete recorded sequences; /scripts to browse",
+            "/help variables  variables for recorded sequences: ${serial}, ${random:hex}, …",
             "Ctrl+C       cancel running command / clear input / quit",
             "Esc          cancel a prompt or clear input",
+        ] {
+            self.note(l);
+        }
+    }
+
+    fn help_variables(&mut self) {
+        for l in [
+            "Variables work in recorded and saved sequences: write ${name} in a command.",
+            "",
+            "From the current key (changes per key in a batch):",
+            "  ${serial}   serial number           ${version}  firmware version",
+            "  ${name}     product name            ${round}    batch round (1, 2, …)",
+            "  ${date}     today, YYYY-MM-DD",
+            "  ${i}        iteration number inside /repeat",
+            "",
+            "Random, generated fresh for every key and run:",
+            "  ${random:base32:32}   OATH secret (A-Z, 2-7), default length 32",
+            "  ${random:hex:32}      hex, default 32",
+            "  ${random:digits:6}    digits, default 6",
+            "  ${random:alnum:8}     letters and digits, default 8 (also just ${random})",
+            "  Lengths are 1-128. The same ${random:…} twice in one run is the same value.",
+            "  base32 and hex values are hidden in the command and printed once after the run.",
+            "",
+            "From a CSV: /csv <file>, then ${column} in a sequence. Batch mode takes one row per",
+            "  key (a failed key retries the same row); /repeat all … runs once per row.",
+            "",
+            "Your own, e.g. ${customer}: asked once before the sequence starts.",
+            "  Names containing secret, key, pass, pin, puk, token or code are masked.",
+            "  Values are kept in memory only and never saved with a script.",
         ] {
             self.note(l);
         }

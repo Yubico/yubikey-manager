@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) const TABS: [&str; 3] = ["Mixed", "Logs", "Output"];
+pub(super) const TABS: [&str; 3] = ["Normal", "Mixed", "Logs"];
 pub(super) const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 pub(super) const LOGO: [&str; 6] = [
     "       _                          ",
@@ -18,14 +18,15 @@ pub(super) const POPUP_ROWS: usize = 8;
 // user's theme; "dim" text uses the DIM attribute on the default foreground.
 const ACCENT: Color = Color::Green;
 const BATCH_ACCENT: Color = Color::LightBlue;
-static BATCH_THEME: AtomicBool = AtomicBool::new(false);
+static THEME: AtomicU8 = AtomicU8::new(0);
+const RECORD_ACCENT: Color = Color::Magenta;
 
 /// Primary colour: cyan while in batch mode so the mode is obvious.
 pub(super) fn accent() -> Color {
-    if BATCH_THEME.load(Ordering::Relaxed) {
-        BATCH_ACCENT
-    } else {
-        ACCENT
+    match THEME.load(Ordering::Relaxed) {
+        2 => RECORD_ACCENT,
+        1 => BATCH_ACCENT,
+        _ => ACCENT,
     }
 }
 pub(super) const TEXT: Color = Color::Reset;
@@ -365,7 +366,12 @@ pub(super) fn highlight_line(line: &Line, q: &[char], style: Style) -> Line<'sta
 
 impl App {
     pub(super) fn draw(&mut self, f: &mut Frame) {
-        BATCH_THEME.store(self.batch_mode || self.batch.is_some(), Ordering::Relaxed);
+        let theme = if self.recording.is_some() {
+            2
+        } else {
+            u8::from(self.batch_mode || self.batch.is_some())
+        };
+        THEME.store(theme, Ordering::Relaxed);
         let mut area = f.area();
         // The device panel spans the full height; everything else sits to its right.
         if self.sidebar {
@@ -423,51 +429,59 @@ impl App {
         self.draw_log(f, main[2]);
         self.draw_input(f, rows[1]);
         self.draw_status(f, pad(rows[2]));
+        self.draw_script_panel(f, rows[1]);
         self.draw_popup(f, rows[1]);
     }
 
     pub(super) fn draw_sidebar(&mut self, f: &mut Frame, area: Rect) {
-        let active = self.active_device();
-        let chosen = self.side_state.selected();
         let w = area.width.saturating_sub(2) as usize;
-        let mut items: Vec<ListItem> = self
-            .devices
-            .iter()
-            .enumerate()
-            .map(|(i, d)| {
-                let mark = if active == Some(d.serial) { "●" } else { " " };
-                let is_sel = chosen == Some(i);
-                let fill = if is_sel {
-                    Style::new().bg(selected())
-                } else {
-                    Style::new()
-                };
-                // Half-block rows above and below give the selection vertical padding.
-                ListItem::new(vec![
-                    Line::from(vec![
-                        Span::styled(format!(" {mark} "), Style::new().fg(accent())),
-                        Span::styled(d.name.clone(), Style::new().add_modifier(Modifier::BOLD)),
-                    ])
-                    .style(fill),
-                    Line::from(Span::styled(
-                        format!("   S/N: {}  F/W: {}", d.serial, d.version),
-                        dim(),
-                    ))
-                    .style(fill),
-                    // The spacer row doubles as the half-row edge of the selection,
-                    // so every item keeps the same height and nothing shifts.
-                    if is_sel {
-                        half_edge('▀', w)
-                    } else if chosen == Some(i + 1) {
-                        half_edge('▄', w)
-                    } else {
-                        Line::from("")
-                    },
-                ])
-            })
-            .collect();
+        f.render_widget(
+            ratatui::widgets::Block::new()
+                .borders(ratatui::widgets::Borders::RIGHT)
+                .border_style(dim()),
+            area,
+        );
+        self.hits.side_tabs.clear();
+        let mut x = area.x + 1;
+        let mut head = Vec::new();
+        for (i, t) in ["YubiKeys", "Scripts"].iter().enumerate() {
+            let style = if i == self.side_tab {
+                Style::new()
+                    .fg(ON_ACCENT)
+                    .bg(accent())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                dim().bg(tab_bg())
+            };
+            let tw = t.len() as u16 + 2;
+            self.hits.side_tabs.push((Rect::new(x, area.y, tw, 1), i));
+            head.push(Span::styled(format!(" {t} "), style));
+            head.push(Span::raw(" "));
+            x += tw + 1;
+        }
+        f.render_widget(
+            Paragraph::new(Line::from(head)),
+            Rect::new(area.x + 1, area.y, area.width.saturating_sub(3), 1),
+        );
+        let area = Rect::new(
+            area.x,
+            area.y + 2,
+            area.width,
+            area.height.saturating_sub(2),
+        );
+        let chosen = self.side_state.selected();
+        let mut items: Vec<ListItem> = if self.side_tab == 1 {
+            self.script_items(chosen, w)
+        } else {
+            self.device_items(self.active_device(), chosen, w)
+        };
         if items.is_empty() {
-            items.push(ListItem::new(Span::styled("  Insert a YubiKey", dim())));
+            let msg = if self.side_tab == 1 {
+                "  No saved scripts yet."
+            } else {
+                "  Insert a YubiKey"
+            };
+            items.push(ListItem::new(Span::styled(msg, dim())));
         }
         let list = List::new(items).block(
             ratatui::widgets::Block::new()
@@ -486,6 +500,86 @@ impl App {
             let edge = Rect::new(area.x, area.y, area.width.saturating_sub(2), 1);
             f.render_widget(Paragraph::new(half_edge('▄', w)), edge);
         }
+    }
+
+    fn script_items(&self, chosen: Option<usize>, w: usize) -> Vec<ListItem<'static>> {
+        self.scripts
+            .iter()
+            .enumerate()
+            .map(|(i, (name, n, first))| {
+                let is_sel = chosen == Some(i);
+                let fill = if is_sel {
+                    Style::new().bg(selected())
+                } else {
+                    Style::new()
+                };
+                let mut preview = first.clone();
+                let room = w.saturating_sub(5);
+                if preview.chars().count() > room {
+                    preview = preview
+                        .chars()
+                        .take(room.saturating_sub(1))
+                        .collect::<String>()
+                        + "…";
+                }
+                ListItem::new(vec![
+                    Line::from(vec![
+                        Span::raw("   "),
+                        Span::styled(name.clone(), Style::new().add_modifier(Modifier::BOLD)),
+                        Span::styled(format!("  {n} step{}", plural(*n)), dim()),
+                    ])
+                    .style(fill),
+                    Line::from(Span::styled(format!("   {preview}"), dim())).style(fill),
+                    if is_sel {
+                        half_edge('▀', w)
+                    } else if chosen == Some(i + 1) {
+                        half_edge('▄', w)
+                    } else {
+                        Line::from("")
+                    },
+                ])
+            })
+            .collect()
+    }
+
+    fn device_items(
+        &self,
+        active: Option<u32>,
+        chosen: Option<usize>,
+        w: usize,
+    ) -> Vec<ListItem<'static>> {
+        self.devices
+            .iter()
+            .enumerate()
+            .map(|(i, d)| {
+                let mark = if active == Some(d.serial) { "●" } else { " " };
+                let is_sel = chosen == Some(i);
+                let fill = if is_sel {
+                    Style::new().bg(selected())
+                } else {
+                    Style::new()
+                };
+                ListItem::new(vec![
+                    Line::from(vec![
+                        Span::styled(format!(" {mark} "), Style::new().fg(accent())),
+                        Span::styled(d.name.clone(), Style::new().add_modifier(Modifier::BOLD)),
+                    ])
+                    .style(fill),
+                    Line::from(Span::styled(
+                        format!("   S/N: {}  F/W: {}", d.serial, d.version),
+                        dim(),
+                    ))
+                    .style(fill),
+                    if is_sel {
+                        half_edge('▀', w)
+                    } else if chosen == Some(i + 1) {
+                        half_edge('▄', w)
+                    } else {
+                        Line::from("")
+                    },
+                ])
+            })
+            .collect()
     }
 
     pub(super) fn draw_log(&mut self, f: &mut Frame, area: Rect) {
@@ -520,9 +614,9 @@ impl App {
         if self.welcome {
             self.welcome_lines(width, &mut lines);
         }
-        let mixed = self.tab == 0;
-        let show_out = self.tab != 1;
-        let show_logs = self.tab != 2;
+        let mixed = self.tab == 1;
+        let show_out = self.tab != 2;
+        let show_logs = self.tab != 0;
         let last_run = runs.len() - 1;
         let mut toggle_lines: Vec<(usize, usize)> = Vec::new();
         let mut prev: Option<u8> = None;
@@ -784,6 +878,15 @@ impl App {
                 };
                 (prompt, shown, hint)
             }
+            None if self.var_prompt().is_some() => {
+                let (name, secret) = self.var_prompt().unwrap_or_default();
+                let shown = if secret {
+                    "•".repeat(self.input.len())
+                } else {
+                    self.input.buf.clone()
+                };
+                (format!("{name} ❯ "), shown, String::new())
+            }
             None => {
                 let sugg = self.suggestions();
                 let partial = current_partial(&self.input.buf);
@@ -797,10 +900,11 @@ impl App {
                 } else {
                     ghost
                 };
-                let mark = if self.batch_mode {
-                    "batch ❯ "
-                } else {
-                    "❯ "
+                let mark = match (self.recording.is_some(), self.batch_mode) {
+                    (true, true) => "batch rec ❯ ",
+                    (true, false) => "rec ❯ ",
+                    (false, true) => "batch ❯ ",
+                    (false, false) => "❯ ",
                 };
                 (mark.to_string(), self.input.buf.clone(), ghost)
             }
@@ -816,7 +920,9 @@ impl App {
                     Style::new().add_modifier(Modifier::BOLD).bg(band_bg()),
                 )),
                 None => {
-                    let hint = if self.batch_mode {
+                    let hint = if self.recording.is_some() {
+                        "Type / to add a command · Esc to finish"
+                    } else if self.batch_mode {
                         "Type / to pick a command to repeat on many keys · Esc to leave"
                     } else {
                         "Type / for commands"
@@ -868,7 +974,7 @@ impl App {
         } else {
             vec![
                 Span::styled("←", dim().add_modifier(Modifier::BOLD)),
-                Span::styled(" devices", dim()),
+                Span::styled(" devices & scripts", dim()),
             ]
         };
         let bold = dim().add_modifier(Modifier::BOLD);
@@ -951,6 +1057,72 @@ impl App {
             area,
             &mut state,
         );
+    }
+
+    /// Numbered overview of the commands queued by `/record`, above the input.
+    pub(super) fn draw_script_panel(&self, f: &mut Frame, input_area: Rect) {
+        let Some(steps) = self.recording.as_ref() else {
+            return;
+        };
+        if self.sidebar
+            || self.prompt().is_some()
+            || self.hist_pos.is_some()
+            || !self.suggestions().is_empty()
+        {
+            return;
+        }
+        let max = 6;
+        let hidden = steps.len().saturating_sub(max);
+        let width = input_area.width.saturating_sub(4) as usize;
+        let n = steps.len();
+        let mut lines = vec![Line::from(vec![
+            Span::styled(
+                "● Recording",
+                Style::new().fg(accent()).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" · {n} step{}", if n == 1 { "" } else { "s" }),
+                dim(),
+            ),
+        ])];
+        if hidden > 0 {
+            lines.push(Line::from(Span::styled(
+                format!("  … {hidden} earlier"),
+                dim(),
+            )));
+        }
+        for (i, s) in steps.iter().enumerate().skip(hidden) {
+            let mut text = s.join(" ");
+            let room = width.saturating_sub(6);
+            if text.chars().count() > room {
+                text = text
+                    .chars()
+                    .take(room.saturating_sub(1))
+                    .collect::<String>()
+                    + "…";
+            }
+            lines.push(Line::from(vec![
+                Span::styled(format!("{:>3}  ", i + 1), Style::new().fg(accent())),
+                Span::raw(text),
+            ]));
+        }
+        lines.push(Line::from(Span::styled(
+            "Enter add · Backspace remove last · Esc finish",
+            dim(),
+        )));
+        let h = (lines.len() as u16).min(input_area.y);
+        if h == 0 {
+            return;
+        }
+        let skip = lines.len() - h as usize;
+        let area = Rect::new(
+            input_area.x + 2,
+            input_area.y - h,
+            input_area.width.saturating_sub(4),
+            h,
+        );
+        f.render_widget(Clear, area);
+        f.render_widget(Paragraph::new(lines.split_off(skip)), area);
     }
 
     pub(super) fn draw_popup(&self, f: &mut Frame, input_area: Rect) {
