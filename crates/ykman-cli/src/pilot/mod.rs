@@ -456,6 +456,11 @@ impl App {
                     }
                 }
                 self.devices = list;
+                // Keep the first key found as the active one so a changing
+                // list order (e.g. with NFC readers) cannot switch it.
+                if self.device.is_none() {
+                    self.device = self.devices.first().map(|d| d.serial);
+                }
                 self.announce_device_change(before);
                 self.batch_devices();
                 if !self.scanned {
