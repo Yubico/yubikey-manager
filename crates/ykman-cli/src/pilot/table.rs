@@ -244,3 +244,136 @@ pub(super) fn row_label(b: &Batch, row: usize) -> String {
         .map_or_else(String::new, |v| format!(" ({v})"));
     format!("row {}/{}{who}", row + 1, t.rows.len())
 }
+
+fn csv_field(v: &str) -> String {
+    if v.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", v.replace('"', "\"\""))
+    } else {
+        v.to_string()
+    }
+}
+
+/// Generated values as one row per key and iteration, one column per variable.
+fn generated_rows(entries: &[[String; 4]]) -> (Vec<String>, Vec<(String, Vec<String>)>) {
+    let mut names: Vec<String> = Vec::new();
+    let mut rows: Vec<(&str, &str, Vec<(&str, &str)>)> = Vec::new();
+    for [serial, group, name, value] in entries {
+        if !names.contains(name) {
+            names.push(name.clone());
+        }
+        match rows.iter_mut().find(|r| r.0 == serial && r.1 == group) {
+            Some(r) => r.2.push((name, value)),
+            None => rows.push((serial, group, vec![(name, value)])),
+        }
+    }
+    let rows = rows
+        .into_iter()
+        .map(|(serial, _, vals)| {
+            let cells = names
+                .iter()
+                .map(|n| {
+                    vals.iter()
+                        .find(|v| v.0 == n)
+                        .map_or(String::new(), |v| v.1.to_string())
+                })
+                .collect();
+            (serial.to_string(), cells)
+        })
+        .collect();
+    (names, rows)
+}
+
+impl App {
+    /// Show what a round generated, so the values can be written down or checked.
+    pub(super) fn show_generated(&mut self, serial: u32, round: usize) {
+        let (s, r) = (serial.to_string(), round.to_string());
+        let mine: Vec<[String; 4]> = self
+            .generated
+            .iter()
+            .filter(|g| g[0] == s && (g[1] == r || g[1].starts_with(&format!("{r}."))))
+            .cloned()
+            .collect();
+        if mine.is_empty() {
+            return;
+        }
+        let (names, rows) = generated_rows(&mine);
+        if let [(_, cells)] = rows.as_slice() {
+            let w = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
+            for (n, c) in names.iter().zip(cells) {
+                self.note(&format!("  {n:<w$}  {c}"));
+            }
+            return;
+        }
+        let widths: Vec<usize> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                rows.iter()
+                    .map(|r| r.1[i].chars().count())
+                    .chain([n.chars().count()])
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
+        let line = |cells: &[String]| {
+            let padded: Vec<String> = cells
+                .iter()
+                .zip(&widths)
+                .map(|(c, w)| format!("{c:<w$}"))
+                .collect();
+            format!("  {}", padded.join("  ").trim_end())
+        };
+        self.note(&line(&names));
+        for (_, cells) in &rows {
+            self.note(&line(cells));
+        }
+    }
+
+    /// `/export` saves, `/export copy` copies, `/export <file>` saves to a file.
+    pub(super) fn export_command(&mut self, args: &[String]) {
+        if self.generated.is_empty() {
+            self.note("No generated values yet. Run a sequence that uses ${random…} first.");
+            return;
+        }
+        let (names, rows) = generated_rows(&self.generated);
+        let mut text = format!(
+            "serial,{}\n",
+            names
+                .iter()
+                .map(|h| csv_field(h))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        for (serial, cells) in &rows {
+            let cells: Vec<String> = cells.iter().map(|c| csv_field(c)).collect();
+            text.push_str(&format!("{},{}\n", csv_field(serial), cells.join(",")));
+        }
+        let n = rows.len();
+        if args.first().is_some_and(|a| a == "copy") {
+            match copy_to_clipboard(&text) {
+                Ok(()) => self.note(&format!("Copied {n} row{} as CSV.", plural(n))),
+                Err(e) => self.note(&format!("Couldn't copy: {e}")),
+            }
+            return;
+        }
+        let path = args.first().map_or_else(
+            || {
+                std::path::PathBuf::from(format!(
+                    "ykman-pilot-values-{}.csv",
+                    chrono::Local::now().format("%Y%m%d-%H%M%S")
+                ))
+            },
+            std::path::PathBuf::from,
+        );
+        // Private and never overwrites: the values include secrets.
+        let res = create_private_file(&path).and_then(|()| std::fs::write(&path, &text));
+        match res {
+            Ok(()) => self.note(&format!(
+                "Saved {n} row{} to {} (contains secrets)",
+                plural(n),
+                path.display()
+            )),
+            Err(e) => self.note(&format!("Couldn't save {}: {e}", path.display())),
+        }
+    }
+}

@@ -61,7 +61,6 @@ pub(super) struct Batch {
     /// Steps that came from a `repeat` and so get fresh random values each.
     pub(super) fresh: Vec<bool>,
     /// Generated secret values to print after the round: (step, name, value).
-    pub(super) secrets: Vec<(usize, String, String)>,
     /// The attached CSV, if the steps use its columns.
     pub(super) csv: Option<Table>,
     /// Batch mode: the CSV row the current round uses.
@@ -179,7 +178,6 @@ impl App {
         b.step = 0;
         b.phase = BatchPhase::Running;
         b.random.clear();
-        b.secrets.clear();
         let (round, n, once) = (b.round, b.steps.len(), b.once);
         let row = b.csv.is_some().then(|| row_label(b, b.row));
         self.device = Some(serial);
@@ -200,18 +198,44 @@ impl App {
         };
         let (idx, fresh) = (b.step, b.fresh[b.step]);
         let step = b.steps[idx].clone();
+        let mut generated: Vec<[String; 4]> = Vec::new();
+        let columns = self.param_names(&step);
         if let Some(b) = self.batch.as_mut() {
             for n in random_names(&step) {
+                let column = columns
+                    .iter()
+                    .zip(&step)
+                    .find(|(_, w)| find_vars(w).iter().any(|(_, _, v)| *v == n))
+                    .and_then(|(c, _)| c.clone())
+                    .unwrap_or_else(|| parse_random(&n).map_or(n.clone(), |(k, _)| k.to_string()));
                 if (fresh || !b.random.contains_key(&n))
                     && let Some(v) = random_value(&n)
                 {
-                    if random_is_secret(&n) {
-                        b.secrets.push((idx + 1, n.clone(), v.clone()));
+                    let serial = b.current.to_string();
+                    let group = if fresh {
+                        format!("{}.{}", b.round, idx)
+                    } else {
+                        b.round.to_string()
+                    };
+                    let same = |g: &[String; 4]| g[0] == serial && g[1] == group;
+                    let taken = |name: &str| {
+                        self.generated
+                            .iter()
+                            .chain(&generated)
+                            .any(|g| same(g) && g[2] == name)
+                    };
+                    let mut name = column.clone();
+                    let mut k = 2;
+                    while taken(&name) {
+                        name = format!("{column}_{k}");
+                        k += 1;
                     }
+                    generated.push([serial, group, name, v.clone()]);
                     b.random.insert(n, v);
                 }
             }
         }
+        self.generated.extend(generated);
         let Some(b) = self.batch.as_ref() else {
             return;
         };
@@ -273,19 +297,7 @@ impl App {
         let ok = b.results.iter().filter(|r| r.1).count();
         let tally = format!("{ok} ok, {} failed", b.results.len() - ok);
         let (n, step, serial) = (b.steps.len(), b.step + 1, b.current);
-        let once = b.once;
-        let generated: Vec<(String, String)> = b
-            .secrets
-            .iter()
-            .map(|(k, n, v)| {
-                let label = if b.steps.len() > 1 {
-                    format!("step {k}  ${{{n}}}")
-                } else {
-                    format!("${{{n}}}")
-                };
-                (label, v.clone())
-            })
-            .collect();
+        let (once, round_no) = (b.once, b.round);
         let msg = if once {
             match (good, n) {
                 (true, 1) => (Kind::Success, format!("Done on S/N {serial}")),
@@ -328,9 +340,7 @@ impl App {
             };
         }
         self.push(msg.0, msg.1);
-        for (spec, value) in generated {
-            self.note(&format!("  {spec} = {value}"));
-        }
+        self.show_generated(serial, round_no);
         if once {
             self.script_hint();
         } else if exhausted {
@@ -589,6 +599,44 @@ impl App {
         Ok(())
     }
 
+    /// For each word of a step, the name of the command parameter it fills
+    /// (e.g. `name`, `secret`, `password`), if clap can tell.
+    pub(super) fn param_names(&self, step: &[String]) -> Vec<Option<String>> {
+        let expanded = self.expand(step, Expand::Check);
+        let mut names = vec![None; step.len()];
+        let Ok(mut m) = self.tree.clone().try_get_matches_from(
+            std::iter::once("ykman").chain(expanded.iter().map(String::as_str)),
+        ) else {
+            return names;
+        };
+        let mut offset = 0;
+        loop {
+            for id in m.ids().map(|i| i.as_str().to_string()).collect::<Vec<_>>() {
+                if m.value_source(&id) != Some(clap::parser::ValueSource::CommandLine) {
+                    continue;
+                }
+                for i in m.indices_of(&id).into_iter().flatten() {
+                    // Indices count from the start of this subcommand's own arguments.
+                    if let Some(slot) = (offset + i).checked_sub(1).and_then(|i| names.get_mut(i)) {
+                        slot.get_or_insert_with(|| id.clone());
+                    }
+                }
+            }
+            match m.remove_subcommand() {
+                Some((name, sub)) => {
+                    offset += expanded
+                        .iter()
+                        .skip(offset)
+                        .position(|w| *w == name)
+                        .map_or(0, |p| p + 1);
+                    m = sub;
+                }
+                None => break,
+            }
+        }
+        names
+    }
+
     /// Queue a command (without the implicit `batch` prefix) if it would be accepted.
     pub(super) fn record_step(&mut self, args: &[String]) {
         if let Err(e) = self.check_step(args) {
@@ -657,6 +705,7 @@ impl App {
         self.remember_sequence(&steps, name);
         let serial = self.active_device().unwrap_or_default();
         let once = !self.batch_mode;
+        self.generated.clear();
         self.batch = Some(self.new_batch(steps, once, serial));
     }
 

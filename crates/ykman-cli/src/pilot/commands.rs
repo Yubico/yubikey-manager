@@ -22,13 +22,17 @@ pub(super) const PILOT_MANAGED_OPTS: [&str; 8] = [
     "diagnose",
 ];
 /// Commands handled by the pilot itself (the first three wrap top-level flags).
-pub(super) const BUILTINS: [(&str, &str); 16] = [
+pub(super) const BUILTINS: [(&str, &str); 17] = [
     ("diagnose", "Run system diagnostics"),
     ("licenses", "Show open source licenses"),
     ("version", "Show the ykman version"),
     ("batch", "Repeat a command on one YubiKey after another"),
     ("record", "Record a sequence of commands, then run it"),
     ("scripts", "Browse saved scripts"),
+    (
+        "export",
+        "Export generated values as CSV: /export [copy|file]",
+    ),
     ("csv", "Use a CSV file for variables: /csv <file>"),
     (
         "repeat",
@@ -358,7 +362,12 @@ impl App {
         }
         self.history
             .iter()
-            .filter_map(|h| h.strip_prefix("/batch ").map(|r| format!("/{}", r.trim())))
+            .filter_map(|h| {
+                if h.starts_with("/repeat ") {
+                    return Some(h.clone());
+                }
+                h.strip_prefix("/batch ").map(|r| format!("/{}", r.trim()))
+            })
             .filter(|h| h.len() > 1)
             .collect()
     }
@@ -438,6 +447,7 @@ impl App {
             "repeat" => self.repeat_command(&args),
             "script" => self.script_command(&args[1..]),
             "csv" => self.csv_command(&args[1..]),
+            "export" => self.export_command(&args[1..]),
             "batch" if self.recording.is_some() => {
                 self.note("Finish the recording first (Esc).");
             }
@@ -464,8 +474,16 @@ impl App {
             ""
         };
         let rest = &words[prefix.len().min(1)..];
+        let repeat = words.first() == Some(&"repeat") && parse_repeat(args).is_ok();
+        // `/repeat <n> <command path>`: the count is kept, the arguments are not.
+        let rest = if repeat { &words[2..] } else { rest };
         let (node, used) = self.resolve(rest);
-        let path = if used > 0 {
+        let path = if repeat {
+            if used == 0 {
+                return;
+            }
+            format!("repeat {} {}", words[1], rest[..used].join(" "))
+        } else if used > 0 {
             let mut path = rest[..used].join(" ");
             if !prefix.is_empty() {
                 for tok in safe_batch_args(node, &rest[used..]) {
@@ -596,6 +614,7 @@ impl App {
             "/log [level] change log verbosity (error, warning, info, debug, traffic)",
             "/record      queue several commands, then run them once (or on every key in batch)",
             "/repeat <n> <command…>  run a command n times (1-100); ${i} is the iteration",
+            "/export [copy|file]  save or copy the random values a sequence generated, as CSV",
             "/csv <file>  variables from a CSV (header row = names); one row per key in batch",
             "/script      save, run, list or delete recorded sequences; /scripts to browse",
             "/help variables  variables for recorded sequences: ${serial}, ${random:hex}, …",

@@ -306,7 +306,6 @@ impl App {
             csv,
             row: 0,
             labels: Vec::new(),
-            secrets: Vec::new(),
             step: 0,
             once,
             phase: if ask.is_empty() {
@@ -376,7 +375,7 @@ impl App {
                 _ if is_random(name) => match (mode, b.and_then(|b| b.random.get(name))) {
                     (Expand::Run, Some(v)) => v.clone(),
                     (Expand::Display, Some(v)) => {
-                        if parse_random(name).is_ok_and(|(k, _)| k == "base32" || k == "hex") {
+                        if random_is_secret(name) {
                             "••••".into()
                         } else {
                             v.clone()
@@ -425,13 +424,19 @@ impl App {
 
     /// A single dim hint after a run, if the sequence has not been saved yet.
     pub(super) fn script_hint(&mut self) {
-        if self
+        let unsaved = self
             .last_sequence
             .as_ref()
-            .is_some_and(|s| s.name.is_none())
-        {
-            self.note("Tip: /script save <name> keeps this sequence for later.");
-        }
+            .is_some_and(|s| s.name.is_none());
+        let tip = match (unsaved, self.generated.is_empty()) {
+            (true, false) => {
+                "Tip: /script save <name> keeps this sequence, /export saves the values as CSV."
+            }
+            (true, true) => "Tip: /script save <name> keeps this sequence for later.",
+            (false, false) => "Tip: /export saves the generated values as CSV.",
+            (false, true) => return,
+        };
+        self.note(tip);
     }
 
     pub(super) fn script_command(&mut self, args: &[String]) {
