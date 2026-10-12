@@ -28,7 +28,7 @@ pub(super) enum BatchPhase {
     SameKey(u32),
 }
 
-/// Repeat one command across keys, replaying the first run's answers.
+/// Repeat one command across keys; every round asks its own prompts.
 pub(super) struct Batch {
     pub(super) args: Vec<String>,
     pub(super) shown: String,
@@ -39,18 +39,6 @@ pub(super) struct Batch {
     /// Serial of the key the current round runs on.
     pub(super) current: u32,
     pub(super) results: Vec<(u32, bool)>,
-    /// (normalised prompt, reply) recorded during round 1; memory only.
-    pub(super) answers: Vec<(String, String)>,
-    pub(super) used: Vec<bool>,
-}
-
-/// Prompt text without digits, so prompts that mention a serial still match.
-pub(super) fn norm_prompt(p: &str) -> String {
-    strip_ansi(p)
-        .trim()
-        .chars()
-        .filter(|c| !c.is_ascii_digit())
-        .collect()
 }
 
 impl App {
@@ -107,16 +95,7 @@ impl App {
             return;
         }
         let words: Vec<&str> = args.iter().map(String::as_str).collect();
-        let (node, used) = self.resolve(&words);
-        let force = node
-            .get_arguments()
-            .find(|a| a.get_long() == Some("force"))
-            .filter(|a| {
-                !args
-                    .iter()
-                    .any(|x| x == "--force" || a.get_short().is_some_and(|c| x == &format!("-{c}")))
-            })
-            .is_some();
+        let (_, used) = self.resolve(&words);
         let is_reset = used > 0 && words[used - 1] == "reset";
         if !is_reset && !BATCH_ALLOWED.iter().any(|p| words.starts_with(p)) {
             self.note(
@@ -143,26 +122,19 @@ impl App {
         }
         let (serial, name) = (self.devices[0].serial, self.devices[0].describe());
         let msg = format!(
-            "Batch: /{} on {}.{} Answers from the first run are repeated on every key.",
+            "Batch: /{} on {}. The command runs on every key you insert, so give it all the options it needs.",
             args.join(" "),
-            name,
-            if force { " Runs with --force." } else { "" }
+            name
         );
         self.note(&msg);
-        let mut run_args = args.to_vec();
-        if force {
-            run_args.push("--force".to_string());
-        }
         self.batch = Some(Batch {
-            args: run_args,
+            args: args.to_vec(),
             shown: format!("/batch {}", args.join(" ")),
             phase: BatchPhase::Confirm,
             round: 0,
             same_key: false,
             current: serial,
             results: Vec::new(),
-            answers: Vec::new(),
-            used: Vec::new(),
         });
     }
 
@@ -174,7 +146,6 @@ impl App {
         b.same_key = b.results.iter().any(|r| r.0 == serial);
         b.current = serial;
         b.phase = BatchPhase::Running;
-        b.used = vec![false; b.answers.len()];
         let (shown, args, round) = (b.shown.clone(), b.args.clone(), b.round);
         self.device = Some(serial);
         self.note(&format!("Batch round {round}: YubiKey S/N {serial}"));
@@ -240,30 +211,6 @@ impl App {
         } else {
             self.begin_round(serial);
         }
-    }
-
-    /// Answer prompts of later rounds with the replies recorded in round 1.
-    pub(super) fn auto_reply(&mut self) {
-        let Some(b) = self.batch.as_ref() else {
-            return;
-        };
-        if b.round < 2 || !matches!(b.phase, BatchPhase::Running) {
-            return;
-        }
-        let Some(raw) = self.prompt().map(str::to_string) else {
-            return;
-        };
-        let norm = norm_prompt(&raw);
-        let Some(b) = self.batch.as_mut() else {
-            return;
-        };
-        let Some(i) = (0..b.answers.len()).find(|&i| !b.used[i] && b.answers[i].0 == norm) else {
-            return;
-        };
-        b.used[i] = true;
-        let reply = b.answers[i].1.clone();
-        let secret = self.secret_prompt(&raw);
-        self.send_reply(&reply, secret);
     }
 
     /// Short status-bar text while the batch waits for the user.

@@ -352,7 +352,6 @@ impl App {
                 dirty = true;
                 self.on_msg(msg);
             }
-            self.auto_reply();
             let interval = if self.batch_waiting() {
                 BATCH_POLL
             } else {
@@ -438,11 +437,23 @@ impl App {
                     && !list.iter().any(|d| d.serial == serial)
                 {
                     self.device = None;
-                    let msg = match self.devices.iter().find(|d| d.serial == serial) {
-                        Some(d) => format!("Removed {}", d.describe()),
-                        None => format!("YubiKey {serial} was removed."),
-                    };
-                    self.note(&msg);
+                }
+                // The batch has its own progress messages.
+                if self.scanned && self.batch.is_none() {
+                    let gone: Vec<String> = self
+                        .devices
+                        .iter()
+                        .filter(|d| !list.iter().any(|n| n.serial == d.serial))
+                        .map(|d| format!("Removed {}", d.describe()))
+                        .collect();
+                    let new: Vec<String> = list
+                        .iter()
+                        .filter(|n| !self.devices.iter().any(|d| d.serial == n.serial))
+                        .map(|d| format!("Inserted {}", d.describe()))
+                        .collect();
+                    for msg in gone.into_iter().chain(new) {
+                        self.note(&msg);
+                    }
                 }
                 self.devices = list;
                 self.announce_device_change(before);
@@ -650,16 +661,12 @@ impl App {
     /// Note the newly active key if it differs from `before`.
     fn announce_device_change(&mut self, before: Option<u32>) {
         let now = self.active_device();
-        if now == before || (before.is_none() && self.welcome) {
+        // Inserting the first key is already announced as "Inserted".
+        if now == before || before.is_none() {
             return;
         }
         if let Some(d) = now.and_then(|s| self.devices.iter().find(|d| d.serial == s)) {
-            let verb = if before.is_some() {
-                "Switched to"
-            } else {
-                "Using"
-            };
-            let msg = format!("{verb} {}", d.describe());
+            let msg = format!("Switched to {}", d.describe());
             self.note(&msg);
         }
     }

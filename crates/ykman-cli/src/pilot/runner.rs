@@ -132,13 +132,6 @@ impl App {
     }
 
     pub(super) fn send_reply(&mut self, reply: &str, secret: bool) {
-        if let Some(b) = self.batch.as_mut()
-            && b.round == 1
-            && matches!(b.phase, BatchPhase::Running)
-        {
-            b.answers
-                .push((norm_prompt(&self.partial), reply.to_string()));
-        }
         if secret {
             let prompt = strip_ansi(&self.partial);
             self.skip_echo = Some(prompt.trim().to_string());
