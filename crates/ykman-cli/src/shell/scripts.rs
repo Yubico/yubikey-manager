@@ -1,6 +1,9 @@
 use super::*;
 use std::collections::HashMap;
 
+#[cfg(test)]
+mod tests;
+
 const BUILTIN_VARS: [&str; 6] = ["serial", "version", "name", "round", "date", "i"];
 const MAX_REPEAT: usize = 100;
 
@@ -275,7 +278,7 @@ fn secret_flag(w: &str) -> bool {
 }
 
 /// A step for display, with values that look like secrets hidden.
-fn masked_step(step: &[String]) -> String {
+pub(super) fn masked_step(step: &[String]) -> String {
     let off = if step.first().is_some_and(|w| w == "repeat") {
         2
     } else {
@@ -653,7 +656,7 @@ impl App {
             .collect()
     }
 
-    fn load_script(&self, name: &str) -> Option<Vec<Vec<String>>> {
+    pub(super) fn load_script(&self, name: &str) -> Option<Vec<Vec<String>>> {
         if !valid_name(name) {
             return None;
         }
@@ -666,7 +669,7 @@ impl App {
         )
     }
 
-    fn script_run(&mut self, name: &str) {
+    pub(super) fn script_run(&mut self, name: &str) {
         let Some(steps) = self.load_script(name) else {
             self.note(&format!("No script named '{name}'."));
             return;

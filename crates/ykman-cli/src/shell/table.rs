@@ -1,9 +1,12 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 const MAX_ROWS: usize = 10_000;
 
 /// A CSV file attached for the session: the header names become variables.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct Table {
     pub(super) name: String,
     pub(super) headers: Vec<String>,
@@ -245,6 +248,15 @@ pub(super) fn row_label(b: &Batch, row: usize) -> String {
     format!("row {}/{}{who}", row + 1, t.rows.len())
 }
 
+/// A summary value, hidden when it is a secret and secrets are hidden.
+fn masked_cell(hide: bool, secrets: &std::collections::HashSet<String>, value: &str) -> String {
+    if hide && secrets.contains(value) {
+        "••••".to_string()
+    } else {
+        value.to_string()
+    }
+}
+
 fn csv_field(v: &str) -> String {
     if v.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", v.replace('"', "\"\""))
@@ -297,6 +309,16 @@ impl App {
             return;
         }
         let (names, rows) = generated_rows(&mine);
+        let rows: Vec<(String, Vec<String>)> = rows
+            .into_iter()
+            .map(|(s, cells)| {
+                let cells = cells
+                    .iter()
+                    .map(|c| masked_cell(self.hide_secrets, &self.secret_values, c))
+                    .collect();
+                (s, cells)
+            })
+            .collect();
         if let [(_, cells)] = rows.as_slice() {
             let w = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
             for (n, c) in names.iter().zip(cells) {

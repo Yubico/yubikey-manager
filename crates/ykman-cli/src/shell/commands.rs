@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) const LEVELS: [(&str, &str); 5] = [
     ("error", "Only errors"),
     ("warning", "Warnings and errors"),
@@ -22,17 +25,24 @@ pub(super) const SHELL_MANAGED_OPTS: [&str; 8] = [
     "diagnose",
 ];
 /// Commands handled by the shell itself (the first three wrap top-level flags).
-pub(super) const BUILTINS: [(&str, &str); 16] = [
+pub(super) const BUILTINS: [(&str, &str); 17] = [
     ("diagnose", "Run system diagnostics"),
     ("licenses", "Show open source licenses"),
     ("version", "Show the ykman version"),
-    ("batch", "Repeat a command on one YubiKey after another"),
+    (
+        "batch",
+        "Repeat a command or saved script on one YubiKey after another",
+    ),
     ("record", "Record a sequence of commands, then run it"),
     (
         "export",
         "Export generated values as CSV: /export [copy|file]",
     ),
     ("csv", "Use a CSV file for variables: /csv <file>"),
+    (
+        "secrets",
+        "Hide or show secrets in the summary and commands: /secrets [hide|show]",
+    ),
     (
         "repeat",
         "Run a command several times: /repeat <n> <command…>",
@@ -227,6 +237,17 @@ impl App {
             add("all", "The whole session, not just the last command");
             return out;
         }
+        if words == ["secrets"] {
+            for (name, desc) in [
+                ("hide", "Mask secrets in the summary and echoed commands"),
+                ("show", "Show secrets again"),
+            ] {
+                if name.starts_with(partial) {
+                    add(name, desc);
+                }
+            }
+            return out;
+        }
         if words == ["csv"] {
             if "clear".starts_with(partial) {
                 add("clear", "Detach the CSV file");
@@ -275,6 +296,11 @@ impl App {
         };
         if off == 1 && words.len() == 1 && "stop".starts_with(partial) {
             add("stop", "End the batch and show a summary");
+            for name in script_names() {
+                if name.starts_with(partial) {
+                    add(&name, "Run this saved script on every key");
+                }
+            }
         }
         if off == 0 && words.first().is_some_and(|w| is_builtin(w)) {
             return out;
@@ -564,6 +590,7 @@ impl App {
             "script" => self.script_command(&args[1..]),
             "csv" => self.csv_command(&args[1..]),
             "export" => self.export_command(&args[1..]),
+            "secrets" => self.secrets_command(args.get(1).map(String::as_str)),
             "batch" if self.recording.is_some() => {
                 self.note("Finish the recording first (Esc).");
             }
@@ -577,8 +604,26 @@ impl App {
                 let flag = vec![format!("--{}", args[0])];
                 self.spawn(line.trim(), flag);
             }
+            _ if self.hide_secrets => {
+                let shown = masked_step(&args);
+                self.spawn(&shown, args);
+            }
             _ => self.spawn(line.trim(), args),
         }
+    }
+
+    /// `/secrets` shows the state, `/secrets hide|show` changes it.
+    pub(super) fn secrets_command(&mut self, arg: Option<&str>) {
+        match arg {
+            Some("hide") => self.hide_secrets = true,
+            Some("show") => self.hide_secrets = false,
+            None => {}
+            Some(_) => return self.note("usage: /secrets [hide|show]"),
+        }
+        let state = if self.hide_secrets { "hidden" } else { "shown" };
+        self.note(&format!(
+            "Secrets are {state} in the summary and in echoed commands (/export still includes them)."
+        ));
     }
 
     /// Remember only the command path (never arguments, which may be secrets).
@@ -717,7 +762,7 @@ impl App {
         if topic.is_some_and(|t| t.starts_with("var")) {
             return self.help_variables();
         }
-        const ROWS: [(&str, &str); 18] = [
+        const ROWS: [(&str, &str); 19] = [
             (
                 "/",
                 "Browse commands; Tab/→ complete, ↑/↓ select, Enter run",
@@ -761,6 +806,10 @@ impl App {
                 "Variables from a CSV; one row per key in batch",
             ),
             ("/script", "Browse saved sequences; save, run, list, delete"),
+            (
+                "/secrets [hide|show]",
+                "Mask secrets in the summary and commands",
+            ),
             ("/help variables", "Variables: ${serial}, ${random:hex}, …"),
             (
                 "Ctrl+C / Esc",

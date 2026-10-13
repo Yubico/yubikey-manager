@@ -134,6 +134,12 @@ impl App {
             self.note("A batch is already active. Use /batch stop to end it.");
             return;
         }
+        if let [name] = args
+            && self.load_script(name).is_some()
+        {
+            self.batch_script(name);
+            return;
+        }
         let words: Vec<&str> = args.iter().map(String::as_str).collect();
         if !self.batch_allows(&words) {
             self.note(
@@ -170,6 +176,18 @@ impl App {
         );
         self.note(&msg);
         self.batch = Some(self.new_batch(vec![args.to_vec()], false, serial));
+    }
+
+    /// `/batch <script>`: run a saved script on every key, then leave batch mode.
+    fn batch_script(&mut self, name: &str) {
+        let was_batch = self.batch_mode;
+        self.batch_mode = true;
+        self.script_run(name);
+        if self.batch.is_some() {
+            self.batch_oneshot = !was_batch;
+        } else {
+            self.batch_mode = was_batch;
+        }
     }
 
     pub(super) fn begin_round(&mut self, serial: u32) {
@@ -241,6 +259,9 @@ impl App {
                             .position(|w| find_vars(w).iter().any(|(_, _, x)| *x == n))
                             .unwrap_or(0),
                     );
+                    if random_is_secret(&n) {
+                        self.secret_values.insert(v.clone());
+                    }
                     generated.push([serial, group, name, v.clone()]);
                     b.random.insert(n, v);
                 }
@@ -277,6 +298,9 @@ impl App {
                         k += 1;
                     }
                     order.push(pos);
+                    if var_secret(n) {
+                        self.secret_values.insert(value.clone());
+                    }
                     generated.push([serial.clone(), group.clone(), name, value]);
                 }
             }
@@ -289,7 +313,10 @@ impl App {
         };
         let step = &step;
         let args = self.expand(step, Expand::Run);
-        let shown_args = self.expand(step, Expand::Display);
+        let mut shown_args = self.expand(step, Expand::Display);
+        if self.hide_secrets {
+            shown_args = split_args(&masked_step(&shown_args));
+        }
         let (step, n) = (b.step, b.steps.len());
         let shown = if n == 1 && !b.once {
             format!("/batch {}", shown_args.join(" "))
@@ -436,6 +463,9 @@ impl App {
         let Some(b) = self.batch.take() else {
             return;
         };
+        if std::mem::take(&mut self.batch_oneshot) {
+            self.batch_mode = false;
+        }
         if b.once {
             self.note(&title.replace("Batch", "Sequence"));
             return;
@@ -762,6 +792,7 @@ impl App {
         let serial = self.active_device().unwrap_or_default();
         let once = !self.batch_mode;
         self.generated.clear();
+        self.secret_values.clear();
         self.batch = Some(self.new_batch(steps, once, serial));
     }
 
