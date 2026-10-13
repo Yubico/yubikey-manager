@@ -803,6 +803,12 @@ impl App {
             KeyCode::Char(' ') if self.side_tab == 1 && count > 0 => {
                 self.script_open = (self.script_open != Some(cur)).then_some(cur);
             }
+            KeyCode::Char('d') if self.side_tab == 1 && count > 0 => {
+                if let Some((name, ..)) = self.scripts.get(cur) {
+                    self.input.set(format!("/script delete {name}"));
+                    self.sidebar = false;
+                }
+            }
             KeyCode::Char('r') if self.side_tab == 1 && count > 0 => {
                 if let Some((name, ..)) = self.scripts.get(cur) {
                     self.input.set(format!("/script rename {name} "));

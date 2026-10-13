@@ -10,8 +10,8 @@ pub(super) const LEVELS: [(&str, &str); 5] = [
         "Everything, including raw APDU traffic (may contain secrets)",
     ),
 ];
-/// Options the pilot sets itself (or that make no sense in its UI).
-pub(super) const PILOT_MANAGED_OPTS: [&str; 8] = [
+/// Options the shell sets itself (or that make no sense in its UI).
+pub(super) const SHELL_MANAGED_OPTS: [&str; 8] = [
     "color",
     "no-color",
     "log-level",
@@ -21,7 +21,7 @@ pub(super) const PILOT_MANAGED_OPTS: [&str; 8] = [
     "licenses",
     "diagnose",
 ];
-/// Commands handled by the pilot itself (the first three wrap top-level flags).
+/// Commands handled by the shell itself (the first three wrap top-level flags).
 pub(super) const BUILTINS: [(&str, &str); 16] = [
     ("diagnose", "Run system diagnostics"),
     ("licenses", "Show open source licenses"),
@@ -53,7 +53,7 @@ pub(super) const BUILTINS: [(&str, &str); 16] = [
     ),
     ("log", "Set the log level: /log [level]"),
     ("help", "Show keyboard shortcuts"),
-    ("quit", "Exit pilot"),
+    ("quit", "Exit shell"),
 ];
 
 pub(super) fn is_builtin(word: &str) -> bool {
@@ -321,7 +321,7 @@ impl App {
             for arg in args {
                 let Some(long) = arg
                     .get_long()
-                    .filter(|l| !arg.is_hide_set() && !PILOT_MANAGED_OPTS.contains(l))
+                    .filter(|l| !arg.is_hide_set() && !SHELL_MANAGED_OPTS.contains(l))
                 else {
                     continue;
                 };
@@ -458,7 +458,7 @@ impl App {
             .collect();
         if node.get_arguments().any(|a| {
             a.get_long()
-                .is_some_and(|l| !a.is_hide_set() && !PILOT_MANAGED_OPTS.contains(&l))
+                .is_some_and(|l| !a.is_hide_set() && !SHELL_MANAGED_OPTS.contains(&l))
         }) {
             parts.push("[--options]".to_string());
         }
@@ -695,7 +695,7 @@ impl App {
         let path = file.map_or_else(
             || {
                 std::path::PathBuf::from(format!(
-                    "ykman-pilot-{}.txt",
+                    "ykman-shell-{}.txt",
                     chrono::Local::now().format("%Y%m%d-%H%M%S")
                 ))
             },
@@ -737,7 +737,7 @@ impl App {
             ),
             (
                 "/save [all] [file]",
-                "Same, to a file (ykman-pilot-<time>.txt)",
+                "Same, to a file (ykman-shell-<time>.txt)",
             ),
             ("", "Follows the current tab: Debug tab = debug log"),
             (

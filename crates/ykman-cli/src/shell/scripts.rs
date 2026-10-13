@@ -223,7 +223,7 @@ pub(super) struct Sequence {
 }
 
 fn scripts_dir() -> Option<std::path::PathBuf> {
-    Some(state::state_file()?.parent()?.join("pilot-scripts"))
+    Some(state::state_file()?.parent()?.join("shell-scripts"))
 }
 
 pub(super) fn script_names() -> Vec<String> {

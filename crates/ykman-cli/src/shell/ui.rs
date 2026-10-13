@@ -14,7 +14,7 @@ pub(super) const LOGO: [&str; 6] = [
 /// Recent commands shown while browsing history with Up/Down.
 pub(super) const HISTORY_ROWS: usize = 5;
 pub(super) const POPUP_ROWS: usize = 8;
-// Colours come from the terminal's own palette so the pilot follows the
+// Colours come from the terminal's own palette so the shell follows the
 // user's theme; "dim" text uses the DIM attribute on the default foreground.
 const ACCENT: Color = Color::Green;
 const BATCH_ACCENT: Color = Color::LightBlue;
@@ -164,6 +164,42 @@ pub(super) fn log_summary(
 }
 
 /// A row filled with a half block in the selection colour, for vertical padding.
+/// Keys that work in the sidebar, per tab (YubiKeys, Scripts).
+const SIDEBAR_KEYS: [&[(&str, &str)]; 2] = [
+    &[("Enter", "select"), ("Tab", "scripts")],
+    &[
+        ("Enter", "run"),
+        ("Space", "expand"),
+        ("r", "rename"),
+        ("d", "delete"),
+        ("Tab", "devices"),
+    ],
+];
+
+/// The sidebar keys as dim lines, wrapped to `width` columns.
+fn sidebar_hint(tab: usize, width: usize) -> Vec<Line<'static>> {
+    let bold = dim().add_modifier(Modifier::BOLD);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut cur: Vec<Span<'static>> = Vec::new();
+    let mut used = 0;
+    for (key, what) in SIDEBAR_KEYS[tab] {
+        let w = key.chars().count() + what.chars().count() + 1;
+        if used > 0 && used + 3 + w > width {
+            lines.push(Line::from(std::mem::take(&mut cur)));
+            used = 0;
+        }
+        if used > 0 {
+            cur.push(Span::styled(" · ", dim()));
+            used += 3;
+        }
+        cur.push(Span::styled(*key, bold));
+        cur.push(Span::styled(format!(" {what}"), dim()));
+        used += w;
+    }
+    lines.push(Line::from(cur));
+    lines
+}
+
 pub(super) fn half_edge(c: char, width: usize) -> Line<'static> {
     Line::from(Span::styled(
         c.to_string().repeat(width),
@@ -463,11 +499,19 @@ impl App {
             Paragraph::new(Line::from(head)),
             Rect::new(area.x + 1, area.y, area.width.saturating_sub(3), 1),
         );
+        let hint_w = area.width.saturating_sub(3);
+        let hint = sidebar_hint(self.side_tab, hint_w as usize);
+        let hint_h = (hint.len() as u16).min(area.height.saturating_sub(3));
+        f.render_widget(
+            Paragraph::new(hint),
+            Rect::new(area.x + 1, area.y + 2, hint_w, hint_h),
+        );
+        let top = 2 + hint_h + 1;
         let area = Rect::new(
             area.x,
-            area.y + 2,
+            area.y + top,
             area.width,
-            area.height.saturating_sub(2),
+            area.height.saturating_sub(top),
         );
         let chosen = self.side_state.selected();
         let mut items: Vec<ListItem> = if self.side_tab == 1 {
@@ -821,7 +865,7 @@ impl App {
                 ),
                 Span::styled(env!("CARGO_PKG_VERSION"), dim()),
                 Span::styled(" · ", dim()),
-                Span::styled("pilot mode", Style::new().fg(WARN)),
+                Span::styled("shell mode", Style::new().fg(WARN)),
             ]),
             Line::from(Span::styled(
                 "Configure your YubiKey via the command line.",
@@ -1011,19 +1055,6 @@ impl App {
                 Span::styled("Esc", dim().add_modifier(Modifier::BOLD)),
                 Span::styled(" close", dim()),
             ]
-        } else if self.sidebar && self.side_tab == 1 {
-            let bold = dim().add_modifier(Modifier::BOLD);
-            vec![
-                Span::styled("Enter", bold),
-                Span::styled(" run · ", dim()),
-                Span::styled("Space", bold),
-                Span::styled(" steps · ", dim()),
-                Span::styled("r", bold),
-                Span::styled(" rename", dim()),
-                Span::styled(" · ", dim()),
-                Span::styled("Esc", bold),
-                Span::styled(" close", dim()),
-            ]
         } else if self.running || self.batch_wait_msg().is_some() {
             let msg = if self.prompt().is_some() {
                 "waiting for input"
@@ -1075,13 +1106,6 @@ impl App {
         let width = |v: &[Span]| v.iter().map(Span::width).sum::<usize>();
         let spans = if self.search.is_some() {
             left
-        } else if self.sidebar && self.side_tab == 1 {
-            // Drop the trailing "· Esc close", then the middle, to fit.
-            let mut v = left;
-            while v.len() > 3 && width(&v) > avail {
-                v.truncate(v.len().saturating_sub(3));
-            }
-            v
         } else {
             [full, short, left]
                 .into_iter()

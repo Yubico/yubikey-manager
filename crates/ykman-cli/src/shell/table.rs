@@ -359,7 +359,7 @@ impl App {
         let path = args.first().map_or_else(
             || {
                 std::path::PathBuf::from(format!(
-                    "ykman-pilot-values-{}.csv",
+                    "ykman-shell-values-{}.csv",
                     chrono::Local::now().format("%Y%m%d-%H%M%S")
                 ))
             },

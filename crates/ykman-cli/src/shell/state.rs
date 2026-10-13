@@ -10,7 +10,7 @@ pub(super) fn state_file() -> Option<std::path::PathBuf> {
                 std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config"))
             })?
     };
-    Some(base.join("ykman").join("pilot-state"))
+    Some(base.join("ykman").join("shell-state"))
 }
 
 /// Loads the saved log level and command history (best effort).
@@ -52,7 +52,7 @@ pub(super) fn save_state(level: &str, tab: usize, history: &[String]) {
 }
 
 /// Lists keys through a child process: enumerating HID devices inside the
-/// pilot crashes macOS IOKit when a key re-enumerates (e.g. after a reset).
+/// shell crashes macOS IOKit when a key re-enumerates (e.g. after a reset).
 pub(super) fn list_devices() -> Vec<Device> {
     std::process::Command::new(exe())
         .arg("list")

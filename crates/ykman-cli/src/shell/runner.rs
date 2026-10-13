@@ -189,7 +189,7 @@ impl App {
 
     pub(super) fn try_spawn(&mut self, args: Vec<String>) -> Result<()> {
         let log_path = std::env::temp_dir().join(format!(
-            "ykman-pilot-{}-{}.log",
+            "ykman-shell-{}-{}.log",
             std::process::id(),
             RUN_COUNTER.fetch_add(1, Ordering::Relaxed)
         ));

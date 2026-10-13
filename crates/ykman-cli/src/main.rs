@@ -22,10 +22,10 @@ mod list;
 mod oath;
 mod openpgp;
 mod otp;
-mod pilot;
 mod piv;
 mod scp;
 mod securitydomain;
+mod shell;
 mod util;
 
 // Re-export library modules so binary-internal modules can use them via crate::
@@ -90,9 +90,9 @@ struct Cli {
     #[arg(long)]
     licenses: bool,
 
-    /// Launch the interactive pilot (experimental TUI)
+    /// Launch the interactive shell (experimental TUI)
     #[arg(long, hide = true)]
-    pilot: bool,
+    shell: bool,
 
     /// Generate shell completion
     #[arg(long)]
@@ -505,8 +505,8 @@ fn run() -> Result<()> {
 
     color::init(cli.no_color, cli.color);
 
-    if cli.pilot {
-        return pilot::run(build_cli_command());
+    if cli.shell {
+        return shell::run(build_cli_command());
     }
 
     init_logging(&cli)?;
