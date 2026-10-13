@@ -159,6 +159,13 @@ impl Editor {
         self.buf.drain(..i);
         self.cursor = 0;
     }
+    /// A deletion that leaves only whitespace would look empty but still
+    /// block the empty-line keys (Tab, Left, `/`), so clear it.
+    fn drop_blank(&mut self) {
+        if !self.buf.is_empty() && self.buf.trim().is_empty() {
+            self.take();
+        }
+    }
     fn kill_to_end(&mut self) {
         let i = self.byte_at(self.cursor);
         self.buf.truncate(i);
@@ -169,12 +176,24 @@ impl Editor {
         match key.code {
             KeyCode::Char('a') if ctrl => self.cursor = 0,
             KeyCode::Char('e') if ctrl => self.cursor = self.len(),
-            KeyCode::Char('u') if ctrl => self.kill_to_start(),
+            KeyCode::Char('u') if ctrl => {
+                self.kill_to_start();
+                self.drop_blank();
+            }
             KeyCode::Char('k') if ctrl => self.kill_to_end(),
-            KeyCode::Char('w') if ctrl => self.delete_word(),
+            KeyCode::Char('w') if ctrl => {
+                self.delete_word();
+                self.drop_blank();
+            }
             KeyCode::Char(c) if !ctrl => self.insert(c),
-            KeyCode::Backspace => self.backspace(),
-            KeyCode::Delete => self.delete(),
+            KeyCode::Backspace => {
+                self.backspace();
+                self.drop_blank();
+            }
+            KeyCode::Delete => {
+                self.delete();
+                self.drop_blank();
+            }
             KeyCode::Left => self.cursor = self.cursor.saturating_sub(1),
             KeyCode::Right => self.cursor = (self.cursor + 1).min(self.len()),
             KeyCode::Home => self.cursor = 0,

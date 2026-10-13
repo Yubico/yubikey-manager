@@ -12,8 +12,8 @@ pub(super) const LOGO: [&str; 6] = [
 ];
 
 /// Recent commands shown while browsing history with Up/Down.
-pub(super) const HISTORY_ROWS: usize = 5;
-pub(super) const POPUP_ROWS: usize = 8;
+pub(super) const HISTORY_ROWS: usize = POPUP_ROWS;
+pub(super) const POPUP_ROWS: usize = 6;
 // Colours come from the terminal's own palette so the shell follows the
 // user's theme; "dim" text uses the DIM attribute on the default foreground.
 const ACCENT: Color = Color::Green;
@@ -1248,7 +1248,7 @@ impl App {
         if sugg.is_empty() || self.sidebar || self.prompt().is_some() {
             return;
         }
-        let h = (sugg.len().min(POPUP_ROWS) as u16).min(input_area.y);
+        let h = (POPUP_ROWS as u16).min(input_area.y);
         if h == 0 {
             return;
         }
