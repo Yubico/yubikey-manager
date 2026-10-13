@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) const TABS: [&str; 3] = ["Normal", "Mixed", "Logs"];
+pub(super) const TABS: [&str; 3] = ["Default", "Hybrid", "Debug"];
 pub(super) const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 pub(super) const LOGO: [&str; 6] = [
     "       _                          ",

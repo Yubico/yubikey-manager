@@ -194,6 +194,7 @@ impl App {
             RUN_COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         create_private_file(&log_path).context("creating log file")?;
+        super::state::wait_for_poll();
 
         let mut cmd = CommandBuilder::new(exe());
         cmd.args(["--log-level", self.log_level, "--log-file"]);

@@ -88,10 +88,27 @@ impl App {
 
     pub(super) fn refresh_devices(&mut self) {
         self.polling = true;
+        POLLS_IN_FLIGHT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let devices = list_devices();
+            POLLS_IN_FLIGHT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
             let _ = tx.send(Msg::Devices(devices));
         });
+    }
+}
+
+/// Device polls running right now. A command must not open the key at the same
+/// time as a poll, or one of them may see no YubiKey.
+pub(super) static POLLS_IN_FLIGHT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Wait (briefly) for a device poll in progress to finish.
+pub(super) fn wait_for_poll() {
+    let start = std::time::Instant::now();
+    while POLLS_IN_FLIGHT.load(std::sync::atomic::Ordering::SeqCst) > 0
+        && start.elapsed() < std::time::Duration::from_secs(3)
+    {
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }

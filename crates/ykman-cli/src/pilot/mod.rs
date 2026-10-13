@@ -239,6 +239,7 @@ struct App {
     tick: usize,
     last_poll: Instant,
     polling: bool,
+    missing_polls: u8,
     batch: Option<Batch>,
     /// Batch mode: typed commands are repeated on key after key.
     batch_mode: bool,
@@ -315,6 +316,7 @@ impl App {
             tick: 0,
             last_poll: Instant::now(),
             polling: false,
+            missing_polls: 0,
             batch: None,
             batch_mode: false,
             recording: None,
@@ -433,6 +435,19 @@ impl App {
             Msg::Devices(list) => {
                 self.polling = false;
                 self.last_poll = Instant::now();
+                // A failed or empty poll (sleep/wake, a PC/SC hiccup) looks like a
+                // removal; only believe it if the next poll agrees.
+                let missing = self.batch.is_none()
+                    && self
+                        .devices
+                        .iter()
+                        .any(|d| !list.iter().any(|n| n.serial == d.serial));
+                if missing && self.missing_polls < 1 {
+                    self.missing_polls += 1;
+                    self.last_poll = Instant::now() - DEVICE_POLL + Duration::from_secs(1);
+                    return;
+                }
+                self.missing_polls = 0;
                 let before = self.active_device();
                 if let Some(serial) = self.device
                     && self.batch.is_none()

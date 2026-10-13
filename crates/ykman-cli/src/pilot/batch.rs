@@ -199,8 +199,14 @@ impl App {
         let (idx, fresh) = (b.step, b.fresh[b.step]);
         let step = b.steps[idx].clone();
         let mut generated: Vec<[String; 4]> = Vec::new();
+        // Word position of each entry, to list the values in the order typed.
+        let mut order: Vec<usize> = Vec::new();
         let columns = self.param_names(&step);
         if let Some(b) = self.batch.as_mut() {
+            // A new CSV row starts a new set of random values.
+            if idx > 0 && b.step_rows.get(idx) != b.step_rows.get(idx - 1) {
+                b.random.clear();
+            }
             for n in random_names(&step) {
                 let column = columns
                     .iter()
@@ -212,11 +218,7 @@ impl App {
                     && let Some(v) = random_value(&n)
                 {
                     let serial = b.current.to_string();
-                    let group = if fresh {
-                        format!("{}.{}", b.round, idx)
-                    } else {
-                        b.round.to_string()
-                    };
+                    let group = row_group(b, idx, fresh);
                     let same = |g: &[String; 4]| g[0] == serial && g[1] == group;
                     let taken = |name: &str| {
                         self.generated
@@ -230,12 +232,54 @@ impl App {
                         name = format!("{column}_{k}");
                         k += 1;
                     }
+                    order.push(
+                        step.iter()
+                            .position(|w| find_vars(w).iter().any(|(_, _, x)| *x == n))
+                            .unwrap_or(0),
+                    );
                     generated.push([serial, group, name, v.clone()]);
                     b.random.insert(n, v);
                 }
             }
         }
-        self.generated.extend(generated);
+        // CSV columns and typed-in variables used by the step are part of the result too.
+        if let Some(b) = self.batch.as_ref() {
+            let (serial, group) = (b.current.to_string(), row_group(b, idx, fresh));
+            let mut seen: Vec<&str> = Vec::new();
+            for (pos, (w, param)) in step.iter().zip(&columns).enumerate() {
+                for (_, _, n) in find_vars(w) {
+                    let known = b.vars.contains_key(n)
+                        || b.csv
+                            .as_ref()
+                            .is_some_and(|t| t.headers.iter().any(|h| h == n));
+                    if !known || seen.contains(&n) {
+                        continue;
+                    }
+                    seen.push(n);
+                    let value = self
+                        .expand(&[format!("${{{n}}}")], Expand::Run)
+                        .pop()
+                        .unwrap_or_default();
+                    let column = param.clone().unwrap_or_else(|| n.to_string());
+                    let all = || self.generated.iter().chain(&generated);
+                    let same = |g: &&[String; 4]| g[0] == serial && g[1] == group;
+                    if all().filter(same).any(|g| g[2] == column && g[3] == value) {
+                        continue;
+                    }
+                    let mut name = column.clone();
+                    let mut k = 2;
+                    while all().filter(same).any(|g| g[2] == name) {
+                        name = format!("{column}_{k}");
+                        k += 1;
+                    }
+                    order.push(pos);
+                    generated.push([serial.clone(), group.clone(), name, value]);
+                }
+            }
+        }
+        let mut sorted: Vec<(usize, [String; 4])> = order.into_iter().zip(generated).collect();
+        sorted.sort_by_key(|(pos, _)| *pos);
+        self.generated.extend(sorted.into_iter().map(|(_, g)| g));
         let Some(b) = self.batch.as_ref() else {
             return;
         };
@@ -714,4 +758,14 @@ impl App {
 
 pub(super) fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
+}
+
+/// Which result row a step's values belong to: one per iteration of a repeat,
+/// one per CSV row, otherwise one per round.
+fn row_group(b: &Batch, idx: usize, fresh: bool) -> String {
+    match (fresh, b.step_rows.get(idx).copied().flatten()) {
+        (true, _) => format!("{}.{idx}", b.round),
+        (false, Some(row)) => format!("{}.r{row}", b.round),
+        (false, None) => b.round.to_string(),
+    }
 }
