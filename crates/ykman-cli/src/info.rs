@@ -315,7 +315,7 @@ const ID_PIV_OBJECTS: u8 = 0x01;
 const ID_PIV_KEYS: u8 = 0x02;
 const ID_OPENPGP_KEYS: u8 = 0x03;
 const ID_FIDO_CREDENTIALS: u8 = 0x04;
-const ID_OATH: u8 = 0x05;
+const ID_FIDO_LARGE_BLOB: u8 = 0x05;
 
 /// A single decoded storage-stats entry: how many objects of this type are
 /// stored, and how many pages they occupy in total. Widened to `u32` from
@@ -337,52 +337,9 @@ impl From<StorageStatsEntry> for StatsEntry {
     }
 }
 
-// Simulated response, captured from a real YubiKey 6 while the dedicated
-// `GET STORAGE INFO` management command was under development. Used as a
-// local fallback for demoing/visual verification (`YKMAN_FAKE_STORAGE=1`)
-// until an alpha key with real storage reporting is available.
-//
-// Layout: a single TLV — 1-byte tag (`0x01`), 1-byte length, then payload:
-// a run of 5-byte records, each `id (1 byte) | objects (u16 BE) | pages
-// (u16 BE)`. This used to be tag `0x1C` nested inside the larger
-// `GET DEVICE INFO` response (hence the extra wrapping seen in the two
-// older samples below); now that it's its own command, the response is
-// just this one TLV with no outer length byte or sibling tags to skip.
-//
-// Lighter-usage sample (mostly empty FIDO2, no PIV objects yet, plenty of
-// free object slots and page space), kept here for later re-use. Captured
-// while this was still nested under DeviceInfo tag `0x1C`:
-// const SAMPLE_STORAGE_INFO_RESPONSE: &[u8] = &[
-//     0x1D, 0x1B, 0x00, 0x1C, 0x19, 0x00, 0x00, 0x8D, 0x01, 0x9C, 0x01, 0x00, 0x00, 0x00, 0x00,
-//     0x02, 0x00, 0x01, 0x00, 0x08, 0x03, 0x00, 0x04, 0x00, 0x20, 0x04, 0x00, 0x0E, 0x00, 0x1C,
-// ];
-
-// Heavier-usage sample (154 FIDO2 passkeys). Also a useful edge case: 0
-// free *objects* (headrar) but 129 free *pages* (sidor) remain — all
-// object slots exhausted even though raw page space is not, exactly the
-// scenario the "Objects" line below is meant to surface. Also captured
-// while still nested under DeviceInfo tag `0x1C`, kept here for later
-// re-use:
-// const SAMPLE_STORAGE_INFO_RESPONSE: &[u8] = &[
-//     0x1D, 0x1B, 0x00, 0x1C, 0x19, 0x00, 0x00, 0x00, 0x00, 0x81, 0x01, 0x00, 0x01, 0x00, 0x03,
-//     0x02, 0x00, 0x01, 0x00, 0x08, 0x03, 0x00, 0x04, 0x00, 0x20, 0x04, 0x00, 0x9A, 0x01, 0x34,
-// ];
-
-/// Current sample: first capture from the new, standalone `GET STORAGE
-/// INFO` command. Same six real-world totals as the previous two samples
-/// underneath (480 pages / 120 KB, 160 object slots) — same physical
-/// device, different snapshot in time — plus the first appearance of id
-/// `0x05`, reserved for OATH ahead of it actually reporting any usage yet.
-const SAMPLE_STORAGE_INFO_RESPONSE: &[u8] = &[
-    0x01, 0x1E, 0x00, 0x00, 0x91, 0x01, 0x95, 0x01, 0x00, 0x02, 0x00, 0x07, 0x02, 0x00, 0x03, 0x00,
-    0x18, 0x03, 0x00, 0x04, 0x00, 0x20, 0x04, 0x00, 0x06, 0x00, 0x0C, 0x05, 0x00, 0x00, 0x00, 0x00,
-];
-
 /// Builds the STORAGE section's data from a decoded [`StorageInfo`] —
-/// either read live from a device over CCID (see
-/// [`read_device_storage_info`]), or the captured
-/// [`SAMPLE_STORAGE_INFO_RESPONSE`] when demoing without a storage-capable
-/// key (see [`sample_storage_info`]). Total and free space are derived
+/// read live from a device over CCID (see [`read_device_storage_info`]).
+/// Total and free space are derived
 /// from the data itself (free pages plus every used id's pages) rather
 /// than a fixed constant, since capacity is expected to grow as more
 /// object types gain reporting support. Ids with no reporting support yet
@@ -396,7 +353,7 @@ fn storage_summary_from_info(info: &StorageInfo) -> StorageSummary {
     let piv_keys = entry(ID_PIV_KEYS);
     let openpgp = entry(ID_OPENPGP_KEYS);
     let fido = entry(ID_FIDO_CREDENTIALS);
-    let oath = entry(ID_OATH);
+    let large_blob = entry(ID_FIDO_LARGE_BLOB);
     let free = entry(ID_FREE);
 
     // Any id in the blob that this client doesn't recognise yet (e.g. a
@@ -410,7 +367,7 @@ fn storage_summary_from_info(info: &StorageInfo) -> StorageSummary {
         ID_PIV_KEYS,
         ID_OPENPGP_KEYS,
         ID_FIDO_CREDENTIALS,
-        ID_OATH,
+        ID_FIDO_LARGE_BLOB,
     ];
     let other = info
         .entries
@@ -423,13 +380,22 @@ fn storage_summary_from_info(info: &StorageInfo) -> StorageSummary {
         });
 
     let apps = vec![
+        // FIDO2 passkeys and the large blob are separate ids, grouped like PIV.
         StorageApp {
-            name: "FIDO2",
+            name: "passkeys",
             used_bytes: bytes_of(fido),
             objects: fido.objects,
             object_label: "passkeys",
             color: color::Swatch::Red,
-            group: None,
+            group: Some("FIDO2"),
+        },
+        StorageApp {
+            name: "large blob",
+            used_bytes: bytes_of(large_blob),
+            objects: large_blob.objects,
+            object_label: "blobs",
+            color: color::Swatch::Red,
+            group: Some("FIDO2"),
         },
         // PIV objects (certificates etc.) and PIV keys are reported as two
         // separate ids; shown here as two child rows sharing both a colour
@@ -453,14 +419,6 @@ fn storage_summary_from_info(info: &StorageInfo) -> StorageSummary {
             group: Some("PIV"),
         },
         StorageApp {
-            name: "OATH",
-            used_bytes: bytes_of(oath),
-            objects: oath.objects,
-            object_label: "accounts",
-            color: color::Swatch::Green,
-            group: None,
-        },
-        StorageApp {
             name: "OpenPGP",
             used_bytes: bytes_of(openpgp),
             objects: openpgp.objects,
@@ -468,7 +426,7 @@ fn storage_summary_from_info(info: &StorageInfo) -> StorageSummary {
             color: color::Swatch::Blue,
             group: None,
         },
-        // YubiHSM Auth reporting isn't implemented yet either; same as OATH.
+        // YubiHSM Auth reporting isn't implemented yet; hidden while its usage is zero.
         StorageApp {
             name: "YubiHSM Auth",
             used_bytes: 0,
@@ -478,7 +436,7 @@ fn storage_summary_from_info(info: &StorageInfo) -> StorageSummary {
             group: None,
         },
         // Catches ids this client build doesn't know about yet; stays
-        // hidden (like OATH/YubiHSM Auth above) unless the device actually
+        // hidden (like YubiHSM Auth above) unless the device actually
         // reports an unrecognised id with nonzero usage.
         StorageApp {
             name: "Other",
@@ -505,17 +463,6 @@ fn storage_summary_from_info(info: &StorageInfo) -> StorageSummary {
         total_objects,
         free_objects: free.objects,
     }
-}
-
-/// Decodes the captured [`SAMPLE_STORAGE_INFO_RESPONSE`] for local
-/// demoing/visual verification without a storage-capable key. Only used
-/// when `YKMAN_FAKE_STORAGE` is set (see [`print_storage_section`]); the
-/// sample bytes are a known-good capture, so a parse failure here would
-/// indicate a bug in this build rather than bad device data.
-fn sample_storage_info() -> StorageSummary {
-    let info =
-        StorageInfo::parse(SAMPLE_STORAGE_INFO_RESPONSE).expect("sample storage data is valid");
-    storage_summary_from_info(&info)
 }
 
 /// Reads storage stats from the connected key over CCID (the only
@@ -605,21 +552,12 @@ fn allocate_percentages(values: &[u64], total: u64) -> Vec<String> {
 #[allow(dead_code)]
 const MIN_STORAGE_VERSION: yubikit::core::Version = yubikit::core::Version(6, 0, 0);
 
-/// Set to demo the STORAGE section with the captured sample dataset
-/// instead of attempting a real read — useful until an alpha key with
-/// storage support is in hand.
-const FAKE_STORAGE_ENV_VAR: &str = "YKMAN_FAKE_STORAGE";
-
 fn print_storage_section(
     dev: &dyn YubiKeyDevice,
     _version: &yubikit::core::Version,
     unicode: bool,
 ) {
-    let info = if std::env::var_os(FAKE_STORAGE_ENV_VAR).is_some() {
-        Some(sample_storage_info())
-    } else {
-        read_device_storage_info(dev).map(|info| storage_summary_from_info(&info))
-    };
+    let info = read_device_storage_info(dev).map(|info| storage_summary_from_info(&info));
     let Some(StorageSummary {
         total_bytes,
         apps,
