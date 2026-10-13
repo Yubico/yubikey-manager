@@ -566,7 +566,11 @@ impl App {
                     ])
                     .style(fill),
                     Line::from(Span::styled(
-                        format!("   S/N: {}  F/W: {}", d.serial, d.version),
+                        if d.serial == NO_SERIAL {
+                            format!("   F/W: {}", d.version)
+                        } else {
+                            format!("   S/N: {}  F/W: {}", d.serial, d.version)
+                        },
                         dim(),
                     ))
                     .style(fill),
@@ -657,6 +661,10 @@ impl App {
                         render_entry(e, width, &mut lines);
                     }
                 }
+            }
+            // The Debug tab is the raw log: no output, notes or batch messages.
+            if !show_out {
+                continue;
             }
             let failed = run.rest.iter().any(|e| e.kind == Kind::Fail);
             let mut marked = false;
@@ -753,7 +761,14 @@ impl App {
                     format!("{} ({})", d.name, d.version),
                     Style::new().add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!("  S/N: {}", d.serial), dim()),
+                Span::styled(
+                    if d.serial == NO_SERIAL {
+                        String::new()
+                    } else {
+                        format!("  S/N: {}", d.serial)
+                    },
+                    dim(),
+                ),
             ]),
             None => Line::from(vec![
                 Span::styled("○ ", Style::new().fg(WARN)),

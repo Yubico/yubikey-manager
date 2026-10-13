@@ -145,6 +145,10 @@ impl App {
             self.note("Batch needs exactly one YubiKey inserted to start.");
             return;
         }
+        if self.devices[0].serial == super::NO_SERIAL {
+            self.note("Batch needs a YubiKey with a serial number to tell keys apart.");
+            return;
+        }
         if self.running {
             self.note("A command is already running.");
             return;
@@ -418,7 +422,7 @@ impl App {
             self.active_device()
         } else {
             match self.devices.as_slice() {
-                [d] => Some(d.serial),
+                [d] if d.serial != super::NO_SERIAL => Some(d.serial),
                 _ => None,
             }
         };
@@ -457,7 +461,12 @@ impl App {
         let Some(b) = self.batch.as_mut() else {
             return;
         };
-        let serials: Vec<u32> = self.devices.iter().map(|d| d.serial).collect();
+        let serials: Vec<u32> = self
+            .devices
+            .iter()
+            .map(|d| d.serial)
+            .filter(|s| *s != super::NO_SERIAL)
+            .collect();
         match (&mut b.phase, serials.as_slice()) {
             (BatchPhase::Waiting { absent, .. }, []) => *absent = true,
             (BatchPhase::Waiting { prev, .. }, [s]) if s != prev => {
@@ -718,6 +727,9 @@ impl App {
             false
         } else if self.batch_mode && self.devices.len() != 1 {
             self.note("Batch needs exactly one YubiKey inserted to start.");
+            false
+        } else if self.batch_mode && self.devices[0].serial == super::NO_SERIAL {
+            self.note("Batch needs a YubiKey with a serial number to tell keys apart.");
             false
         } else if !self.batch_mode && self.active_device().is_none() {
             self.note("Insert a YubiKey to run the sequence.");

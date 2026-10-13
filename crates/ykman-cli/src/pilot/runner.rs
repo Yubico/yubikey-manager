@@ -201,6 +201,7 @@ impl App {
         cmd.arg(&log_path);
         let own_device = args.iter().any(|a| a == "-d" || a == "--device");
         if let Some(serial) = self.active_device()
+            && serial != super::NO_SERIAL
             && args[0] != "list"
             && !own_device
         {

@@ -73,9 +73,15 @@ struct Device {
     version: String,
 }
 
+/// Stand-in serial for keys that have none; they can't be selected with `--device`.
+const NO_SERIAL: u32 = 0;
+
 impl Device {
     fn describe(&self) -> String {
-        format!("{} ({})  S/N: {}", self.name, self.version, self.serial)
+        match self.serial {
+            NO_SERIAL => format!("{} ({})", self.name, self.version),
+            s => format!("{} ({})  S/N: {s}", self.name, self.version),
+        }
     }
 }
 
@@ -770,6 +776,13 @@ impl App {
     fn choose_device(&mut self, idx: usize) {
         let before = self.active_device();
         if let Some(d) = self.devices.get(idx) {
+            if d.serial == NO_SERIAL && self.devices.len() > 1 {
+                self.note(
+                    "ykman can only pick a key by serial number. Remove the other keys to use this one.",
+                );
+                self.sidebar = false;
+                return;
+            }
             self.device = Some(d.serial);
         }
         self.announce_device_change(before);

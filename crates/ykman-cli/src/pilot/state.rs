@@ -64,11 +64,14 @@ pub(super) fn list_devices() -> Vec<Device> {
 }
 
 pub(super) fn parse_devices(stdout: &str) -> Vec<Device> {
-    stdout
+    let mut devices: Vec<Device> = stdout
         .lines()
         .filter_map(|line| {
-            let (head, serial) = line.rsplit_once("Serial:")?;
-            let serial = serial.trim().parse().ok()?;
+            // Keys such as the FIDO U2F Security Key have no serial number.
+            let (head, serial) = match line.rsplit_once("Serial:") {
+                Some((head, serial)) => (head, serial.trim().parse().ok()?),
+                None => (line, NO_SERIAL),
+            };
             let (name, rest) = head.split_once('(')?;
             let version = rest.split_once(')')?.0;
             Some(Device {
@@ -77,7 +80,11 @@ pub(super) fn parse_devices(stdout: &str) -> Vec<Device> {
                 version: version.to_string(),
             })
         })
-        .collect()
+        .collect();
+    // ykman's order can change between polls; keep the picker steady, newest
+    // (highest serial) first.
+    devices.sort_by_key(|d| std::cmp::Reverse(d.serial));
+    devices
 }
 
 impl App {
