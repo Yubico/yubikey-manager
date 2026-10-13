@@ -541,22 +541,14 @@ fn allocate_percentages(values: &[u64], total: u64) -> Vec<String> {
         .collect()
 }
 
-/// Minimum firmware version expected to expose the STORAGE section once
-/// alpha-key version reporting is confirmed and this can be gated
-/// up-front rather than relying solely on `read_storage_info()` failing.
-/// Currently unused: no version check is applied yet (still exercised by
-/// `storage_requires_firmware_6_0_0_or_above`), since it's unclear what
-/// alpha firmware reports for its version. Failing the real
-/// `GET STORAGE INFO` read already hides the section for keys that don't
-/// support it, so this isn't needed for correctness yet.
-#[allow(dead_code)]
+/// Minimum firmware version that supports `GET STORAGE INFO`. Older keys are
+/// never sent the command. Beta firmware reports 6.0.0 here.
 const MIN_STORAGE_VERSION: yubikit::core::Version = yubikit::core::Version(6, 0, 0);
 
-fn print_storage_section(
-    dev: &dyn YubiKeyDevice,
-    _version: &yubikit::core::Version,
-    unicode: bool,
-) {
+fn print_storage_section(dev: &dyn YubiKeyDevice, version: &yubikit::core::Version, unicode: bool) {
+    if *version < MIN_STORAGE_VERSION {
+        return;
+    }
     let info = read_device_storage_info(dev).map(|info| storage_summary_from_info(&info));
     let Some(StorageSummary {
         total_bytes,
