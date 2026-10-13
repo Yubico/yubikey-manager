@@ -686,7 +686,7 @@ fn print_legend(apps: &[StorageApp], total_bytes: u64, free_bytes: u64, unicode:
     // above it, and later children of the same group don't repeat it.
     let mut printed_groups: std::collections::HashSet<&'static str> =
         std::collections::HashSet::new();
-    for app in apps {
+    for (i, app) in apps.iter().enumerate() {
         if !app.is_visible() {
             continue;
         }
@@ -706,8 +706,17 @@ fn print_legend(apps: &[StorageApp], total_bytes: u64, free_bytes: u64, unicode:
                 let count = color::dim(&format!("{group_objects} objects"));
                 println!("{marker} {name}{size}{pct}   {count}");
             }
-            // Children are indented one column under their group header.
-            let name = color::dim(&format!("{:<16}", format!(" {}", app.name)));
+            // Children hang off their group header like `tree` output.
+            let is_last = !apps[i + 1..]
+                .iter()
+                .any(|a| a.is_visible() && a.group == Some(group));
+            let branch = match (unicode, is_last) {
+                (true, true) => "\u{2514}\u{2500}",
+                (true, false) => "\u{251c}\u{2500}",
+                (false, true) => "`-",
+                (false, false) => "|-",
+            };
+            let name = color::dim(&format!("{:<16}", format!("{branch} {}", app.name)));
             let size = color::bright(&format!("{:>12}", fmt_kb(app.used_bytes)));
             let pct_value = percentages.next().unwrap_or_default();
             let pct = color::dim(&format!("{:>7}", pct_value));
