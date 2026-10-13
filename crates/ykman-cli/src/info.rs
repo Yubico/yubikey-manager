@@ -311,11 +311,11 @@ const PAGE_SIZE: u64 = 256;
 /// always "free space"; the rest are assigned per application as new ones
 /// gain reporting support.
 const ID_FREE: u8 = 0x00;
-const ID_PIV_OBJECTS: u8 = 0x01;
-const ID_PIV_KEYS: u8 = 0x02;
-const ID_OPENPGP_KEYS: u8 = 0x03;
-const ID_FIDO_CREDENTIALS: u8 = 0x04;
-const ID_FIDO_LARGE_BLOB: u8 = 0x05;
+pub(crate) const ID_PIV_OBJECTS: u8 = 0x01;
+pub(crate) const ID_PIV_KEYS: u8 = 0x02;
+pub(crate) const ID_OPENPGP_KEYS: u8 = 0x03;
+pub(crate) const ID_FIDO_CREDENTIALS: u8 = 0x04;
+pub(crate) const ID_FIDO_LARGE_BLOB: u8 = 0x05;
 
 /// A single decoded storage-stats entry: how many objects of this type are
 /// stored, and how many pages they occupy in total. Widened to `u32` from
@@ -474,6 +474,65 @@ fn read_device_storage_info(dev: &dyn YubiKeyDevice) -> Option<StorageInfo> {
     let conn = dev.open_smartcard().ok()?;
     let mut session = ManagementSession::new(conn).ok()?;
     session.read_storage_info().ok()
+}
+
+/// The "Storage" row for an application's info page on firmware with a shared
+/// storage pool: a bar split into this application's pages (`ids`, in its
+/// own colour), other applications' pages, and free pages, plus a summary.
+/// `None` for older firmware or when the key can't report storage.
+pub(crate) fn pool_row(
+    dev: &dyn YubiKeyDevice,
+    name: &str,
+    ids: &[u8],
+    swatch: color::Swatch,
+) -> Option<(&'static str, String)> {
+    if dev.info().version < MIN_STORAGE_VERSION {
+        return None;
+    }
+    let info = read_device_storage_info(dev)?;
+    let pages = |e: &StorageStatsEntry| e.pages as u64;
+    let free: u64 = info.entry(ID_FREE).map(|e| pages(&e)).unwrap_or(0);
+    let mine: u64 = info
+        .entries
+        .iter()
+        .filter(|e| ids.contains(&e.id))
+        .map(pages)
+        .sum();
+    let total: u64 = info.entries.iter().map(pages).sum();
+    if total == 0 {
+        return None;
+    }
+    let others = total - free - mine;
+
+    const WIDTH: usize = 20;
+    let cells = |v: u64| {
+        if v == 0 {
+            0
+        } else {
+            ((v as usize * WIDTH).div_ceil(total as usize)).clamp(1, WIDTH)
+        }
+    };
+    let my_cells = cells(mine).min(WIDTH);
+    let other_cells = cells(others).min(WIDTH - my_cells);
+    let free_cells = WIDTH - my_cells - other_cells;
+    let (full, shade, empty) = if use_unicode() {
+        ("\u{2588}", "\u{2592}", "\u{2591}")
+    } else {
+        ("#", "+", "-")
+    };
+    let bar = format!(
+        "{}{}{}",
+        color::swatch(&full.repeat(my_cells), swatch),
+        color::dim(&shade.repeat(other_cells)),
+        color::muted(&empty.repeat(free_cells)),
+    );
+    let text = format!(
+        "{} used by {name} ({}), {} free (shared)",
+        fmt_kb(mine * PAGE_SIZE),
+        pct_str(mine * PAGE_SIZE, total * PAGE_SIZE),
+        fmt_kb(free * PAGE_SIZE),
+    );
+    Some(("Storage", format!("{bar} {text}")))
 }
 
 fn fmt_kb(bytes: u64) -> String {

@@ -322,6 +322,13 @@ fn format_openpgp_credential_error(
 const OPENPGP_KEY_SLOTS: u32 = 3;
 
 pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
+    // Read before the OpenPGP session is opened, over its own connection.
+    let pool = crate::info::pool_row(
+        dev,
+        "OpenPGP",
+        &[crate::info::ID_OPENPGP_KEYS],
+        crate::color::Swatch::Blue,
+    );
     let mut session = open_session(dev, scp_params)?;
 
     let aid = session.aid().clone();
@@ -409,8 +416,10 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
         }
 
         let used = keys.len() as u32;
-        rows.push((
-            "Key storage",
+        // With a storage pool row below, a second bar would be redundant.
+        let storage = if pool.is_some() {
+            format!("{used} of {OPENPGP_KEY_SLOTS} used")
+        } else {
             format!(
                 "{} {used} of {OPENPGP_KEY_SLOTS} used",
                 usage_bar(
@@ -420,9 +429,11 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
                     crate::info::use_unicode(),
                     false
                 )
-            ),
-        ));
+            )
+        };
+        rows.push(("Key storage", storage));
     }
+    rows.extend(pool);
     if !keys.is_empty() {
         rows.push(("", String::new()));
     }
