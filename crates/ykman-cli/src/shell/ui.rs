@@ -478,7 +478,7 @@ impl App {
             area,
         );
         self.hits.side_tabs.clear();
-        let mut x = area.x + 1;
+        let mut x = area.x;
         let mut head = Vec::new();
         for (i, t) in ["YubiKeys", "Scripts"].iter().enumerate() {
             let style = if i == self.side_tab {
@@ -497,14 +497,14 @@ impl App {
         }
         f.render_widget(
             Paragraph::new(Line::from(head)),
-            Rect::new(area.x + 1, area.y, area.width.saturating_sub(3), 1),
+            Rect::new(area.x, area.y, area.width.saturating_sub(2), 1),
         );
-        let hint_w = area.width.saturating_sub(3);
+        let hint_w = area.width.saturating_sub(2);
         let hint = sidebar_hint(self.side_tab, hint_w as usize);
         let hint_h = (hint.len() as u16).min(area.height.saturating_sub(3));
         f.render_widget(
             Paragraph::new(hint),
-            Rect::new(area.x + 1, area.y + 2, hint_w, hint_h),
+            Rect::new(area.x, area.y + 2, hint_w, hint_h),
         );
         let top = 2 + hint_h + 1;
         let area = Rect::new(
