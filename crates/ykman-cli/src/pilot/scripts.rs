@@ -259,6 +259,66 @@ fn format_step(s: &[String]) -> String {
     s.iter().map(|w| quote(w)).collect::<Vec<_>>().join(" ")
 }
 
+const SECRET_FLAGS: [&str; 7] = [
+    "key",
+    "password",
+    "secret",
+    "passphrase",
+    "pin",
+    "puk",
+    "code",
+];
+
+fn secret_flag(w: &str) -> bool {
+    let w = w.to_lowercase();
+    w.starts_with('-') && SECRET_FLAGS.iter().any(|s| w.contains(s))
+}
+
+/// A step for display, with values that look like secrets hidden.
+fn masked_step(step: &[String]) -> String {
+    let off = if step.first().is_some_and(|w| w == "repeat") {
+        2
+    } else {
+        0
+    };
+    let w: Vec<&str> = step.iter().skip(off).map(String::as_str).collect();
+    let positional = if w.starts_with(&["oath", "accounts", "add"]) {
+        Some(4)
+    } else if w.starts_with(&["oath", "accounts", "uri"]) {
+        Some(3)
+    } else {
+        None
+    };
+    let hide = |s: &str| {
+        if s.contains("${") {
+            quote(s)
+        } else {
+            "••••".to_string()
+        }
+    };
+    let mut out = Vec::new();
+    let mut hide_next = false;
+    for (i, word) in step.iter().enumerate() {
+        let shown = if hide_next && !word.starts_with('-') {
+            hide(word)
+        } else if let Some((flag, value)) = word.split_once('=')
+            && secret_flag(flag)
+        {
+            format!("{flag}={}", hide(value))
+        } else if !word.starts_with('-')
+            && i.checked_sub(off).is_some()
+            && i - off == positional.unwrap_or(usize::MAX)
+        {
+            hide(word)
+        } else {
+            quote(word)
+        };
+        hide_next = secret_flag(word) && !word.contains('=');
+        out.push(shown);
+    }
+    out.join(" ")
+}
+
 /// Steps that may carry secrets on the command line.
 fn looks_secret(step: &[String]) -> bool {
     let step = match parse_repeat(step) {
@@ -270,19 +330,7 @@ fn looks_secret(step: &[String]) -> bool {
         if step.get(i + 1).is_some_and(|n| n.contains("${")) {
             return false;
         }
-        let w = w.to_lowercase();
-        w.starts_with('-')
-            && [
-                "key",
-                "password",
-                "secret",
-                "passphrase",
-                "pin",
-                "puk",
-                "code",
-            ]
-            .iter()
-            .any(|s| w.contains(s))
+        secret_flag(w)
     });
     let w: Vec<&str> = step.iter().map(String::as_str).collect();
     flag || w.starts_with(&["otp", "static"])
@@ -440,6 +488,15 @@ impl App {
     }
 
     pub(super) fn script_command(&mut self, args: &[String]) {
+        match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+            ["show", name] => return self.script_show(name),
+            ["rename", old, new] => return self.script_rename(old, new),
+            ["rename", ..] => {
+                self.note("Usage: /script rename <old-name> <new-name>");
+                return;
+            }
+            _ => {}
+        }
         if self.batch.is_some() || self.running || self.recording.is_some() {
             self.note("Finish the current command, batch or recording first.");
             return;
@@ -461,7 +518,9 @@ impl App {
                 }
                 None => self.note("No sequence yet. Use /record to make one."),
             },
-            _ => self.note("Usage: /script save <name> · run <name> · list · delete <name> · last"),
+            _ => self.note(
+                "Usage: /script save <name> · run <name> · show <name> · rename <old> <new> · list · delete <name> · last",
+            ),
         }
     }
 
@@ -528,6 +587,46 @@ impl App {
         }
     }
 
+    fn script_show(&mut self, name: &str) {
+        let Some(steps) = self.load_script(name) else {
+            self.note(&format!("No script named '{name}'."));
+            return;
+        };
+        self.note(&format!(
+            "Script '{name}' · {} step{}:",
+            steps.len(),
+            plural(steps.len())
+        ));
+        for (i, s) in steps.iter().enumerate() {
+            self.note(&format!("  {}  {}", i + 1, masked_step(s)));
+        }
+    }
+
+    fn script_rename(&mut self, old: &str, new: &str) {
+        if !valid_name(new) {
+            self.note("Script names may use letters, digits, - and _ (max 40).");
+            return;
+        }
+        let Some(dir) = scripts_dir() else {
+            self.note("No place to save scripts on this system.");
+            return;
+        };
+        if !valid_name(old) || !dir.join(old).is_file() {
+            self.note(&format!("No script named '{old}'."));
+        } else if dir.join(new).exists() {
+            self.note(&format!("A script named '{new}' already exists."));
+        } else if let Err(e) = std::fs::rename(dir.join(old), dir.join(new)) {
+            self.note(&format!("Could not rename: {e}"));
+        } else {
+            self.note(&format!("Renamed script '{old}' to '{new}'."));
+            if let Some(s) = self.last_sequence.as_mut()
+                && s.name.as_deref() == Some(old)
+            {
+                s.name = Some(new.to_string());
+            }
+        }
+    }
+
     fn script_delete(&mut self, name: &str) {
         let removed = valid_name(name)
             && scripts_dir().is_some_and(|d| std::fs::remove_file(d.join(name)).is_ok());
@@ -543,13 +642,13 @@ impl App {
         }
     }
 
-    pub(super) fn load_script_list(&self) -> Vec<(String, usize, String)> {
+    pub(super) fn load_script_list(&self) -> Vec<(String, usize, Vec<String>)> {
         script_names()
             .into_iter()
             .map(|n| {
                 let steps = self.load_script(&n).unwrap_or_default();
-                let first = steps.first().map(|s| s.join(" ")).unwrap_or_default();
-                (n, steps.len(), first)
+                let shown = steps.iter().map(|s| masked_step(s)).collect();
+                (n, steps.len(), shown)
             })
             .collect()
     }
@@ -606,6 +705,11 @@ impl App {
         let subs = [
             ("save", "Save the last sequence: /script save <name>"),
             ("run", "Run a saved script"),
+            ("show", "Show what a saved script does"),
+            (
+                "rename",
+                "Rename a saved script: /script rename <old> <new>",
+            ),
             ("list", "List saved scripts"),
             ("delete", "Delete a saved script"),
             ("last", "Run the last sequence again"),
@@ -616,7 +720,7 @@ impl App {
                 .filter(|(n, _)| n.starts_with(partial))
                 .map(|(n, d)| (n.to_string(), d.to_string()))
                 .collect(),
-            ["script", "run" | "delete"] => script_names()
+            ["script", "run" | "delete" | "show" | "rename"] => script_names()
                 .into_iter()
                 .filter(|n| n.starts_with(partial))
                 .map(|n| (n, "Saved script".to_string()))

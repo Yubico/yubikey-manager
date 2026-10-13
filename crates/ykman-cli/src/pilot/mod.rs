@@ -76,6 +76,9 @@ struct Device {
 /// Stand-in serial for keys that have none; they can't be selected with `--device`.
 const NO_SERIAL: u32 = 0;
 
+/// Steps shown when a script is expanded in the Scripts page.
+const MAX_OPEN_STEPS: usize = 6;
+
 impl Device {
     fn describe(&self) -> String {
         match self.serial {
@@ -235,7 +238,9 @@ struct App {
     /// Side panel page: 0 = YubiKeys, 1 = Scripts.
     side_tab: usize,
     /// Saved scripts shown on the Scripts page: (name, step count, first step).
-    scripts: Vec<(String, usize, String)>,
+    scripts: Vec<(String, usize, Vec<String>)>,
+    /// Index of the script whose steps are expanded in the Scripts page.
+    script_open: Option<usize>,
     side_state: ListState,
     devices: Vec<Device>,
     device: Option<u32>,
@@ -313,6 +318,7 @@ impl App {
             sidebar: false,
             side_tab: 0,
             scripts: Vec::new(),
+            script_open: None,
             side_state: ListState::default(),
             devices: Vec::new(),
             device: None,
@@ -722,6 +728,7 @@ impl App {
 
     fn set_side_tab(&mut self, tab: usize) {
         self.side_tab = tab;
+        self.script_open = None;
         if tab == 1 {
             self.scripts = self.load_script_list();
             self.side_state
@@ -734,6 +741,37 @@ impl App {
             self.side_state.select(Some(idx));
         }
         *self.side_state.offset_mut() = 0;
+    }
+
+    /// Height in rows of one item in the sidebar list.
+    fn side_item_height(&self, i: usize) -> usize {
+        if self.side_tab == 1 {
+            2 + self.script_lines(i)
+        } else {
+            3
+        }
+    }
+
+    /// How many lines of steps a script shows: one preview, or all steps when open.
+    fn script_lines(&self, i: usize) -> usize {
+        match (self.script_open == Some(i), self.scripts.get(i)) {
+            (true, Some((_, n, _))) => (*n).clamp(1, MAX_OPEN_STEPS + 1),
+            _ => 1,
+        }
+    }
+
+    /// The list item under a row of the sidebar (relative to its top).
+    fn side_row_at(&self, rel: usize) -> usize {
+        let mut i = self.side_state.offset();
+        let mut top = 0;
+        while i + 1 < self.side_count() {
+            top += self.side_item_height(i);
+            if rel < top {
+                break;
+            }
+            i += 1;
+        }
+        i
     }
 
     fn side_count(&self) -> usize {
@@ -754,8 +792,23 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Right | KeyCode::Left => self.sidebar = false,
             KeyCode::Tab | KeyCode::BackTab => self.set_side_tab(1 - self.side_tab),
-            KeyCode::Up if count > 0 => self.side_state.select(Some((cur + count - 1) % count)),
-            KeyCode::Down if count > 0 => self.side_state.select(Some((cur + 1) % count)),
+            KeyCode::Up if count > 0 => {
+                self.script_open = None;
+                self.side_state.select(Some((cur + count - 1) % count))
+            }
+            KeyCode::Down if count > 0 => {
+                self.script_open = None;
+                self.side_state.select(Some((cur + 1) % count))
+            }
+            KeyCode::Char(' ') if self.side_tab == 1 && count > 0 => {
+                self.script_open = (self.script_open != Some(cur)).then_some(cur);
+            }
+            KeyCode::Char('r') if self.side_tab == 1 && count > 0 => {
+                if let Some((name, ..)) = self.scripts.get(cur) {
+                    self.input.set(format!("/script rename {name} "));
+                    self.sidebar = false;
+                }
+            }
             KeyCode::Enter if count > 0 => self.choose_side(cur),
             _ => {}
         }
@@ -797,7 +850,7 @@ impl App {
             MouseEventKind::ScrollDown => self.scroll = self.scroll.saturating_sub(3),
             MouseEventKind::Down(MouseButton::Left) => {
                 if self.sidebar && inside(self.hits.side_items) {
-                    let row = (y - self.hits.side_items.y) as usize / 3 + self.side_state.offset();
+                    let row = self.side_row_at((y - self.hits.side_items.y) as usize);
                     if row < self.side_count() {
                         self.side_state.select(Some(row));
                         self.choose_side(row);

@@ -506,38 +506,64 @@ impl App {
         self.scripts
             .iter()
             .enumerate()
-            .map(|(i, (name, n, first))| {
+            .map(|(i, (name, n, steps))| {
                 let is_sel = chosen == Some(i);
                 let fill = if is_sel {
                     Style::new().bg(selected())
                 } else {
                     Style::new()
                 };
-                let mut preview = first.clone();
                 let room = w.saturating_sub(5);
-                if preview.chars().count() > room {
-                    preview = preview
-                        .chars()
-                        .take(room.saturating_sub(1))
-                        .collect::<String>()
-                        + "…";
+                let fit = |text: String| {
+                    if text.chars().count() > room {
+                        text.chars()
+                            .take(room.saturating_sub(1))
+                            .collect::<String>()
+                            + "…"
+                    } else {
+                        text
+                    }
+                };
+                let open = self.script_open == Some(i);
+                let mut body: Vec<Line<'static>> = Vec::new();
+                if open {
+                    for (k, s) in steps.iter().take(MAX_OPEN_STEPS).enumerate() {
+                        body.push(
+                            Line::from(Span::styled(fit(format!("{} {s}", k + 1)), dim()))
+                                .style(fill),
+                        );
+                    }
+                    if steps.len() > MAX_OPEN_STEPS {
+                        let more = steps.len() - MAX_OPEN_STEPS;
+                        body.push(
+                            Line::from(Span::styled(format!("… +{more} more"), dim())).style(fill),
+                        );
+                    }
                 }
-                ListItem::new(vec![
+                if body.is_empty() {
+                    let first = steps.first().cloned().unwrap_or_default();
+                    body.push(Line::from(Span::styled(fit(first), dim())).style(fill));
+                }
+                for line in &mut body {
+                    line.spans.insert(0, Span::raw("   "));
+                }
+                let mut lines = vec![
                     Line::from(vec![
                         Span::raw("   "),
                         Span::styled(name.clone(), Style::new().add_modifier(Modifier::BOLD)),
                         Span::styled(format!("  {n} step{}", plural(*n)), dim()),
                     ])
                     .style(fill),
-                    Line::from(Span::styled(format!("   {preview}"), dim())).style(fill),
-                    if is_sel {
-                        half_edge('▀', w)
-                    } else if chosen == Some(i + 1) {
-                        half_edge('▄', w)
-                    } else {
-                        Line::from("")
-                    },
-                ])
+                ];
+                lines.extend(body);
+                lines.push(if is_sel {
+                    half_edge('▀', w)
+                } else if chosen == Some(i + 1) {
+                    half_edge('▄', w)
+                } else {
+                    Line::from("")
+                });
+                ListItem::new(lines)
             })
             .collect()
     }
@@ -667,8 +693,17 @@ impl App {
                 continue;
             }
             let failed = run.rest.iter().any(|e| e.kind == Kind::Fail);
+            // The red marker and the command's own error already say it failed;
+            // keep the exit code only when there is nothing else to show.
+            let has_output = run
+                .rest
+                .iter()
+                .any(|e| matches!(e.kind, Kind::Out | Kind::Err));
             let mut marked = false;
             for e in &run.rest {
+                if has_output && e.kind == Kind::Fail && e.text.starts_with("exited with code") {
+                    continue;
+                }
                 let is_out = matches!(e.kind, Kind::Out | Kind::Err | Kind::Fail);
                 if is_out && !show_out {
                     continue;
@@ -976,6 +1011,19 @@ impl App {
                 Span::styled("Esc", dim().add_modifier(Modifier::BOLD)),
                 Span::styled(" close", dim()),
             ]
+        } else if self.sidebar && self.side_tab == 1 {
+            let bold = dim().add_modifier(Modifier::BOLD);
+            vec![
+                Span::styled("Enter", bold),
+                Span::styled(" run · ", dim()),
+                Span::styled("Space", bold),
+                Span::styled(" steps · ", dim()),
+                Span::styled("r", bold),
+                Span::styled(" rename", dim()),
+                Span::styled(" · ", dim()),
+                Span::styled("Esc", bold),
+                Span::styled(" close", dim()),
+            ]
         } else if self.running || self.batch_wait_msg().is_some() {
             let msg = if self.prompt().is_some() {
                 "waiting for input"
@@ -1027,6 +1075,13 @@ impl App {
         let width = |v: &[Span]| v.iter().map(Span::width).sum::<usize>();
         let spans = if self.search.is_some() {
             left
+        } else if self.sidebar && self.side_tab == 1 {
+            // Drop the trailing "· Esc close", then the middle, to fit.
+            let mut v = left;
+            while v.len() > 3 && width(&v) > avail {
+                v.truncate(v.len().saturating_sub(3));
+            }
+            v
         } else {
             [full, short, left]
                 .into_iter()
