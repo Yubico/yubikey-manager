@@ -281,6 +281,9 @@ struct App {
     monitor: Option<Box<dyn std::any::Any>>,
     /// Whether the monitor reports device changes (polling then only happens as a one-off refresh).
     monitored: bool,
+    /// The latest monitor update received while a command was running; a
+    /// reset that asks to re-insert the key must not churn the device list.
+    held_devices: Option<Vec<Device>>,
     /// When the device list last changed (or the monitor last reported).
     devices_changed: Instant,
     batch: Option<Batch>,
@@ -369,6 +372,7 @@ impl App {
             missing_polls: 0,
             monitor: None,
             monitored: false,
+            held_devices: None,
             devices_changed: Instant::now(),
             batch: None,
             batch_mode: false,
@@ -390,12 +394,14 @@ impl App {
         app.saved_tab = state.tab;
         app.history = state.history.clone();
         app.saved = state.history;
-        app.refresh_devices();
+        // The monitor's first scan replaces the initial poll; polling only
+        // starts (after DEVICE_POLL) if the monitor never becomes ready.
         #[cfg(feature = "hardware")]
         {
-            app.monitor =
-                monitor::start(app.tx.clone()).map(|h| Box::new(h) as Box<dyn std::any::Any>);
+            app.monitor = Some(Box::new(monitor::start(app.tx.clone())));
         }
+        #[cfg(not(feature = "hardware"))]
+        app.refresh_devices();
         app
     }
 
@@ -495,10 +501,18 @@ impl App {
                     None => self.note("terminated"),
                 }
                 self.batch_step_done(code);
+                if let Some(list) = self.held_devices.take() {
+                    self.devices_changed = Instant::now();
+                    self.apply_devices(list, true);
+                }
             }
             Msg::Devices(list) => self.apply_devices(list, true),
             Msg::Monitored(list) => {
                 self.monitored = true;
+                if self.running && self.batch.is_none() {
+                    self.held_devices = Some(list);
+                    return;
+                }
                 self.devices_changed = Instant::now();
                 self.apply_devices(list, false);
             }
@@ -506,7 +520,9 @@ impl App {
     }
 
     /// Applies a new device list. A poll that shows a key missing must be
-    /// confirmed by the next poll (`confirm_removal`); the monitor is trusted.
+    /// confirmed by the next poll (`confirm_removal`). The monitor is trusted,
+    /// except for what it reported while a command ran: a key re-enumerating
+    /// after a reset can look removed.
     fn apply_devices(&mut self, list: Vec<Device>, confirm_removal: bool) {
         self.polling = false;
         self.last_poll = Instant::now();

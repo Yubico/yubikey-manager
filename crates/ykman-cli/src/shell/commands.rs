@@ -293,11 +293,13 @@ impl App {
             Some(&"repeat") if words.len() >= 2 => 2,
             _ => 0,
         };
-        if off == 1 && words.len() == 1 && "stop".starts_with(partial) {
-            add("stop", "End the batch and show a summary");
-            for name in script_names() {
+        if off == 1 && words.len() == 1 {
+            if "stop".starts_with(partial) {
+                add("stop", "End the batch and show a summary");
+            }
+            for (name, n, steps) in self.load_script_list() {
                 if name.starts_with(partial) {
-                    add(&name, "Run this saved script on every key");
+                    add(&name, &script_desc(n, &steps));
                 }
             }
         }

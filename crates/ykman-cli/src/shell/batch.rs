@@ -13,6 +13,11 @@ pub(super) const BATCH_ALLOWED: [&[&str]; 10] = [
     &["oath", "accounts", "import"],
     &["oath", "accounts", "uri"],
 ];
+/// Read-only commands: `info`, and `info` or `list` under an application.
+fn is_read_only(path: &[&str]) -> bool {
+    matches!(path, ["info"] | [_, .., "info" | "list"])
+}
+
 pub(super) const BATCH_POLL: Duration = Duration::from_millis(500);
 /// A rebooting key needs a moment before it can be trusted to be back.
 const STEP_SETTLE: Duration = Duration::from_millis(1500);
@@ -83,11 +88,11 @@ impl App {
     pub(super) fn batch_possible(&self, words: &[&str]) -> bool {
         fn has_reset(c: &clap::Command) -> bool {
             c.get_subcommands()
-                .any(|s| s.get_name() == "reset" || has_reset(s))
+                .any(|s| matches!(s.get_name(), "reset" | "info" | "list") || has_reset(s))
         }
         let (node, used) = self.resolve(words);
         used < words.len()
-            || node.get_name() == "reset"
+            || matches!(node.get_name(), "reset" | "info" | "list")
             || BATCH_ALLOWED
                 .iter()
                 .any(|p| p.starts_with(words) || words.starts_with(p))
@@ -98,7 +103,9 @@ impl App {
     pub(super) fn batch_allows(&self, words: &[&str]) -> bool {
         let (_, used) = self.resolve(words);
         let is_reset = used > 0 && words[used - 1] == "reset";
-        is_reset || BATCH_ALLOWED.iter().any(|p| words.starts_with(p))
+        is_reset
+            || is_read_only(&words[..used])
+            || BATCH_ALLOWED.iter().any(|p| words.starts_with(p))
     }
 
     pub(super) fn enter_batch_mode(&mut self) {
@@ -150,7 +157,7 @@ impl App {
         let words: Vec<&str> = args.iter().map(String::as_str).collect();
         if !self.batch_allows(&words) {
             self.note(
-                "Batch supports OTP programming, OATH account adding, config and reset commands. Example: otp yubiotp 1 -S -g -G",
+                "Batch supports OTP programming, OATH account adding, config, reset and info/list commands. Example: otp yubiotp 1 -S -g -G",
             );
             return;
         }
@@ -769,7 +776,7 @@ impl App {
         let words: Vec<&str> = expanded.iter().map(String::as_str).collect();
         if self.batch_mode && !self.batch_allows(&words) {
             return Err(
-                "batch supports OTP programming, OATH account adding, config and reset commands."
+                "batch supports OTP programming, OATH account adding, config, reset and info/list commands."
                     .into(),
             );
         }
@@ -939,6 +946,15 @@ fn row_group(b: &Batch, idx: usize, fresh: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_only_commands_are_recognised() {
+        assert!(is_read_only(&["info"]));
+        assert!(is_read_only(&["piv", "info"]));
+        assert!(is_read_only(&["oath", "accounts", "list"]));
+        assert!(!is_read_only(&["list"]));
+        assert!(!is_read_only(&["piv", "reset"]));
+    }
 
     #[test]
     fn transient_key_errors_are_recognised() {

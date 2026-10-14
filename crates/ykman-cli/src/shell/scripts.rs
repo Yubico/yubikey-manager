@@ -229,6 +229,16 @@ fn scripts_dir() -> Option<std::path::PathBuf> {
     Some(state::state_file()?.parent()?.join("shell-scripts"))
 }
 
+/// Completion text for a saved script: a marker, the step count and the first step.
+pub(super) fn script_desc(count: usize, steps: &[String]) -> String {
+    let first = steps.first().map_or("", String::as_str);
+    let more = if count > 1 { "…" } else { "" };
+    format!(
+        "≡ Saved script · {count} step{} · {first}{more}",
+        plural(count)
+    )
+}
+
 pub(super) fn script_names() -> Vec<String> {
     let mut names: Vec<String> = scripts_dir()
         .and_then(|d| std::fs::read_dir(d).ok())
@@ -726,10 +736,14 @@ impl App {
                 .filter(|(n, _)| n.starts_with(partial))
                 .map(|(n, d)| (n.to_string(), d.to_string()))
                 .collect(),
-            ["script", "run" | "delete" | "show" | "rename"] => script_names()
+            ["script", "run" | "delete" | "show" | "rename"] => self
+                .load_script_list()
                 .into_iter()
-                .filter(|n| n.starts_with(partial))
-                .map(|n| (n, "Saved script".to_string()))
+                .filter(|(n, ..)| n.starts_with(partial))
+                .map(|(n, count, steps)| {
+                    let desc = script_desc(count, &steps);
+                    (n, desc)
+                })
                 .collect(),
             _ => Vec::new(),
         }
