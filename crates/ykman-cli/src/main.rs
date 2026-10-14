@@ -25,6 +25,7 @@ mod otp;
 mod piv;
 mod scp;
 mod securitydomain;
+mod shell;
 mod util;
 
 // Re-export library modules so binary-internal modules can use them via crate::
@@ -86,6 +87,10 @@ struct Cli {
     /// Show third-party license information
     #[arg(long, hide = true)]
     licenses: bool,
+
+    /// Launch the interactive shell (experimental TUI)
+    #[arg(long, hide = true)]
+    shell: bool,
 
     /// Generate shell completion
     #[arg(long, value_name = "SHELL", hide = true)]
@@ -347,6 +352,10 @@ fn run() -> Result<()> {
     };
     let cli = Cli::from_arg_matches_mut(&mut matches).unwrap_or_else(|error| error.exit());
     color::init(cli.no_color, cli.color);
+
+    if cli.shell {
+        return shell::run(cli_command());
+    }
 
     init_logging(&cli)?;
 
