@@ -850,6 +850,13 @@ fn parse_object_id(s: &str) -> Result<u32> {
 }
 
 pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
+    // Read before the PIV session is opened, over its own connection.
+    let pool = crate::info::pool_row(
+        dev,
+        "PIV",
+        &[crate::info::ID_PIV_OBJECTS, crate::info::ID_PIV_KEYS],
+        color::Swatch::Yellow,
+    );
     let mut session = open_session(dev, scp_params)?;
     let reset_blocked = dev.info().reset_blocked.contains(Capability::PIV);
     let version = session.version();
@@ -909,7 +916,9 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
 
     // Slot capacity is only fixed up to 5.x; from 6.0 the storage pool is
     // shared with other applications.
-    if version < Version(6, 0, 0) {
+    if let Some(row) = pool {
+        rows.push(row);
+    } else if version < Version(6, 0, 0) {
         let used = count_certificate_slots(&mut session);
         rows.push((
             "Slots in use",

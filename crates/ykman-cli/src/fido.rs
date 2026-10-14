@@ -524,6 +524,16 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
         .is_some_and(|caps: &Capability| caps.contains(Capability::FIDO2));
 
     if fido2_enabled {
+        // Read before the FIDO session is opened, over its own connection.
+        let pool = crate::info::pool_row(
+            dev,
+            "FIDO2",
+            &[
+                crate::info::ID_FIDO_CREDENTIALS,
+                crate::info::ID_FIDO_LARGE_BLOB,
+            ],
+            crate::color::Swatch::Red,
+        );
         with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
             let mut rows = Vec::new();
             // FIPS status
@@ -625,6 +635,8 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
                     None => rows.push(("Credential storage remaining", remaining.to_string())),
                 }
             }
+
+            rows.extend(pool);
 
             // Enterprise Attestation
             if let Some(&ep) = ctap_info.options.get("ep") {
