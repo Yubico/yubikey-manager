@@ -405,6 +405,21 @@ pub enum Slot {
 }
 
 impl Slot {
+    /// Key slots reported by PIV info, excluding the attestation slot.
+    pub fn key_slots() -> impl Iterator<Item = Self> {
+        [
+            Self::Authentication,
+            Self::Signature,
+            Self::KeyManagement,
+            Self::CardAuth,
+        ]
+        .into_iter()
+        .chain(
+            (Self::Retired1 as u8..=Self::Retired20 as u8)
+                .map(|id| Self::from_u8(id).expect("retired key slot IDs are contiguous")),
+        )
+    }
+
     /// Convert a raw byte to a [`Slot`], returning `None` if unrecognized.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
@@ -2948,6 +2963,63 @@ impl<C: SmartCardConnection> signature::Signer<PivSignature> for PivSigner<'_, C
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::prelude::*;
+
+    #[test]
+    fn openssl_pqc_private_key_files_import_as_seed() {
+        for (algorithm, key_type, tag, seed_len) in [
+            ("ml-dsa-44", KeyType::MlDsa44, 0x09, 32),
+            ("ml-dsa-65", KeyType::MlDsa65, 0x09, 32),
+            ("ml-dsa-87", KeyType::MlDsa87, 0x09, 32),
+            ("ml-kem-512", KeyType::MlKem512, 0x0A, 64),
+            ("ml-kem-768", KeyType::MlKem768, 0x0A, 64),
+            ("ml-kem-1024", KeyType::MlKem1024, 0x0A, 64),
+        ] {
+            let mut payloads = Vec::new();
+            for (format, inner_tag) in [("full", 0x30), ("seed", 0x80)] {
+                let path = format!(
+                    "{}/tests/fixtures/pqc/{algorithm}-{format}.pem",
+                    env!("CARGO_MANIFEST_DIR")
+                );
+                let pem = std::fs::read_to_string(&path).expect("read OpenSSL key fixture");
+                assert!(pem.starts_with("-----BEGIN PRIVATE KEY-----"));
+                assert!(pem.trim_end().ends_with("-----END PRIVATE KEY-----"));
+                let encoded: String = pem
+                    .lines()
+                    .filter(|line| !line.starts_with("-----"))
+                    .collect();
+                let der = BASE64_STANDARD
+                    .decode(encoded)
+                    .expect("decode OpenSSL key fixture");
+
+                let (_, seq_off, seq_len, _) = tlv_parse(&der, 0).unwrap();
+                let seq = &der[seq_off..seq_off + seq_len];
+                let (_, _, _, version_end) = tlv_parse(seq, 0).unwrap();
+                let (_, _, _, algorithm_end) = tlv_parse(seq, version_end).unwrap();
+                let (_, key_off, key_len, _) = tlv_parse(seq, algorithm_end).unwrap();
+                let key_data = &seq[key_off..key_off + key_len];
+                assert_eq!(tlv_parse(key_data, 0).unwrap().0, inner_tag, "{path}");
+
+                let private_key = PrivateKey::from_pkcs8(&der).expect("parse OpenSSL key fixture");
+                assert_eq!(
+                    KeyType::try_from(&private_key.algorithm()).unwrap(),
+                    key_type
+                );
+                let payload = build_put_key_data(key_type, &private_key).unwrap();
+                let (payload_tag, _, payload_len, end) = tlv_parse(&payload, 0).unwrap();
+                assert_eq!(
+                    (payload_tag, payload_len, end),
+                    (tag, seed_len, payload.len())
+                );
+                payloads.push(payload);
+            }
+            assert_eq!(
+                payloads[0].as_slice(),
+                payloads[1].as_slice(),
+                "{algorithm}"
+            );
+        }
+    }
 
     #[test]
     fn fascn_matches_python_reference() {
@@ -3116,6 +3188,28 @@ mod tests {
             Some(ManagementKeyType::Aes256)
         );
         assert_eq!(ManagementKeyType::from_u8(0xFF), None);
+    }
+
+    #[test]
+    fn test_key_slots_include_all_retired_slots_without_attestation() {
+        let slots: Vec<_> = Slot::key_slots().collect();
+        assert_eq!(slots.len(), 24);
+        assert_eq!(
+            &slots[..4],
+            &[
+                Slot::Authentication,
+                Slot::Signature,
+                Slot::KeyManagement,
+                Slot::CardAuth
+            ]
+        );
+        for (index, slot) in slots[4..].iter().enumerate() {
+            assert_eq!(*slot as u8, 0x82 + index as u8);
+            assert_eq!(Slot::from_u8(*slot as u8), Some(*slot));
+        }
+        assert_eq!(slots[4], Slot::Retired1);
+        assert_eq!(slots[23], Slot::Retired20);
+        assert!(!slots.contains(&Slot::Attestation));
     }
 
     #[test]
@@ -3379,13 +3473,12 @@ mod tests {
 
     #[test]
     fn test_ml_private_key_der_detection_and_extraction() {
-        fn pkcs8_der(oid: &[u8], raw_key: &[u8]) -> Vec<u8> {
+        fn pkcs8_der(oid: &[u8], inner_key: &[u8]) -> Vec<u8> {
             let mut algorithm_identifier = Vec::new();
             algorithm_identifier.extend_from_slice(&tlv_encode(0x06, oid));
             let algorithm_identifier = tlv_encode(0x30, &algorithm_identifier);
 
-            let inner_key = tlv_encode(0x04, raw_key);
-            let private_key = tlv_encode(0x04, &inner_key);
+            let private_key = tlv_encode(0x04, inner_key);
 
             let mut pkcs8 = Vec::new();
             pkcs8.extend_from_slice(&tlv_encode(0x02, &[0x00]));
@@ -3395,7 +3488,9 @@ mod tests {
         }
 
         let ml_dsa_key = vec![0x11; 32];
-        let ml_dsa_pkcs8 = pkcs8_der(OID_ML_DSA_65.as_bytes(), &ml_dsa_key);
+        let mut ml_dsa_fields = tlv_encode(0x04, &ml_dsa_key);
+        ml_dsa_fields.extend_from_slice(&tlv_encode(0x04, &vec![0x33; 4032]));
+        let ml_dsa_pkcs8 = pkcs8_der(OID_ML_DSA_65.as_bytes(), &tlv_encode(0x30, &ml_dsa_fields));
         let ml_dsa_priv = PrivateKey::from_pkcs8(&ml_dsa_pkcs8).expect("parse ML-DSA key");
         assert_eq!(
             KeyType::try_from(&ml_dsa_priv.algorithm()).expect("convert algorithm"),
@@ -3405,9 +3500,13 @@ mod tests {
             PrivateKey::MlDsa(k) => assert_eq!(k.private_key.expose_secret(), &ml_dsa_key),
             _ => panic!("Expected MlDsa variant"),
         }
+        assert_eq!(
+            *build_put_key_data(KeyType::MlDsa65, &ml_dsa_priv).unwrap(),
+            tlv_encode(0x09, &ml_dsa_key)
+        );
 
-        let ml_kem_key = vec![0x22; 48];
-        let ml_kem_pkcs8 = pkcs8_der(OID_ML_KEM_1024.as_bytes(), &ml_kem_key);
+        let ml_kem_key = vec![0x22; 64];
+        let ml_kem_pkcs8 = pkcs8_der(OID_ML_KEM_1024.as_bytes(), &tlv_encode(0x80, &ml_kem_key));
         let ml_kem_priv = PrivateKey::from_pkcs8(&ml_kem_pkcs8).expect("parse ML-KEM key");
         assert_eq!(
             KeyType::try_from(&ml_kem_priv.algorithm()).expect("convert algorithm"),
@@ -3417,5 +3516,9 @@ mod tests {
             PrivateKey::MlKem(k) => assert_eq!(k.private_key.expose_secret(), &ml_kem_key),
             _ => panic!("Expected MlKem variant"),
         }
+        assert_eq!(
+            *build_put_key_data(KeyType::MlKem1024, &ml_kem_priv).unwrap(),
+            tlv_encode(0x0A, &ml_kem_key)
+        );
     }
 }

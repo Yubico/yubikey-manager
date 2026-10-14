@@ -187,7 +187,7 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         }
     }
 
-    let pipe_name = crate::PIPE_NAME;
+    let pipe_name = crate::windows_service().pipe();
     let pipe_name_w: Vec<u16> = pipe_name.encode_utf16().chain(std::iter::once(0)).collect();
 
     // Build a security descriptor that allows Authenticated Users (AU) to

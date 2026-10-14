@@ -7,6 +7,7 @@
 
 use std::io::{self, Write};
 use std::sync::{Mutex, Once, OnceLock};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 static PICO_CLEANUP_TARGETS: OnceLock<Mutex<Vec<(String, u8)>>> = OnceLock::new();
@@ -49,10 +50,10 @@ pub trait Controller: Send + Sync {
     /// on [`NfcController`] will panic.
     fn touch(&self);
 
-    /// Release the YubiKey sensor after a long touch.
+    /// Release the YubiKey sensor, including any pending asynchronous touch.
     ///
-    /// Must only be called after [`touch()`](Controller::touch). For NFC this
-    /// is never needed, so calling this on [`NfcController`] will panic.
+    /// May also be called to ensure USB starts in an untouched state. For NFC
+    /// this is never needed, so calling this on [`NfcController`] will panic.
     fn release(&self);
 
     /// Remove/disconnect the YubiKey (first half of a power cycle).
@@ -160,16 +161,22 @@ impl Controller for PrintController {
 ///
 /// Controls power and touch on a YubiKey via HTTP endpoints on a Pi Pico W.
 /// The Pico exposes `/usbN/power/{on,off}` and `/usbN/touch/{on,off}` endpoints.
+/// Pending touch requests are joined and the sensor is released on drop.
 pub struct PicoController {
     base_url: String,
     port: u8,
+    pending_touch: Mutex<Option<JoinHandle<Result<(), String>>>>,
 }
 
 impl PicoController {
     pub fn new(base_url: &str, port: u8) -> Self {
         let base_url = base_url.trim_end_matches('/').to_string();
         register_pico_cleanup(&base_url, port);
-        Self { base_url, port }
+        Self {
+            base_url,
+            port,
+            pending_touch: Mutex::new(None),
+        }
     }
 
     fn format_url(&self, action: &str) -> String {
@@ -183,6 +190,42 @@ impl PicoController {
             .call()
             .unwrap_or_else(|e| panic!("PicoController request failed: {url}: {e}"));
     }
+
+    fn finish_touch(pending: &mut Option<JoinHandle<Result<(), String>>>) -> Result<(), String> {
+        if let Some(worker) = pending.take() {
+            worker
+                .join()
+                .map_err(|_| "PicoController touch worker panicked".to_string())??;
+        }
+        Ok(())
+    }
+
+    fn release_touch(&self) -> Result<(), String> {
+        let mut pending = self.pending_touch.lock().map_err(|e| e.to_string())?;
+        let pending_result = Self::finish_touch(&mut pending);
+        let url = self.format_url("touch/off");
+        eprintln!("PicoController: GET {url}");
+        let release_result = ureq::get(&url)
+            .call()
+            .map(|_| ())
+            .map_err(|e| format!("PicoController request failed: {url}: {e}"));
+        release_result?;
+        // Allow the device to observe release before switching FIDO transports.
+        std::thread::sleep(Duration::from_millis(250));
+        pending_result
+    }
+}
+
+impl Drop for PicoController {
+    fn drop(&mut self) {
+        if let Err(e) = self.release_touch() {
+            if std::thread::panicking() {
+                eprintln!("PicoController touch cleanup failed: {e}");
+            } else {
+                panic!("PicoController touch cleanup failed: {e}");
+            }
+        }
+    }
 }
 
 impl Controller for PicoController {
@@ -190,23 +233,31 @@ impl Controller for PicoController {
         // Turn touch off first then back on in a background thread so that
         // the NFCCTAP keepalive polling loop isn't starved. The authenticator
         // needs to see a fresh off→on transition to register user presence.
+        let mut pending = self.pending_touch.lock().unwrap();
+        Self::finish_touch(&mut pending).unwrap_or_else(|e| panic!("{e}"));
         let url_off = self.format_url("touch/off");
         let url_on = self.format_url("touch/on");
-        std::thread::spawn(move || {
+        let worker = std::thread::spawn(move || {
             eprintln!("PicoController: GET {url_off}");
-            let _ = ureq::get(&url_off).call();
+            ureq::get(&url_off)
+                .call()
+                .map_err(|e| format!("PicoController request failed: {url_off}: {e}"))?;
             std::thread::sleep(Duration::from_millis(200));
             eprintln!("PicoController: GET {url_on}");
-            let _ = ureq::get(&url_on).call();
+            ureq::get(&url_on)
+                .call()
+                .map_err(|e| format!("PicoController request failed: {url_on}: {e}"))?;
+            Ok(())
         });
+        *pending = Some(worker);
     }
 
     fn release(&self) {
-        self.get("touch/off");
+        self.release_touch().unwrap_or_else(|e| panic!("{e}"));
     }
 
     fn remove(&self) {
-        self.get("touch/off");
+        self.release();
         self.get("power/off");
     }
 
@@ -247,6 +298,67 @@ pub fn get_controller(
                     .unwrap_or(6); // Default port 6, closest to the controller on the fixture
                 Some(Box::new(PicoController::new(&env_val, port)))
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+
+    #[test]
+    fn test_pico_touch_cleanup_joins_pending_worker() {
+        for (explicit_release, fail_test) in [(false, false), (true, false), (false, true)] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let request_count = if explicit_release { 4 } else { 3 };
+            let server = std::thread::spawn(move || {
+                let mut requests = Vec::new();
+                for _ in 0..request_count {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut reader = BufReader::new(&mut stream);
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    requests.push(line.split_whitespace().nth(1).unwrap().to_string());
+                    loop {
+                        line.clear();
+                        reader.read_line(&mut line).unwrap();
+                        if line == "\r\n" {
+                            break;
+                        }
+                    }
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        )
+                        .unwrap();
+                }
+                requests
+            });
+            let ctrl = PicoController {
+                base_url: format!("http://{address}"),
+                port: 6,
+                pending_touch: Mutex::new(None),
+            };
+            let result = std::panic::catch_unwind(move || {
+                ctrl.touch();
+                assert!(!fail_test, "simulated test failure");
+                if explicit_release {
+                    ctrl.release();
+                }
+            });
+            assert_eq!(result.is_err(), fail_test);
+            let requests = server.join().unwrap();
+            assert_eq!(
+                &requests[..3],
+                ["/usb6/touch/off", "/usb6/touch/on", "/usb6/touch/off"]
+            );
+            assert_eq!(requests.last().unwrap(), "/usb6/touch/off");
         }
     }
 }

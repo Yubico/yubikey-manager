@@ -334,6 +334,15 @@ macro_rules! with_fido_session {
     ($tc:expr, |$open:ident, $info:ident| $body:block) => {{
         skip_if_needed!($tc);
         require_capability!(Capability::FIDO2);
+        // Keep a controller alive to release USB touch on both success and unwind.
+        let touch_cleanup = if get_device().transport() == Transport::Usb {
+            get_controller()
+        } else {
+            None
+        };
+        if let Some(ctrl) = &touch_cleanup {
+            ctrl.release();
+        }
         match &$tc {
             TestConnection::UsbHid => {
                 require_transport!(Transport::Usb);

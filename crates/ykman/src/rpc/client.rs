@@ -1,5 +1,6 @@
 //! RPC client — connects to ykman-svc Named Pipe.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::{Arc, Mutex};
 
@@ -29,6 +30,7 @@ enum Transport {
 /// An RPC client connected to a ykman RPC server.
 pub struct RpcClient {
     transport: Transport,
+    open_connections: HashMap<Vec<String>, usize>,
 }
 
 /// Thread-safe writer handle for sending cancel signals from the Ctrl+C handler.
@@ -47,6 +49,18 @@ impl CancelWriter {
 }
 
 impl RpcClient {
+    #[cfg(all(test, not(target_os = "windows")))]
+    pub(crate) fn from_test_stream(stream: std::os::unix::net::UnixStream) -> Self {
+        let reader = stream.try_clone().expect("clone test socket");
+        Self {
+            transport: Transport::Stream {
+                reader: BufReader::new(Box::new(reader)),
+                writer: Arc::new(Mutex::new(Box::new(stream))),
+            },
+            open_connections: HashMap::new(),
+        }
+    }
+
     /// Connect to the ykman-svc Named Pipe (Windows) or Unix socket (dev).
     ///
     /// Returns `Err` if the service is not available.
@@ -57,7 +71,10 @@ impl RpcClient {
             use std::os::windows::fs::OpenOptionsExt;
             use std::os::windows::io::AsRawHandle;
 
-            let pipe_path = r"\\.\pipe\ykman-svc";
+            let service = super::windows::client_service().map_err(|e| {
+                RpcCallError::Transport(format!("Failed to determine package identity: {e}"))
+            })?;
+            let pipe_path = service.pipe();
             log::debug!("Connecting to Named Pipe: {pipe_path}");
 
             let file = OpenOptions::new()
@@ -86,6 +103,7 @@ impl RpcClient {
                     writer: Arc::new(Mutex::new(writer)),
                     reader_handle,
                 },
+                open_connections: HashMap::new(),
             };
             client.handshake()?;
 
@@ -115,6 +133,7 @@ impl RpcClient {
                     reader: BufReader::new(reader),
                     writer: Arc::new(Mutex::new(writer)),
                 },
+                open_connections: HashMap::new(),
             };
             client.handshake()?;
 
@@ -253,7 +272,7 @@ impl RpcClient {
                 }
             }
 
-            match self.read_server_message(signal_handler)? {
+            match self.read_server_message(signal_handler, cancellable)? {
                 ServerMessage::Success(success) => {
                     let body = success.body.to_value().map_err(|e| {
                         RpcCallError::Transport(format!("Malformed RPC success body: {e}"))
@@ -288,20 +307,25 @@ impl RpcClient {
     fn read_server_message(
         &mut self,
         signal_handler: Option<&dyn Fn(&str, &Value)>,
+        cancellable: bool,
     ) -> Result<ServerMessage, RpcCallError> {
+        #[cfg(not(target_os = "windows"))]
+        let _ = cancellable;
         loop {
             #[cfg(target_os = "windows")]
-            match self.windows_read_state()? {
-                PipeReadState::NoData => {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                    continue;
+            if cancellable {
+                match self.windows_read_state()? {
+                    PipeReadState::NoData => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    PipeReadState::Disconnected => {
+                        return Err(RpcCallError::Transport(
+                            "RPC subprocess closed unexpectedly".into(),
+                        ));
+                    }
+                    PipeReadState::DataAvailable => {}
                 }
-                PipeReadState::Disconnected => {
-                    return Err(RpcCallError::Transport(
-                        "RPC subprocess closed unexpectedly".into(),
-                    ));
-                }
-                PipeReadState::DataAvailable => {}
             }
 
             let line = self.read_rpc_line()?;
@@ -330,6 +354,37 @@ impl RpcClient {
     /// Call `get` on a target to retrieve node info.
     pub fn get(&mut self, target: &[impl AsRef<str>]) -> Result<RpcResult, RpcCallError> {
         self.call("get", target, json!({}), None, false)
+    }
+
+    pub(crate) fn track_connection(&mut self, target: &[String]) {
+        *self.open_connections.entry(target.to_vec()).or_default() += 1;
+    }
+
+    pub(crate) fn close_connection(&mut self, target: &[String]) -> Result<(), RpcCallError> {
+        let (device, connection) = match target {
+            [device, connection] => (device.clone(), connection.clone()),
+            _ => {
+                return Err(RpcCallError::Transport(
+                    "Invalid RPC connection target".into(),
+                ));
+            }
+        };
+        let count = self
+            .open_connections
+            .get_mut(target)
+            .ok_or_else(|| RpcCallError::Transport("RPC connection was not tracked".into()))?;
+        *count -= 1;
+        if *count == 0 {
+            self.open_connections.remove(target);
+            self.call(
+                "close",
+                &[device],
+                json!({"child": connection}),
+                None,
+                false,
+            )?;
+        }
+        Ok(())
     }
 
     fn read_line(&mut self, buf: &mut String) -> std::io::Result<usize> {
