@@ -440,7 +440,7 @@ impl App {
                     (Expand::Display, None) => format!("${{{name}}}"),
                     _ => "1".into(),
                 },
-                "date" => chrono::Local::now().format("%Y-%m-%d").to_string(),
+                "date" => jiff::ZonedDateTime::now().strftime("%Y-%m-%d").to_string(),
                 _ if check => "1".into(),
                 _ if csv_value(name).is_some() => {
                     if hide && var_secret(name) {

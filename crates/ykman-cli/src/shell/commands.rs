@@ -754,7 +754,7 @@ impl App {
             || {
                 std::path::PathBuf::from(format!(
                     "ykman-shell-{}.txt",
-                    chrono::Local::now().format("%Y%m%d-%H%M%S")
+                    jiff::ZonedDateTime::now().strftime("%Y%m%d-%H%M%S")
                 ))
             },
             std::path::PathBuf::from,
