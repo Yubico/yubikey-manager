@@ -816,6 +816,47 @@ fn test_reinsert_usb_single_interface(#[case] case: UsbReinsertCase) {
     replace_cached_device(dev);
 }
 
+#[test]
+fn test_usb_ccid_after_fido_init_only() {
+    if std::env::var("YUBIKEY_SERIAL").is_err() {
+        skip!("YUBIKEY_SERIAL not set");
+    }
+    require_transport!(Transport::Usb);
+    require_version!(Version(5, 0, 0));
+    let dev = get_device().clone();
+    let enabled = usb_enabled_capabilities(&dev);
+    if (enabled & (Capability::U2F | Capability::FIDO2)).is_empty()
+        || (enabled
+            & (Capability::PIV
+                | Capability::OATH
+                | Capability::OPENPGP
+                | Capability::HSMAUTH
+                | Capability::FIDOCCID))
+            .is_empty()
+    {
+        skip!("FIDO HID and CCID must both be enabled");
+    }
+
+    let read_ccid = || {
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| format!("open CCID: {e}"))?;
+        let mut session = ManagementSession::new(conn)
+            .map_err(|(e, _)| format!("select management over CCID: {e}"))?;
+        session
+            .read_device_info()
+            .map_err(|e| format!("read device info over CCID: {e}"))
+    };
+    let before = read_ccid().expect("CCID baseline must succeed");
+    assert_eq!(before.serial, required_serial());
+
+    // Opening allocates a HID channel via INIT; close without sending a FIDO command.
+    drop(dev.open_fido().expect("open FIDO HID for INIT only"));
+
+    let after = read_ccid().expect("CCID must remain usable after FIDO HID INIT-only close");
+    assert_eq!(after.serial, before.serial);
+}
+
 #[rstest]
 #[case::smart_card(TestConnection::SmartCard)]
 #[case::scp11b(TestConnection::SmartCardScp11b)]
