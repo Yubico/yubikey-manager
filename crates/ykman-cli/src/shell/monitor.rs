@@ -6,12 +6,13 @@ use std::collections::HashMap;
 use yubikit::management::UsbInterface;
 use yubikit::platform::monitor::{MonitorHandle, YubiKeyEvent, monitor_yubikeys};
 
-/// How long to wait for the monitor's first full scan before falling back to polling.
-const READY_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long the first full scan may take; a NEO needs a while to probe.
+const READY_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Starts the monitor. Every change sends the complete device list as
-/// `Msg::Monitored`. Returns `None` if the first scan doesn't finish in time.
-pub(super) fn start(tx: Sender<Msg>) -> Option<MonitorHandle> {
+/// Starts the monitor without waiting for it. Every change, starting with the
+/// first full scan, sends the complete device list as `Msg::Monitored`; until
+/// then the shell keeps polling.
+pub(super) fn start(tx: Sender<Msg>) -> Arc<MonitorHandle> {
     // The key map, and whether the first scan is done. Events before that
     // only fill the map, so the shell never sees a half-built list.
     let state = Arc::new(Mutex::new((HashMap::<u64, Device>::new(), false)));
@@ -42,14 +43,18 @@ pub(super) fn start(tx: Sender<Msg>) -> Option<MonitorHandle> {
             }
         },
     );
-    if !handle.wait_ready(READY_TIMEOUT) {
-        return None;
-    }
-    let mut s = state.lock().ok()?;
-    s.1 = true;
-    let _ = tx.send(Msg::Monitored(sorted(&s.0)));
-    drop(s);
-    Some(handle)
+    let handle = Arc::new(handle);
+    let waiting = Arc::clone(&handle);
+    std::thread::spawn(move || {
+        if !waiting.wait_ready(READY_TIMEOUT) {
+            return;
+        }
+        if let Ok(mut s) = state.lock() {
+            s.1 = true;
+            let _ = tx.send(Msg::Monitored(sorted(&s.0)));
+        }
+    });
+    handle
 }
 
 /// Same order as `parse_devices`: newest (highest serial) first.

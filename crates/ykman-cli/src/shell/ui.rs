@@ -663,7 +663,18 @@ impl App {
     pub(super) fn draw_log(&mut self, f: &mut Frame, area: Rect) {
         let width = area.width.saturating_sub(2).max(1) as usize;
         let mut lines: Vec<Line> = Vec::new();
-        let live = (!self.partial.is_empty() && self.prompt().is_none()).then(|| Entry {
+        // A yes/no question stays in the log (it ends up there with its answer
+        // anyway); other prompts are shown in the input band instead, and are
+        // hidden from the first moment they look like one, so they don't flicker.
+        let partial = strip_ansi(&self.partial);
+        let hidden = self.running
+            && self.writer.is_some()
+            && !self.is_choice(&partial)
+            && partial
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_whitespace() || ":?]>".contains(c));
+        let live = (!self.partial.is_empty() && !hidden).then(|| Entry {
             kind: Kind::Out,
             text: self.partial.clone(),
         });
@@ -974,7 +985,13 @@ impl App {
                 } else {
                     String::new()
                 };
-                (prompt, shown, hint)
+                // The question itself is in the log above.
+                let label = if self.is_choice(&prompt) {
+                    "Choose: ".to_string()
+                } else {
+                    prompt
+                };
+                (label, shown, hint)
             }
             None if self.var_prompt().is_some() => {
                 let (name, secret) = self.var_prompt().unwrap_or_default();
