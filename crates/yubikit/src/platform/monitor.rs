@@ -39,11 +39,15 @@
 //! active USB transport at a time, so accessing their OTP/FIDO HID interface
 //! transiently ejects and re-inserts the CCID card, which surfaces as a
 //! matching pair of card removal/insertion events.
+//!
+//! A [`LocalYubiKeyDevice::reinsert`] pauses in-process monitor probes and
+//! supplies its verified identity and paths for the ensuing reconciliation.
+//! Unannounced hotplugs still require DeviceInfo reads.
 
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -119,6 +123,8 @@ enum Change {
     /// A HID device was added or removed; re-diff the HID transport.
     #[cfg(feature = "hid")]
     Hid,
+    /// Reconcile a device whose identity and paths were verified by reinsert.
+    VerifiedReinsert(u64),
     /// Shut down the coordination loop.
     Stop,
 }
@@ -251,8 +257,99 @@ impl ReadySignal {
 pub struct MonitorHandle {
     shutdown: Arc<Shutdown>,
     threads: Vec<JoinHandle<()>>,
+    coordinator: Arc<ProbeCoordinator>,
     /// Signalled once the initial device enumeration has been processed.
     ready: ReadySignal,
+}
+
+struct ProbeCoordinator {
+    probe_gate: Mutex<()>,
+    verified: Mutex<Vec<(u64, LocalYubiKeyDevice)>>,
+    next_verification: AtomicU64,
+    change_tx: mpsc::Sender<Change>,
+}
+
+static MONITORS: OnceLock<Mutex<Vec<Weak<ProbeCoordinator>>>> = OnceLock::new();
+
+/// Run a reinsert without concurrent DeviceInfo reads by monitors in this
+/// process. Publish the device's newly verified identity for reconciliation.
+pub(crate) fn with_paused_monitors(
+    reinsert: impl FnOnce() -> Result<LocalYubiKeyDevice, DeviceError>,
+) -> Result<(), DeviceError> {
+    let mut registry = MONITORS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    registry.retain(|monitor| monitor.strong_count() > 0);
+    let monitors: Vec<_> = registry.iter().filter_map(Weak::upgrade).collect();
+    let mut guards = Vec::new();
+    for monitor in &monitors {
+        guards.push(
+            MonitorHandle::lock_probe_gate(&monitor.probe_gate, Duration::from_secs(10))
+                .ok_or_else(|| {
+                    DeviceError::Transport(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "Timed out waiting for device monitor probes",
+                    )))
+                })?,
+        );
+    }
+
+    let verified = reinsert()?;
+    if verified.info().serial.is_some() {
+        for monitor in &monitors {
+            let id = monitor.next_verification.fetch_add(1, Ordering::Relaxed);
+            monitor
+                .verified
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((id, verified.clone()));
+            monitor
+                .change_tx
+                .send(Change::VerifiedReinsert(id))
+                .map_err(|_| {
+                    DeviceError::Transport(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "Device monitor stopped during reinsert",
+                    )))
+                })?;
+        }
+    }
+    drop(guards);
+    drop(registry);
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum VerifiedInterface {
+    Ccid,
+    Otp,
+    Fido,
+}
+
+fn verified_info(
+    devices: &[LocalYubiKeyDevice],
+    interface: VerifiedInterface,
+    path: &str,
+    pid: Option<u16>,
+) -> Option<DeviceInfo> {
+    devices
+        .iter()
+        .rev()
+        .find(|dev| {
+            dev.pid() == pid
+                && match interface {
+                    VerifiedInterface::Ccid => dev.reader_name.as_deref() == Some(path),
+                    VerifiedInterface::Otp => dev.hid_path.as_deref() == Some(path),
+                    VerifiedInterface::Fido => dev.fido_path.as_deref() == Some(path),
+                }
+        })
+        .map(|dev| dev.info().clone())
+}
+
+/// Prevents the monitor from probing device interfaces until dropped.
+pub struct MonitorPauseGuard<'a> {
+    _guard: MutexGuard<'a, ()>,
 }
 
 impl MonitorHandle {
@@ -272,12 +369,35 @@ impl MonitorHandle {
         self.ready.wait_timeout(timeout)
     }
 
+    /// Wait for an in-flight probe to finish, then pause further probes.
+    /// Device-change notifications remain queued and are processed on drop.
+    /// Do not hold this guard when calling `LocalYubiKeyDevice::reinsert`,
+    /// which coordinates with monitors automatically.
+    pub fn pause(&self, timeout: Duration) -> Option<MonitorPauseGuard<'_>> {
+        Self::lock_probe_gate(&self.coordinator.probe_gate, timeout)
+            .map(|guard| MonitorPauseGuard { _guard: guard })
+    }
+
     fn shutdown_and_join(&mut self) {
         self.shutdown.signal_stop();
         // Unblock anything still waiting on readiness; the monitor is stopping.
         self.ready.signal();
         for handle in self.threads.drain(..) {
             let _ = handle.join();
+        }
+    }
+
+    fn lock_probe_gate(gate: &Mutex<()>, timeout: Duration) -> Option<MutexGuard<'_, ()>> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match gate.try_lock() {
+                Ok(guard) => return Some(guard),
+                Err(TryLockError::Poisoned(error)) => return Some(error.into_inner()),
+                Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(TryLockError::WouldBlock) => return None,
+            }
         }
     }
 
@@ -318,6 +438,17 @@ pub fn monitor_device_events(
     let (tx, rx) = mpsc::channel::<Change>();
     let shutdown = Arc::new(Shutdown::new(tx.clone()));
     let ready = ReadySignal::new();
+    let coordinator = Arc::new(ProbeCoordinator {
+        probe_gate: Mutex::new(()),
+        verified: Mutex::new(Vec::new()),
+        next_verification: AtomicU64::new(0),
+        change_tx: tx.clone(),
+    });
+    MONITORS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(Arc::downgrade(&coordinator));
     let mut threads: Vec<JoinHandle<()>> = Vec::new();
 
     #[cfg(feature = "pcsc")]
@@ -332,38 +463,73 @@ pub fn monitor_device_events(
 
     // Coordination loop: owns the tracked state and calls `on_event`.
     let coordinator_ready = ready.clone();
-    let coordinator = thread::spawn(move || {
+    let probe_coordinator = Arc::clone(&coordinator);
+    let coordinator_thread = thread::spawn(move || {
         let mut state = MonitorState::default();
 
         // Emit events for the initial state before processing changes.
+        let gate = probe_coordinator
+            .probe_gate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         #[cfg(feature = "pcsc")]
         if usb_interfaces.contains(UsbInterface::CCID) {
-            state.refresh_pcsc(&mut on_event);
+            state.refresh_pcsc(&mut on_event, &[]);
         }
         #[cfg(feature = "hid")]
         if usb_interfaces.contains(UsbInterface::OTP) || usb_interfaces.contains(UsbInterface::FIDO)
         {
-            state.refresh_hid(usb_interfaces, &mut on_event);
+            state.refresh_hid(usb_interfaces, &mut on_event, &[]);
         }
 
         // The initial device enumeration is complete.
         coordinator_ready.signal();
+        drop(gate);
 
         while let Ok(change) = rx.recv() {
+            let _gate = probe_coordinator
+                .probe_gate
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let verified: Vec<_> = probe_coordinator
+                .verified
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .map(|(_, device)| device.clone())
+                .collect();
             match change {
                 Change::Stop => break,
                 #[cfg(feature = "pcsc")]
-                Change::Pcsc => state.refresh_pcsc(&mut on_event),
+                Change::Pcsc => state.refresh_pcsc(&mut on_event, &verified),
                 #[cfg(feature = "hid")]
-                Change::Hid => state.refresh_hid(usb_interfaces, &mut on_event),
+                Change::Hid => state.refresh_hid(usb_interfaces, &mut on_event, &verified),
+                Change::VerifiedReinsert(id) => {
+                    #[cfg(feature = "pcsc")]
+                    if usb_interfaces.contains(UsbInterface::CCID) {
+                        state.refresh_pcsc(&mut on_event, &verified);
+                    }
+                    #[cfg(feature = "hid")]
+                    if usb_interfaces.contains(UsbInterface::OTP)
+                        || usb_interfaces.contains(UsbInterface::FIDO)
+                    {
+                        state.refresh_hid(usb_interfaces, &mut on_event, &verified);
+                    }
+                    probe_coordinator
+                        .verified
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .retain(|(token, _)| *token != id);
+                }
             }
         }
     });
-    threads.push(coordinator);
+    threads.push(coordinator_thread);
 
     MonitorHandle {
         shutdown,
         threads,
+        coordinator,
         ready,
     }
 }
@@ -388,7 +554,11 @@ struct MonitorState {
 #[cfg(feature = "pcsc")]
 impl MonitorState {
     /// Re-enumerate PC/SC readers and emit events for any changes.
-    fn refresh_pcsc(&mut self, on_event: &mut impl FnMut(NodeEvent)) {
+    fn refresh_pcsc(
+        &mut self,
+        on_event: &mut impl FnMut(NodeEvent),
+        verified: &[LocalYubiKeyDevice],
+    ) {
         let readers = match list_readers_with_state() {
             Ok(readers) => readers,
             Err(e) => {
@@ -446,7 +616,15 @@ impl MonitorState {
 
             if *card_present {
                 if !self.cards.contains_key(name) {
-                    match read_card_info(name, usb) {
+                    let pid = if usb {
+                        pid_from_reader_name(name)
+                    } else {
+                        None
+                    };
+                    let info = verified_info(verified, VerifiedInterface::Ccid, name, pid)
+                        .map(Ok)
+                        .unwrap_or_else(|| read_card_info(name, usb));
+                    match info {
                         Ok(info) => {
                             let node = DeviceNode::CardNode {
                                 reader_name: name.clone(),
@@ -470,7 +648,12 @@ impl MonitorState {
 #[cfg(feature = "hid")]
 impl MonitorState {
     /// Re-enumerate HID devices and emit events for any changes.
-    fn refresh_hid(&mut self, interfaces: UsbInterface, on_event: &mut impl FnMut(NodeEvent)) {
+    fn refresh_hid(
+        &mut self,
+        interfaces: UsbInterface,
+        on_event: &mut impl FnMut(NodeEvent),
+        verified: &[LocalYubiKeyDevice],
+    ) {
         if interfaces.contains(UsbInterface::OTP) {
             match list_otp_devices() {
                 Ok(devices) => {
@@ -493,7 +676,15 @@ impl MonitorState {
                         if self.hid_otp.contains_key(&device.path) {
                             continue;
                         }
-                        match read_otp_info(&device.path, device.pid) {
+                        let info = verified_info(
+                            verified,
+                            VerifiedInterface::Otp,
+                            &device.path,
+                            Some(device.pid),
+                        )
+                        .map(Ok)
+                        .unwrap_or_else(|| read_otp_info(&device.path, device.pid));
+                        match info {
                             Ok(info) => {
                                 let node = DeviceNode::HidOtpNode {
                                     hid_path: device.path.clone(),
@@ -535,7 +726,15 @@ impl MonitorState {
                         if self.hid_fido.contains_key(&device.path) {
                             continue;
                         }
-                        match read_fido_info(device) {
+                        let info = verified_info(
+                            verified,
+                            VerifiedInterface::Fido,
+                            &device.path,
+                            Some(device.pid),
+                        )
+                        .map(Ok)
+                        .unwrap_or_else(|| read_fido_info(device));
+                        match info {
                             Ok(info) => {
                                 let node = DeviceNode::HidFidoNode {
                                     hid_path: device.path.clone(),
@@ -1544,4 +1743,52 @@ fn node_sort_key(a: &DeviceNode, b: &DeviceNode) -> std::cmp::Ordering {
         }
     }
     key(a).cmp(&key(b))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Version;
+
+    #[test]
+    fn monitor_pause_is_exclusive_and_resumes_on_drop() {
+        let handle = monitor_device_events(UsbInterface(0), |_| {});
+        assert!(handle.wait_ready(Duration::from_secs(1)));
+
+        let pause = handle.pause(Duration::from_secs(1)).unwrap();
+        assert!(handle.pause(Duration::ZERO).is_none());
+        drop(pause);
+        assert!(handle.pause(Duration::from_secs(1)).is_some());
+    }
+
+    #[test]
+    fn verified_reinsert_info_requires_matching_path_and_pid() {
+        let mut info = DeviceInfo::parse_tlvs(&HashMap::new(), Version(5, 8, 0)).unwrap();
+        info.serial = Some(1234);
+        let device = LocalYubiKeyDevice::from_parts(
+            Some("reader".into()),
+            Some("otp".into()),
+            Some("fido".into()),
+            Some(0x407),
+            Transport::Usb,
+            info.clone(),
+        );
+        let verified = [device];
+
+        for (interface, path) in [
+            (VerifiedInterface::Ccid, "reader"),
+            (VerifiedInterface::Otp, "otp"),
+            (VerifiedInterface::Fido, "fido"),
+        ] {
+            assert_eq!(
+                verified_info(&verified, interface, path, Some(0x407)),
+                Some(info.clone())
+            );
+            assert_eq!(
+                verified_info(&verified, interface, "another device", Some(0x407)),
+                None
+            );
+            assert_eq!(verified_info(&verified, interface, path, Some(0x408)), None);
+        }
+    }
 }

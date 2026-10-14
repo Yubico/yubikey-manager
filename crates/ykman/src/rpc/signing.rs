@@ -165,7 +165,9 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
         SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_STATUS_PROCESS,
     };
 
-    const SERVICE_NAME: &str = "ykman-svc";
+    let service_name = super::windows::client_service()
+        .map_err(|e| SigningError(format!("Failed to determine package identity: {e}")))?
+        .name();
 
     struct ServiceHandle(windows_sys::Win32::System::Services::SC_HANDLE);
 
@@ -186,7 +188,7 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
     }
     let manager = ServiceHandle(manager);
 
-    let service_name_w: Vec<u16> = SERVICE_NAME
+    let service_name_w: Vec<u16> = service_name
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
@@ -199,7 +201,7 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
     };
     if service.is_null() {
         return Err(SigningError(format!(
-            "OpenServiceW({SERVICE_NAME}) failed: {}",
+            "OpenServiceW({service_name}) failed: {}",
             std::io::Error::last_os_error()
         )));
     }
@@ -218,13 +220,13 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
     };
     if ok == 0 {
         return Err(SigningError(format!(
-            "QueryServiceStatusEx({SERVICE_NAME}) failed: {}",
+            "QueryServiceStatusEx({service_name}) failed: {}",
             std::io::Error::last_os_error()
         )));
     }
     if status.dwProcessId != pid {
         return Err(SigningError(format!(
-            "{SERVICE_NAME} PID {} does not match pipe server PID {pid}",
+            "{service_name} PID {} does not match pipe server PID {pid}",
             status.dwProcessId
         )));
     }
@@ -235,7 +237,7 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
     };
     if ok != 0 || unsafe { GetLastError() } != ERROR_INSUFFICIENT_BUFFER {
         return Err(SigningError(format!(
-            "QueryServiceConfigW({SERVICE_NAME}) sizing failed: {}",
+            "QueryServiceConfigW({service_name}) sizing failed: {}",
             std::io::Error::last_os_error()
         )));
     }
@@ -251,7 +253,7 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
     };
     if ok == 0 {
         return Err(SigningError(format!(
-            "QueryServiceConfigW({SERVICE_NAME}) failed: {}",
+            "QueryServiceConfigW({service_name}) failed: {}",
             std::io::Error::last_os_error()
         )));
     }
@@ -260,7 +262,7 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
         let ptr = (*(config.as_ptr() as *const QUERY_SERVICE_CONFIGW)).lpBinaryPathName;
         if ptr.is_null() {
             return Err(SigningError(format!(
-                "{SERVICE_NAME} has no configured binary path"
+                "{service_name} has no configured binary path"
             )));
         }
         let mut len = 0;

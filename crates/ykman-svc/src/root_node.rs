@@ -13,13 +13,16 @@ use crate::device_manager::DeviceManager;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn matches_revision(opened: Option<&u64>, current: Option<u64>) -> bool {
+    matches!((opened, current), (Some(opened), Some(current)) if *opened == current)
+}
+
 /// Root node of the service RPC tree.
 pub struct ServiceRootNode {
     manager: Arc<DeviceManager>,
     /// Cached list of device names for list_children.
     cached_children: BTreeMap<String, Value>,
-    /// Device names locked by this session (released on drop).
-    opened_devices: Vec<String>,
+    opened_revisions: BTreeMap<String, u64>,
 }
 
 impl ServiceRootNode {
@@ -27,21 +30,7 @@ impl ServiceRootNode {
         Self {
             manager,
             cached_children: BTreeMap::new(),
-            opened_devices: Vec::new(),
-        }
-    }
-}
-
-impl Drop for ServiceRootNode {
-    fn drop(&mut self) {
-        for name in &self.opened_devices {
-            self.manager.release_device(name);
-        }
-        if !self.opened_devices.is_empty() {
-            log::debug!(
-                "Released {} device lock(s) on session end",
-                self.opened_devices.len()
-            );
+            opened_revisions: BTreeMap::new(),
         }
     }
 }
@@ -54,11 +43,7 @@ impl RpcNode for ServiceRootNode {
     }
 
     fn on_child_closed(&mut self, name: &str) {
-        if self.opened_devices.contains(&name.to_string()) {
-            self.manager.release_device(name);
-            self.opened_devices.retain(|n| n != name);
-            log::debug!("Released device lock for '{name}'");
-        }
+        self.opened_revisions.remove(name);
     }
 
     fn list_actions(&self) -> Vec<&'static str> {
@@ -87,6 +72,7 @@ impl RpcNode for ServiceRootNode {
     ) -> Result<RpcResponse, RpcError> {
         match action {
             "select_fido" => {
+                let _selection = self.manager.reserve_fido_devices()?;
                 log::debug!("FIDO selection requested");
                 let cancel_fn = || cancel.load(Ordering::Relaxed);
                 let device = yubikit::platform::device::select_fido(Some(&cancel_fn))
@@ -148,12 +134,28 @@ impl RpcNode for ServiceRootNode {
     }
 
     fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
-        let node = self.manager.open_device(name)?;
-        self.opened_devices.push(name.to_string());
+        let (node, revision) = self.manager.open_device(name)?;
+        self.opened_revisions.insert(name.to_string(), revision);
         Ok(node)
     }
 
     fn is_child_valid(&self, name: &str) -> bool {
-        self.manager.is_device_present(name)
+        matches_revision(
+            self.opened_revisions.get(name),
+            self.manager.device_revision(name),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::matches_revision;
+
+    #[test]
+    fn reconnected_device_invalidates_cached_child_with_same_name() {
+        assert!(matches_revision(Some(&1), Some(1)));
+        assert!(!matches_revision(Some(&1), Some(2)));
+        assert!(!matches_revision(Some(&1), None));
+        assert!(!matches_revision(None, None));
     }
 }

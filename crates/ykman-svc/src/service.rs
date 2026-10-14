@@ -26,8 +26,6 @@ use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 use windows_service::{define_windows_service, service_dispatcher};
 
 #[cfg(target_os = "windows")]
-const SERVICE_NAME: &str = crate::SERVICE_NAME;
-#[cfg(target_os = "windows")]
 const DISPLAY_NAME: &str = "YubiKey Manager Service";
 
 #[cfg(target_os = "windows")]
@@ -36,26 +34,36 @@ define_windows_service!(ffi_service_main, service_main);
 /// Install the service.
 #[cfg(target_os = "windows")]
 pub fn install() -> Result<()> {
+    let service_name = crate::windows_service().name();
     let manager =
         ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CREATE_SERVICE)?;
 
     let exe_path = std::env::current_exe()?;
 
     let service_info = ServiceInfo {
-        name: OsString::from(SERVICE_NAME),
+        name: OsString::from(service_name),
         display_name: OsString::from(DISPLAY_NAME),
         service_type: ServiceType::OWN_PROCESS,
         start_type: ServiceStartType::AutoStart,
         error_control: ServiceErrorControl::Normal,
         executable_path: exe_path,
-        launch_arguments: vec![OsString::from("run")],
+        launch_arguments: if crate::windows_service()
+            == ykman::rpc::windows::WindowsService::AuthenticatorMsix
+        {
+            vec![
+                OsString::from("run"),
+                OsString::from("--authenticator-msix"),
+            ]
+        } else {
+            vec![OsString::from("run")]
+        },
         dependencies: vec![],
         account_name: None, // LocalSystem
         account_password: None,
     };
 
     let _service = manager.create_service(&service_info, ServiceAccess::CHANGE_CONFIG)?;
-    log::info!("Service '{SERVICE_NAME}' installed");
+    log::info!("Service '{service_name}' installed");
     println!("Service installed successfully.");
     Ok(())
 }
@@ -63,10 +71,11 @@ pub fn install() -> Result<()> {
 /// Uninstall the service.
 #[cfg(target_os = "windows")]
 pub fn uninstall() -> Result<()> {
+    let service_name = crate::windows_service().name();
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
 
     let service = manager.open_service(
-        SERVICE_NAME,
+        service_name,
         ServiceAccess::DELETE | ServiceAccess::QUERY_STATUS,
     )?;
 
@@ -80,7 +89,7 @@ pub fn uninstall() -> Result<()> {
     }
 
     service.delete()?;
-    log::info!("Service '{SERVICE_NAME}' uninstalled");
+    log::info!("Service '{service_name}' uninstalled");
     println!("Service uninstalled successfully.");
     Ok(())
 }
@@ -88,7 +97,7 @@ pub fn uninstall() -> Result<()> {
 /// Entry point called by the service dispatcher.
 #[cfg(target_os = "windows")]
 pub fn run_service() -> Result<()> {
-    service_dispatcher::start(SERVICE_NAME, ffi_service_main)?;
+    service_dispatcher::start(crate::windows_service().name(), ffi_service_main)?;
     Ok(())
 }
 
@@ -110,13 +119,15 @@ fn run_service_inner() -> Result<()> {
     let stop_clone = stop.clone();
 
     let status_handle =
-        service_control_handler::register(SERVICE_NAME, move |control| match control {
-            ServiceControl::Stop | ServiceControl::Shutdown => {
-                stop_clone.store(true, Ordering::Relaxed);
-                ServiceControlHandlerResult::NoError
+        service_control_handler::register(crate::windows_service().name(), move |control| {
+            match control {
+                ServiceControl::Stop | ServiceControl::Shutdown => {
+                    stop_clone.store(true, Ordering::Relaxed);
+                    ServiceControlHandlerResult::NoError
+                }
+                ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+                _ => ServiceControlHandlerResult::NotImplemented,
             }
-            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
-            _ => ServiceControlHandlerResult::NotImplemented,
         })?;
 
     // Report running

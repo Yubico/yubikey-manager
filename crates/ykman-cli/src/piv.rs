@@ -923,14 +923,7 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     print_table(rows);
 
     // Slot details
-    let slots = [
-        (Slot::Authentication, "9A", "AUTHENTICATION"),
-        (Slot::Signature, "9C", "SIGNATURE"),
-        (Slot::KeyManagement, "9D", "KEY MANAGEMENT"),
-        (Slot::CardAuth, "9E", "CARD AUTH"),
-    ];
-
-    for (slot, hex_id, name) in slots {
+    for slot in Slot::key_slots() {
         let has_key = session.get_slot_metadata(slot).ok();
         let has_cert = session.get_certificate(slot).ok();
 
@@ -938,7 +931,7 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
             continue;
         }
 
-        println!("\n{}", color::dim(&format!("SLOT {hex_id}  {name}")));
+        println!("\n{}", color::dim(&slot_heading(slot)));
 
         let mut rows = Vec::new();
         let private_type = has_key.as_ref().map(|meta| meta.key_type.to_string());
@@ -1008,6 +1001,17 @@ fn count_certificate_slots(session: &mut PivSession<impl SmartCardConnection>) -
         .filter_map(Slot::from_u8)
         .filter(|&slot| session.get_certificate(slot).is_ok())
         .count() as u32
+}
+
+fn slot_heading(slot: Slot) -> String {
+    let name = match slot {
+        Slot::Authentication => "AUTHENTICATION".to_string(),
+        Slot::Signature => "SIGNATURE".to_string(),
+        Slot::KeyManagement => "KEY MANAGEMENT".to_string(),
+        Slot::CardAuth => "CARD AUTH".to_string(),
+        _ => format!("{slot:?}").to_ascii_uppercase(),
+    };
+    format!("SLOT {:02X}  {name}", slot as u8)
 }
 
 struct CertInfo {
@@ -2170,14 +2174,53 @@ fn write_cert_file(output: &str, cert_der: &[u8], format: CliFormat) -> Result<(
 #[cfg(test)]
 mod tests {
     use yubikit::core::Version;
-    use yubikit::piv::ManagementKeyType;
-    use yubikit::piv::PivError;
+    use yubikit::keys::PrivateKey;
+    use yubikit::piv::{KeyType, ManagementKeyType, PivError, Slot};
     use yubikit::smartcard::SmartCardError;
 
     use super::{
-        check_management_key_type_supported, format_management_key_auth_error,
-        format_piv_credential_error, management_key_type_prompt_name,
+        check_management_key_type_supported, decrypt_private_key_data,
+        format_management_key_auth_error, format_piv_credential_error,
+        management_key_type_prompt_name, slot_heading,
     };
+
+    #[test]
+    fn piv_info_labels_retired_slots() {
+        assert_eq!(
+            slot_heading(Slot::Authentication),
+            "SLOT 9A  AUTHENTICATION"
+        );
+        assert_eq!(slot_heading(Slot::Retired1), "SLOT 82  RETIRED1");
+        assert_eq!(slot_heading(Slot::Retired10), "SLOT 8B  RETIRED10");
+        assert_eq!(slot_heading(Slot::Retired20), "SLOT 95  RETIRED20");
+    }
+
+    #[test]
+    fn openssl_pqc_pem_files_are_accepted_for_import() {
+        for (algorithm, key_type) in [
+            ("ml-dsa-44", KeyType::MlDsa44),
+            ("ml-dsa-65", KeyType::MlDsa65),
+            ("ml-dsa-87", KeyType::MlDsa87),
+            ("ml-kem-512", KeyType::MlKem512),
+            ("ml-kem-768", KeyType::MlKem768),
+            ("ml-kem-1024", KeyType::MlKem1024),
+        ] {
+            for format in ["full", "seed"] {
+                let path = format!(
+                    "{}/../yubikit/tests/fixtures/pqc/{algorithm}-{format}.pem",
+                    env!("CARGO_MANIFEST_DIR")
+                );
+                let pem = std::fs::read(&path).expect("read OpenSSL key fixture");
+                let der = decrypt_private_key_data(&pem, None).expect("decode PEM");
+                let key = PrivateKey::from_pkcs8(&der).expect("parse PKCS#8 key");
+                assert_eq!(
+                    KeyType::try_from(&key.algorithm()).unwrap(),
+                    key_type,
+                    "{path}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn piv_credential_errors_name_the_credential() {

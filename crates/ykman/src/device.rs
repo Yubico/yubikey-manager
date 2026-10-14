@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use yubikit::device::{DeviceError, YubiKeyDevice};
 
@@ -131,19 +131,20 @@ impl DeviceSource for RpcDeviceSource {
         let children = root
             .body
             .get("children")
-            .and_then(|v| v.as_object())
-            .cloned()
-            .unwrap_or_default();
-
-        let mut devices: Vec<Box<dyn YubiKeyDevice>> = Vec::new();
-        for (name, _info) in &children {
-            match RpcDevice::from_shared_at(self.client.clone(), name) {
-                Ok(dev) => devices.push(Box::new(dev)),
-                Err(e) => log::warn!("Failed to open service device '{name}': {e}"),
-            }
-        }
-
-        Ok(devices)
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                rpc_to_device_error(RpcCallError::Transport(
+                    "Malformed RPC response: children is not an object".into(),
+                ))
+            })?;
+        children
+            .iter()
+            .map(|(name, data)| {
+                RpcDevice::from_inventory(self.client.clone(), name, data)
+                    .map(|dev| Box::new(dev) as Box<dyn YubiKeyDevice>)
+                    .map_err(rpc_to_device_error)
+            })
+            .collect()
     }
 
     fn select_fido(
@@ -225,5 +226,232 @@ pub fn get_device_source() -> Box<dyn DeviceSource> {
     #[cfg(not(feature = "hardware"))]
     {
         Box::new(NoDeviceSource)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{DeviceSource, RpcDeviceSource};
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn service_listing_returns_devices_but_connections_report_busy() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        use crate::rpc::client::RpcClient;
+        use crate::rpc::protocol::ServerMessage;
+
+        for connection in ["ccid", "ctap", "otp"] {
+            let (client, mut server) = UnixStream::pair().unwrap();
+            let server_thread = std::thread::spawn(move || {
+                let mut reader = BufReader::new(server.try_clone().unwrap());
+                let mut root_request = String::new();
+                reader.read_line(&mut root_request).unwrap();
+                let response = ServerMessage::success(
+                    json!({
+                        "children": {
+                            "123": {
+                                "name": "YubiKey 5 NFC",
+                                "version": [5, 4, 3],
+                                "usb_interfaces": 7,
+                                "serial": 123,
+                                "form_factor": 3,
+                                "transport": "usb"
+                            },
+                            "456": {
+                                "name": "YubiKey 5C",
+                                "version": [5, 7, 0],
+                                "usb_interfaces": 7,
+                                "serial": 456,
+                                "form_factor": 3,
+                                "transport": "usb"
+                            }
+                        }
+                    }),
+                    vec![],
+                )
+                .unwrap();
+                writeln!(server, "{}", serde_json::to_string(&response).unwrap()).unwrap();
+                let mut connection_request = String::new();
+                reader.read_line(&mut connection_request).unwrap();
+                let response =
+                    ServerMessage::error("device-busy", "Device is in use", json!({})).unwrap();
+                writeln!(server, "{}", serde_json::to_string(&response).unwrap()).unwrap();
+                (root_request, connection_request)
+            });
+            let mut source = RpcDeviceSource::new(RpcClient::from_test_stream(client));
+            let devices = source.list_devices().unwrap();
+            assert_eq!(devices.len(), 2);
+            let selected = devices
+                .iter()
+                .find(|d| d.info().serial == Some(123))
+                .unwrap();
+            assert_eq!(selected.usb_interfaces().0, 7);
+            let error = match connection {
+                "ccid" => selected.open_smartcard().err().unwrap(),
+                "ctap" => selected.open_fido().err().unwrap(),
+                "otp" => selected.open_otp().err().unwrap(),
+                _ => unreachable!(),
+            };
+            assert!(matches!(error, yubikit::device::DeviceError::InUse));
+            let (root_request, connection_request) = server_thread.join().unwrap();
+            let root: serde_json::Value = serde_json::from_str(&root_request).unwrap();
+            let request: serde_json::Value = serde_json::from_str(&connection_request).unwrap();
+            assert_eq!(root["action"], "get");
+            assert_eq!(root["target"], json!([]));
+            assert_eq!(request["action"], "get");
+            assert_eq!(request["target"], json!(["123", connection]));
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn closing_last_connection_releases_device_before_switching() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        use crate::rpc::client::RpcClient;
+        use crate::rpc::protocol::ServerMessage;
+
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let server_thread = std::thread::spawn(move || {
+            let mut reader = BufReader::new(server.try_clone().unwrap());
+            let mut requests = Vec::new();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap() == 0 {
+                    break;
+                }
+                let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                let response = if request["target"] == json!([]) {
+                    ServerMessage::success(
+                        json!({"children": {
+                            "123": {
+                                "name": "YubiKey 5 NFC", "version": [5, 4, 3],
+                                "usb_interfaces": 2, "serial": 123,
+                                "form_factor": 3, "transport": "usb"
+                            },
+                            "456": {
+                                "name": "YubiKey 5C", "version": [5, 7, 0],
+                                "usb_interfaces": 2, "serial": 456,
+                                "form_factor": 3, "transport": "usb"
+                            }
+                        }}),
+                        vec![],
+                    )
+                } else {
+                    ServerMessage::success(json!({"data": {}, "children": {}}), vec![])
+                }
+                .unwrap();
+                writeln!(server, "{}", serde_json::to_string(&response).unwrap()).unwrap();
+                requests.push((
+                    request["action"].clone(),
+                    request["target"].clone(),
+                    request["body"].clone(),
+                ));
+            }
+            requests
+        });
+
+        let mut source = RpcDeviceSource::new(RpcClient::from_test_stream(client));
+        let devices = source.list_devices().unwrap();
+        let first = devices
+            .iter()
+            .find(|d| d.info().serial == Some(123))
+            .unwrap();
+        let second = devices
+            .iter()
+            .find(|d| d.info().serial == Some(456))
+            .unwrap();
+        let mut first_connection = first.open_smartcard().unwrap();
+        let another_connection = first.open_smartcard().unwrap();
+        first_connection.close();
+        first_connection.close();
+        drop(another_connection);
+        let second_connection = second.open_smartcard().unwrap();
+        drop(second_connection);
+        drop(first_connection);
+        drop(devices);
+        drop(source);
+
+        let requests = server_thread.join().unwrap();
+        assert_eq!(
+            requests,
+            vec![
+                (json!("get"), json!([]), json!({})),
+                (json!("get"), json!(["123", "ccid"]), json!({})),
+                (json!("get"), json!(["123", "ccid"]), json!({})),
+                (json!("close"), json!(["123"]), json!({"child": "ccid"})),
+                (json!("get"), json!(["456", "ccid"]), json!({})),
+                (json!("close"), json!(["456"]), json!({"child": "ccid"})),
+            ]
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn dropped_fido_and_otp_connections_close_service_children() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        use crate::rpc::client::RpcClient;
+        use crate::rpc::protocol::ServerMessage;
+
+        for interface in ["ctap", "otp"] {
+            let (client, mut server) = UnixStream::pair().unwrap();
+            let server_thread = std::thread::spawn(move || {
+                let mut reader = BufReader::new(server.try_clone().unwrap());
+                let mut requests = Vec::new();
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap() == 0 {
+                        break;
+                    }
+                    let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                    let response = if request["target"] == json!([]) {
+                        ServerMessage::success(
+                            json!({"children": {"123": {
+                                "name": "YubiKey 5 NFC", "version": [5, 4, 3],
+                                "usb_interfaces": 7, "serial": 123,
+                                "form_factor": 3, "transport": "usb"
+                            }}}),
+                            vec![],
+                        )
+                    } else {
+                        ServerMessage::success(
+                            json!({"data": {
+                                "device_version": [5, 4, 3],
+                                "capabilities": 0
+                            }}),
+                            vec![],
+                        )
+                    }
+                    .unwrap();
+                    writeln!(server, "{}", serde_json::to_string(&response).unwrap()).unwrap();
+                    requests.push((request["action"].clone(), request["target"].clone()));
+                }
+                requests
+            });
+            let mut source = RpcDeviceSource::new(RpcClient::from_test_stream(client));
+            let devices = source.list_devices().unwrap();
+            if interface == "ctap" {
+                drop(devices[0].open_fido().unwrap());
+            } else {
+                drop(devices[0].open_otp().unwrap());
+            }
+            drop(devices);
+            drop(source);
+            assert_eq!(
+                server_thread.join().unwrap(),
+                vec![
+                    (json!("get"), json!([])),
+                    (json!("get"), json!(["123", interface])),
+                    (json!("close"), json!(["123"])),
+                ]
+            );
+        }
     }
 }
