@@ -422,7 +422,7 @@ fn storage_summary_from_info(info: &StorageInfo) -> StorageSummary {
             name: "OpenPGP",
             used_bytes: bytes_of(openpgp),
             objects: openpgp.objects,
-            object_label: "keys",
+            object_label: "objects",
             color: color::Swatch::Blue,
             group: None,
         },
@@ -791,6 +791,18 @@ fn print_legend(apps: &[StorageApp], total_bytes: u64, free_bytes: u64, unicode:
     let pct_value = percentages.next().unwrap_or_default();
     let pct = color::dim(&format!("{:>7}", pct_value));
     println!("{marker} {name}{size}{pct}");
+    // New keys already hold factory objects (attestation), which would
+    // otherwise look like unexplained usage.
+    let provisioned = apps
+        .iter()
+        .any(|a| (a.group == Some("PIV") || a.name == "OpenPGP") && a.objects > 0);
+    if provisioned {
+        println!();
+        println!(
+            "{}",
+            color::dim("Includes factory-provisioned objects (PIV/OpenPGP attestation).")
+        );
+    }
 }
 
 #[cfg(test)]
