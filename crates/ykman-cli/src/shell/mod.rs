@@ -38,8 +38,9 @@ use self::table::*;
 use self::ui::*;
 
 const DEVICE_POLL: Duration = Duration::from_secs(5);
-/// Poll interval when the monitor reports changes.
-const SAFETY_POLL: Duration = Duration::from_secs(30);
+/// With the monitor running, devices are re-read on a keypress after this long
+/// without any device update (sleep/wake can drop monitor events).
+const IDLE_REFRESH: Duration = Duration::from_secs(120);
 const PROMPT_DELAY: Duration = Duration::from_millis(200);
 const MAX_ENTRIES: usize = 20_000;
 #[derive(Clone, Copy, PartialEq)]
@@ -278,7 +279,7 @@ struct App {
     missing_polls: u8,
     /// Keeps the device monitor running.
     monitor: Option<Box<dyn std::any::Any>>,
-    /// Whether the monitor reports device changes (polling is then only a safety net).
+    /// Whether the monitor reports device changes (polling then only happens as a one-off refresh).
     monitored: bool,
     /// When the device list last changed (or the monitor last reported).
     devices_changed: Instant,
@@ -441,14 +442,15 @@ impl App {
                 self.on_msg(msg);
             }
             self.batch_tick();
-            let interval = if self.monitored {
-                SAFETY_POLL
-            } else if self.batch_waiting() {
+            // The monitor reports changes; polling is the fallback, or the
+            // second look that confirms a removal seen by a refresh.
+            let interval = if self.batch_waiting() && !self.monitored {
                 BATCH_POLL
             } else {
                 DEVICE_POLL
             };
-            if !self.running && !self.polling && self.last_poll.elapsed() > interval {
+            let poll = !self.monitored || self.missing_polls > 0;
+            if poll && !self.running && !self.polling && self.last_poll.elapsed() > interval {
                 self.refresh_devices();
             }
         }
@@ -575,6 +577,13 @@ impl App {
     // ---------- batch mode ----------
 
     fn on_key(&mut self, key: KeyEvent) {
+        if self.monitored
+            && !self.running
+            && !self.polling
+            && self.last_poll.elapsed() > IDLE_REFRESH
+        {
+            self.refresh_devices();
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && key.code == KeyCode::Char('c') {
             if self.running {

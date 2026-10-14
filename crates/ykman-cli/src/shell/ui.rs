@@ -522,7 +522,8 @@ impl App {
         } else {
             self.device_items(self.active_device(), chosen, w)
         };
-        if items.is_empty() {
+        let placeholder = items.is_empty();
+        if placeholder {
             let msg = if self.side_tab == 1 {
                 "  No saved scripts yet."
             } else {
@@ -543,7 +544,7 @@ impl App {
             area.height.saturating_sub(1),
         );
         f.render_stateful_widget(list, area, &mut self.side_state);
-        if chosen == Some(0) && self.side_state.offset() == 0 && area.height > 0 {
+        if !placeholder && chosen == Some(0) && self.side_state.offset() == 0 && area.height > 0 {
             let edge = Rect::new(area.x, area.y, area.width.saturating_sub(2), 1);
             f.render_widget(Paragraph::new(half_edge('▄', w)), edge);
         }
