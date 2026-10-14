@@ -149,11 +149,15 @@ impl App {
             );
             return;
         }
-        if self.devices.len() != 1 {
-            self.note("Batch needs exactly one YubiKey inserted to start.");
+        if self.devices.len() > 1 {
+            self.note("Batch needs a single YubiKey at a time. Remove the others to start.");
             return;
         }
-        if self.devices[0].serial == super::NO_SERIAL {
+        if self
+            .devices
+            .first()
+            .is_some_and(|d| d.serial == super::NO_SERIAL)
+        {
             self.note("Batch needs a YubiKey with a serial number to tell keys apart.");
             return;
         }
@@ -170,11 +174,14 @@ impl App {
                 "Warning: a fixed public ID, private ID or key is identical on every key. Use -S -g -G to generate per key.",
             );
         }
-        let (serial, name) = (self.devices[0].serial, self.devices[0].describe());
+        let serial = self.devices.first().map_or(0, |d| d.serial);
+        let on = self
+            .devices
+            .first()
+            .map_or_else(|| "every key you insert".into(), |d| d.describe());
         let msg = format!(
-            "Batch: /{} on {}. The command runs on every key you insert, so give it all the options it needs.",
+            "Batch: /{} on {on}. The command runs on every key you insert, so give it all the options it needs.",
             args.join(" "),
-            name
         );
         self.note(&msg);
         self.batch = Some(self.new_batch(vec![args.to_vec()], false, serial));
@@ -482,6 +489,18 @@ impl App {
                 _ => None,
             }
         };
+        // No key yet: wait for the first one to be inserted.
+        if !once
+            && self.devices.is_empty()
+            && let Some(b) = self.batch.as_mut()
+        {
+            b.phase = BatchPhase::Waiting {
+                prev: 0,
+                absent: false,
+            };
+            self.note("Insert the first YubiKey to begin.");
+            return;
+        }
         match serial {
             Some(s) => self.begin_round(s),
             None => self.end_batch("Batch cancelled (the YubiKey changed)"),
@@ -586,6 +605,9 @@ impl App {
             BatchPhase::Waiting { .. } if self.devices.len() > 1 => {
                 Some("waiting for a single YubiKey")
             }
+            BatchPhase::Waiting { .. } if self.batch.as_ref()?.results.is_empty() => {
+                Some("waiting for the first YubiKey")
+            }
             BatchPhase::Waiting { .. } => Some("waiting for the next YubiKey"),
             BatchPhase::StepWait { .. } => Some("waiting for the YubiKey to come back"),
             BatchPhase::Vars => None,
@@ -637,6 +659,9 @@ impl App {
             ),
             BatchPhase::Waiting { .. } if self.devices.len() > 1 => {
                 format!("{tally} · leave only one YubiKey inserted")
+            }
+            BatchPhase::Waiting { .. } if b.results.is_empty() => {
+                format!("{tally} · insert the first YubiKey (Esc to finish)")
             }
             BatchPhase::Waiting { .. } => {
                 format!("{tally} · insert the next YubiKey (Esc to finish)")
@@ -787,10 +812,15 @@ impl App {
         if let Some(p) = self.csv_problem(steps) {
             self.note(&p);
             false
-        } else if self.batch_mode && self.devices.len() != 1 {
-            self.note("Batch needs exactly one YubiKey inserted to start.");
+        } else if self.batch_mode && self.devices.len() > 1 {
+            self.note("Batch needs a single YubiKey at a time. Remove the others to start.");
             false
-        } else if self.batch_mode && self.devices[0].serial == super::NO_SERIAL {
+        } else if self.batch_mode
+            && self
+                .devices
+                .first()
+                .is_some_and(|d| d.serial == super::NO_SERIAL)
+        {
             self.note("Batch needs a YubiKey with a serial number to tell keys apart.");
             false
         } else if !self.batch_mode && self.active_device().is_none() {
