@@ -21,6 +21,8 @@ use std::time::{Duration, Instant};
 
 mod batch;
 mod commands;
+#[cfg(feature = "hardware")]
+mod monitor;
 mod runner;
 mod scripts;
 mod state;
@@ -36,6 +38,8 @@ use self::table::*;
 use self::ui::*;
 
 const DEVICE_POLL: Duration = Duration::from_secs(5);
+/// Poll interval when the monitor reports changes.
+const SAFETY_POLL: Duration = Duration::from_secs(30);
 const PROMPT_DELAY: Duration = Duration::from_millis(200);
 const MAX_ENTRIES: usize = 20_000;
 #[derive(Clone, Copy, PartialEq)]
@@ -64,6 +68,8 @@ enum Msg {
     Partial(String),
     Done(Option<u32>),
     Devices(Vec<Device>),
+    /// A complete device list from the event-based monitor.
+    Monitored(Vec<Device>),
 }
 
 #[derive(Clone)]
@@ -270,6 +276,12 @@ struct App {
     last_poll: Instant,
     polling: bool,
     missing_polls: u8,
+    /// Keeps the device monitor running.
+    monitor: Option<Box<dyn std::any::Any>>,
+    /// Whether the monitor reports device changes (polling is then only a safety net).
+    monitored: bool,
+    /// When the device list last changed (or the monitor last reported).
+    devices_changed: Instant,
     batch: Option<Batch>,
     /// Batch mode: typed commands are repeated on key after key.
     batch_mode: bool,
@@ -354,6 +366,9 @@ impl App {
             last_poll: Instant::now(),
             polling: false,
             missing_polls: 0,
+            monitor: None,
+            monitored: false,
+            devices_changed: Instant::now(),
             batch: None,
             batch_mode: false,
             recording: None,
@@ -375,6 +390,11 @@ impl App {
         app.history = state.history.clone();
         app.saved = state.history;
         app.refresh_devices();
+        #[cfg(feature = "hardware")]
+        {
+            app.monitor =
+                monitor::start(app.tx.clone()).map(|h| Box::new(h) as Box<dyn std::any::Any>);
+        }
         app
     }
 
@@ -421,7 +441,9 @@ impl App {
                 self.on_msg(msg);
             }
             self.batch_tick();
-            let interval = if self.batch_waiting() {
+            let interval = if self.monitored {
+                SAFETY_POLL
+            } else if self.batch_waiting() {
                 BATCH_POLL
             } else {
                 DEVICE_POLL
@@ -472,63 +494,80 @@ impl App {
                 }
                 self.batch_step_done(code);
             }
-            Msg::Devices(list) => {
-                self.polling = false;
-                self.last_poll = Instant::now();
-                // A failed or empty poll (sleep/wake, a PC/SC hiccup) looks like a
-                // removal; only believe it if the next poll agrees.
-                let missing = self.batch.is_none()
-                    && self
-                        .devices
-                        .iter()
-                        .any(|d| !list.iter().any(|n| n.serial == d.serial));
-                if missing && self.missing_polls < 1 {
-                    self.missing_polls += 1;
-                    self.last_poll = Instant::now() - DEVICE_POLL + Duration::from_secs(1);
-                    return;
-                }
-                self.missing_polls = 0;
-                let before = self.active_device();
-                if let Some(serial) = self.device
-                    && self.batch.is_none()
-                    && !list.iter().any(|d| d.serial == serial)
-                {
-                    self.device = None;
-                }
-                // The batch has its own progress messages.
-                if self.scanned && self.batch.is_none() {
-                    let gone: Vec<String> = self
-                        .devices
-                        .iter()
-                        .filter(|d| !list.iter().any(|n| n.serial == d.serial))
-                        .map(|d| format!("Removed {}", d.describe()))
-                        .collect();
-                    let new: Vec<String> = list
-                        .iter()
-                        .filter(|n| !self.devices.iter().any(|d| d.serial == n.serial))
-                        .map(|d| format!("Inserted {}", d.describe()))
-                        .collect();
-                    for msg in gone.into_iter().chain(new) {
-                        self.note(&msg);
-                    }
-                }
-                self.devices = list;
-                // Keep the first key found as the active one so a changing
-                // list order (e.g. with NFC readers) cannot switch it.
-                if self.device.is_none() {
-                    self.device = self.devices.first().map(|d| d.serial);
-                }
-                self.announce_device_change(before);
-                self.batch_devices();
-                if !self.scanned {
-                    self.scanned = true;
-                    let n = self.devices.len();
-                    if n > 1 {
-                        self.note(&format!(
-                            "{n} YubiKeys detected. Using the first one; press ← to choose another."
-                        ));
-                    }
-                }
+            Msg::Devices(list) => self.apply_devices(list, true),
+            Msg::Monitored(list) => {
+                self.monitored = true;
+                self.devices_changed = Instant::now();
+                self.apply_devices(list, false);
+            }
+        }
+    }
+
+    /// Applies a new device list. A poll that shows a key missing must be
+    /// confirmed by the next poll (`confirm_removal`); the monitor is trusted.
+    fn apply_devices(&mut self, list: Vec<Device>, confirm_removal: bool) {
+        self.polling = false;
+        self.last_poll = Instant::now();
+        // A failed or empty poll (sleep/wake, a PC/SC hiccup) looks like a
+        // removal; only believe it if the next poll agrees.
+        let missing = confirm_removal
+            && self.batch.is_none()
+            && self
+                .devices
+                .iter()
+                .any(|d| !list.iter().any(|n| n.serial == d.serial));
+        if missing && self.missing_polls < 1 {
+            self.missing_polls += 1;
+            self.last_poll = Instant::now() - DEVICE_POLL + Duration::from_secs(1);
+            return;
+        }
+        self.missing_polls = 0;
+        let before = self.active_device();
+        if let Some(serial) = self.device
+            && self.batch.is_none()
+            && !list.iter().any(|d| d.serial == serial)
+        {
+            self.device = None;
+        }
+        // The batch has its own progress messages.
+        if self.scanned && self.batch.is_none() {
+            let gone: Vec<String> = self
+                .devices
+                .iter()
+                .filter(|d| !list.iter().any(|n| n.serial == d.serial))
+                .map(|d| format!("Removed {}", d.describe()))
+                .collect();
+            let new: Vec<String> = list
+                .iter()
+                .filter(|n| !self.devices.iter().any(|d| d.serial == n.serial))
+                .map(|d| format!("Inserted {}", d.describe()))
+                .collect();
+            for msg in gone.into_iter().chain(new) {
+                self.note(&msg);
+            }
+        }
+        if list
+            .iter()
+            .map(|d| d.serial)
+            .ne(self.devices.iter().map(|d| d.serial))
+        {
+            self.devices_changed = Instant::now();
+        }
+        self.devices = list;
+        // Keep the first key found as the active one so a changing
+        // list order (e.g. with NFC readers) cannot switch it.
+        if self.device.is_none() {
+            self.device = self.devices.first().map(|d| d.serial);
+        }
+        self.announce_device_change(before);
+        self.batch_devices();
+        if !self.scanned {
+            self.scanned = true;
+            let n = self.devices.len();
+            if n > 1 {
+                self.note(&format!(
+                    "{n} YubiKeys detected. Using the first one; press ← to choose another."
+                ));
             }
         }
     }

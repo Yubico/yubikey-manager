@@ -43,6 +43,8 @@ pub(super) enum BatchPhase {
 pub(super) struct Batch {
     pub(super) steps: Vec<Vec<String>>,
     pub(super) step: usize,
+    /// Retries of the current step after a key that wasn't ready yet.
+    pub(super) retries: u8,
     /// Run once on the current key instead of repeating on every key.
     pub(super) once: bool,
     pub(super) phase: BatchPhase,
@@ -331,6 +333,13 @@ impl App {
 
     /// A command finished: go on to the next step, or complete the round.
     pub(super) fn batch_step_done(&mut self, code: Option<u32>) {
+        let transient = code != Some(0)
+            && self
+                .entries
+                .iter()
+                .rev()
+                .take(4)
+                .any(|e| is_transient_failure(&e.text));
         let Some(b) = self.batch.as_mut() else {
             return;
         };
@@ -338,6 +347,16 @@ impl App {
             return;
         }
         let good = code == Some(0);
+        if transient && b.retries < 2 && !b.fresh[b.step] {
+            b.retries += 1;
+            b.phase = BatchPhase::StepWait {
+                serial: b.current,
+                since: Instant::now(),
+            };
+            self.note("The YubiKey wasn't ready yet, trying again.");
+            return;
+        }
+        b.retries = 0;
         if good && b.step + 1 < b.steps.len() {
             let reboots = may_reboot(&b.steps[b.step]);
             b.step += 1;
@@ -425,6 +444,16 @@ impl App {
 
     /// Give up on a step whose key never came back.
     pub(super) fn batch_tick(&mut self) {
+        // The settle times are checked here too: with the monitor there may be
+        // no further device event to trigger it.
+        if self.batch.as_ref().is_some_and(|b| {
+            matches!(
+                b.phase,
+                BatchPhase::Waiting { .. } | BatchPhase::SameKey(_) | BatchPhase::StepWait { .. }
+            )
+        }) {
+            self.batch_devices();
+        }
         let Some(Batch {
             phase: BatchPhase::StepWait { serial, since },
             ..
@@ -488,6 +517,9 @@ impl App {
 
     /// Called with a fresh device list: start the next round on a new key.
     pub(super) fn batch_devices(&mut self) {
+        // A key such as the NEO drops its card while its info is read, so a
+        // new key only counts once the device list has been quiet for a moment.
+        let settled = self.devices_changed.elapsed() >= STEP_SETTLE;
         let Some(b) = self.batch.as_mut() else {
             return;
         };
@@ -499,7 +531,7 @@ impl App {
             .collect();
         match (&mut b.phase, serials.as_slice()) {
             (BatchPhase::Waiting { absent, .. }, []) => *absent = true,
-            (BatchPhase::Waiting { prev, .. }, [s]) if s != prev => {
+            (BatchPhase::Waiting { prev, .. }, [s]) if s != prev && settled => {
                 let s = *s;
                 self.next_key(s);
             }
@@ -523,7 +555,7 @@ impl App {
                     absent: true,
                 };
             }
-            (BatchPhase::SameKey(prev), [s]) if s != prev => {
+            (BatchPhase::SameKey(prev), [s]) if s != prev && settled => {
                 let s = *s;
                 self.next_key(s);
             }
@@ -799,6 +831,13 @@ impl App {
     // ---------- prompts ----------
 }
 
+/// Errors a key gives while it is still re-enumerating (typically a NEO
+/// switching interfaces); the command had not started, so it is safe to retry.
+fn is_transient_failure(text: &str) -> bool {
+    text.contains("reader name is not recognized")
+        || (text.contains("YubiKey with serial") && text.contains("not found"))
+}
+
 pub(super) fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
@@ -810,5 +849,21 @@ fn row_group(b: &Batch, idx: usize, fresh: bool) -> String {
         (true, _) => format!("{}.{idx}", b.round),
         (false, Some(row)) => format!("{}.r{row}", b.round),
         (false, None) => b.round.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transient_key_errors_are_recognised() {
+        assert!(is_transient_failure(
+            "Error: YubiKey with serial 7325609 not found."
+        ));
+        assert!(is_transient_failure(
+            "PC/SC error: The specified reader name is not recognized."
+        ));
+        assert!(!is_transient_failure("Error: Wrong PIN"));
     }
 }
