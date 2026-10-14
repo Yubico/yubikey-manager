@@ -153,7 +153,7 @@ impl LocalYubiKeyDevice {
         let reader = self
             .reader_name
             .as_deref()
-            .ok_or(DeviceError::NoDeviceFound)?;
+            .ok_or(DeviceError::CcidUnavailable)?;
 
         let mut last_err = None;
         for attempt in 0..9 {
@@ -167,6 +167,8 @@ impl LocalYubiKeyDevice {
                         );
                         thread::sleep(Duration::from_millis(500));
                         last_err = Some(e);
+                    } else if e.is_sharing_violation() {
+                        return Err(DeviceError::CcidUnavailable);
                     } else {
                         return Err(e.into());
                     }
@@ -244,7 +246,9 @@ impl LocalYubiKeyDevice {
 
     /// Wait for the user to remove and reinsert this YubiKey.
     ///
-    /// On success, updates this device's transport paths and info.
+    /// On success, updates this device's transport paths and info. Active
+    /// device monitors reuse the verified info for serial-numbered keys
+    /// instead of probing the same interfaces concurrently.
     ///
     /// * `status_cb` – called with [`ReinsertStatus`] variants to indicate
     ///   what the user should do.
@@ -254,10 +258,13 @@ impl LocalYubiKeyDevice {
         status_cb: &dyn Fn(ReinsertStatus),
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DeviceError> {
-        match self.transport {
-            Transport::Usb => self.reinsert_usb(status_cb, cancelled),
-            Transport::Nfc => self.reinsert_nfc(status_cb, cancelled),
-        }
+        super::monitor::with_paused_monitors(|| {
+            match self.transport {
+                Transport::Usb => self.reinsert_usb(status_cb, cancelled)?,
+                Transport::Nfc => self.reinsert_nfc(status_cb, cancelled)?,
+            }
+            Ok(self.clone())
+        })
     }
 
     fn reinsert_usb(
@@ -1310,6 +1317,23 @@ mod tests {
         assert!(matches!(
             dev.open_smartcard(),
             Err(DeviceError::UnsupportedFeature("pcsc"))
+        ));
+    }
+
+    #[cfg(feature = "pcsc")]
+    #[test]
+    fn test_open_smartcard_without_reader_reports_ccid_unavailable() {
+        let dev = make_device(
+            None,
+            None,
+            Some("/dev/hidraw1"),
+            Some(0x0407),
+            Version(5, 4, 3),
+            Some(12345),
+        );
+        assert!(matches!(
+            dev.open_smartcard(),
+            Err(DeviceError::CcidUnavailable)
         ));
     }
 

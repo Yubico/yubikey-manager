@@ -22,6 +22,48 @@ use super::client::{RpcCallError, RpcClient};
 
 type SharedClient = Arc<Mutex<RpcClient>>;
 
+struct RpcConnectionLease {
+    client: SharedClient,
+    target: Vec<String>,
+}
+
+impl Drop for RpcConnectionLease {
+    fn drop(&mut self) {
+        match self.client.lock() {
+            Ok(mut client) => {
+                if let Err(error) = client.close_connection(&self.target) {
+                    log::warn!("Failed to close RPC connection: {error}");
+                }
+            }
+            Err(_) => log::error!("RPC client lock poisoned while closing connection"),
+        }
+    }
+}
+
+fn closed_connection_error() -> RpcTransportError {
+    RpcTransportError("RPC connection is closed".into())
+}
+
+fn device_open_error(error: RpcCallError) -> DeviceError {
+    match error {
+        RpcCallError::Rpc(ref rpc) if rpc.status == "device-busy" => DeviceError::InUse,
+        RpcCallError::Rpc(ref rpc)
+            if rpc.status == "connection-error"
+                && rpc.body.get("reason").and_then(Value::as_str) == Some("ccid-unavailable") =>
+        {
+            DeviceError::CcidUnavailable
+        }
+        other => DeviceError::Transport(Box::new(other)),
+    }
+}
+
+fn smartcard_device_error(error: RpcCallError) -> DeviceError {
+    match error {
+        RpcCallError::Rpc(ref rpc) if rpc.status == "device-busy" => DeviceError::InUse,
+        other => DeviceError::SmartCard(SmartCardError::Transport(Box::new(other))),
+    }
+}
+
 /// Build a full target path from a device prefix and a sub-path.
 fn target(prefix: &[String], path: &[&str]) -> Vec<String> {
     prefix
@@ -134,17 +176,24 @@ pub struct RpcSmartCardConnection {
     client: SharedClient,
     transport: Transport,
     device_prefix: Vec<String>,
+    lease: Option<RpcConnectionLease>,
 }
 
 impl Connection for RpcSmartCardConnection {
     type Error = SmartCardError;
     fn close(&mut self) {
         log::debug!("Closing RPC SmartCard connection");
+        self.lease.take();
     }
 }
 
 impl SmartCardConnection for RpcSmartCardConnection {
     fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+        if self.lease.is_none() {
+            return Err(SmartCardError::Transport(Box::new(
+                closed_connection_error(),
+            )));
+        }
         let apdu_hex = SecretValue::new(apdu.encode_hex::<String>());
         yubikit::log_traffic!(">> {}", apdu_hex.expose_secret());
         let result = self
@@ -197,15 +246,24 @@ pub struct RpcFidoConnection {
     device_version: yubikit::core::Version,
     capabilities: CtapHidCapability,
     device_prefix: Vec<String>,
+    lease: Option<RpcConnectionLease>,
 }
 
 impl RpcFidoConnection {
     fn from_client(client: SharedClient, device_prefix: Vec<String>) -> Result<Self, RpcCallError> {
-        let info = client
-            .lock()
-            .map_err(|_| RpcCallError::Transport("RPC client lock poisoned".into()))?
-            .get(&target(&device_prefix, &["ctap"]))
-            .map_err(|e| RpcCallError::Transport(format!("{e}")))?;
+        let path = target(&device_prefix, &["ctap"]);
+        let info = {
+            let mut rpc = client
+                .lock()
+                .map_err(|_| RpcCallError::Transport("RPC client lock poisoned".into()))?;
+            let info = rpc.get(&path)?;
+            rpc.track_connection(&path);
+            info
+        };
+        let lease = RpcConnectionLease {
+            client: client.clone(),
+            target: path,
+        };
         let data = required_field(&info.body, "data")?;
 
         let device_version =
@@ -221,6 +279,7 @@ impl RpcFidoConnection {
             device_version,
             capabilities,
             device_prefix,
+            lease: Some(lease),
         })
     }
 }
@@ -229,6 +288,7 @@ impl Connection for RpcFidoConnection {
     type Error = FidoError;
     fn close(&mut self) {
         log::debug!("Closing RPC FIDO connection");
+        self.lease.take();
     }
 }
 
@@ -240,6 +300,9 @@ impl FidoConnection for RpcFidoConnection {
         on_keepalive: Option<&mut dyn FnMut(u8)>,
         _cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, FidoError> {
+        if self.lease.is_none() {
+            return Err(FidoError::Other("RPC connection is closed".into()));
+        }
         let signal_handler: Option<Box<dyn Fn(&str, &Value) + '_>> =
             on_keepalive.map(|cb| -> Box<dyn Fn(&str, &Value) + '_> {
                 let cb = RefCell::new(cb);
@@ -298,17 +361,22 @@ impl FidoConnection for RpcFidoConnection {
 pub struct RpcOtpConnection {
     client: SharedClient,
     device_prefix: Vec<String>,
+    lease: Option<RpcConnectionLease>,
 }
 
 impl Connection for RpcOtpConnection {
     type Error = OtpError;
     fn close(&mut self) {
         log::debug!("Closing RPC OTP connection");
+        self.lease.take();
     }
 }
 
 impl OtpConnection for RpcOtpConnection {
     fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
+        if self.lease.is_none() {
+            return Err(OtpError::CommandRejected("RPC connection is closed".into()));
+        }
         let result = self
             .client
             .lock()
@@ -334,6 +402,9 @@ impl OtpConnection for RpcOtpConnection {
     }
 
     fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
+        if self.lease.is_none() {
+            return Err(OtpError::CommandRejected("RPC connection is closed".into()));
+        }
         let data_hex = SecretValue::new(data.encode_hex::<String>());
         yubikit::log_traffic!("otp_send >> {}", data_hex.expose_secret());
         self.client
@@ -372,6 +443,35 @@ pub struct RpcDevice {
 }
 
 impl RpcDevice {
+    /// Construct a device from the unlocked service inventory.
+    pub fn from_inventory(
+        client: Arc<Mutex<RpcClient>>,
+        device_name: &str,
+        data: &Value,
+    ) -> Result<Self, RpcCallError> {
+        let transport = match required_str(data, "transport")? {
+            "usb" => Transport::Usb,
+            "nfc" => Transport::Nfc,
+            other => {
+                return Err(RpcCallError::Transport(format!(
+                    "Malformed RPC response: unknown transport {other}"
+                )));
+            }
+        };
+        let ifaces = UsbInterface(as_u8(
+            required_u64(data, "usb_interfaces")?,
+            "usb_interfaces",
+        )?);
+        Self::from_data(
+            client,
+            vec![device_name.to_string()],
+            data,
+            transport == Transport::Nfc || ifaces.contains(UsbInterface::CCID),
+            transport == Transport::Usb && ifaces.contains(UsbInterface::FIDO),
+            transport == Transport::Usb && ifaces.contains(UsbInterface::OTP),
+        )
+    }
+
     /// Create an RPC device from an already-shared client, targeting a specific
     /// device by name.
     ///
@@ -398,13 +498,36 @@ impl RpcDevice {
             .lock()
             .map_err(|_| RpcCallError::Transport("RPC client lock poisoned".into()))?
             .get(&prefix)
-            .map_err(|e| RpcCallError::Transport(format!("Failed to get root node: {e}")))?;
+            .map_err(|e| match e {
+                RpcCallError::Transport(message) => {
+                    RpcCallError::Transport(format!("Failed to get root node: {message}"))
+                }
+                rpc_error => rpc_error,
+            })?;
         let data = required_field(&root.body, "data")?;
         let children = required_field(&root.body, "children")?;
         let children = children.as_object().ok_or_else(|| {
             RpcCallError::Transport("Malformed RPC response: children is not an object".into())
         })?;
 
+        Self::from_data(
+            client,
+            prefix,
+            data,
+            children.contains_key("ccid"),
+            children.contains_key("ctap"),
+            children.contains_key("otp"),
+        )
+    }
+
+    fn from_data(
+        client: SharedClient,
+        prefix: Vec<String>,
+        data: &Value,
+        has_ccid: bool,
+        has_ctap: bool,
+        has_otp: bool,
+    ) -> Result<Self, RpcCallError> {
         let transport = match required_str(data, "transport")? {
             "usb" => Transport::Usb,
             "nfc" => Transport::Nfc,
@@ -422,10 +545,6 @@ impl RpcDevice {
             .transpose()?;
 
         let reader_name = optional_str(data, "reader_name")?;
-
-        let has_ccid = children.get("ccid").is_some();
-        let has_ctap = children.get("ctap").is_some();
-        let has_otp = children.get("otp").is_some();
 
         let usb_ifaces = UsbInterface(as_u8(
             required_u64(data, "usb_interfaces")?,
@@ -608,10 +727,23 @@ impl YubiKeyDevice for RpcDevice {
             return Err(DeviceError::NoDeviceFound);
         }
         log::debug!("Opening RPC SmartCard connection");
+        let path = target(&self.prefix, &["ccid"]);
+        let mut client = self.client.lock().map_err(|_| {
+            DeviceError::Transport(Box::new(RpcCallError::Transport(
+                "RPC client lock poisoned".into(),
+            )))
+        })?;
+        client.get(&path).map_err(device_open_error)?;
+        client.track_connection(&path);
+        drop(client);
         Ok(Box::new(RpcSmartCardConnection {
             client: self.client.clone(),
             transport: self.transport,
             device_prefix: self.prefix.clone(),
+            lease: Some(RpcConnectionLease {
+                client: self.client.clone(),
+                target: path,
+            }),
         }))
     }
 
@@ -621,11 +753,7 @@ impl YubiKeyDevice for RpcDevice {
         }
         log::debug!("Opening RPC FIDO connection");
         let conn = RpcFidoConnection::from_client(self.client.clone(), self.prefix.clone())
-            .map_err(|e| {
-                DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(
-                    format!("{e}"),
-                ))))
-            })?;
+            .map_err(smartcard_device_error)?;
         Ok(Box::new(conn))
     }
 
@@ -634,9 +762,22 @@ impl YubiKeyDevice for RpcDevice {
             return Err(DeviceError::NoDeviceFound);
         }
         log::debug!("Opening RPC OTP connection");
+        let path = target(&self.prefix, &["otp"]);
+        let mut client = self.client.lock().map_err(|_| {
+            DeviceError::Transport(Box::new(RpcCallError::Transport(
+                "RPC client lock poisoned".into(),
+            )))
+        })?;
+        client.get(&path).map_err(device_open_error)?;
+        client.track_connection(&path);
+        drop(client);
         Ok(Box::new(RpcOtpConnection {
             client: self.client.clone(),
             device_prefix: self.prefix.clone(),
+            lease: Some(RpcConnectionLease {
+                client: self.client.clone(),
+                target: path,
+            }),
         }))
     }
 
@@ -670,11 +811,7 @@ impl YubiKeyDevice for RpcDevice {
                 Some(&signal_handler),
                 true,
             )
-            .map_err(|e| {
-                DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(
-                    format!("{e}"),
-                ))))
-            })?;
+            .map_err(smartcard_device_error)?;
 
         Ok(())
     }
@@ -698,3 +835,22 @@ impl Drop for RpcDevice {
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 struct RpcTransportError(String);
+
+#[cfg(test)]
+mod tests {
+    use super::super::client::RpcClientError;
+    use super::*;
+
+    #[test]
+    fn unavailable_ccid_rpc_error_preserves_device_reason() {
+        let error = RpcCallError::Rpc(RpcClientError {
+            status: "connection-error".into(),
+            message: "Error connecting to ccid interface".into(),
+            body: json!({"reason": "ccid-unavailable"}),
+        });
+        assert!(matches!(
+            device_open_error(error),
+            DeviceError::CcidUnavailable
+        ));
+    }
+}

@@ -5,13 +5,19 @@
   <?define BinaryDir="{BINARY_DIR}" ?>
 
    <Product Id="*" UpgradeCode="fba0ab59-48d1-4050-82eb-acad31cf2239" Name="$(var.ProductName)" Version="$(var.ProductVersion)" Manufacturer="Yubico AB" Language="1033">
-      <Package InstallerVersion="301" Compressed="yes" InstallScope="perMachine" Platform="x64" Description="$(var.ProductName) $(var.ProductVersion)" />
+      <Package InstallerVersion="{INSTALLER_VERSION}" Compressed="yes" InstallScope="perMachine" Platform="{ARCHITECTURE}" Description="$(var.ProductName) $(var.ProductVersion)" />
       <Media Id="1" Cabinet="ykman.cab" EmbedCab="yes"/>
 
       <WixVariable Id="WixUIDialogBmp" Value="yubico-msi-background.png" />
       <WixVariable Id="WixUIBannerBmp" Value="yubico-msi-y-banner.png" />
 
       <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />
+      <Property Id="YKMANSERVICEARCH">
+        <RegistrySearch Id="ServiceArchitecture" Root="HKLM" Key="Software\Yubico\YubiKey Manager Service" Name="Architecture" Type="raw" Win64="yes" />
+      </Property>
+      <Condition Message="The installed YubiKey Manager Service has a different architecture. Use installers of the same architecture for YubiKey Manager and Yubico Authenticator.">
+        Installed OR NOT YKMANSERVICEARCH OR YKMANSERVICEARCH = "{ARCHITECTURE}"
+      </Condition>
 
       <Property Id="PREVIOUSVERSIONSINSTALLED" Secure="yes" />
 
@@ -51,39 +57,22 @@
          	<Directory Id="ApplicationProgramsFolder" Name="YubiKey Manager CLI"/>
          </Directory>
 
-         <Component Id='EnvVars' Guid="7e30efe4-dc8b-40ba-a182-76e490de4f37">
+         <Component Id='EnvVars' Guid="{ENVVARS_GUID}">
            <Environment Id='PathEnvVar' Action='set' System='yes' Name='PATH' Part='last' Value='[INSTALLDIR]'/>
          </Component>
       </Directory>
 
       <DirectoryRef Id="INSTALLDIR">
-         <Component Id="YkmanExe" Guid="a3d7c1e2-5f8a-4b9e-9c1d-2e4f6a8b0c3d">
+         <Component Id="YkmanExe" Guid="{YKMAN_EXE_GUID}">
              <File Id="ykman.exe" Source="$(var.BinaryDir)\ykman.exe" KeyPath="yes" />
-         </Component>
-         <Component Id="YkmanSvcExe" Guid="b4e8d2f3-6a9b-4c0f-ad2e-3f5a7b9c1d4e">
-             <File Id="ykman_svc.exe" Name="ykman-svc.exe" Source="$(var.BinaryDir)\ykman-svc.exe" KeyPath="yes" />
-             <ServiceInstall
-                 Id="YkmanSvcInstall"
-                 Type="ownProcess"
-                 Name="ykman-svc"
-                 DisplayName="YubiKey Manager Service"
-                 Description="Provides device management services for YubiKey Manager."
-                 Start="auto"
-                 Account="LocalSystem"
-                 ErrorControl="normal"
-                 Arguments="run" />
-             <ServiceControl
-                 Id="YkmanSvcControl"
-                 Name="ykman-svc"
-                 Start="install"
-                 Stop="both"
-                 Remove="uninstall"
-                 Wait="yes" />
          </Component>
       </DirectoryRef>
 
+      <DirectoryRef Id="TARGETDIR">
+        <Merge Id="YkmanService" SourceFile="$(var.ServiceModule)" DiskId="1" Language="1033" />
+      </DirectoryRef>
       <DirectoryRef Id="ApplicationProgramsFolder">
-         <Component Id="ApplicationShortcut" Guid="fba0ab59-48d1-4050-82eb-acad31cf2239">
+         <Component Id="ApplicationShortcut" Guid="{SHORTCUT_GUID}">
              <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall"/>
              <RegistryValue Root="HKCU" Key="Software\Yubico\YubiKey Manager CLI" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
              <util:RemoveFolderEx Id="Remove" On="install" Property="INSTALLDIR" />
@@ -93,7 +82,7 @@
 
       <Feature Id="DefaultFeature" Level="1">
          <ComponentRef Id="YkmanExe" />
-         <ComponentRef Id="YkmanSvcExe" />
+         <MergeRef Id="YkmanService" />
       </Feature>
 
       <Feature Id="MainApplication" Title="Main Application" Level="1">

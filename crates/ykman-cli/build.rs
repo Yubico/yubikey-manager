@@ -31,6 +31,7 @@ fn compress(data: &[u8]) -> Vec<u8> {
 fn generate_licenses() {
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest = Path::new(&out_dir).join("licenses.deflate");
+    let report = Path::new(&out_dir).join("licenses.txt");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let manifest_dir = Path::new(&manifest_dir);
@@ -54,10 +55,14 @@ fn generate_licenses() {
         .arg(&config)
         .arg("--manifest-path")
         .arg(workspace_root.join("Cargo.toml"))
+        .arg("--output-file")
+        .arg(&report)
         .output();
 
     let raw = match output {
-        Ok(result) if result.status.success() => result.stdout,
+        Ok(result) if result.status.success() => {
+            fs::read(&report).expect("Failed to read generated licenses")
+        }
         Ok(result) => {
             let stderr = String::from_utf8_lossy(&result.stderr);
             panic!("cargo-about failed: {stderr}");
@@ -65,5 +70,6 @@ fn generate_licenses() {
         Err(e) => panic!("cargo-about not found: {e}"),
     };
 
+    fs::remove_file(&report).expect("Failed to remove generated licenses");
     fs::write(&dest, compress(&raw)).expect("Failed to write licenses.deflate");
 }
