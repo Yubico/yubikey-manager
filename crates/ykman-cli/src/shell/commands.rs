@@ -218,7 +218,6 @@ impl App {
         // `${` completes variable names wherever a sequence will expand them.
         if let Some(at) = partial.rfind("${")
             && !partial[at..].contains('}')
-            && (self.recording.is_some() || self.batch_mode || words.first() == Some(&"repeat"))
         {
             let (before, typed) = (&partial[..at], &partial[at + 2..]);
             let in_repeat = words.first() == Some(&"repeat")
@@ -567,6 +566,11 @@ impl App {
         if self.recording.is_some() && plain {
             let skip = usize::from(self.batch_mode);
             self.record_step(&args[skip..]);
+            return;
+        }
+        // A command with ${variables} runs as a one-step sequence.
+        if plain && !self.batch_mode && args.iter().any(|w| w.contains("${")) {
+            self.repeat_command(&args);
             return;
         }
         match args[0].as_str() {

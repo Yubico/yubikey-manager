@@ -601,7 +601,11 @@ impl App {
             let confirming = self
                 .batch
                 .as_ref()
-                .is_some_and(|b| matches!(b.phase, BatchPhase::Confirm));
+                .is_some_and(|b| matches!(b.phase, BatchPhase::Confirm | BatchPhase::Auto));
+            let asking_auto = self
+                .batch
+                .as_ref()
+                .is_some_and(|b| matches!(b.phase, BatchPhase::Auto));
             let same = self.batch.as_ref().and_then(|b| match b.phase {
                 BatchPhase::SameKey(s) => Some(s),
                 _ => None,
@@ -624,6 +628,15 @@ impl App {
                     if let Some(s) = same {
                         self.begin_round(s);
                     }
+                    return;
+                }
+                KeyCode::Char('y' | 'Y' | 'n' | 'N') | KeyCode::Enter if asking_auto => {
+                    if let Some(b) = self.batch.as_mut() {
+                        b.auto_yes = !matches!(key.code, KeyCode::Char('n' | 'N'));
+                        b.phase = BatchPhase::Confirm;
+                        b.auto_asked = true;
+                    }
+                    self.confirm_start();
                     return;
                 }
                 KeyCode::Enter if confirming => {

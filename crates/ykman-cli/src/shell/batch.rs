@@ -21,6 +21,8 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(20);
 pub(super) enum BatchPhase {
     /// Waiting for the user to confirm the first run.
     Confirm,
+    /// Asking whether yes/no questions should be answered automatically.
+    Auto,
     Running,
     /// Waiting for the next key; `absent` once the previous one was seen gone.
     Waiting {
@@ -45,6 +47,9 @@ pub(super) struct Batch {
     pub(super) step: usize,
     /// Retries of the current step after a key that wasn't ready yet.
     pub(super) retries: u8,
+    /// Answer yes/no questions with "y" instead of asking (chosen on the start card).
+    pub(super) auto_yes: bool,
+    pub(super) auto_asked: bool,
     /// Run once on the current key instead of repeating on every key.
     pub(super) once: bool,
     pub(super) phase: BatchPhase,
@@ -313,6 +318,28 @@ impl App {
                     generated.push([serial.clone(), group.clone(), name, value]);
                 }
             }
+            // Next to variables, fixed values (a typed name, say) belong in the result too.
+            if step.iter().any(|w| !find_vars(w).is_empty()) {
+                for (pos, (w, param)) in step.iter().zip(&columns).enumerate() {
+                    let Some(column) = param else { continue };
+                    if w.starts_with('-') || !find_vars(w).is_empty() {
+                        continue;
+                    }
+                    let all = || self.generated.iter().chain(&generated);
+                    let same = |g: &&[String; 4]| g[0] == serial && g[1] == group;
+                    let mut name = column.clone();
+                    let mut k = 2;
+                    while all().filter(same).any(|g| g[2] == name) {
+                        name = format!("{column}_{k}");
+                        k += 1;
+                    }
+                    order.push(pos);
+                    if var_secret(column) {
+                        self.secret_values.insert(w.clone());
+                    }
+                    generated.push([serial.clone(), group.clone(), name, w.clone()]);
+                }
+            }
         }
         let mut sorted: Vec<(usize, [String; 4])> = order.into_iter().zip(generated).collect();
         sorted.sort_by_key(|(pos, _)| *pos);
@@ -451,6 +478,12 @@ impl App {
 
     /// Give up on a step whose key never came back.
     pub(super) fn batch_tick(&mut self) {
+        if let Some(prompt) = self.prompt().map(str::to_string)
+            && self.batch.as_ref().is_some_and(|b| b.auto_yes)
+            && self.is_choice(&prompt)
+        {
+            self.send_reply("y", false);
+        }
         // The settle times are checked here too: with the monitor there may be
         // no further device event to trigger it.
         if self.batch.as_ref().is_some_and(|b| {
@@ -480,6 +513,23 @@ impl App {
 
     /// Enter on the confirmation: begin the first run.
     pub(super) fn confirm_start(&mut self) {
+        // Steps that all carry --force never ask yes/no questions.
+        let ask = self.batch.as_ref().is_some_and(|b| {
+            matches!(b.phase, BatchPhase::Confirm)
+                && !b.auto_asked
+                && !b.steps.iter().all(|s| s.iter().any(|a| a == "--force"))
+        });
+        if ask && let Some(b) = self.batch.as_mut() {
+            b.phase = BatchPhase::Auto;
+            self.push(
+                Kind::Note,
+                "Answer yes/no questions automatically in every run? (Y/n)".to_string(),
+            );
+            return;
+        }
+        if self.batch.as_ref().is_some_and(|b| b.auto_yes) {
+            self.note("Yes/no questions are answered \"y\" automatically.");
+        }
         let once = self.batch.as_ref().is_some_and(|b| b.once);
         let serial = if once {
             self.active_device()
@@ -600,7 +650,7 @@ impl App {
     /// Short status-bar text while the batch waits for the user.
     pub(super) fn batch_wait_msg(&self) -> Option<&'static str> {
         match self.batch.as_ref()?.phase {
-            BatchPhase::Confirm => Some("waiting for confirmation"),
+            BatchPhase::Confirm | BatchPhase::Auto => Some("waiting for confirmation"),
             BatchPhase::SameKey(_) => Some("same YubiKey, waiting for your decision"),
             BatchPhase::Waiting { .. } if self.devices.len() > 1 => {
                 Some("waiting for a single YubiKey")
@@ -645,6 +695,10 @@ impl App {
                 "Press Enter to start the batch ({n} step{}), Esc to cancel",
                 plural(n)
             ),
+            BatchPhase::Auto => {
+                "Answer yes/no questions automatically in every run? Enter/y = yes, n = no, Esc cancels"
+                    .to_string()
+            }
             BatchPhase::Running if b.same_key => format!(
                 "{tally} · round {} running{progress} · warning: this YubiKey was already used in this batch",
                 b.round

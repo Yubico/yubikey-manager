@@ -359,6 +359,8 @@ impl App {
             labels: Vec::new(),
             step: 0,
             retries: 0,
+            auto_yes: false,
+            auto_asked: false,
             once,
             phase: if ask.is_empty() {
                 BatchPhase::Confirm
