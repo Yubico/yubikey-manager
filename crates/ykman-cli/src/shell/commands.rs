@@ -611,7 +611,7 @@ impl App {
                 self.spawn(line.trim(), flag);
             }
             _ if self.hide_secrets => {
-                let shown = masked_step(&args);
+                let shown = self.masked(&args);
                 self.spawn(&shown, args);
             }
             _ => self.spawn(line.trim(), args),

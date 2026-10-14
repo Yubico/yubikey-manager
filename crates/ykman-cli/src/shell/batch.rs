@@ -358,7 +358,7 @@ impl App {
         let args = self.expand(step, Expand::Run);
         let mut shown_args = self.expand(step, Expand::Display);
         if self.hide_secrets {
-            shown_args = split_args(&masked_step(&shown_args));
+            shown_args = split_args(&masked_step(&shown_args, &self.param_names(step)));
         }
         let (step, n) = (b.step, b.steps.len());
         let shown = if n == 1 && !b.once {

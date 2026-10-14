@@ -225,14 +225,32 @@ fn secret_flags() {
     assert!(!secret_flag("key"));
 }
 
+fn masked_plain(step: &[String]) -> String {
+    masked_step(step, &[])
+}
+
+#[test]
+fn masks_values_by_resolved_parameter_name() {
+    let names = vec![None, None, None, None, Some("key".to_string())];
+    assert_eq!(
+        masked_step(&s(&["otp", "yubiotp", "1", "-k", "abc"]), &names),
+        "otp yubiotp 1 -k ••••"
+    );
+    let layout = vec![None, None, None, None, Some("keyboard_layout".to_string())];
+    assert_eq!(
+        masked_step(&s(&["otp", "static", "1", "-k", "us"]), &layout),
+        "otp static 1 -k us"
+    );
+}
+
 #[test]
 fn masks_the_value_after_a_secret_flag() {
     assert_eq!(
-        masked_step(&s(&["otp", "yubiotp", "1", "--key", "abc123"])),
+        masked_plain(&s(&["otp", "yubiotp", "1", "--key", "abc123"])),
         "otp yubiotp 1 --key ••••"
     );
     assert_eq!(
-        masked_step(&s(&["piv", "access", "--pin=123456"])),
+        masked_plain(&s(&["piv", "access", "--pin=123456"])),
         "piv access --pin=••••"
     );
 }
@@ -240,11 +258,11 @@ fn masks_the_value_after_a_secret_flag() {
 #[test]
 fn masks_secret_positionals_for_oath() {
     assert_eq!(
-        masked_step(&s(&["oath", "accounts", "add", "Acme", "JBSWY3DP"])),
+        masked_plain(&s(&["oath", "accounts", "add", "Acme", "JBSWY3DP"])),
         "oath accounts add Acme ••••"
     );
     assert_eq!(
-        masked_step(&s(&[
+        masked_plain(&s(&[
             "oath",
             "accounts",
             "uri",
@@ -253,7 +271,7 @@ fn masks_secret_positionals_for_oath() {
         "oath accounts uri ••••"
     );
     assert_eq!(
-        masked_step(&s(&[
+        masked_plain(&s(&[
             "repeat", "3", "oath", "accounts", "add", "A", "SECRET"
         ])),
         "repeat 3 oath accounts add A ••••"
@@ -263,16 +281,16 @@ fn masks_secret_positionals_for_oath() {
 #[test]
 fn leaves_variables_visible_when_masking() {
     assert_eq!(
-        masked_step(&s(&["otp", "yubiotp", "1", "--key", "${key}"])),
+        masked_plain(&s(&["otp", "yubiotp", "1", "--key", "${key}"])),
         "otp yubiotp 1 --key ${key}"
     );
 }
 
 #[test]
 fn masking_leaves_ordinary_steps_alone() {
-    assert_eq!(masked_step(&s(&["oath", "info"])), "oath info");
+    assert_eq!(masked_plain(&s(&["oath", "info"])), "oath info");
     assert_eq!(
-        masked_step(&s(&["oath", "accounts", "add", "My Label", "x"])),
+        masked_plain(&s(&["oath", "accounts", "add", "My Label", "x"])),
         "oath accounts add \"My Label\" ••••"
     );
 }

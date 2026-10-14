@@ -287,8 +287,13 @@ fn secret_flag(w: &str) -> bool {
     w.starts_with('-') && SECRET_FLAGS.iter().any(|s| w.contains(s))
 }
 
+/// Whether a clap parameter id (resolved from short or long flags) holds a secret.
+fn secret_param(id: &str) -> bool {
+    id != "keyboard_layout" && SECRET_FLAGS.iter().any(|s| id.contains(s))
+}
+
 /// A step for display, with values that look like secrets hidden.
-pub(super) fn masked_step(step: &[String]) -> String {
+pub(super) fn masked_step(step: &[String], names: &[Option<String>]) -> String {
     let off = if step.first().is_some_and(|w| w == "repeat") {
         2
     } else {
@@ -312,7 +317,12 @@ pub(super) fn masked_step(step: &[String]) -> String {
     let mut out = Vec::new();
     let mut hide_next = false;
     for (i, word) in step.iter().enumerate() {
-        let shown = if hide_next && !word.starts_with('-') {
+        let by_name = !word.starts_with('-')
+            && names
+                .get(i)
+                .and_then(Option::as_deref)
+                .is_some_and(secret_param);
+        let shown = if (hide_next || by_name) && !word.starts_with('-') {
             hide(word)
         } else if let Some((flag, value)) = word.split_once('=')
             && secret_flag(flag)
@@ -614,7 +624,7 @@ impl App {
             plural(steps.len())
         ));
         for (i, s) in steps.iter().enumerate() {
-            self.note(&format!("  {}  {}", i + 1, masked_step(s)));
+            self.note(&format!("  {}  {}", i + 1, self.masked(s)));
         }
     }
 
@@ -658,12 +668,24 @@ impl App {
         }
     }
 
+    /// A step for display with secrets hidden, using clap to resolve short flags.
+    pub(super) fn masked(&self, step: &[String]) -> String {
+        let off = if step.first().is_some_and(|w| w == "repeat") {
+            2.min(step.len())
+        } else {
+            0
+        };
+        let mut names = vec![None; off];
+        names.extend(self.param_names(&step[off..]));
+        masked_step(step, &names)
+    }
+
     pub(super) fn load_script_list(&self) -> Vec<(String, usize, Vec<String>)> {
         script_names()
             .into_iter()
             .map(|n| {
                 let steps = self.load_script(&n).unwrap_or_default();
-                let shown = steps.iter().map(|s| masked_step(s)).collect();
+                let shown = steps.iter().map(|s| self.masked(s)).collect();
                 (n, steps.len(), shown)
             })
             .collect()
