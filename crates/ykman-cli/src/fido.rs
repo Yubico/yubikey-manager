@@ -28,6 +28,7 @@ use yubikit::smartcard::SmartCardError;
 
 use crate::cancel;
 use crate::context;
+use crate::progress::StepProgress;
 use crate::scp::{self, ScpParams};
 use crate::util::{format_smartcard_connection_error, print_table, usage_bar};
 
@@ -750,30 +751,35 @@ pub fn run_reset(dev: &mut dyn YubiKeyDevice, scp_params: &ScpParams, force: boo
         if !answer.trim().eq_ignore_ascii_case("y") {
             return Err(anyhow!("Reset aborted by user."));
         }
+    }
 
-        // Close and reinsert
-        dev.reinsert(
-            &|status| match (transport, status) {
-                (Transport::Usb, ReinsertStatus::Remove) => {
-                    eprintln!("Remove your YubiKey from the USB port.")
-                }
-                (Transport::Usb, ReinsertStatus::Reinsert) => {
-                    eprintln!("Re-insert your YubiKey now...")
-                }
-                (Transport::Nfc, ReinsertStatus::Remove) => {
-                    eprintln!("Remove your YubiKey from the NFC reader.")
-                }
-                (Transport::Nfc, ReinsertStatus::Reinsert) => {
-                    eprintln!("Place your YubiKey back on the NFC reader now...")
-                }
+    let progress = StepProgress::new(3);
+    // --force skips the unplug/reinsert step so the reset can be triggered
+    // within the key's 5 second window after it was inserted.
+    if !force {
+        let (remove_msg, reinsert_msg) = match transport {
+            Transport::Usb => ("Unplug your YubiKey", "Reinsert your YubiKey"),
+            Transport::Nfc => (
+                "Remove your YubiKey from the NFC reader",
+                "Place your YubiKey back on the NFC reader",
+            ),
+        };
+        cancel::clear();
+        let reinserted = dev.reinsert(
+            &|status| match status {
+                ReinsertStatus::Remove => progress.update(0, remove_msg),
+                ReinsertStatus::Reinsert => progress.update(1, reinsert_msg),
             },
-            &|| false,
-        )
-        .map_err(|e| anyhow!("Reinsert failed: {e}"))?;
+            &cancel::is_cancelled,
+        );
+        if let Err(e) = reinserted {
+            progress.fail(0, "Reinsert failed");
+            return Err(anyhow!("Reinsert failed: {e}"));
+        }
     }
 
     with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
-        run_reset_inner(ctap2, ctap_info, transport)
+        run_reset_inner(ctap2, ctap_info, transport, &progress)
     })
 }
 
@@ -781,6 +787,7 @@ fn run_reset_inner<C: Connection + 'static>(
     mut ctap2: Ctap2Session<C>,
     ctap_info: Info,
     transport: Transport,
+    progress: &StepProgress,
 ) -> Result<()> {
     // Check transport restrictions
     let transports_for_reset = &ctap_info.transports_for_reset;
@@ -799,9 +806,9 @@ fn run_reset_inner<C: Connection + 'static>(
     }
 
     let touch_msg = if ctap_info.long_touch_for_reset {
-        "Press and hold the YubiKey button for 5 seconds to confirm."
+        "Press and hold the button on your YubiKey for 5 seconds"
     } else {
-        "Touch the YubiKey to confirm."
+        "Touch the button on your YubiKey now"
     };
 
     // Set up Ctrl+C cancellation
@@ -809,9 +816,9 @@ fn run_reset_inner<C: Connection + 'static>(
     let result = ctap2.reset(
         Some(&mut |status| {
             if status == KEEPALIVE_UPNEEDED {
-                eprintln!("{touch_msg}");
+                progress.update(2, touch_msg);
             } else if status == KEEPALIVE_PROCESSING {
-                eprintln!("Reset in progress, DO NOT REMOVE YOUR YUBIKEY!");
+                progress.update(2, "Resetting, DO NOT REMOVE YOUR YUBIKEY!");
             }
         }),
         Some(&cancel::is_cancelled),
@@ -819,21 +826,25 @@ fn run_reset_inner<C: Connection + 'static>(
 
     match result {
         Ok(()) => {
-            println!("FIDO application has been reset.");
+            progress.finish("FIDO application reset");
             Ok(())
         }
-        Err(ref e) => match get_ctap_status(e) {
-            Some(CtapStatus::UserActionTimeout) => Err(anyhow!(
-                "Reset failed. You need to touch your YubiKey to confirm the reset.".to_string(),
-            )),
-            Some(CtapStatus::NotAllowed | CtapStatus::PinAuthBlocked) => Err(anyhow!(
-                "Reset failed. Reset must be triggered within 5 seconds after the \
+        Err(ref e) => {
+            progress.fail(2, "Reset failed");
+            match get_ctap_status(e) {
+                Some(CtapStatus::UserActionTimeout) => Err(anyhow!(
+                    "Reset failed. You need to touch your YubiKey to confirm the reset."
+                        .to_string(),
+                )),
+                Some(CtapStatus::NotAllowed | CtapStatus::PinAuthBlocked) => Err(anyhow!(
+                    "Reset failed. Reset must be triggered within 5 seconds after the \
                      YubiKey is inserted."
-                    .to_string(),
-            )),
-            Some(CtapStatus::KeepaliveCancel) => Err(anyhow!("Reset aborted by user.")),
-            _ => Err(anyhow!("FIDO reset failed: {e}")),
-        },
+                        .to_string(),
+                )),
+                Some(CtapStatus::KeepaliveCancel) => Err(anyhow!("Reset aborted by user.")),
+                _ => Err(anyhow!("FIDO reset failed: {e}")),
+            }
+        }
     }
 }
 

@@ -23,6 +23,7 @@ mod oath;
 mod openpgp;
 mod otp;
 mod piv;
+mod progress;
 mod scp;
 mod securitydomain;
 mod util;

@@ -108,6 +108,15 @@ pub fn red(s: &str) -> String {
     }
 }
 
+/// Green, typically used to indicate progress or success.
+pub fn green(s: &str) -> String {
+    if enabled() {
+        sgr("32", "39", s)
+    } else {
+        s.to_string()
+    }
+}
+
 /// Amber/yellow, typically used for a warning state.
 pub fn yellow(s: &str) -> String {
     if enabled() {
