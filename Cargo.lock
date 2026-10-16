@@ -3374,6 +3374,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "subtle",
  "tempfile",
  "ureq",
  "windows-sys 0.61.2",
@@ -3381,6 +3382,7 @@ dependencies = [
  "x509-cert",
  "ykman",
  "yubikit",
+ "zeroize",
 ]
 
 [[package]]

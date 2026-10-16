@@ -137,6 +137,38 @@ impl From<CliHashAlgorithm> for yubikit::piv::HashAlgorithm {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum CliSignaturePadding {
+    #[value(name = "pkcs1v15")]
+    Pkcs1v15,
+    Pss,
+}
+
+impl From<CliSignaturePadding> for yubikit::__internal::piv_padding::SignaturePadding {
+    fn from(v: CliSignaturePadding) -> Self {
+        match v {
+            CliSignaturePadding::Pkcs1v15 => Self::Pkcs1v15,
+            CliSignaturePadding::Pss => Self::Pss,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum CliDecryptionPadding {
+    Oaep,
+    #[value(name = "pkcs1v15")]
+    Pkcs1v15,
+}
+
+impl From<CliDecryptionPadding> for yubikit::__internal::piv_padding::DecryptionPadding {
+    fn from(v: CliDecryptionPadding) -> Self {
+        match v {
+            CliDecryptionPadding::Oaep => Self::Oaep,
+            CliDecryptionPadding::Pkcs1v15 => Self::Pkcs1v15,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum CliFormat {
     Pem,

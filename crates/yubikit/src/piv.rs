@@ -48,7 +48,6 @@ use des::TdesEde3;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use sha2::Digest;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 use x509_cert::der;
@@ -2580,51 +2579,6 @@ pub enum HashAlgorithm {
 }
 
 // ---------------------------------------------------------------------------
-// Hashing & PKCS#1 v1.5 padding
-// ---------------------------------------------------------------------------
-
-const DIGEST_INFO_SHA256: &[u8] = &[
-    0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
-    0x00, 0x04, 0x20,
-];
-const DIGEST_INFO_SHA384: &[u8] = &[
-    0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05,
-    0x00, 0x04, 0x30,
-];
-const DIGEST_INFO_SHA512: &[u8] = &[
-    0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05,
-    0x00, 0x04, 0x40,
-];
-
-/// Compute the hash of `data` using the specified algorithm.
-pub(crate) fn hash_data(hash_alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {
-    match hash_alg {
-        HashAlgorithm::Sha256 => sha2::Sha256::digest(data).to_vec(),
-        HashAlgorithm::Sha384 => sha2::Sha384::digest(data).to_vec(),
-        HashAlgorithm::Sha512 => sha2::Sha512::digest(data).to_vec(),
-    }
-}
-
-/// Construct a PKCS#1 v1.5 signature padding block from a hash digest.
-fn pkcs1v15_pad(hash_alg: HashAlgorithm, hash: &[u8], key_byte_len: usize) -> Vec<u8> {
-    let digest_info_prefix = match hash_alg {
-        HashAlgorithm::Sha256 => DIGEST_INFO_SHA256,
-        HashAlgorithm::Sha384 => DIGEST_INFO_SHA384,
-        HashAlgorithm::Sha512 => DIGEST_INFO_SHA512,
-    };
-    let t_len = digest_info_prefix.len() + hash.len();
-    let pad_len = key_byte_len - 3 - t_len;
-    let mut padded = Vec::with_capacity(key_byte_len);
-    padded.push(0x00);
-    padded.push(0x01);
-    padded.extend(std::iter::repeat_n(0xFF, pad_len));
-    padded.push(0x00);
-    padded.extend_from_slice(digest_info_prefix);
-    padded.extend_from_slice(hash);
-    padded
-}
-
-// ---------------------------------------------------------------------------
 // Device public key → PublicKey conversion
 // ---------------------------------------------------------------------------
 
@@ -2929,19 +2883,21 @@ impl<C: SmartCardConnection> DynSignatureAlgorithmIdentifier for PivSigner<'_, C
 
 impl<C: SmartCardConnection> signature::Signer<PivSignature> for PivSigner<'_, C> {
     fn try_sign(&self, msg: &[u8]) -> Result<PivSignature, signature::Error> {
-        let message = match self.key_type {
-            KeyType::EccP256 | KeyType::EccP384 => hash_data(self.hash_alg, msg),
-            KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
-                let hash = hash_data(self.hash_alg, msg);
-                let key_byte_len = (self.key_type.bit_len() / 8) as usize;
-                pkcs1v15_pad(self.hash_alg, &hash, key_byte_len)
+        let hash_alg = match self.key_type.algorithm() {
+            Algorithm::Ec if matches!(self.key_type, KeyType::EccP256 | KeyType::EccP384) => {
+                Some(self.hash_alg)
             }
-            KeyType::Ed25519 => msg.to_vec(),
-            KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => msg.to_vec(),
-            KeyType::X25519 | KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
-                return Err(signature::Error::new());
-            }
+            Algorithm::Rsa => Some(self.hash_alg),
+            _ => None,
         };
+        let message = crate::__internal::piv_padding::prepare_signature(
+            self.key_type,
+            msg,
+            hash_alg,
+            false,
+            None,
+        )
+        .map_err(signature::Error::from_source)?;
 
         let mut session = self.session.borrow_mut();
         let raw_sig = session

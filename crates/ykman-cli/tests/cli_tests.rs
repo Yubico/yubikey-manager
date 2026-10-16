@@ -37,5 +37,7 @@ mod openpgp;
 mod otp;
 #[path = "cli_tests/piv.rs"]
 mod piv;
+#[path = "cli_tests/piv_crypto.rs"]
+mod piv_crypto;
 #[path = "cli_tests/securitydomain.rs"]
 mod securitydomain;

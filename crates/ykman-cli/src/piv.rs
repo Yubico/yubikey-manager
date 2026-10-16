@@ -2,7 +2,8 @@ use anyhow::{Result, anyhow};
 use std::str::FromStr;
 use std::time::Duration;
 
-use clap::Subcommand;
+use clap::{Args, Subcommand};
+use subtle::ConstantTimeEq;
 use x509_cert::Certificate;
 use x509_cert::builder::{Builder, CertificateBuilder, Profile, RequestBuilder};
 use x509_cert::der::{self, Decode, Encode, EncodePem, pem::LineEnding};
@@ -18,6 +19,7 @@ use yubikit::piv::{
     DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, ManagementKey, ManagementKeyType, ObjectId,
     PinPolicy, PivError, PivPin, PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
 };
+use zeroize::Zeroizing;
 
 use ykman::piv::{
     TAG_PIVMAN_KEY, get_pivman_data, get_pivman_protected_data, has_stored_key, pivman_set_mgm_key,
@@ -25,13 +27,16 @@ use ykman::piv::{
 use yubikit::smartcard::{SmartCardConnection, SmartCardError, Sw};
 
 use crate::cli_enums::{
-    CliFormat, CliHashAlgorithm, CliKeyType, CliMgmtKeyType, CliPinPolicy, CliTouchPolicy,
+    CliDecryptionPadding, CliFormat, CliHashAlgorithm, CliKeyType, CliMgmtKeyType, CliPinPolicy,
+    CliSignaturePadding, CliTouchPolicy,
 };
 use crate::scp::ScpParams;
 use crate::util::{
     ByteFormat, ByteLen, confirm, open_smartcard_session, print_table, prompt_bytes,
     read_file_or_stdin, write_file_or_stdout,
 };
+
+use yubikit::__internal::piv_padding;
 
 #[derive(Subcommand)]
 pub enum PivAction {
@@ -188,6 +193,41 @@ pub enum PivKeysAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
     },
+    /// Sign a message (ECDSA signatures use DER encoding)
+    Sign {
+        #[command(flatten)]
+        operation: KeyOperation,
+        /// Hash for RSA/ECDSA (default: sha256); not used with Ed25519 or ML-DSA
+        #[arg(short = 'a', long)]
+        hash_algorithm: Option<CliHashAlgorithm>,
+        /// Input is already a digest (RSA/ECDSA only)
+        #[arg(long)]
+        prehashed: bool,
+        /// RSA signature padding (default: pkcs1v15); PSS uses a digest-length salt
+        #[arg(long)]
+        padding: Option<CliSignaturePadding>,
+    },
+    /// Decrypt RSA ciphertext
+    Decrypt {
+        #[command(flatten)]
+        operation: KeyOperation,
+        /// RSA encryption padding
+        #[arg(long, default_value = "oaep")]
+        padding: CliDecryptionPadding,
+        /// OAEP hash and MGF1 hash (default: sha256); the OAEP label is empty
+        #[arg(short = 'a', long)]
+        hash_algorithm: Option<CliHashAlgorithm>,
+    },
+    /// Decapsulate ML-KEM ciphertext and output the raw shared secret
+    Decapsulate {
+        #[command(flatten)]
+        operation: KeyOperation,
+    },
+    /// Derive a raw ECDH/X25519 shared secret from a peer public key (PEM/DER)
+    Derive {
+        #[command(flatten)]
+        operation: KeyOperation,
+    },
     /// Show key metadata
     Info {
         /// PIV slot
@@ -243,6 +283,22 @@ pub enum PivKeysAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
+}
+
+#[derive(Args)]
+pub struct KeyOperation {
+    /// PIV slot
+    slot: String,
+    /// Input file, or - for stdin
+    input: String,
+    /// Output file, or - for binary stdout
+    output: String,
+    /// PIN (prompted for only when required by the slot policy)
+    #[arg(short = 'P', long)]
+    pin: Option<String>,
+    /// Key algorithm for devices without slot metadata
+    #[arg(long)]
+    algorithm: Option<CliKeyType>,
 }
 
 #[derive(Subcommand)]
@@ -472,6 +528,43 @@ impl PivAction {
                     pin.as_deref(),
                     password.as_deref(),
                 ),
+                PivKeysAction::Sign {
+                    operation,
+                    hash_algorithm,
+                    prehashed,
+                    padding,
+                } => run_key_operation(
+                    dev,
+                    scp_params,
+                    &operation,
+                    PrivateKeyOperation::Sign {
+                        hash_algorithm,
+                        prehashed,
+                        padding,
+                    },
+                ),
+                PivKeysAction::Decrypt {
+                    operation,
+                    padding,
+                    hash_algorithm,
+                } => run_key_operation(
+                    dev,
+                    scp_params,
+                    &operation,
+                    PrivateKeyOperation::Decrypt {
+                        padding,
+                        hash_algorithm,
+                    },
+                ),
+                PivKeysAction::Decapsulate { operation } => run_key_operation(
+                    dev,
+                    scp_params,
+                    &operation,
+                    PrivateKeyOperation::Decapsulate,
+                ),
+                PivKeysAction::Derive { operation } => {
+                    run_key_operation(dev, scp_params, &operation, PrivateKeyOperation::Derive)
+                }
                 PivKeysAction::Info { slot } => run_keys_info(dev, scp_params, &slot),
                 PivKeysAction::Attest {
                     slot,
@@ -1361,6 +1454,245 @@ pub fn run_keys_import(
     Ok(())
 }
 
+enum PrivateKeyOperation {
+    Sign {
+        hash_algorithm: Option<CliHashAlgorithm>,
+        prehashed: bool,
+        padding: Option<CliSignaturePadding>,
+    },
+    Decrypt {
+        padding: CliDecryptionPadding,
+        hash_algorithm: Option<CliHashAlgorithm>,
+    },
+    Decapsulate,
+    Derive,
+}
+
+fn operation_key_type<C: SmartCardConnection>(
+    session: &mut PivSession<C>,
+    slot: Slot,
+    algorithm: Option<CliKeyType>,
+) -> Result<(KeyType, PinPolicy, TouchPolicy)> {
+    if session.version() < Version(5, 3, 0) {
+        return algorithm
+            .map(|a| (KeyType::from(a), PinPolicy::Default, TouchPolicy::Default))
+            .ok_or_else(|| anyhow!("Slot metadata is unavailable; specify --algorithm."));
+    }
+    let metadata = session
+        .get_slot_metadata(slot)
+        .map_err(|e| anyhow!("Failed to read key metadata for slot {slot}: {e}"))?;
+    if let Some(algorithm) = algorithm
+        && KeyType::from(algorithm) != metadata.key_type
+    {
+        return Err(anyhow!(
+            "--algorithm does not match the key in slot {slot}."
+        ));
+    }
+    Ok((
+        metadata.key_type,
+        metadata.pin_policy,
+        metadata.touch_policy,
+    ))
+}
+
+/// Whether a key's PIN policy is known to require PIN verification in a new session.
+fn pin_required(slot: Slot, pin_policy: PinPolicy, version: Version) -> bool {
+    match pin_policy {
+        PinPolicy::Once | PinPolicy::Always => true,
+        // Metadata is unavailable before 5.3, so the policy is not actually known.
+        PinPolicy::Default if version >= Version(5, 3, 0) => slot != Slot::CardAuth,
+        _ => false,
+    }
+}
+
+fn peer_key_bytes(key_type: KeyType, input: &[u8]) -> Result<Vec<u8>> {
+    let der = if input.starts_with(b"-----BEGIN") {
+        pem_decode(std::str::from_utf8(input)?)?
+    } else {
+        input.to_vec()
+    };
+    let public_key = PublicKey::from_spki(&der).map_err(|e| {
+        anyhow!("Invalid peer public key (expected PEM/DER SubjectPublicKeyInfo): {e}")
+    })?;
+    if KeyType::from_public_key(&public_key)? != key_type {
+        return Err(anyhow!(
+            "Peer public key algorithm must match the slot key."
+        ));
+    }
+    match public_key {
+        PublicKey::Ec(key) if key_type == KeyType::EccP256 => {
+            p256::PublicKey::from_sec1_bytes(&key.point)
+                .map_err(|_| anyhow!("Invalid P-256 peer public key."))?;
+            Ok(key.point)
+        }
+        PublicKey::Ec(key) if key_type == KeyType::EccP384 => {
+            p384::PublicKey::from_sec1_bytes(&key.point)
+                .map_err(|_| anyhow!("Invalid P-384 peer public key."))?;
+            Ok(key.point)
+        }
+        PublicKey::X25519(key) => Ok(key.key),
+        _ => Err(anyhow!("Key agreement requires P-256, P-384, or X25519.")),
+    }
+}
+
+fn write_secret_output(path: &str, secret: &[u8]) -> Result<()> {
+    use std::io::Write;
+    if path == "-" {
+        return write_file_or_stdout(path, secret);
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(|e| {
+        anyhow!("Cannot create secret output '{path}' (must not already exist): {e}")
+    })?;
+    file.write_all(secret)
+        .map_err(|e| anyhow!("Failed to write secret output '{path}': {e}"))
+}
+
+fn authorize_key_operation<C, F, T>(
+    session: &mut PivSession<C>,
+    pin: Option<&str>,
+    pin_required: bool,
+    touch_policy: TouchPolicy,
+    mut operation: F,
+) -> Result<T>
+where
+    C: SmartCardConnection,
+    F: FnMut(&mut PivSession<C>) -> Result<T, PivError>,
+{
+    // Verify the PIN (prompting if needed) before asking for touch, so the
+    // prompts appear in the order the YubiKey needs them.
+    let pin_verified = pin.is_some() || pin_required;
+    if pin_verified {
+        ensure_pin(session, pin)?;
+    }
+    if matches!(touch_policy, TouchPolicy::Always | TouchPolicy::Cached) {
+        eprintln!("Touch your YubiKey to authorize the private-key operation.");
+    }
+    if pin_verified {
+        operation(session).map_err(|e| anyhow!("{e}"))
+    } else {
+        verify_pin_if_needed(session, None, operation)
+    }
+}
+
+fn run_key_operation(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    operation: &KeyOperation,
+    action: PrivateKeyOperation,
+) -> Result<()> {
+    let slot = parse_slot(&operation.slot)?;
+    let input = Zeroizing::new(read_file_or_stdin(&operation.input)?);
+    let mut session = open_session(dev, scp_params)?;
+    let (key_type, pin_policy, touch_policy) =
+        operation_key_type(&mut session, slot, operation.algorithm)?;
+    let pin_required = pin_required(slot, pin_policy, session.version());
+    let pin = operation.pin.as_deref();
+    let output = match action {
+        PrivateKeyOperation::Sign {
+            hash_algorithm,
+            prehashed,
+            padding,
+        } => {
+            let prepared = Zeroizing::new(piv_padding::prepare_signature(
+                key_type,
+                &input,
+                hash_algorithm.map(Into::into),
+                prehashed,
+                padding.map(Into::into),
+            )?);
+            let signature =
+                authorize_key_operation(&mut session, pin, pin_required, touch_policy, |s| {
+                    s.sign(slot, key_type, &prepared)
+                })
+                .map_err(|e| anyhow!("Failed to sign: {e}"))?;
+            return write_file_or_stdout(&operation.output, &signature);
+        }
+        PrivateKeyOperation::Decrypt {
+            padding,
+            hash_algorithm,
+        } => {
+            if key_type.algorithm() != yubikit::piv::Algorithm::Rsa {
+                return Err(anyhow!("Decryption requires an RSA key."));
+            }
+            if padding == CliDecryptionPadding::Pkcs1v15 && hash_algorithm.is_some() {
+                return Err(anyhow!("--hash-algorithm applies only to OAEP decryption."));
+            }
+            if input.len() != (key_type.bit_len() / 8) as usize {
+                return Err(anyhow!(
+                    "Ciphertext length must match the RSA modulus size."
+                ));
+            }
+            let block = Zeroizing::new(
+                authorize_key_operation(&mut session, pin, pin_required, touch_policy, |s| {
+                    s.decrypt(slot, &input)
+                })
+                .map_err(|e| anyhow!("Failed to decrypt: {e}"))?,
+            );
+            piv_padding::unpad_rsa(
+                &block,
+                padding.into(),
+                hash_algorithm.map_or(HashAlgorithm::Sha256, Into::into),
+            )?
+        }
+        PrivateKeyOperation::Decapsulate => {
+            let expected_len = match key_type {
+                KeyType::MlKem512 => 768,
+                KeyType::MlKem768 => 1088,
+                KeyType::MlKem1024 => 1568,
+                _ => return Err(anyhow!("Decapsulation requires an ML-KEM key.")),
+            };
+            if input.len() != expected_len {
+                return Err(anyhow!(
+                    "Expected {expected_len} bytes of ML-KEM ciphertext, got {}.",
+                    input.len()
+                ));
+            }
+            let secret = Zeroizing::new(
+                authorize_key_operation(&mut session, pin, pin_required, touch_policy, |s| {
+                    s.calculate_secret(slot, key_type, &input)
+                })
+                .map_err(|e| anyhow!("Failed to decapsulate: {e}"))?,
+            );
+            if secret.len() != 32 {
+                return Err(anyhow!(
+                    "Invalid ML-KEM shared secret length returned by the device."
+                ));
+            }
+            secret
+        }
+        PrivateKeyOperation::Derive => {
+            if !matches!(
+                key_type,
+                KeyType::EccP256 | KeyType::EccP384 | KeyType::X25519
+            ) {
+                return Err(anyhow!("Key agreement requires P-256, P-384, or X25519."));
+            }
+            let peer = peer_key_bytes(key_type, &input)?;
+            let secret = Zeroizing::new(
+                authorize_key_operation(&mut session, pin, pin_required, touch_policy, |s| {
+                    s.calculate_secret(slot, key_type, &peer)
+                })
+                .map_err(|e| anyhow!("Failed to derive shared secret: {e}"))?,
+            );
+            let expected_len = if key_type == KeyType::EccP384 { 48 } else { 32 };
+            if secret.len() != expected_len
+                || (key_type == KeyType::X25519 && bool::from(secret.as_slice().ct_eq(&[0; 32])))
+            {
+                return Err(anyhow!("Invalid shared secret returned by the device."));
+            }
+            secret
+        }
+    };
+    write_secret_output(&operation.output, &output)
+}
+
 pub fn run_keys_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, slot: &str) -> Result<()> {
     let slot = parse_slot(slot)?;
     let mut session = open_session(dev, scp_params)?;
@@ -2026,8 +2358,13 @@ fn check_key_match<C: yubikit::smartcard::SmartCardConnection>(
     let to_sign = match key_type {
         KeyType::EccP256 | KeyType::EccP384 => hash.clone(),
         KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
-            let key_byte_len = (key_type.bit_len() / 8) as usize;
-            pkcs1v15_pad(&hash, key_byte_len)
+            piv_padding::prepare_signature(
+                key_type,
+                &hash,
+                Some(HashAlgorithm::Sha256),
+                true,
+                None,
+            )?
         }
         KeyType::Ed25519 => test_message.to_vec(),
         KeyType::X25519 => {
@@ -2052,23 +2389,6 @@ fn check_key_match<C: yubikit::smartcard::SmartCardConnection>(
         ));
     }
     Ok(())
-}
-
-/// PKCS#1 v1.5 padding for RSA signatures with SHA-256.
-fn pkcs1v15_pad(hash: &[u8], key_byte_len: usize) -> Vec<u8> {
-    // DigestInfo for SHA-256: 30 31 30 0d 06 09 60 86 48 01 65 03 04 02 01 05 00 04 20
-    let digest_info_prefix: &[u8] = &[
-        0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
-        0x05, 0x00, 0x04, 0x20,
-    ];
-    let t_len = digest_info_prefix.len() + hash.len();
-    let ps_len = key_byte_len - t_len - 3;
-    let mut padded = vec![0x00, 0x01];
-    padded.extend(vec![0xFF; ps_len]);
-    padded.push(0x00);
-    padded.extend_from_slice(digest_info_prefix);
-    padded.extend_from_slice(hash);
-    padded
 }
 
 /// Verify a signature using the public key from SPKI DER.
@@ -2156,6 +2476,96 @@ mod tests {
         format_management_key_auth_error, format_piv_credential_error,
         management_key_type_prompt_name, slot_heading,
     };
+
+    #[test]
+    fn padding_option_names() {
+        use crate::cli_enums::{CliDecryptionPadding, CliSignaturePadding};
+        use clap::ValueEnum;
+        for (padding, name) in [
+            (CliSignaturePadding::Pkcs1v15, "pkcs1v15"),
+            (CliSignaturePadding::Pss, "pss"),
+        ] {
+            assert_eq!(padding.to_possible_value().unwrap().get_name(), name);
+        }
+        for (padding, name) in [
+            (CliDecryptionPadding::Pkcs1v15, "pkcs1v15"),
+            (CliDecryptionPadding::Oaep, "oaep"),
+        ] {
+            assert_eq!(padding.to_possible_value().unwrap().get_name(), name);
+        }
+    }
+
+    #[test]
+    fn pin_is_requested_upfront_only_when_policy_requires_it() {
+        use yubikit::piv::PinPolicy;
+        let v = Version(5, 7, 0);
+        assert!(super::pin_required(Slot::Retired1, PinPolicy::Once, v));
+        assert!(super::pin_required(Slot::Retired1, PinPolicy::Always, v));
+        assert!(super::pin_required(Slot::Signature, PinPolicy::Default, v));
+        assert!(!super::pin_required(Slot::CardAuth, PinPolicy::Default, v));
+        assert!(!super::pin_required(Slot::Retired1, PinPolicy::Never, v));
+        assert!(!super::pin_required(
+            Slot::Retired1,
+            PinPolicy::MatchOnce,
+            v
+        ));
+        assert!(!super::pin_required(
+            Slot::Retired1,
+            PinPolicy::Default,
+            Version(5, 2, 0)
+        ));
+    }
+
+    #[test]
+    fn secret_output_is_private_and_never_overwrites() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret");
+        let path = path.to_str().unwrap();
+        super::write_secret_output(path, b"secret").unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), b"secret");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        assert!(super::write_secret_output(path, b"replacement").is_err());
+        assert_eq!(std::fs::read(path).unwrap(), b"secret");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn secret_output_does_not_follow_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        let link = dir.path().join("link");
+        std::fs::write(&target, b"unchanged").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(super::write_secret_output(link.to_str().unwrap(), b"secret").is_err());
+        assert_eq!(std::fs::read(target).unwrap(), b"unchanged");
+    }
+
+    #[test]
+    fn agreement_rejects_wrong_curves_and_invalid_points() {
+        let p256 = p256::SecretKey::from_slice(&[1; 32]).unwrap().public_key();
+        use p256::pkcs8::EncodePublicKey;
+        let der = p256.to_public_key_der().unwrap();
+        assert_eq!(
+            super::peer_key_bytes(KeyType::EccP256, der.as_bytes())
+                .unwrap()
+                .len(),
+            65
+        );
+        assert!(super::peer_key_bytes(KeyType::EccP384, der.as_bytes()).is_err());
+        assert!(super::peer_key_bytes(KeyType::Rsa2048, der.as_bytes()).is_err());
+        assert!(super::peer_key_bytes(KeyType::EccP256, b"not a public key").is_err());
+        let mut invalid = der.as_bytes().to_vec();
+        let len = invalid.len();
+        invalid[len - 64..].fill(0);
+        assert!(super::peer_key_bytes(KeyType::EccP256, &invalid).is_err());
+    }
 
     #[test]
     fn piv_info_labels_retired_slots() {
