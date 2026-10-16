@@ -140,12 +140,17 @@ impl App {
                         "{}: {} rows · columns {}",
                         t.name,
                         t.rows.len(),
-                        t.headers.join(", ")
+                        t.headers
+                            .iter()
+                            .map(|h| format!("`{h}`"))
+                            .collect::<Vec<_>>()
+                            .join(" ")
                     );
                     self.note(&msg);
                 }
-                None => self
-                    .note("No CSV attached. Use /csv <file>; the header row names the variables."),
+                None => self.note(
+                    "No CSV attached. Use `/csv <file>`; the header row names the variables.",
+                ),
             },
             [a] if a == "clear" => {
                 self.csv = None;
@@ -167,11 +172,15 @@ impl App {
                 match result {
                     Ok(t) => {
                         self.note(&format!(
-                            "Attached {}: {} row{} · columns {}",
+                            "Attached `{}`: {} row{} · columns {}",
                             t.name,
                             t.rows.len(),
                             plural(t.rows.len()),
-                            t.headers.join(", ")
+                            t.headers
+                                .iter()
+                                .map(|h| format!("`{h}`"))
+                                .collect::<Vec<_>>()
+                                .join(" ")
                         ));
                         self.note(
                             "Use ${column} in a sequence. In batch mode each key takes the next row.",
@@ -181,7 +190,7 @@ impl App {
                     Err(e) => self.note(&format!("Could not use {path}: {e}")),
                 }
             }
-            _ => self.note("Usage: /csv <file> · /csv clear · /csv"),
+            _ => self.note("Usage: `/csv <file>` · `/csv clear` · `/csv`"),
         }
     }
 
@@ -322,7 +331,7 @@ impl App {
         if let [(_, cells)] = rows.as_slice() {
             let w = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
             for (n, c) in names.iter().zip(cells) {
-                self.note(&format!("  {n:<w$}  {c}"));
+                self.note(&format!("  {n:<w$}  `{c}`"));
             }
             return;
         }
@@ -354,7 +363,7 @@ impl App {
     /// `/export` saves, `/export copy` copies, `/export <file>` saves to a file.
     pub(super) fn export_command(&mut self, args: &[String]) {
         if self.generated.is_empty() {
-            self.note("No generated values yet. Run a sequence that uses ${random…} first.");
+            self.note("No generated values yet. Run a sequence that uses `${random…}` first.");
             return;
         }
         let (names, rows) = generated_rows(&self.generated);

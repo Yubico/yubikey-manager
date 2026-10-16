@@ -9,13 +9,47 @@ use yubikit::platform::monitor::{MonitorHandle, YubiKeyEvent, monitor_yubikeys};
 /// How long the first full scan may take; a NEO needs a while to probe.
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long a NEO placeholder is held back while its interfaces are probed.
+const GHOST_DELAY: Duration = Duration::from_millis(800);
+
+#[derive(Default)]
+struct Shared {
+    devices: HashMap<u64, Device>,
+    ready: bool,
+    /// Ids in the list last sent to the shell.
+    sent: Vec<u64>,
+    /// Bumped on every send so a held-back list can tell it was superseded.
+    generation: u64,
+}
+
+impl Shared {
+    fn send(&mut self, tx: &Sender<Msg>) {
+        self.generation += 1;
+        self.sent = self.devices.keys().copied().collect();
+        let _ = tx.send(Msg::Monitored(sorted(&self.devices)));
+    }
+
+    /// Whether the list holds a placeholder the shell hasn't seen yet.
+    fn has_new_ghost(&self) -> bool {
+        self.devices
+            .iter()
+            .any(|(id, d)| is_probe_placeholder(d) && !self.sent.contains(id))
+    }
+}
+
+/// The bare 1.1.0 stand-in for a NEO whose interfaces haven't been read yet.
+/// Keys without a serial but with a real version are shown right away.
+fn is_probe_placeholder(d: &Device) -> bool {
+    d.serial == NO_SERIAL && d.version == "1.1.0"
+}
+
 /// Starts the monitor without waiting for it. Every change, starting with the
 /// first full scan, sends the complete device list as `Msg::Monitored`; until
 /// then the shell keeps polling.
 pub(super) fn start(tx: Sender<Msg>) -> Arc<MonitorHandle> {
     // The key map, and whether the first scan is done. Events before that
     // only fill the map, so the shell never sees a half-built list.
-    let state = Arc::new(Mutex::new((HashMap::<u64, Device>::new(), false)));
+    let state = Arc::new(Mutex::new(Shared::default()));
     let shared = Arc::clone(&state);
     let sender = tx.clone();
     let handle = monitor_yubikeys(
@@ -25,7 +59,7 @@ pub(super) fn start(tx: Sender<Msg>) -> Arc<MonitorHandle> {
             match event {
                 YubiKeyEvent::Added(yk) | YubiKeyEvent::Changed(yk) => {
                     let info = yk.device().info();
-                    s.0.insert(
+                    s.devices.insert(
                         yk.id(),
                         Device {
                             serial: info.serial.unwrap_or(NO_SERIAL),
@@ -35,11 +69,26 @@ pub(super) fn start(tx: Sender<Msg>) -> Arc<MonitorHandle> {
                     );
                 }
                 YubiKeyEvent::Removed(yk) => {
-                    s.0.remove(&yk.id());
+                    s.devices.remove(&yk.id());
                 }
             }
-            if s.1 {
-                let _ = sender.send(Msg::Monitored(sorted(&s.0)));
+            if !s.ready {
+                return;
+            }
+            if s.has_new_ghost() {
+                // Wait to see whether it settles into a real key; any later
+                // send supersedes this one.
+                let (state, tx, generation) = (Arc::clone(&shared), sender.clone(), s.generation);
+                std::thread::spawn(move || {
+                    std::thread::sleep(GHOST_DELAY);
+                    if let Ok(mut s) = state.lock()
+                        && s.generation == generation
+                    {
+                        s.send(&tx);
+                    }
+                });
+            } else {
+                s.send(&sender);
             }
         },
     );
@@ -50,8 +99,8 @@ pub(super) fn start(tx: Sender<Msg>) -> Arc<MonitorHandle> {
             return;
         }
         if let Ok(mut s) = state.lock() {
-            s.1 = true;
-            let _ = tx.send(Msg::Monitored(sorted(&s.0)));
+            s.ready = true;
+            s.send(&tx);
         }
     });
     handle

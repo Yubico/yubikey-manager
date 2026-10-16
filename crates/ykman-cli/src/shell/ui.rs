@@ -227,6 +227,11 @@ pub(super) fn render_entry(e: &Entry, width: usize, lines: &mut Vec<Line<'static
     };
     let cells = if matches!(e.kind, Kind::Out | Kind::Err) {
         parse_ansi(&e.text, base)
+    } else if matches!(
+        e.kind,
+        Kind::Note | Kind::Fail | Kind::Success | Kind::RoundFail
+    ) {
+        highlight_cells(&e.text, base)
     } else {
         e.text
             .chars()
@@ -271,6 +276,44 @@ pub(super) fn render_entry(e: &Entry, width: usize, lines: &mut Vec<Line<'static
         spans.push(Span::styled(run, run_style));
         lines.push(Line::from(spans));
     }
+}
+
+/// Styled chars for a message where `code` spans (in backticks, or a `${…}`
+/// variable) get a solid background; the backticks themselves are not shown.
+pub(super) fn highlight_cells(text: &str, base: Style) -> Vec<(char, Style)> {
+    let code = Style::new()
+        .fg(TEXT)
+        .bg(tab_bg())
+        .remove_modifier(Modifier::ITALIC | Modifier::DIM);
+    let chars: Vec<char> = text.chars().filter(|c| !c.is_control()).collect();
+    let mut out = Vec::with_capacity(chars.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let close = match chars[i] {
+            '`' => chars[i + 1..]
+                .iter()
+                .position(|&c| c == '`')
+                .map(|p| (i + 1, i + 1 + p, i + 2 + p)),
+            '$' if chars.get(i + 1) == Some(&'{') => chars[i..]
+                .iter()
+                .position(|&c| c == '}')
+                .map(|p| (i, i + p + 1, i + p + 1)),
+            _ => None,
+        };
+        match close {
+            Some((from, to, next)) if to > from => {
+                out.push((' ', code));
+                out.extend(chars[from..to].iter().map(|&c| (c, code)));
+                out.push((' ', code));
+                i = next;
+            }
+            _ => {
+                out.push((chars[i], base));
+                i += 1;
+            }
+        }
+    }
+    out
 }
 
 /// Converts text with ANSI SGR codes into styled chars. Other escape

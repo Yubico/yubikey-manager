@@ -603,7 +603,7 @@ impl App {
             "batch" if args.len() == 1 => self.enter_batch_mode(),
             "batch" => self.batch_command(&args[1..]),
             _ if self.batch.is_some() => {
-                self.note("A batch or sequence is active. Use /batch stop to end it first.");
+                self.note("A batch or sequence is active. Use `/batch stop` to end it first.");
             }
             _ if self.running => self.note("A command is already running."),
             "version" | "licenses" | "diagnose" if args.len() == 1 => {
@@ -860,7 +860,7 @@ impl App {
         if let Some(t) = self.csv.clone() {
             any = true;
             self.note(&format!(
-                "  CSV {} ({} row{}):",
+                "  CSV `{}` ({} row{}):",
                 t.name,
                 t.rows.len(),
                 plural(t.rows.len())
@@ -892,10 +892,10 @@ impl App {
         if !used.is_empty() {
             any = true;
             let list: Vec<String> = used.iter().map(|n| format!("${{{n}}}")).collect();
-            self.note(&format!("  Your own, in the sequence: {}", list.join(", ")));
+            self.note(&format!("  Your own, in the sequence: {}", list.join(" ")));
         }
         if !any {
-            self.note("  No CSV attached and no custom variables in use (see /csv).");
+            self.note("  No CSV attached and no custom variables in use (see `/csv`).");
         }
     }
 

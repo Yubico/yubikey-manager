@@ -518,7 +518,7 @@ impl App {
             ["show", name] => return self.script_show(name),
             ["rename", old, new] => return self.script_rename(old, new),
             ["rename", ..] => {
-                self.note("Usage: /script rename <old-name> <new-name>");
+                self.note("Usage: `/script rename <old-name> <new-name>`");
                 return;
             }
             _ => {}
@@ -542,10 +542,10 @@ impl App {
                     let (steps, name) = (s.steps.clone(), s.name.clone());
                     self.start_saved(steps, name);
                 }
-                None => self.note("No sequence yet. Use /record to make one."),
+                None => self.note("No sequence yet. Use `/record` to make one."),
             },
             _ => self.note(
-                "Usage: /script save <name> · run <name> · show <name> · rename <old> <new> · list · delete <name> · last",
+                "Usage: `/script save <name>` · `run <name>` · `show <name>` · `rename <old> <new>` · `list` · `delete <name>` · `last`",
             ),
         }
     }
@@ -553,13 +553,13 @@ impl App {
     fn script_list(&mut self) {
         let names = script_names();
         if names.is_empty() {
-            self.note("No saved scripts. Record a sequence, then /script save <name>.");
+            self.note("No saved scripts. Record a sequence, then `/script save <name>`.");
             return;
         }
         self.note(&format!("Saved scripts ({}):", names.len()));
         for n in names {
             let steps = self.load_script(&n).map_or(0, |s| s.len());
-            self.note(&format!("  {n}  · {steps} step{}", plural(steps)));
+            self.note(&format!("  `{n}`  · {steps} step{}", plural(steps)));
         }
     }
 
@@ -569,7 +569,7 @@ impl App {
             return;
         }
         let Some(steps) = self.last_sequence.as_ref().map(|s| s.steps.clone()) else {
-            self.note("Nothing to save yet. Use /record to make a sequence.");
+            self.note("Nothing to save yet. Use `/record` to make a sequence.");
             return;
         };
         let Some(dir) = scripts_dir() else {
@@ -600,7 +600,7 @@ impl App {
         match result {
             Ok(()) => {
                 self.note(&format!(
-                    "{} script '{name}' ({} step{}).",
+                    "{} script `{name}` ({} step{}).",
                     if existed { "Updated" } else { "Saved" },
                     steps.len(),
                     plural(steps.len())
@@ -615,16 +615,16 @@ impl App {
 
     fn script_show(&mut self, name: &str) {
         let Some(steps) = self.load_script(name) else {
-            self.note(&format!("No script named '{name}'."));
+            self.note(&format!("No script named `{name}`."));
             return;
         };
         self.note(&format!(
-            "Script '{name}' · {} step{}:",
+            "Script `{name}` · {} step{}:",
             steps.len(),
             plural(steps.len())
         ));
         for (i, s) in steps.iter().enumerate() {
-            self.note(&format!("  {}  {}", i + 1, self.masked(s)));
+            self.note(&format!("  {}  `{}`", i + 1, self.masked(s)));
         }
     }
 
@@ -638,13 +638,13 @@ impl App {
             return;
         };
         if !valid_name(old) || !dir.join(old).is_file() {
-            self.note(&format!("No script named '{old}'."));
+            self.note(&format!("No script named `{old}`."));
         } else if dir.join(new).exists() {
-            self.note(&format!("A script named '{new}' already exists."));
+            self.note(&format!("A script named `{new}` already exists."));
         } else if let Err(e) = std::fs::rename(dir.join(old), dir.join(new)) {
             self.note(&format!("Could not rename: {e}"));
         } else {
-            self.note(&format!("Renamed script '{old}' to '{new}'."));
+            self.note(&format!("Renamed script `{old}` to `{new}`."));
             if let Some(s) = self.last_sequence.as_mut()
                 && s.name.as_deref() == Some(old)
             {
@@ -657,14 +657,14 @@ impl App {
         let removed = valid_name(name)
             && scripts_dir().is_some_and(|d| std::fs::remove_file(d.join(name)).is_ok());
         if removed {
-            self.note(&format!("Deleted script '{name}'."));
+            self.note(&format!("Deleted script `{name}`."));
             if let Some(s) = self.last_sequence.as_mut()
                 && s.name.as_deref() == Some(name)
             {
                 s.name = None;
             }
         } else {
-            self.note(&format!("No script named '{name}'."));
+            self.note(&format!("No script named `{name}`."));
         }
     }
 
@@ -706,16 +706,16 @@ impl App {
 
     pub(super) fn script_run(&mut self, name: &str) {
         let Some(steps) = self.load_script(name) else {
-            self.note(&format!("No script named '{name}'."));
+            self.note(&format!("No script named `{name}`."));
             return;
         };
         if steps.is_empty() {
-            self.note(&format!("Script '{name}' is empty."));
+            self.note(&format!("Script `{name}` is empty."));
             return;
         }
         for (i, s) in steps.iter().enumerate() {
             if let Err(e) = self.check_step(s) {
-                self.note(&format!("Script '{name}' step {}: {e}", i + 1));
+                self.note(&format!("Script `{name}` step {}: {e}", i + 1));
                 return;
             }
         }
@@ -731,7 +731,7 @@ impl App {
 
     pub(super) fn show_steps(&mut self, steps: &[Vec<String>]) {
         for (i, s) in steps.iter().enumerate() {
-            self.note(&format!("  {}  {}", i + 1, s.join(" ")));
+            self.note(&format!("  {}  `{}`", i + 1, s.join(" ")));
         }
     }
 

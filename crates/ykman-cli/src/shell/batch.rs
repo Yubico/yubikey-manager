@@ -145,7 +145,7 @@ impl App {
             return;
         }
         if self.batch.is_some() {
-            self.note("A batch is already active. Use /batch stop to end it.");
+            self.note("A batch is already active. Use `/batch stop` to end it.");
             return;
         }
         if let [name] = args
@@ -157,7 +157,7 @@ impl App {
         let words: Vec<&str> = args.iter().map(String::as_str).collect();
         if !self.batch_allows(&words) {
             self.note(
-                "Batch supports OTP programming, OATH account adding, config, reset and info/list commands. Example: otp yubiotp 1 -S -g -G",
+                "Batch supports OTP programming, OATH account adding, config, reset and info/list commands. Example: `otp yubiotp 1 -S -g -G`",
             );
             return;
         }
@@ -518,13 +518,22 @@ impl App {
         }
     }
 
+    /// Steps that can't ask yes/no questions: those with --force and read-only ones.
+    fn never_asks(&self, step: &[String]) -> bool {
+        if step.iter().any(|a| a == "--force") {
+            return true;
+        }
+        let words: Vec<&str> = step.iter().map(String::as_str).collect();
+        let (_, used) = self.resolve(&words);
+        is_read_only(&words[..used])
+    }
+
     /// Enter on the confirmation: begin the first run.
     pub(super) fn confirm_start(&mut self) {
-        // Steps that all carry --force never ask yes/no questions.
         let ask = self.batch.as_ref().is_some_and(|b| {
             matches!(b.phase, BatchPhase::Confirm)
                 && !b.auto_asked
-                && !b.steps.iter().all(|s| s.iter().any(|a| a == "--force"))
+                && !b.steps.iter().all(|s| self.never_asks(s))
         });
         if ask && let Some(b) = self.batch.as_mut() {
             b.phase = BatchPhase::Auto;
@@ -754,7 +763,7 @@ impl App {
             self.note(if self.batch_mode {
                 "Recording: enter the commands to run on every key. Esc to finish."
             } else {
-                "Recording: enter commands to queue them. Variables like ${serial} work (/help variables). Esc to finish."
+                "Recording: enter commands to queue them. Variables like `${serial}` work (`/help variables`). Esc to finish."
             });
         }
     }
@@ -896,7 +905,7 @@ impl App {
     pub(super) fn start_sequence(&mut self, steps: Vec<Vec<String>>, name: Option<String>) {
         let what = name
             .as_ref()
-            .map_or_else(String::new, |n| format!(" '{n}'"));
+            .map_or_else(String::new, |n| format!(" `{n}`"));
         self.note(&format!(
             "Sequence{what}: {} step{}",
             steps.len(),
@@ -907,9 +916,13 @@ impl App {
             let what = if self.batch_mode {
                 "one row per key"
             } else {
-                "rows by /repeat, or one pass per row"
+                "rows by `/repeat`, or one pass per row"
             };
-            self.note(&format!("  CSV {}: {} rows, {what}", t.name, t.rows.len()));
+            self.note(&format!(
+                "  CSV `{}`: {} rows, {what}",
+                t.name,
+                t.rows.len()
+            ));
         }
         self.remember_sequence(&steps, name);
         let serial = self.active_device().unwrap_or_default();
