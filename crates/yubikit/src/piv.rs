@@ -2890,7 +2890,7 @@ impl<C: SmartCardConnection> signature::Signer<PivSignature> for PivSigner<'_, C
             Algorithm::Rsa => Some(self.hash_alg),
             _ => None,
         };
-        let message = crate::__internal::piv_padding::prepare_signature(
+        let message = crate::__internal::padding::prepare_signature(
             self.key_type,
             msg,
             hash_alg,

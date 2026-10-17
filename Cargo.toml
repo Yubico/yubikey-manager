@@ -36,6 +36,7 @@ pkcs8 = { version = "0.10.2", features = ["encryption", "pem"] }
 rsa = "0.9"
 sha1 = "0.10"
 sha2 = "0.10"
+sha3 = "0.10"
 signature = { version = "2.2", features = ["std"] }
 subtle = "2"
 x25519-dalek = { version = "2", features = ["static_secrets"] }

@@ -1,4 +1,5 @@
-pub mod piv_padding;
+pub mod padding;
+pub mod piv_secret;
 mod secret;
 pub mod tlv;
 

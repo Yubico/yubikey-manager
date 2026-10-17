@@ -144,7 +144,7 @@ pub enum CliSignaturePadding {
     Pss,
 }
 
-impl From<CliSignaturePadding> for yubikit::__internal::piv_padding::SignaturePadding {
+impl From<CliSignaturePadding> for yubikit::__internal::padding::SignaturePadding {
     fn from(v: CliSignaturePadding) -> Self {
         match v {
             CliSignaturePadding::Pkcs1v15 => Self::Pkcs1v15,
@@ -160,7 +160,7 @@ pub enum CliDecryptionPadding {
     Pkcs1v15,
 }
 
-impl From<CliDecryptionPadding> for yubikit::__internal::piv_padding::DecryptionPadding {
+impl From<CliDecryptionPadding> for yubikit::__internal::padding::DecryptionPadding {
     fn from(v: CliDecryptionPadding) -> Self {
         match v {
             CliDecryptionPadding::Oaep => Self::Oaep,

@@ -40,7 +40,13 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa, x25519
-from cryptography.hazmat.primitives.asymmetric.padding import AsymmetricPadding
+from cryptography.hazmat.primitives.asymmetric.padding import (
+    MGF1,
+    OAEP,
+    PSS,
+    AsymmetricPadding,
+    PKCS1v15,
+)
 from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
@@ -68,6 +74,7 @@ if TYPE_CHECKING:
     # This type isn't available on cryptography <40.
     from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
 
+from _yubikit_native import padding as _native_padding
 from _yubikit_native.sessions import PivSession as _NativePivSession
 
 logger = logging.getLogger(__name__)
@@ -505,39 +512,63 @@ class Chuid:
         )
 
 
+def _mgf1_hash_name(mgf) -> str:
+    if not isinstance(mgf, MGF1):
+        raise TypeError(f"Unsupported mask generation function: {mgf}")
+    return mgf._algorithm.name
+
+
 def _pad_message(key_type, message, hash_algorithm, padding):
     if key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
         return message
-    if key_type.algorithm == ALGORITHM.EC:
-        if isinstance(hash_algorithm, Prehashed):
-            hashed = message
-        else:
-            h = hashes.Hash(hash_algorithm, default_backend())
-            h.update(message)
-            hashed = h.finalize()
-        byte_len = key_type.bit_len // 8
-        if len(hashed) < byte_len:
-            return hashed.rjust(byte_len // 8, b"\0")
-        return hashed[:byte_len]
-    elif key_type.algorithm == ALGORITHM.RSA:
-        # Sign with a dummy key, then encrypt the signature to get the padded message
-        e = 65537
-        dummy = rsa.generate_private_key(e, key_type.bit_len, default_backend())
-        signature = dummy.sign(message, padding, hash_algorithm)
-        # Raw (textbook) RSA encrypt
-        n = dummy.public_key().public_numbers().n
-        return int2bytes(pow(bytes2int(signature), e, n), key_type.bit_len // 8)
-    else:
+    if key_type.algorithm not in (ALGORITHM.EC, ALGORITHM.RSA):
         raise ValueError(f"Unsupported algorithm {key_type.algorithm}")
+    if isinstance(hash_algorithm, Prehashed):
+        if len(message) != hash_algorithm.digest_size:
+            raise ValueError("The provided data must be the same length as the hash")
+        hashed = message
+        hash_name = hash_algorithm._algorithm.name
+    else:
+        h = hashes.Hash(hash_algorithm)
+        h.update(message)
+        hashed = h.finalize()
+        hash_name = hash_algorithm.name
+    if key_type.algorithm == ALGORITHM.EC:
+        return hashed[: key_type.bit_len // 8]
+
+    if isinstance(padding, PKCS1v15):
+        return _native_padding.pkcs1v15_sign_pad(key_type.bit_len, hash_name, hashed)
+    if isinstance(padding, PSS):
+        salt_length = padding._salt_length
+        if isinstance(salt_length, int):
+            salt_len: int | None = salt_length
+        elif salt_length is PSS.MAX_LENGTH:
+            salt_len = None
+        elif salt_length is PSS.DIGEST_LENGTH:
+            salt_len = len(hashed)
+        else:
+            raise ValueError(f"Unsupported PSS salt length for signing: {salt_length}")
+        return _native_padding.pss_sign_pad(
+            key_type.bit_len,
+            hash_name,
+            hashed,
+            salt_len,
+            _mgf1_hash_name(padding._mgf),
+        )
+    raise ValueError(f"Unsupported padding: {padding}")
 
 
 def _unpad_message(padded, padding):
-    e = 65537
-    dummy = rsa.generate_private_key(e, len(padded) * 8, default_backend())
-    # Raw (textbook) RSA encrypt
-    n = dummy.public_key().public_numbers().n
-    encrypted = int2bytes(pow(bytes2int(padded), e, n), len(padded))
-    return dummy.decrypt(encrypted, padding)
+    if isinstance(padding, PKCS1v15):
+        return _native_padding.pkcs1v15_decrypt_unpad(padded)
+    if isinstance(padding, OAEP):
+        return _native_padding.oaep_decrypt_unpad(
+            padded,
+            padding._algorithm.name,
+            _mgf1_hash_name(padding._mgf),
+            padding._label or b"",
+        )
+    raise ValueError(f"Unsupported padding: {padding}")
 
 
 def decompress_certificate(cert_data: bytes) -> bytes:

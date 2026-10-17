@@ -3,11 +3,16 @@ import zlib
 from datetime import date
 
 import pytest
-
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from yubikit.core import BadResponseError
 from yubikit.piv import (
+    KEY_TYPE,
     Chuid,
     FascN,
+    _pad_message,
+    _unpad_message,
     decompress_certificate,
 )
 
@@ -134,3 +139,109 @@ class TestDecompressCertificate:
 
         result = decompress_certificate(gzip_data)
         assert result == original_data
+
+
+_RSA_KEY = rsa.generate_private_key(65537, 2048)
+
+
+def _raw_private(data: bytes) -> bytes:
+    numbers = _RSA_KEY.private_numbers()
+    n = numbers.public_numbers.n
+    result = pow(int.from_bytes(data, "big"), numbers.d, n)
+    return result.to_bytes(_RSA_KEY.key_size // 8, "big")
+
+
+@pytest.mark.parametrize(
+    "hash_algorithm",
+    [
+        hashes.SHA1(),
+        hashes.SHA224(),
+        hashes.SHA256(),
+        hashes.SHA384(),
+        hashes.SHA512(),
+        hashes.SHA512_256(),
+        hashes.SHA3_256(),
+        hashes.SHA3_512(),
+    ],
+)
+@pytest.mark.parametrize(
+    "pad",
+    [
+        padding.PKCS1v15(),
+        padding.PSS(padding.MGF1(hashes.SHA256()), padding.PSS.MAX_LENGTH),
+        padding.PSS(padding.MGF1(hashes.SHA1()), padding.PSS.DIGEST_LENGTH),
+        padding.PSS(padding.MGF1(hashes.SHA512()), 0),
+    ],
+)
+def test_rsa_sign_padding(hash_algorithm, pad):
+    message = b"PIV signature padding"
+    public_key = _RSA_KEY.public_key()
+
+    padded = _pad_message(KEY_TYPE.RSA2048, message, hash_algorithm, pad)
+    public_key.verify(_raw_private(padded), message, pad, hash_algorithm)
+
+    h = hashes.Hash(hash_algorithm)
+    h.update(message)
+    prehashed = Prehashed(hash_algorithm)
+    padded = _pad_message(KEY_TYPE.RSA2048, h.finalize(), prehashed, pad)
+    public_key.verify(_raw_private(padded), message, pad, hash_algorithm)
+
+
+def test_rsa_sign_padding_errors():
+    with pytest.raises(ValueError):
+        _pad_message(
+            KEY_TYPE.RSA2048,
+            b"\0" * 31,
+            Prehashed(hashes.SHA256()),
+            padding.PKCS1v15(),
+        )
+    with pytest.raises(ValueError):
+        _pad_message(
+            KEY_TYPE.RSA2048,
+            b"message",
+            hashes.SHA256(),
+            padding.PSS(padding.MGF1(hashes.SHA256()), padding.PSS.AUTO),
+        )
+    with pytest.raises(ValueError):
+        _pad_message(
+            KEY_TYPE.RSA1024,
+            b"message",
+            hashes.SHA512(),
+            padding.PSS(padding.MGF1(hashes.SHA512()), 100),
+        )
+
+
+@pytest.mark.parametrize(
+    "pad",
+    [
+        padding.PKCS1v15(),
+        padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None),
+        padding.OAEP(padding.MGF1(hashes.SHA1()), hashes.SHA1(), None),
+        padding.OAEP(padding.MGF1(hashes.SHA1()), hashes.SHA384(), b"label"),
+    ],
+)
+def test_rsa_decrypt_unpadding(pad):
+    message = b"PIV decryption padding"
+    ciphertext = _RSA_KEY.public_key().encrypt(message, pad)
+    assert _unpad_message(_raw_private(ciphertext), pad) == message
+
+    with pytest.raises(ValueError):
+        _unpad_message(b"\0" * 256, pad)
+
+
+def test_ec_sign_hash_truncation():
+    message = b"message"
+    h = hashes.Hash(hashes.SHA384())
+    h.update(message)
+    digest = h.finalize()
+    assert _pad_message(KEY_TYPE.ECCP256, message, hashes.SHA384(), None) == digest[:32]
+    assert (
+        _pad_message(KEY_TYPE.ECCP256, digest[:32], Prehashed(hashes.SHA256()), None)
+        == digest[:32]
+    )
+    assert _pad_message(KEY_TYPE.ECCP384, message, hashes.SHA384(), None) == digest
+    h = hashes.Hash(hashes.SHA256())
+    h.update(message)
+    assert (
+        _pad_message(KEY_TYPE.ECCP384, message, hashes.SHA256(), None) == h.finalize()
+    )

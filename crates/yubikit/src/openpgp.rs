@@ -46,6 +46,7 @@ use sha2::Digest;
 use thiserror::Error;
 use zeroize::Zeroizing;
 
+use crate::__internal::padding::Hash;
 use crate::__internal::tlv::{
     TlvError, parse_tlv_dict, parse_tlv_list, tlv_append, tlv_encode, tlv_unpack,
 };
@@ -552,23 +553,6 @@ const EC_ALG_EDDSA: u8 = 0x16;
 
 // RSA algorithm ID
 const RSA_ALG_ID: u8 = 0x01;
-
-// PKCS#1 v1.5 DigestInfo headers
-const PKCS1_SHA1: &[u8] = &[
-    0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2B, 0x0E, 0x03, 0x02, 0x1A, 0x05, 0x00, 0x04, 0x14,
-];
-const PKCS1_SHA256: &[u8] = &[
-    0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
-    0x00, 0x04, 0x20,
-];
-const PKCS1_SHA384: &[u8] = &[
-    0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05,
-    0x00, 0x04, 0x30,
-];
-const PKCS1_SHA512: &[u8] = &[
-    0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05,
-    0x00, 0x04, 0x40,
-];
 
 // ---------------------------------------------------------------------------
 // Secret value types
@@ -1644,55 +1628,32 @@ fn pad_message(
         return Ok(message.to_vec());
     }
 
-    let hashed = match hash_algorithm {
-        SignHashAlgorithm::Prehashed(_) => message.to_vec(),
-        SignHashAlgorithm::None => message.to_vec(),
-        SignHashAlgorithm::Sha1 => {
-            let mut h = sha1::Sha1::new();
-            h.update(message);
-            h.finalize().to_vec()
+    let hash = match hash_algorithm {
+        SignHashAlgorithm::Sha1 | SignHashAlgorithm::Prehashed(PrehashAlgorithm::Sha1) => {
+            Some(Hash::Sha1)
         }
-        SignHashAlgorithm::Sha256 => {
-            let mut h = sha2::Sha256::new();
-            h.update(message);
-            h.finalize().to_vec()
+        SignHashAlgorithm::Sha256 | SignHashAlgorithm::Prehashed(PrehashAlgorithm::Sha256) => {
+            Some(Hash::Sha256)
         }
-        SignHashAlgorithm::Sha384 => {
-            let mut h = sha2::Sha384::new();
-            h.update(message);
-            h.finalize().to_vec()
+        SignHashAlgorithm::Sha384 | SignHashAlgorithm::Prehashed(PrehashAlgorithm::Sha384) => {
+            Some(Hash::Sha384)
         }
-        SignHashAlgorithm::Sha512 => {
-            let mut h = sha2::Sha512::new();
-            h.update(message);
-            h.finalize().to_vec()
+        SignHashAlgorithm::Sha512 | SignHashAlgorithm::Prehashed(PrehashAlgorithm::Sha512) => {
+            Some(Hash::Sha512)
         }
+        SignHashAlgorithm::None => None,
+    };
+    let hashed = match (hash_algorithm, hash) {
+        (SignHashAlgorithm::Prehashed(_), _) | (_, None) => message.to_vec(),
+        (_, Some(hash)) => hash.digest(message).to_vec(),
     };
 
     match attributes {
         AlgorithmAttributes::Ec(_) => Ok(hashed),
-        AlgorithmAttributes::Rsa(_) => {
-            let header = match hash_algorithm {
-                SignHashAlgorithm::Sha1 => PKCS1_SHA1,
-                SignHashAlgorithm::Sha256 => PKCS1_SHA256,
-                SignHashAlgorithm::Sha384 => PKCS1_SHA384,
-                SignHashAlgorithm::Sha512 => PKCS1_SHA512,
-                SignHashAlgorithm::Prehashed(algo) => match algo {
-                    PrehashAlgorithm::Sha1 => PKCS1_SHA1,
-                    PrehashAlgorithm::Sha256 => PKCS1_SHA256,
-                    PrehashAlgorithm::Sha384 => PKCS1_SHA384,
-                    PrehashAlgorithm::Sha512 => PKCS1_SHA512,
-                },
-                SignHashAlgorithm::None => {
-                    return Err(OpenPgpError::InvalidData(
-                        "Hash algorithm required for RSA".into(),
-                    ));
-                }
-            };
-            let mut padded = header.to_vec();
-            padded.extend_from_slice(&hashed);
-            Ok(padded)
-        }
+        AlgorithmAttributes::Rsa(_) => hash
+            .ok_or_else(|| OpenPgpError::InvalidData("Hash algorithm required for RSA".into()))?
+            .digest_info(&hashed)
+            .map_err(|e| OpenPgpError::InvalidData(e.to_string())),
     }
 }
 
@@ -2934,9 +2895,22 @@ mod tests {
         ));
         let msg = b"test message";
         let padded = pad_message(&attrs, msg, SignHashAlgorithm::Sha256).unwrap();
-        // PKCS1_SHA256 header (19 bytes) + SHA256 hash (32 bytes) = 51 bytes
+        // DigestInfo header (19 bytes) + SHA256 hash (32 bytes) = 51 bytes
         assert_eq!(padded.len(), 19 + 32);
-        assert!(padded.starts_with(PKCS1_SHA256));
+        assert!(padded.starts_with(&[
+            0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02,
+            0x01, 0x05, 0x00, 0x04, 0x20
+        ]));
+        let prehashed = pad_message(
+            &attrs,
+            &padded[19..],
+            SignHashAlgorithm::Prehashed(PrehashAlgorithm::Sha256),
+        )
+        .unwrap();
+        assert_eq!(prehashed, padded);
+        let sha1 = pad_message(&attrs, msg, SignHashAlgorithm::Sha1).unwrap();
+        assert_eq!(sha1.len(), 15 + 20);
+        assert!(pad_message(&attrs, msg, SignHashAlgorithm::None).is_err());
     }
 
     #[test]

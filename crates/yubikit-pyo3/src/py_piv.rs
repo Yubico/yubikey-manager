@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use yubikit::__internal::piv_secret;
 use yubikit::keys::{
     EcCurve, EcPrivateKey, Ed25519PrivateKey, MlDsaParameterSet, MlDsaPrivateKey,
     MlKemParameterSet, MlKemPrivateKey, PrivateKey, RsaPrivateKey, X25519PrivateKey,
@@ -353,9 +354,14 @@ impl PivSession {
     ) -> PyResult<Vec<u8>> {
         let s = parse_slot(slot)?;
         let kt = parse_key_type(key_type)?;
-        self.session_mut()?
+        piv_secret::check_secret_input(kt, peer_public_key)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        let secret = self
+            .session_mut()?
             .calculate_secret(s, kt, peer_public_key)
-            .map_err(piv_err)
+            .map_err(piv_err)?;
+        piv_secret::check_shared_secret(kt, &secret).map_err(piv_err)?;
+        Ok(secret)
     }
 
     fn get_object(&mut self, object_id: u32) -> PyResult<Vec<u8>> {

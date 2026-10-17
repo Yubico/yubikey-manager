@@ -3,7 +3,6 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use clap::{Args, Subcommand};
-use subtle::ConstantTimeEq;
 use x509_cert::Certificate;
 use x509_cert::builder::{Builder, CertificateBuilder, Profile, RequestBuilder};
 use x509_cert::der::{self, Decode, Encode, EncodePem, pem::LineEnding};
@@ -36,7 +35,7 @@ use crate::util::{
     read_file_or_stdin, write_file_or_stdout,
 };
 
-use yubikit::__internal::piv_padding;
+use yubikit::__internal::{padding, piv_secret};
 
 #[derive(Subcommand)]
 pub enum PivAction {
@@ -1514,25 +1513,7 @@ fn peer_key_bytes(key_type: KeyType, input: &[u8]) -> Result<Vec<u8>> {
     let public_key = PublicKey::from_spki(&der).map_err(|e| {
         anyhow!("Invalid peer public key (expected PEM/DER SubjectPublicKeyInfo): {e}")
     })?;
-    if KeyType::from_public_key(&public_key)? != key_type {
-        return Err(anyhow!(
-            "Peer public key algorithm must match the slot key."
-        ));
-    }
-    match public_key {
-        PublicKey::Ec(key) if key_type == KeyType::EccP256 => {
-            p256::PublicKey::from_sec1_bytes(&key.point)
-                .map_err(|_| anyhow!("Invalid P-256 peer public key."))?;
-            Ok(key.point)
-        }
-        PublicKey::Ec(key) if key_type == KeyType::EccP384 => {
-            p384::PublicKey::from_sec1_bytes(&key.point)
-                .map_err(|_| anyhow!("Invalid P-384 peer public key."))?;
-            Ok(key.point)
-        }
-        PublicKey::X25519(key) => Ok(key.key),
-        _ => Err(anyhow!("Key agreement requires P-256, P-384, or X25519.")),
-    }
+    Ok(piv_secret::peer_public_key_bytes(key_type, &public_key)?)
 }
 
 fn write_secret_output(path: &str, secret: &[u8]) -> Result<()> {
@@ -1600,7 +1581,7 @@ fn run_key_operation(
             prehashed,
             padding,
         } => {
-            let prepared = Zeroizing::new(piv_padding::prepare_signature(
+            let prepared = Zeroizing::new(padding::prepare_signature(
                 key_type,
                 &input,
                 hash_algorithm.map(Into::into),
@@ -1635,36 +1616,24 @@ fn run_key_operation(
                 })
                 .map_err(|e| anyhow!("Failed to decrypt: {e}"))?,
             );
-            piv_padding::unpad_rsa(
+            padding::unpad_rsa(
                 &block,
                 padding.into(),
                 hash_algorithm.map_or(HashAlgorithm::Sha256, Into::into),
             )?
         }
         PrivateKeyOperation::Decapsulate => {
-            let expected_len = match key_type {
-                KeyType::MlKem512 => 768,
-                KeyType::MlKem768 => 1088,
-                KeyType::MlKem1024 => 1568,
-                _ => return Err(anyhow!("Decapsulation requires an ML-KEM key.")),
-            };
-            if input.len() != expected_len {
-                return Err(anyhow!(
-                    "Expected {expected_len} bytes of ML-KEM ciphertext, got {}.",
-                    input.len()
-                ));
+            if piv_secret::ml_kem_ciphertext_len(key_type).is_none() {
+                return Err(anyhow!("Decapsulation requires an ML-KEM key."));
             }
+            piv_secret::check_secret_input(key_type, &input)?;
             let secret = Zeroizing::new(
                 authorize_key_operation(&mut session, pin, pin_required, touch_policy, |s| {
                     s.calculate_secret(slot, key_type, &input)
                 })
                 .map_err(|e| anyhow!("Failed to decapsulate: {e}"))?,
             );
-            if secret.len() != 32 {
-                return Err(anyhow!(
-                    "Invalid ML-KEM shared secret length returned by the device."
-                ));
-            }
+            piv_secret::check_shared_secret(key_type, &secret)?;
             secret
         }
         PrivateKeyOperation::Derive => {
@@ -1681,12 +1650,7 @@ fn run_key_operation(
                 })
                 .map_err(|e| anyhow!("Failed to derive shared secret: {e}"))?,
             );
-            let expected_len = if key_type == KeyType::EccP384 { 48 } else { 32 };
-            if secret.len() != expected_len
-                || (key_type == KeyType::X25519 && bool::from(secret.as_slice().ct_eq(&[0; 32])))
-            {
-                return Err(anyhow!("Invalid shared secret returned by the device."));
-            }
+            piv_secret::check_shared_secret(key_type, &secret)?;
             secret
         }
     };
@@ -2358,13 +2322,7 @@ fn check_key_match<C: yubikit::smartcard::SmartCardConnection>(
     let to_sign = match key_type {
         KeyType::EccP256 | KeyType::EccP384 => hash.clone(),
         KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
-            piv_padding::prepare_signature(
-                key_type,
-                &hash,
-                Some(HashAlgorithm::Sha256),
-                true,
-                None,
-            )?
+            padding::prepare_signature(key_type, &hash, Some(HashAlgorithm::Sha256), true, None)?
         }
         KeyType::Ed25519 => test_message.to_vec(),
         KeyType::X25519 => {
