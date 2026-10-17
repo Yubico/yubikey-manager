@@ -37,7 +37,6 @@ from enum import Enum, IntEnum, unique
 from typing import TYPE_CHECKING, TypeAlias
 
 from cryptography import x509
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa, x25519
 from cryptography.hazmat.primitives.asymmetric.padding import (
@@ -47,6 +46,7 @@ from cryptography.hazmat.primitives.asymmetric.padding import (
     AsymmetricPadding,
     PKCS1v15,
 )
+from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
 from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
@@ -72,9 +72,8 @@ from .core.smartcard import (
 )
 
 if TYPE_CHECKING:
-    # These aren't available on older versions of cryptography.
+    # These aren't available before cryptography 48.
     from cryptography.hazmat.primitives.asymmetric import mldsa, mlkem
-    from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
 
 from _yubikit_native import padding as _native_padding
 from _yubikit_native.sessions import PivSession as _NativePivSession
@@ -1052,7 +1051,7 @@ class PivSession(Session):
         slot = SLOT(slot)
         der_bytes = self._native.get_certificate(int(slot))
         try:
-            return x509.load_der_x509_certificate(der_bytes, default_backend())
+            return x509.load_der_x509_certificate(der_bytes)
         except Exception as e:
             raise BadResponseError("Invalid certificate", e)
 
@@ -1174,7 +1173,7 @@ class PivSession(Session):
         """
         slot = SLOT(slot)
         der_bytes = self._native.attest_key(int(slot))
-        return x509.load_der_x509_certificate(der_bytes, default_backend())
+        return x509.load_der_x509_certificate(der_bytes)
 
     def move_key(self, from_slot: SLOT, to_slot: SLOT) -> None:
         """Move key from one slot to another.

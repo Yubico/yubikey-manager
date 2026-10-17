@@ -3,7 +3,6 @@ import os
 import pytest
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
@@ -137,7 +136,7 @@ class TestScp11:
             session.authenticate(Scp03KeyParams())
 
             ref = KeyRef(0x13, 0x2)
-            sk = ec.generate_private_key(ec.SECP256R1(), default_backend())
+            sk = ec.generate_private_key(ec.SECP256R1())
             session.put_key(ref, sk)
 
             params = Scp11KeyParams(ref, sk.public_key())

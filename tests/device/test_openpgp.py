@@ -2,7 +2,6 @@ import time
 from typing import NamedTuple
 
 import pytest
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
 
@@ -143,7 +142,7 @@ def test_change_pin_retries(session, keys, version):
 
 
 def test_import_requires_admin(session):
-    priv = rsa.generate_private_key(E, RSA_SIZE.RSA2048, default_backend())
+    priv = rsa.generate_private_key(E, RSA_SIZE.RSA2048)
     with pytest.raises(ApduError):
         session.put_key(KEY_REF.SIG, priv)
 
@@ -217,7 +216,7 @@ def test_import_sign_rsa(session, keys, key_size, info):
             pytest.skip(f"RSA {key_size} requires YubiKey 4 or later")
         elif info.version[0] == 4 and info.is_fips:
             pytest.skip(f"RSA {key_size} not supported on YubiKey 4 FIPS")
-    priv = rsa.generate_private_key(E, key_size, default_backend())
+    priv = rsa.generate_private_key(E, key_size)
     session.verify_admin(keys.admin)
     session.put_key(KEY_REF.SIG, priv)
     if 0 < info.version[0] < 5:
@@ -238,7 +237,7 @@ def test_import_decrypt_rsa(session, keys, key_size, info):
             pytest.skip(f"RSA {key_size} requires YubiKey 4 or later")
         elif info.version[0] == 4 and info.is_fips:
             pytest.skip(f"RSA {key_size} not supported on YubiKey 4 FIPS")
-    priv = rsa.generate_private_key(E, key_size, default_backend())
+    priv = rsa.generate_private_key(E, key_size)
     session.verify_admin(keys.admin)
     session.put_key(KEY_REF.DEC, priv)
     if info.version[0] < 5:

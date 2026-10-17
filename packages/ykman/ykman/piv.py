@@ -36,9 +36,12 @@ from uuid import uuid4
 
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
+from cryptography.hazmat.primitives.asymmetric.types import (
+    CertificatePublicKeyTypes,
+    PublicKeyTypes,
+)
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from yubikit.core import BadResponseError, NotSupportedError, Tlv, int2bytes
@@ -64,13 +67,6 @@ def _display_serial(serial: int) -> str:
     return f"{serial} ({hex(serial)})"
 
 
-if TYPE_CHECKING:
-    # These types arent't available on cryptography <40.
-    from cryptography.hazmat.primitives.asymmetric.types import (
-        CertificatePublicKeyTypes,
-        PublicKeyTypes,
-    )
-
 logger = logging.getLogger(__name__)
 
 
@@ -80,11 +76,11 @@ OBJECT_ID_PIVMAN_PROTECTED_DATA = OBJECT_ID.PRINTED  # Use slot for printed info
 
 def _dummy_key(key_type):
     if key_type.algorithm == ALGORITHM.RSA:
-        return rsa.generate_private_key(65537, key_type.bit_len, default_backend())
+        return rsa.generate_private_key(65537, key_type.bit_len)
     if key_type == KEY_TYPE.ECCP256:
-        return ec.generate_private_key(ec.SECP256R1(), default_backend())
+        return ec.generate_private_key(ec.SECP256R1())
     if key_type == KEY_TYPE.ECCP384:
-        return ec.generate_private_key(ec.SECP384R1(), default_backend())
+        return ec.generate_private_key(ec.SECP384R1())
     if key_type == KEY_TYPE.ED25519:
         return ed25519.Ed25519PrivateKey.generate()
     if key_type == KEY_TYPE.X25519:
@@ -108,7 +104,7 @@ def derive_management_key(pin: str, salt: bytes) -> bytes:
     :param pin: The PIN.
     :param salt: The salt.
     """
-    kdf = PBKDF2HMAC(hashes.SHA1(), 24, salt, 10000, default_backend())  # noqa: S303
+    kdf = PBKDF2HMAC(hashes.SHA1(), 24, salt, 10000)  # noqa: S303
     return kdf.derive(pin.encode("utf-8"))
 
 
@@ -558,18 +554,12 @@ def get_piv_info(session: PivSession):
                 key_algo = "Unsupported"
             serial = cert.serial_number
             try:
-                try:  # Prefer timezone-aware variant (cryptography >= 42)
-                    not_before: datetime | None = cert.not_valid_before_utc
-                except AttributeError:
-                    not_before = cert.not_valid_before
+                not_before: datetime | None = cert.not_valid_before_utc
             except ValueError:
                 logger.debug("Failed reading not_valid_before", exc_info=True)
                 not_before = None
             try:
-                try:  # Prefer timezone-aware variant (cryptography >= 42)
-                    not_after: datetime | None = cert.not_valid_after_utc
-                except AttributeError:
-                    not_after = cert.not_valid_after
+                not_after: datetime | None = cert.not_valid_after_utc
             except ValueError:
                 logger.debug("Failed reading not_valid_after", exc_info=True)
                 not_after = None
@@ -629,7 +619,7 @@ def sign_certificate_builder(
     logger.debug("Signing a certificate")
     dummy_key = _dummy_key(key_type)
     assert not isinstance(dummy_key, x25519.X25519PrivateKey)  # noqa: S101
-    cert = builder.sign(dummy_key, _hash(key_type, hash_algorithm), default_backend())
+    cert = builder.sign(dummy_key, _hash(key_type, hash_algorithm))
 
     sig = session.sign(
         slot,
@@ -645,7 +635,7 @@ def sign_certificate_builder(
     # Re-assemble sequence
     der = Tlv(0x30, b"".join(seq))
 
-    return x509.load_der_x509_certificate(der, default_backend())
+    return x509.load_der_x509_certificate(der)
 
 
 def sign_csr_builder(
@@ -669,7 +659,7 @@ def sign_csr_builder(
     dummy_key = _dummy_key(key_type)
     assert not isinstance(dummy_key, x25519.X25519PrivateKey)  # noqa: S101
 
-    csr = builder.sign(dummy_key, _hash(key_type, hash_algorithm), default_backend())
+    csr = builder.sign(dummy_key, _hash(key_type, hash_algorithm))
     seq = Tlv.parse_list(Tlv.unpack(0x30, csr.public_bytes(Encoding.DER)))
 
     # Replace public key
@@ -695,7 +685,7 @@ def sign_csr_builder(
     # Re-assemble sequence
     der = Tlv(0x30, b"".join(seq))
 
-    return x509.load_der_x509_csr(der, default_backend())
+    return x509.load_der_x509_csr(der)
 
 
 def generate_self_signed_certificate(

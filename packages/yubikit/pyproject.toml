@@ -15,7 +15,7 @@ classifiers = [
   "Topic :: Utilities"
 ]
 dependencies = [
-  "cryptography (>=37, <52)",
+  "cryptography (>=42, <52)",
 ]
 
 [build-system]

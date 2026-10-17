@@ -1,7 +1,6 @@
 import os
 
 import pytest
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
@@ -163,7 +162,7 @@ class TestCredentialManagement:
         self, session, management_key
     ):
         private_key = ec.generate_private_key(
-            ec.SECP224R1(), backend=default_backend()
+            ec.SECP224R1()
         )  # curve secp224r1 is not supported
 
         with pytest.raises(ValueError):
@@ -171,7 +170,7 @@ class TestCredentialManagement:
 
     @condition.min_version(5, 6)
     def test_import_credential_asymmetric_works(self, session, management_key):
-        private_key = ec.generate_private_key(ec.SECP256R1(), backend=default_backend())
+        private_key = ec.generate_private_key(ec.SECP256R1())
         credential = import_key_asymmetric(session, management_key, private_key)
 
         public_key = private_key.public_key()

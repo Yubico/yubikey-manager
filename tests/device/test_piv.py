@@ -5,7 +5,6 @@ from typing import NamedTuple
 
 import pytest
 from cryptography import x509
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
 from ykman.piv import (
@@ -186,11 +185,11 @@ def generate_key(
 
 def generate_sw_key(key_type):
     if key_type.algorithm == ALGORITHM.RSA:
-        return rsa.generate_private_key(65537, key_type.bit_len, default_backend())
+        return rsa.generate_private_key(65537, key_type.bit_len)
     elif key_type == KEY_TYPE.ECCP256:
-        return ec.generate_private_key(ec.SECP256R1(), default_backend())
+        return ec.generate_private_key(ec.SECP256R1())
     elif key_type == KEY_TYPE.ECCP384:
-        return ec.generate_private_key(ec.SECP384R1(), default_backend())
+        return ec.generate_private_key(ec.SECP384R1())
     elif key_type == KEY_TYPE.ED25519:
         return ed25519.Ed25519PrivateKey.generate()
     elif key_type == KEY_TYPE.X25519:
@@ -916,10 +915,10 @@ class TestMetadata:
     @pytest.mark.parametrize(
         "key",
         [
-            rsa.generate_private_key(65537, 1024, default_backend()),
-            rsa.generate_private_key(65537, 2048, default_backend()),
-            ec.generate_private_key(ec.SECP256R1(), default_backend()),
-            ec.generate_private_key(ec.SECP384R1(), default_backend()),
+            rsa.generate_private_key(65537, 1024),
+            rsa.generate_private_key(65537, 2048),
+            ec.generate_private_key(ec.SECP256R1()),
+            ec.generate_private_key(ec.SECP384R1()),
         ],
     )
     @pytest.mark.parametrize(
@@ -958,7 +957,7 @@ class TestMoveAndDelete:
         pass
 
     def test_move_key(self, session, keys):
-        key = ec.generate_private_key(ec.SECP256R1(), default_backend())
+        key = ec.generate_private_key(ec.SECP256R1())
         session.authenticate(keys.mgmt)
         session.put_key(SLOT.AUTHENTICATION, key)
         data_a = session.get_slot_metadata(SLOT.AUTHENTICATION)
@@ -971,7 +970,7 @@ class TestMoveAndDelete:
             session.get_slot_metadata(SLOT.AUTHENTICATION)
 
     def test_delete_key(self, session, keys):
-        key = ec.generate_private_key(ec.SECP256R1(), default_backend())
+        key = ec.generate_private_key(ec.SECP256R1())
         session.authenticate(keys.mgmt)
         session.put_key(SLOT.AUTHENTICATION, key)
         session.get_slot_metadata(SLOT.AUTHENTICATION)

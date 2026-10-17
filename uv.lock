@@ -978,7 +978,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cryptography", specifier = ">=2.1" },
+    { name = "cryptography", specifier = ">=42" },
     { name = "yubikit", editable = "packages/yubikit" },
 ]
 
@@ -1020,4 +1020,4 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cryptography", specifier = ">=37,<52" }]
+requires-dist = [{ name = "cryptography", specifier = ">=42,<52" }]
