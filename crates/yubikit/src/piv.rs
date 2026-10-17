@@ -1128,6 +1128,8 @@ const TAG_AUTH_CHALLENGE: u32 = 0x81;
 const TAG_AUTH_RESPONSE: u32 = 0x82;
 const TAG_AUTH_EXPONENTIATION: u32 = 0x85;
 const TAG_AUTH_KEM: u32 = 0x86;
+const TAG_AUTH_CONTEXT: u32 = 0x87;
+const TAG_AUTH_MU: u32 = 0x88;
 const TAG_GEN_ALGORITHM: u32 = 0x80;
 const TAG_OBJ_DATA: u32 = 0x53;
 const TAG_OBJ_ID: u32 = 0x5C;
@@ -2118,6 +2120,57 @@ impl<C: SmartCardConnection> PivSession<C> {
         log::debug!("Signing with key in slot {:?}", slot);
         let message_tlv = tlv_encode(TAG_AUTH_CHALLENGE, message);
         self.use_private_key(slot, key_type, &message_tlv)
+    }
+
+    /// Sign a message with an ML-DSA key and a context string (FIPS 204, at
+    /// most 255 bytes). An empty context is the same as [`sign`](Self::sign).
+    pub fn sign_with_context(
+        &mut self,
+        slot: Slot,
+        key_type: KeyType,
+        message: &[u8],
+        context: &[u8],
+    ) -> Result<Vec<u8>, PivError> {
+        log::debug!("Signing with context with key in slot {:?}", slot);
+        if key_type.algorithm() != Algorithm::MlDsa {
+            return Err(PivError::InvalidData(
+                "A signature context is only supported for ML-DSA".into(),
+            ));
+        }
+        if context.len() > 255 {
+            return Err(PivError::InvalidData(
+                "ML-DSA context must be at most 255 bytes".into(),
+            ));
+        }
+        let mut data = Vec::new();
+        if !context.is_empty() {
+            data = tlv_encode(TAG_AUTH_CONTEXT, context);
+        }
+        data.extend_from_slice(&tlv_encode(TAG_AUTH_CHALLENGE, message));
+        self.use_private_key(slot, key_type, &data)
+    }
+
+    /// Sign an externally computed ML-DSA message representative μ (64 bytes,
+    /// FIPS 204 "external μ"). The signature verifies against the message and
+    /// context that μ was computed from.
+    pub fn sign_external_mu(
+        &mut self,
+        slot: Slot,
+        key_type: KeyType,
+        mu: &[u8],
+    ) -> Result<Vec<u8>, PivError> {
+        log::debug!("Signing external mu with key in slot {:?}", slot);
+        if key_type.algorithm() != Algorithm::MlDsa {
+            return Err(PivError::InvalidData(
+                "External mu is only supported for ML-DSA".into(),
+            ));
+        }
+        if mu.len() != 64 {
+            return Err(PivError::InvalidData(
+                "ML-DSA mu must be exactly 64 bytes".into(),
+            ));
+        }
+        self.use_private_key(slot, key_type, &tlv_encode(TAG_AUTH_MU, mu))
     }
 
     /// Decrypt ciphertext with an RSA private key in a slot.

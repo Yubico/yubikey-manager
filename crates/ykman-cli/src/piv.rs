@@ -205,6 +205,16 @@ pub enum PivKeysAction {
         /// RSA signature padding (default: pkcs1v15); PSS uses a digest-length salt
         #[arg(long)]
         padding: Option<CliSignaturePadding>,
+        /// ML-DSA context string (at most 255 bytes)
+        #[arg(long, conflicts_with = "mu")]
+        context: Option<String>,
+        /// Input is a precomputed 64-byte ML-DSA message representative (external mu)
+        #[arg(long, conflicts_with = "compute_mu")]
+        mu: bool,
+        /// Compute the ML-DSA mu on the host and sign it as external mu, allowing
+        /// messages of any size
+        #[arg(long)]
+        compute_mu: bool,
     },
     /// Decrypt RSA ciphertext
     Decrypt {
@@ -532,6 +542,9 @@ impl PivAction {
                     hash_algorithm,
                     prehashed,
                     padding,
+                    context,
+                    mu,
+                    compute_mu,
                 } => run_key_operation(
                     dev,
                     scp_params,
@@ -540,6 +553,9 @@ impl PivAction {
                         hash_algorithm,
                         prehashed,
                         padding,
+                        context,
+                        mu,
+                        compute_mu,
                     },
                 ),
                 PivKeysAction::Decrypt {
@@ -1458,6 +1474,9 @@ enum PrivateKeyOperation {
         hash_algorithm: Option<CliHashAlgorithm>,
         prehashed: bool,
         padding: Option<CliSignaturePadding>,
+        context: Option<String>,
+        mu: bool,
+        compute_mu: bool,
     },
     Decrypt {
         padding: CliDecryptionPadding,
@@ -1467,14 +1486,27 @@ enum PrivateKeyOperation {
     Derive,
 }
 
+enum SignRequest {
+    Message(Zeroizing<Vec<u8>>),
+    Context(String),
+    Mu(Zeroizing<Vec<u8>>),
+}
+
 fn operation_key_type<C: SmartCardConnection>(
     session: &mut PivSession<C>,
     slot: Slot,
     algorithm: Option<CliKeyType>,
-) -> Result<(KeyType, PinPolicy, TouchPolicy)> {
+) -> Result<(KeyType, PinPolicy, TouchPolicy, Option<PublicKey>)> {
     if session.version() < Version(5, 3, 0) {
         return algorithm
-            .map(|a| (KeyType::from(a), PinPolicy::Default, TouchPolicy::Default))
+            .map(|a| {
+                (
+                    KeyType::from(a),
+                    PinPolicy::Default,
+                    TouchPolicy::Default,
+                    None,
+                )
+            })
             .ok_or_else(|| anyhow!("Slot metadata is unavailable; specify --algorithm."));
     }
     let metadata = session
@@ -1491,6 +1523,7 @@ fn operation_key_type<C: SmartCardConnection>(
         metadata.key_type,
         metadata.pin_policy,
         metadata.touch_policy,
+        Some(metadata.public_key),
     ))
 }
 
@@ -1571,7 +1604,7 @@ fn run_key_operation(
     let slot = parse_slot(&operation.slot)?;
     let input = Zeroizing::new(read_file_or_stdin(&operation.input)?);
     let mut session = open_session(dev, scp_params)?;
-    let (key_type, pin_policy, touch_policy) =
+    let (key_type, pin_policy, touch_policy, public_key) =
         operation_key_type(&mut session, slot, operation.algorithm)?;
     let pin_required = pin_required(slot, pin_policy, session.version());
     let pin = operation.pin.as_deref();
@@ -1580,19 +1613,70 @@ fn run_key_operation(
             hash_algorithm,
             prehashed,
             padding,
+            context,
+            mu,
+            compute_mu,
         } => {
-            let prepared = Zeroizing::new(padding::prepare_signature(
-                key_type,
-                &input,
-                hash_algorithm.map(Into::into),
-                prehashed,
-                padding.map(Into::into),
-            )?);
+            let request = if context.is_some() || mu || compute_mu {
+                if key_type.algorithm() != yubikit::piv::Algorithm::MlDsa {
+                    return Err(anyhow!(
+                        "--context, --mu and --compute-mu require an ML-DSA key."
+                    ));
+                }
+                if hash_algorithm.is_some() || prehashed || padding.is_some() {
+                    return Err(anyhow!(
+                        "ML-DSA signs messages directly; hash, prehashed and padding options are not supported."
+                    ));
+                }
+                let context = context.unwrap_or_default();
+                if context.len() > 255 {
+                    return Err(anyhow!("--context must be at most 255 bytes."));
+                }
+                if mu {
+                    if input.len() != 64 {
+                        return Err(anyhow!("ML-DSA mu input must be exactly 64 bytes."));
+                    }
+                    SignRequest::Mu(Zeroizing::new(input.to_vec()))
+                } else if compute_mu {
+                    let Some(PublicKey::MlDsa(public_key)) = public_key else {
+                        return Err(anyhow!(
+                            "The public key of slot {slot} is needed to compute mu."
+                        ));
+                    };
+                    let mu = padding::ml_dsa_mu(&public_key.key, context.as_bytes(), &input)?;
+                    SignRequest::Mu(Zeroizing::new(mu.to_vec()))
+                } else {
+                    SignRequest::Context(context)
+                }
+            } else {
+                SignRequest::Message(Zeroizing::new(padding::prepare_signature(
+                    key_type,
+                    &input,
+                    hash_algorithm.map(Into::into),
+                    prehashed,
+                    padding.map(Into::into),
+                )?))
+            };
             let signature =
                 authorize_key_operation(&mut session, pin, pin_required, touch_policy, |s| {
-                    s.sign(slot, key_type, &prepared)
+                    match &request {
+                        SignRequest::Message(message) => s.sign(slot, key_type, message),
+                        SignRequest::Context(context) => {
+                            s.sign_with_context(slot, key_type, &input, context.as_bytes())
+                        }
+                        SignRequest::Mu(mu) => s.sign_external_mu(slot, key_type, mu),
+                    }
                 })
-                .map_err(|e| anyhow!("Failed to sign: {e}"))?;
+                .map_err(|e| {
+                    if key_type.algorithm() == yubikit::piv::Algorithm::MlDsa
+                        && !matches!(request, SignRequest::Mu(_))
+                        && input.len() > 4096
+                    {
+                        anyhow!("Failed to sign: {e} (use --compute-mu for large messages)")
+                    } else {
+                        anyhow!("Failed to sign: {e}")
+                    }
+                })?;
             return write_file_or_stdout(&operation.output, &signature);
         }
         PrivateKeyOperation::Decrypt {

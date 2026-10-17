@@ -208,6 +208,102 @@ impl Drop for KeySlotGuard {
     }
 }
 
+fn openssl_verify_ml_dsa(dir: &Path, message: &str, signature: &str, context: Option<&str>) {
+    let context = context.map(|c| format!("context-string:{c}"));
+    let mut args = vec![
+        "pkeyutl",
+        "-verify",
+        "-pubin",
+        "-inkey",
+        "public.pem",
+        "-rawin",
+        "-in",
+        message,
+        "-sigfile",
+        signature,
+    ];
+    if let Some(context) = &context {
+        args.extend(["-pkeyopt", context]);
+    }
+    openssl(dir, &args);
+}
+
+#[rstest]
+#[case::mldsa44("ml-dsa-44", 1312)]
+#[case::mldsa65("ml-dsa-65", 1952)]
+#[case::mldsa87("ml-dsa-87", 2592)]
+fn test_piv_crypto_ml_dsa_context_and_mu(#[case] algorithm: &str, #[case] public_key_len: usize) {
+    require_capability!("PIV");
+    if skip_before_version((6, 0, 0), algorithm) {
+        return;
+    }
+    if !openssl_supports(algorithm) {
+        skip!("OpenSSL with {algorithm} is required");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = KeySlotGuard::generate(dir.path(), algorithm);
+    fs::write(
+        dir.path().join("message"),
+        b"ML-DSA context and external mu",
+    )
+    .unwrap();
+    // Larger than the YubiKey accepts for direct signing.
+    fs::write(dir.path().join("large"), vec![0x5a; 100_000]).unwrap();
+    let sign = |args: &[&str]| {
+        ykman_dev()
+            .current_dir(dir.path())
+            .args(["piv", "keys", "sign", "95", "-P", piv_pin()])
+            .args(args)
+            .assert()
+    };
+
+    sign(&["message", "context.sig", "--context", "ctx"]).success();
+    openssl_verify_ml_dsa(dir.path(), "message", "context.sig", Some("ctx"));
+
+    sign(&["large", "large.sig", "--compute-mu"]).success();
+    openssl_verify_ml_dsa(dir.path(), "large", "large.sig", None);
+
+    sign(&[
+        "message",
+        "mu-context.sig",
+        "--compute-mu",
+        "--context",
+        "ctx",
+    ])
+    .success();
+    openssl_verify_ml_dsa(dir.path(), "message", "mu-context.sig", Some("ctx"));
+
+    // Compute mu independently: SHAKE256(SHAKE256(pk, 64) || 0 || 0 || M, 64).
+    let spki = openssl(
+        dir.path(),
+        &["pkey", "-pubin", "-in", "public.pem", "-outform", "DER"],
+    )
+    .stdout;
+    fs::write(dir.path().join("pk"), &spki[spki.len() - public_key_len..]).unwrap();
+    let tr = openssl(
+        dir.path(),
+        &["dgst", "-shake256", "-xoflen", "64", "-binary", "pk"],
+    )
+    .stdout;
+    let mut mu_input = tr;
+    mu_input.extend_from_slice(&[0, 0]);
+    mu_input.extend_from_slice(&fs::read(dir.path().join("message")).unwrap());
+    fs::write(dir.path().join("mu-input"), mu_input).unwrap();
+    let mu = openssl(
+        dir.path(),
+        &["dgst", "-shake256", "-xoflen", "64", "-binary", "mu-input"],
+    )
+    .stdout;
+    fs::write(dir.path().join("mu"), mu).unwrap();
+    sign(&["mu", "mu.sig", "--mu"]).success();
+    openssl_verify_ml_dsa(dir.path(), "message", "mu.sig", None);
+
+    sign(&["message", "invalid.sig", "--mu"])
+        .failure()
+        .stderr(predicate::str::contains("exactly 64 bytes"));
+    sign(&["message", "invalid.sig", "--mu", "--context", "ctx"]).failure();
+}
+
 #[rstest]
 #[case::rsa("rsa2048", "rsa", (5, 3, 0))]
 #[case::p256("eccp256", "ec", (5, 3, 0))]
@@ -518,6 +614,13 @@ fn test_piv_crypto_decapsulate(#[case] algorithm: &str) {
         .assert()
         .failure()
         .stderr(predicate::str::contains("cannot be used for signing"));
+    ykman_dev()
+        .current_dir(dir.path())
+        .args(["piv", "keys", "sign", "95", "ciphertext", "invalid"])
+        .args(["--context", "ctx"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("require an ML-DSA key"));
     assert!(!dir.path().join("invalid").exists());
 }
 

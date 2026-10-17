@@ -293,6 +293,34 @@ pub fn oaep_decrypt_unpad(
     Ok(Zeroizing::new(db[separator as usize + 1..].to_vec()))
 }
 
+/// Compute the ML-DSA message representative μ (FIPS 204, Algorithm 7) for
+/// signing `message` with `context` by the key with the encoded `public_key`.
+///
+/// μ = SHAKE256(SHAKE256(pk, 64) || 0x00 || len(ctx) || ctx || M, 64)
+pub fn ml_dsa_mu(public_key: &[u8], context: &[u8], message: &[u8]) -> Result<[u8; 64]> {
+    use sha3::Shake256;
+    use sha3::digest::{ExtendableOutput, Update, XofReader};
+
+    ensure!(
+        context.len() <= 255,
+        "ML-DSA context must be at most 255 bytes."
+    );
+    let mut tr = [0u8; 64];
+    Shake256::default()
+        .chain(public_key)
+        .finalize_xof()
+        .read(&mut tr);
+    let mut mu = [0u8; 64];
+    Shake256::default()
+        .chain(tr)
+        .chain([0, context.len() as u8])
+        .chain(context)
+        .chain(message)
+        .finalize_xof()
+        .read(&mut mu);
+    Ok(mu)
+}
+
 /// RSA signature padding scheme for PIV signatures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignaturePadding {
@@ -879,5 +907,27 @@ mod tests {
         );
         assert!(oaep_decrypt_unpad(&block, Hash::Sha256, Hash::Sha256, b"label").is_err());
         assert!(oaep_decrypt_unpad(&block, Hash::Sha256, Hash::Sha1, b"").is_err());
+    }
+
+    #[test]
+    fn ml_dsa_mu_matches_reference() {
+        use ml_dsa::signature::Keypair;
+        use ml_dsa::{MlDsa65, SigningKey};
+
+        let signing_key = SigningKey::<MlDsa65>::from_seed(&[7u8; 32].into());
+        let verifying_key = signing_key.verifying_key();
+        let public_key = verifying_key.encode();
+        for context in [b"".as_slice(), b"context"] {
+            let message = b"external mu";
+            let mu = ml_dsa_mu(&public_key, context, message).unwrap();
+            let signature = signing_key
+                .expanded_key()
+                .sign_deterministic(message, context)
+                .unwrap();
+            assert!(verifying_key.verify_mu(&mu.into(), &signature));
+            let other = ml_dsa_mu(&public_key, b"other", message).unwrap();
+            assert!(!verifying_key.verify_mu(&other.into(), &signature));
+        }
+        assert!(ml_dsa_mu(&public_key, &[0; 256], b"").is_err());
     }
 }

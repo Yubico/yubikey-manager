@@ -713,6 +713,72 @@ fn test_piv_mldsa44_verify(#[case] tc: TestConnection) {
 #[rstest]
 #[case::smart_card(TestConnection::SmartCard)]
 #[case::scp11b(TestConnection::SmartCardScp11b)]
+fn test_piv_mldsa_context_and_external_mu(#[case] tc: TestConnection) {
+    skip_if_needed!(tc);
+    require_version!(Version(6, 0, 0));
+    require_capability!(Capability::PIV);
+
+    use ml_dsa::{MlDsa65, Signature, VerifyingKey, common::KeyInit};
+    use x509_cert::spki::SubjectPublicKeyInfoRef;
+    use yubikit::__internal::padding::ml_dsa_mu;
+
+    let session = open_piv_session(&tc);
+    let mut session = reset_piv(session);
+    session
+        .authenticate(&effective_management_key(&session))
+        .expect("authenticate");
+
+    let spki_der = session
+        .generate_key(
+            Slot::Authentication,
+            KeyType::MlDsa65,
+            PinPolicy::Default,
+            TouchPolicy::Default,
+        )
+        .expect("generate_key MlDsa65")
+        .to_spki()
+        .unwrap();
+    let spki = SubjectPublicKeyInfoRef::from_der(&spki_der).expect("parse SPKI");
+    let raw_key = spki.subject_public_key.raw_bytes();
+    let vk_bytes: &[u8; 1952] = raw_key.try_into().expect("ML-DSA-65 public key");
+    let vk = VerifyingKey::<MlDsa65>::new(vk_bytes.into());
+
+    session
+        .verify_pin(&effective_piv_pin())
+        .expect("verify PIN");
+
+    let msg = b"test message for ml-dsa context signing";
+    let ctx = b"yubikit context";
+    let sig = session
+        .sign_with_context(Slot::Authentication, KeyType::MlDsa65, msg, ctx)
+        .expect("sign_with_context");
+    let sig = Signature::<MlDsa65>::try_from(sig.as_slice()).expect("parse signature");
+    assert!(vk.verify_with_context(msg, ctx, &sig));
+    assert!(!vk.verify_with_context(msg, b"", &sig));
+
+    let large = vec![0x5a; 100_000];
+    let mu = ml_dsa_mu(raw_key, ctx, &large).expect("compute mu");
+    let sig = session
+        .sign_external_mu(Slot::Authentication, KeyType::MlDsa65, &mu)
+        .expect("sign_external_mu");
+    let sig = Signature::<MlDsa65>::try_from(sig.as_slice()).expect("parse signature");
+    assert!(vk.verify_with_context(&large, ctx, &sig));
+
+    assert!(
+        session
+            .sign_external_mu(Slot::Authentication, KeyType::MlDsa65, &mu[..32])
+            .is_err()
+    );
+    assert!(
+        session
+            .sign_with_context(Slot::Authentication, KeyType::MlDsa65, msg, &[0; 256])
+            .is_err()
+    );
+}
+
+#[rstest]
+#[case::smart_card(TestConnection::SmartCard)]
+#[case::scp11b(TestConnection::SmartCardScp11b)]
 fn test_piv_mlkem768_decapsulate(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_version!(Version(6, 0, 0));
