@@ -56,25 +56,21 @@ No additional system packages required.
 
 === Setting up the development environment
 
-Clone the repository and set up the Python environment:
+Clone the repository and set up the Python environment. This builds the
+native Rust extension (`_yubikit_native`) and the `ykman` executable, and
+installs them into the virtual environment:
 
     $ git clone https://github.com/Yubico/yubikey-manager.git
     $ cd yubikey-manager
     $ uv sync
 
-Build the native Rust extension and install it into the virtual environment:
+After making changes to the Rust code, force a rebuild of the native extension
+before testing, since uv otherwise reuses its cached wheel:
 
-    $ cd crates/yubikit-pyo3
-    $ maturin develop
-    $ cd ../..
+    $ uv sync --reinstall-package yubikit
 
-After making changes to the Rust code, re-run `maturin develop` to rebuild
-and reinstall the native extension before testing.
-
-NOTE: Use `.venv/bin/python3 -m pytest` (or activate the venv) rather than
-`uv run pytest` when testing after `maturin develop`.  The `uv run` command
-synchronises the environment before running, which can overwrite the
-maturin-installed native extension with a cached wheel.
+Use `uv run --no-sync` to run commands without uv re-synchronising (and
+possibly rebuilding) the environment first, e.g. `uv run --no-sync pytest`.
 
 
 === Building the Rust crates and executables
@@ -113,18 +109,20 @@ To build the Python wrapper, use `uv`:
 
     $ uv sync
 
-Because uv caches wheels, any changes to the native layers may require you to
+Because uv caches wheels, any changes to the native layers require you to
 force a rebuild of the yubikit package:
 
-    $ uv clean && uv pip uninstall yubikit
-    $ uv sync
+    $ uv sync --reinstall-package yubikit
 
 === Code style & security
 
 https://docs.astral.sh/ruff/[ruff] handles Python style and security linting.
 https://mypy-lang.org[mypy], https://github.com/microsoft/pyright[pyright], and
 https://github.com/astral-sh/ty[ty] are used for static type checking.
-Rust code uses `cargo fmt` and `cargo clippy`.
+Rust code uses `cargo fmt` and `cargo clippy`, and
+https://embarkstudios.github.io/cargo-deny/[cargo deny] checks Rust
+dependencies for advisories, licenses, and duplicate versions (see
+`deny.toml`).
 All checks are wired up via a http://pre-commit.com/[pre-commit] hook:
 
     $ uv tool install pre-commit
@@ -170,6 +168,20 @@ NOTE: --test-threads 1 is required as the device tests interact with a connected
 YubiKey and cannot be run in parallel. --no-capture displays output showing which
 tests were skipped, and why.
 
+=== CLI device tests
+
+WARNING: ONLY run these on dedicated developer keys, as it will permanently
+delete data on the device!
+
+The `ykman-cli` crate has its own device tests, which run the `ykman`
+executable against a connected YubiKey. They use the same `YUBIKEY_SERIAL`
+environment variable as the Rust device tests:
+
+    $ YUBIKEY_SERIAL=123456 cargo test -p ykman-cli --test cli_tests -- --test-threads=1
+
+As with the Rust device tests, append a test name filter (e.g. "piv") to only
+run a subset.
+
 === Python device tests
 
 WARNING: ONLY run these on dedicated developer keys, as it will permanently
@@ -178,6 +190,8 @@ delete data on the device!
 Specify the serial number of the YubiKey to test with (shown by `ykman list`):
 
     $ uv run pytest --device 123456
+
+For devices without a serial number, use `--no-serial` instead of `--device`.
 
 This works for both USB and NFC-connected devices. The test suite automatically
 skips tests that are not applicable to the attached device.
