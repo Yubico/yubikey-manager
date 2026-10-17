@@ -1404,6 +1404,12 @@ pub fn check_key_support(
         }
     }
 
+    if key_type == KeyType::Rsa1024 && version >= Version(6, 0, 0) {
+        return Err(PivError::NotSupported(
+            "RSA 1024 not supported on YubiKey 6 or later".into(),
+        ));
+    }
+
     // New key types
     if matches!(
         key_type,
@@ -1699,7 +1705,13 @@ impl<C: SmartCardConnection> PivSession<C> {
     ) -> Result<(), PivError> {
         log::debug!("Setting management key");
         let key_type = management_key.key_type();
-        if key_type != ManagementKeyType::Tdes {
+        if key_type == ManagementKeyType::Tdes {
+            if self.version >= Version(6, 0, 0) {
+                return Err(PivError::NotSupported(
+                    "TDES management key not supported on YubiKey 6 or later".into(),
+                ));
+            }
+        } else {
             require_version(self.version, Version(5, 4, 0), "AES management key")?;
         }
 
@@ -3363,6 +3375,34 @@ mod tests {
                 PinPolicy::Default,
                 TouchPolicy::Default,
                 false,
+                false
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_check_key_support_rsa1024() {
+        for (version, ok) in [(Version(5, 7, 0), true), (Version(6, 0, 0), false)] {
+            for generate in [true, false] {
+                let result = check_key_support(
+                    version,
+                    KeyType::Rsa1024,
+                    PinPolicy::Default,
+                    TouchPolicy::Default,
+                    generate,
+                    false,
+                );
+                assert_eq!(result.is_ok(), ok, "{version:?} generate={generate}");
+            }
+        }
+        assert!(
+            check_key_support(
+                Version(6, 0, 0),
+                KeyType::Rsa2048,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                true,
                 false
             )
             .is_ok()

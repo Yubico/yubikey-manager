@@ -527,6 +527,7 @@ class TestKeyManagement:
     ):
         if CAPABILITY.PIV in info.fips_capable:
             pytest.skip("RSA1024 not available on YubiKey FIPS")
+        skip_unsupported_key_type(session, KEY_TYPE.RSA1024, info)
         self._test_put_key_pairing(
             session, scp, keys, KEY_TYPE.RSA1024, KEY_TYPE.ECCP256
         )
@@ -880,7 +881,12 @@ class TestMetadata:
         data = session.get_management_key_metadata()
         assert data.default_value is True
 
-        if CAPABILITY.PIV not in info.fips_capable:
+        if info.version >= (6, 0, 0):
+            with pytest.raises(NotSupportedError):
+                session.set_management_key(
+                    MANAGEMENT_KEY_TYPE.TDES, NON_DEFAULT_MANAGEMENT_KEY
+                )
+        elif CAPABILITY.PIV not in info.fips_capable:
             session.set_management_key(
                 MANAGEMENT_KEY_TYPE.TDES, NON_DEFAULT_MANAGEMENT_KEY
             )
