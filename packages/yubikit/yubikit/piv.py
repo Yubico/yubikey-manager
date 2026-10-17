@@ -59,6 +59,7 @@ from cryptography.hazmat.primitives.serialization import (
 from .core import (
     BadResponseError,
     InvalidPinError,  # noqa: F401 - re-exported
+    NotSupportedError,
     Session,
     Tlv,
     Version,
@@ -71,7 +72,8 @@ from .core.smartcard import (
 )
 
 if TYPE_CHECKING:
-    # This type isn't available on cryptography <40.
+    # These aren't available on older versions of cryptography.
+    from cryptography.hazmat.primitives.asymmetric import mldsa, mlkem
     from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
 
 from _yubikit_native import padding as _native_padding
@@ -80,24 +82,38 @@ from _yubikit_native.sessions import PivSession as _NativePivSession
 logger = logging.getLogger(__name__)
 
 
-PublicKey: TypeAlias = (
+# String aliases, since ML-DSA and ML-KEM need cryptography >= 48. ML-KEM-512 is
+# not supported by cryptography.
+PublicKey: TypeAlias = """
     rsa.RSAPublicKey
     | ec.EllipticCurvePublicKey
     | ed25519.Ed25519PublicKey
     | x25519.X25519PublicKey
-)
-PrivateKey: TypeAlias = (
+    | mldsa.MLDSA44PublicKey
+    | mldsa.MLDSA65PublicKey
+    | mldsa.MLDSA87PublicKey
+    | mlkem.MLKEM768PublicKey
+    | mlkem.MLKEM1024PublicKey
+"""
+PrivateKey: TypeAlias = """
     rsa.RSAPrivateKeyWithSerialization
     | ec.EllipticCurvePrivateKeyWithSerialization
     | ed25519.Ed25519PrivateKey
     | x25519.X25519PrivateKey
-)
+    | mldsa.MLDSA44PrivateKey
+    | mldsa.MLDSA65PrivateKey
+    | mldsa.MLDSA87PrivateKey
+    | mlkem.MLKEM768PrivateKey
+    | mlkem.MLKEM1024PrivateKey
+"""
 
 
 @unique
 class ALGORITHM(str, Enum):
     EC = "ec"
     RSA = "rsa"
+    MLDSA = "mldsa"
+    MLKEM = "mlkem"
 
 
 @unique
@@ -110,18 +126,32 @@ class KEY_TYPE(IntEnum):
     ECCP384 = 0x14
     ED25519 = 0xE0
     X25519 = 0xE1
+    MLDSA44 = 0xE2
+    MLDSA65 = 0xE3
+    MLDSA87 = 0xE4
+    MLKEM512 = 0xE5
+    MLKEM768 = 0xE6
+    MLKEM1024 = 0xE7
 
     def __str__(self):
         return self.name
 
     @property
     def algorithm(self) -> ALGORITHM:
-        return ALGORITHM.RSA if self.name.startswith("RSA") else ALGORITHM.EC
+        if self.name.startswith("RSA"):
+            return ALGORITHM.RSA
+        if self.name.startswith("MLDSA"):
+            return ALGORITHM.MLDSA
+        if self.name.startswith("MLKEM"):
+            return ALGORITHM.MLKEM
+        return ALGORITHM.EC
 
     @property
     def bit_len(self) -> int:
         if self in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
             return 256
+        if self.algorithm in (ALGORITHM.MLDSA, ALGORITHM.MLKEM):
+            raise ValueError("No bit_len")
         match = re.search(r"\d+$", self.name)
         if match:
             return int(match.group())
@@ -145,7 +175,43 @@ class KEY_TYPE(IntEnum):
             return cls.ED25519
         elif isinstance(key, x25519.X25519PublicKey):
             return cls.X25519
+        for key_class, key_type in _PQC_PUBLIC_KEY_TYPES.items():
+            if isinstance(key, key_class):
+                return cls(key_type)
         raise ValueError(f"Unsupported key type: {type(key).__name__}")
+
+
+_PQC_PUBLIC_KEY_TYPES: dict[type, KEY_TYPE] = {}
+try:
+    from cryptography.hazmat.primitives.asymmetric import mldsa as _mldsa
+
+    _PQC_PUBLIC_KEY_TYPES.update(
+        {
+            _mldsa.MLDSA44PublicKey: KEY_TYPE.MLDSA44,
+            _mldsa.MLDSA65PublicKey: KEY_TYPE.MLDSA65,
+            _mldsa.MLDSA87PublicKey: KEY_TYPE.MLDSA87,
+        }
+    )
+except ImportError:  # Not available in older versions of cryptography
+    pass
+try:
+    from cryptography.hazmat.primitives.asymmetric import mlkem as _mlkem
+
+    _PQC_PUBLIC_KEY_TYPES.update(
+        {
+            _mlkem.MLKEM768PublicKey: KEY_TYPE.MLKEM768,
+            _mlkem.MLKEM1024PublicKey: KEY_TYPE.MLKEM1024,
+        }
+    )
+except ImportError:  # Not available in older versions of cryptography
+    pass
+
+# ML-KEM ciphertext lengths, which are unique per parameter set (FIPS 203).
+_ML_KEM_CIPHERTEXT_KEY_TYPES = {
+    768: KEY_TYPE.MLKEM512,
+    1088: KEY_TYPE.MLKEM768,
+    1568: KEY_TYPE.MLKEM1024,
+}
 
 
 @unique
@@ -521,6 +587,10 @@ def _mgf1_hash_name(mgf) -> str:
 def _pad_message(key_type, message, hash_algorithm, padding):
     if key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
         return message
+    if key_type.algorithm == ALGORITHM.MLDSA:
+        if isinstance(hash_algorithm, Prehashed):
+            raise ValueError("ML-DSA does not support prehashed messages")
+        return message
     if key_type.algorithm not in (ALGORITHM.EC, ALGORITHM.RSA):
         raise ValueError(f"Unsupported algorithm {key_type.algorithm}")
     if isinstance(hash_algorithm, Prehashed):
@@ -569,6 +639,27 @@ def _unpad_message(padded, padding):
             padding._label or b"",
         )
     raise ValueError(f"Unsupported padding: {padding}")
+
+
+def calculate_ml_dsa_mu(
+    public_key: (
+        mldsa.MLDSA44PublicKey | mldsa.MLDSA65PublicKey | mldsa.MLDSA87PublicKey | bytes
+    ),
+    message: bytes,
+    context: bytes = b"",
+) -> bytes:
+    """Calculate the ML-DSA message representative (mu) for external mu signing.
+
+    With cryptography >= 50, mldsa.MLDSAMuHasher can be used instead to
+    calculate mu incrementally.
+
+    :param public_key: The ML-DSA public key, or its raw encoding.
+    :param message: The message to sign.
+    :param context: An optional context string (at most 255 bytes).
+    """
+    if not isinstance(public_key, bytes):
+        public_key = public_key.public_bytes_raw()
+    return _native_padding.ml_dsa_mu(public_key, context, message)
 
 
 def decompress_certificate(cert_data: bytes) -> bytes:
@@ -831,21 +922,55 @@ class PivSession(Session):
         message: bytes,
         hash_algorithm: hashes.HashAlgorithm | None,
         padding: AsymmetricPadding | None = None,
+        context: bytes | None = None,
     ) -> bytes:
         """Sign message with key.
 
         Requires PIN verification.
+
+        Ed25519 and ML-DSA keys sign the message directly, and ignore
+        hash_algorithm and padding. The YubiKey limits the size of messages it
+        can sign with ML-DSA; use :meth:`sign_external_mu` for larger messages.
 
         :param slot: The slot of the key to use.
         :param key_type: The type of the key to sign with.
         :param message: The message to sign.
         :param hash_algorithm: The pre-signature hash algorithm to use.
         :param padding: The pre-signature padding.
+        :param context: An ML-DSA context string (at most 255 bytes).
         """
         slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
+        if context is not None:
+            if key_type.algorithm != ALGORITHM.MLDSA:
+                raise ValueError("A context can only be used with ML-DSA keys")
+            if len(context) > 255:
+                raise ValueError("ML-DSA context must be at most 255 bytes")
+            return self._native.sign_with_context(
+                int(slot), int(key_type), message, context
+            )
         padded = _pad_message(key_type, message, hash_algorithm, padding)
         return self._native.sign(int(slot), int(key_type), padded)
+
+    def sign_external_mu(self, slot: SLOT, key_type: KEY_TYPE, mu: bytes) -> bytes:
+        """Sign a precomputed ML-DSA message representative (external mu).
+
+        The resulting signature verifies against the original message. Use
+        :func:`calculate_ml_dsa_mu` to compute mu.
+
+        Requires PIN verification.
+
+        :param slot: The slot of the key to use.
+        :param key_type: The ML-DSA type of the key to sign with.
+        :param mu: The 64 byte message representative.
+        """
+        slot = SLOT(slot)
+        key_type = KEY_TYPE(key_type)
+        if key_type.algorithm != ALGORITHM.MLDSA:
+            raise ValueError("External mu can only be used with ML-DSA keys")
+        if len(mu) != 64:
+            raise ValueError("ML-DSA mu must be exactly 64 bytes")
+        return self._native.sign_external_mu(int(slot), int(key_type), mu)
 
     def decrypt(
         self, slot: SLOT, cipher_text: bytes, padding: AsymmetricPadding
@@ -885,6 +1010,20 @@ class PivSession(Session):
                 Encoding.X962, PublicFormat.UncompressedPoint
             )
         return self._native.calculate_secret(int(slot), int(key_type), data)
+
+    def decapsulate(self, slot: SLOT, cipher_text: bytes) -> bytes:
+        """Decapsulate an ML-KEM ciphertext, recovering the shared secret.
+
+        Requires PIN verification.
+
+        :param slot: The slot of the ML-KEM key.
+        :param cipher_text: The ML-KEM ciphertext.
+        """
+        slot = SLOT(slot)
+        key_type = _ML_KEM_CIPHERTEXT_KEY_TYPES.get(len(cipher_text))
+        if key_type is None:
+            raise ValueError(f"Invalid ML-KEM ciphertext length: {len(cipher_text)}")
+        return self._native.calculate_secret(int(slot), int(key_type), cipher_text)
 
     def get_object(self, object_id: int) -> bytes:
         """Get object by ID.
@@ -964,7 +1103,11 @@ class PivSession(Session):
             key_der = private_key.private_bytes(
                 Encoding.DER, PrivateFormat.TraditionalOpenSSL, NoEncryption()
             )
-        elif key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+        elif key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519) or key_type.algorithm in (
+            ALGORITHM.MLDSA,
+            ALGORITHM.MLKEM,
+        ):
+            # For ML-DSA and ML-KEM, this is the seed.
             key_der = private_key.private_bytes(
                 Encoding.Raw, PrivateFormat.Raw, NoEncryption()
             )
@@ -1003,6 +1146,14 @@ class PivSession(Session):
         """
         slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
+        if (
+            key_type.algorithm in (ALGORITHM.MLDSA, ALGORITHM.MLKEM)
+            and key_type not in _PQC_PUBLIC_KEY_TYPES.values()
+        ):
+            # Fail before generating, since the public key couldn't be returned.
+            raise NotSupportedError(
+                f"{key_type} public keys are not supported by cryptography"
+            )
         logger.debug(
             f"Generating key with pin_policy={pin_policy}, touch_policy={touch_policy}"
         )

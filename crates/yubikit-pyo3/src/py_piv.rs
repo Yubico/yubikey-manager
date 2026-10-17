@@ -341,6 +341,30 @@ impl PivSession {
         self.session_mut()?.sign(s, kt, message).map_err(piv_err)
     }
 
+    /// Sign a message with an ML-DSA key, using a context string.
+    fn sign_with_context(
+        &mut self,
+        slot: u8,
+        key_type: u8,
+        message: &[u8],
+        context: &[u8],
+    ) -> PyResult<Vec<u8>> {
+        let s = parse_slot(slot)?;
+        let kt = parse_key_type(key_type)?;
+        self.session_mut()?
+            .sign_with_context(s, kt, message, context)
+            .map_err(piv_err)
+    }
+
+    /// Sign a precomputed 64-byte ML-DSA message representative (mu).
+    fn sign_external_mu(&mut self, slot: u8, key_type: u8, mu: &[u8]) -> PyResult<Vec<u8>> {
+        let s = parse_slot(slot)?;
+        let kt = parse_key_type(key_type)?;
+        self.session_mut()?
+            .sign_external_mu(s, kt, mu)
+            .map_err(piv_err)
+    }
+
     fn decrypt(&mut self, slot: u8, cipher_text: &[u8]) -> PyResult<Vec<u8>> {
         let s = parse_slot(slot)?;
         self.session_mut()?.decrypt(s, cipher_text).map_err(piv_err)

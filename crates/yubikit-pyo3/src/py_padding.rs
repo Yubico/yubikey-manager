@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Host-side RSA padding, so Python does not need throwaway RSA keys to pad
-//! and unpad for raw RSA operations.
+//! and unpad for raw RSA operations, and ML-DSA mu computation.
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -75,12 +75,22 @@ fn oaep_decrypt_unpad(
         .map_err(value_err)
 }
 
+/// Compute the FIPS 204 ML-DSA message representative (mu) for external-mu
+/// signing.
+#[pyfunction]
+fn ml_dsa_mu(public_key: &[u8], context: &[u8], message: &[u8]) -> PyResult<Vec<u8>> {
+    padding::ml_dsa_mu(public_key, context, message)
+        .map(|mu| mu.to_vec())
+        .map_err(value_err)
+}
+
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "padding")?;
     m.add_function(wrap_pyfunction!(pkcs1v15_sign_pad, &m)?)?;
     m.add_function(wrap_pyfunction!(pss_sign_pad, &m)?)?;
     m.add_function(wrap_pyfunction!(pkcs1v15_decrypt_unpad, &m)?)?;
     m.add_function(wrap_pyfunction!(oaep_decrypt_unpad, &m)?)?;
+    m.add_function(wrap_pyfunction!(ml_dsa_mu, &m)?)?;
     parent.add_submodule(&m)?;
 
     let sys = parent.py().import("sys")?;

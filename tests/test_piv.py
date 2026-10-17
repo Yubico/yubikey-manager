@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 import zlib
 from datetime import date
 
@@ -8,11 +9,13 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from yubikit.core import BadResponseError
 from yubikit.piv import (
+    ALGORITHM,
     KEY_TYPE,
     Chuid,
     FascN,
     _pad_message,
     _unpad_message,
+    calculate_ml_dsa_mu,
     decompress_certificate,
 )
 
@@ -245,3 +248,64 @@ def test_ec_sign_hash_truncation():
     assert (
         _pad_message(KEY_TYPE.ECCP384, message, hashes.SHA256(), None) == h.finalize()
     )
+
+
+@pytest.mark.parametrize(
+    "key_type, algorithm",
+    [
+        (KEY_TYPE.MLDSA44, ALGORITHM.MLDSA),
+        (KEY_TYPE.MLDSA65, ALGORITHM.MLDSA),
+        (KEY_TYPE.MLDSA87, ALGORITHM.MLDSA),
+        (KEY_TYPE.MLKEM512, ALGORITHM.MLKEM),
+        (KEY_TYPE.MLKEM768, ALGORITHM.MLKEM),
+        (KEY_TYPE.MLKEM1024, ALGORITHM.MLKEM),
+    ],
+)
+def test_pqc_key_types(key_type, algorithm):
+    assert key_type.algorithm == algorithm
+    with pytest.raises(ValueError):
+        key_type.bit_len
+
+
+def test_pqc_from_public_key():
+    mldsa = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.mldsa")
+    mlkem = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.mlkem")
+    for cls, key_type in [
+        (mldsa.MLDSA44PrivateKey, KEY_TYPE.MLDSA44),
+        (mldsa.MLDSA65PrivateKey, KEY_TYPE.MLDSA65),
+        (mldsa.MLDSA87PrivateKey, KEY_TYPE.MLDSA87),
+        (mlkem.MLKEM768PrivateKey, KEY_TYPE.MLKEM768),
+        (mlkem.MLKEM1024PrivateKey, KEY_TYPE.MLKEM1024),
+    ]:
+        assert KEY_TYPE.from_public_key(cls.generate().public_key()) == key_type
+
+
+def test_ml_dsa_sign_message_passthrough():
+    message = b"message"
+    assert _pad_message(KEY_TYPE.MLDSA65, message, None, None) == message
+    with pytest.raises(ValueError):
+        _pad_message(KEY_TYPE.MLDSA65, message, Prehashed(hashes.SHA256()), None)
+
+
+def test_calculate_ml_dsa_mu():
+    public_key = bytes(range(256)) * 5 + bytes(32)  # ML-DSA-44 sized
+    message = b"message"
+    for context in (b"", b"context"):
+        tr = hashlib.shake_256(public_key).digest(64)
+        expected = hashlib.shake_256(
+            tr + bytes([0, len(context)]) + context + message
+        ).digest(64)
+        assert calculate_ml_dsa_mu(public_key, message, context) == expected
+    with pytest.raises(ValueError):
+        calculate_ml_dsa_mu(public_key, message, bytes(256))
+
+
+def test_calculate_ml_dsa_mu_matches_cryptography():
+    mldsa = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.mldsa")
+    if not hasattr(mldsa, "MLDSAMuHasher"):
+        pytest.skip("Requires cryptography >= 50")
+    public_key = mldsa.MLDSA65PrivateKey.generate().public_key()
+    message = b"message"
+    hasher = mldsa.MLDSAMuHasher(public_key, b"context")
+    hasher.update(message)
+    assert calculate_ml_dsa_mu(public_key, message, b"context") == hasher.finalize()

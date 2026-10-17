@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any, Mapping, TypeAlias, cast
 from uuid import uuid4
 
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
@@ -89,6 +89,13 @@ def _dummy_key(key_type):
         return ed25519.Ed25519PrivateKey.generate()
     if key_type == KEY_TYPE.X25519:
         return x25519.X25519PrivateKey.generate()
+    if key_type.algorithm == ALGORITHM.MLDSA:
+        try:
+            # ML-DSA certificates and CSRs require cryptography >= 49.
+            from cryptography.hazmat.primitives.asymmetric import mldsa
+        except ImportError:
+            raise NotSupportedError("ML-DSA requires a newer version of cryptography")
+        return getattr(mldsa, f"{key_type.name}PrivateKey").generate()
     raise ValueError("Invalid algorithm")
 
 
@@ -390,6 +397,11 @@ def check_key(
             )
         elif isinstance(public_key, ec.EllipticCurvePublicKey):
             public_key.verify(test_sig, test_data, ec.ECDSA(hashes.SHA256()))
+        elif isinstance(public_key, ed25519.Ed25519PublicKey):
+            public_key.verify(test_sig, test_data)
+        elif KEY_TYPE.from_public_key(public_key).algorithm == ALGORITHM.MLDSA:
+            # ML-DSA public key types need cryptography >= 48.
+            cast(Any, public_key).verify(test_sig, test_data)
         else:
             raise ValueError(f"Unknown key type: {type(public_key)}")
         return True
@@ -542,7 +554,7 @@ def get_piv_info(session: PivSession):
             fingerprint = cert.fingerprint(hashes.SHA256()).hex()
             try:
                 key_algo = KEY_TYPE.from_public_key(cert.public_key()).name
-            except ValueError:
+            except (ValueError, UnsupportedAlgorithm):
                 key_algo = "Unsupported"
             serial = cert.serial_number
             try:
@@ -591,7 +603,10 @@ _AllowedHashTypes: TypeAlias = (
 
 
 def _hash(key_type, hash_algorithm):
-    if key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+    if (
+        key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519)
+        or key_type.algorithm == ALGORITHM.MLDSA
+    ):
         return None
     return hash_algorithm()
 
@@ -609,7 +624,7 @@ def sign_certificate_builder(
     :param slot: The slot.
     :param key_type: The key type.
     :param builder: The x509 certificate builder object.
-    :param hash_algorithm: The hash algorithm, ignored for Curve 25519.
+    :param hash_algorithm: The hash algorithm, ignored for Curve 25519 and ML-DSA.
     """
     logger.debug("Signing a certificate")
     dummy_key = _dummy_key(key_type)
@@ -647,7 +662,7 @@ def sign_csr_builder(
     :param public_key: The public key.
     :param builder: The x509 certificate signing request builder
         object.
-    :param hash_algorithm: The hash algorithm, ignored for Curve 25519.
+    :param hash_algorithm: The hash algorithm, ignored for Curve 25519 and ML-DSA.
     """
     logger.debug("Signing a CSR")
     key_type = KEY_TYPE.from_public_key(public_key)
