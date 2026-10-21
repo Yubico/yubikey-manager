@@ -50,57 +50,71 @@ use scp::{ScpInputs, ScpParams};
       \n  $ ykman --device 123456 info"
 )]
 struct Cli {
-    /// Specify which YubiKey to interact with by serial number
-    #[arg(short = 'd', long, global = true)]
+    /// Use the YubiKey with this serial number
+    #[arg(short = 'd', long, global = true, value_name = "SERIAL")]
     device: Option<u32>,
 
-    /// SCP credentials: private key and cert files, or SCP03 keys as K-ENC:K-MAC[:K-DEK] hex
-    #[arg(long = "scp", global = true)]
+    /// SCP key/cert files, or SCP03 keys as hex
+    #[arg(long = "scp", global = true, value_name = "CRED")]
     scp_cred: Vec<String>,
 
-    /// CA certificate for SCP11 card key verification (PEM/DER file)
-    #[arg(long, global = true)]
+    /// CA certificate for SCP11 (PEM/DER file)
+    #[arg(long, global = true, value_name = "FILE")]
     scp_ca: Option<String>,
 
-    /// Card key reference for SCP (KID KVN, hex)
+    /// SCP card key reference (hex)
     #[arg(long, global = true, num_args = 2, value_names = ["KID", "KVN"])]
     scp_sd: Option<Vec<String>>,
 
-    /// OCE key reference for SCP (KID KVN, hex)
+    /// SCP OCE key reference (hex)
     #[arg(long, global = true, num_args = 2, value_names = ["KID", "KVN"])]
     scp_oce: Option<Vec<String>>,
 
-    /// Password for SCP credential file
-    #[arg(long, global = true)]
+    /// Password for the SCP credential file
+    #[arg(long, global = true, value_name = "PASSWORD")]
     scp_password: Option<String>,
-
-    /// Disable coloured output (shorthand for `--color=never`)
-    #[arg(long, global = true, conflicts_with = "color")]
-    no_color: bool,
-
-    /// Control coloured output
-    #[arg(long, global = true, value_enum, default_value = "auto")]
-    color: color::ColorChoice,
 
     /// Show diagnostic information
     #[arg(long)]
     diagnose: bool,
 
-    /// Show third-party license information
+    /// Show third-party licenses
     #[arg(long)]
     licenses: bool,
 
-    /// Generate shell completion
-    #[arg(long)]
+    /// Generate completion (bash, zsh, fish, ...)
+    #[arg(long, value_name = "SHELL", hide_possible_values = true)]
     completion: Option<Shell>,
 
-    /// Enable logging at given verbosity level
-    #[arg(short = 'l', long, global = true)]
+    /// Log level: error, warning, info, debug, traffic
+    #[arg(
+        short = 'l',
+        long,
+        global = true,
+        value_name = "LEVEL",
+        hide_possible_values = true
+    )]
     log_level: Option<logging::LogLevel>,
 
-    /// Write log to FILE instead of printing to stderr (requires --log-level)
+    /// Write log to FILE (requires --log-level)
     #[arg(long, value_name = "FILE", global = true)]
     log_file: Option<String>,
+
+    /// Disable colour (same as --color=never)
+    #[arg(long, global = true, conflicts_with = "color")]
+    no_color: bool,
+
+    /// Colour output: always, auto, never
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        value_name = "WHEN",
+        default_value = "auto",
+        hide_default_value = true,
+        hide_possible_values = true
+    )]
+    color: color::ColorChoice,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -238,7 +252,7 @@ fn build_cli_command() -> clap::Command {
     // "ykman fido") since that propagation normally only happens later,
     // during arg parsing.
     cmd.build();
-    finalize_help(&mut cmd);
+    finalize_help(&mut cmd, true);
     cmd
 }
 
@@ -293,7 +307,160 @@ fn lowercase_usage(text: &str) -> String {
     transform_section(text, "USAGE", |content| Some(content.to_lowercase()))
 }
 
-fn finalize_help(cmd: &mut clap::Command) {
+/// Option groups for the (mostly global) options, shown as their own help
+/// sections; anything not listed stays under "OPTIONS".
+const OPTION_GROUPS: &[(&str, &[&str])] = &[
+    // Flags that run an action and exit rather than modify other commands.
+    (
+        "ADDITIONAL COMMANDS",
+        &["diagnose", "licenses", "completion"],
+    ),
+    ("DEVICE OPTIONS", &["device"]),
+    (
+        "SECURE CHANNEL OPTIONS",
+        &["scp", "scp-ca", "scp-sd", "scp-oce", "scp-password"],
+    ),
+    (
+        "OUTPUT OPTIONS",
+        &["color", "no-color", "log-level", "log-file"],
+    ),
+];
+
+/// Same as [`OPTION_GROUPS`] for the root command, where the only ungrouped
+/// options are `-h`/`-V`; these and the device/output options are folded into
+/// a single "OPTIONS" section.
+const ROOT_OPTION_GROUPS: &[(&str, &[&str])] = &[
+    OPTION_GROUPS[0],
+    OPTION_GROUPS[2],
+    (
+        "OPTIONS",
+        &[
+            "device",
+            "color",
+            "no-color",
+            "log-level",
+            "log-file",
+            "help",
+            "version",
+        ],
+    ),
+];
+
+/// Top-level command groups, mirroring the sectioned layout of `gh --help`.
+const COMMAND_GROUPS: &[(&str, &[&str])] = &[
+    ("DEVICE COMMANDS", &["list", "info", "config"]),
+    (
+        "APPLICATION COMMANDS",
+        &["oath", "otp", "piv", "fido", "openpgp", "hsmauth", "sd"],
+    ),
+    ("ADVANCED COMMANDS", &["apdu"]),
+];
+
+/// Re-pads the description column of option lines so each section is aligned
+/// on its own widest option rather than on the widest option of the command.
+fn realign(items: &[&str]) -> Vec<String> {
+    let split = |line: &str| {
+        let body = line.trim_start();
+        let gap = body.find("  ")?;
+        let indent = line.len() - body.len();
+        Some((
+            line[..indent + gap].to_string(),
+            body[gap..].trim_start().to_string(),
+        ))
+    };
+    let parts: Vec<_> = items.iter().map(|l| split(l)).collect();
+    let width = parts
+        .iter()
+        .flatten()
+        .map(|(l, _)| l.len())
+        .max()
+        .unwrap_or(0);
+    items
+        .iter()
+        .zip(parts)
+        .map(|(line, part)| match part {
+            Some((lhs, rhs)) => format!("{lhs:<width$}  {rhs}"),
+            None => line.to_string(),
+        })
+        .collect()
+}
+
+/// Splits the section under `heading` into several sections, one per entry
+/// of `groups` (entries are matched by `key`; `is_start` marks the first
+/// line of an entry, the rest are wrapped continuation lines). Entries not
+/// in any group stay under the original heading, and entries whose key is
+/// in `hide` are dropped. Empty sections are omitted.
+fn regroup_section(
+    text: &str,
+    heading: &str,
+    is_start: impl Fn(&str) -> bool,
+    key: impl Fn(&str) -> String,
+    groups: &[(&str, &[&str])],
+    hide: &[&str],
+    align: bool,
+    rest_at: usize,
+) -> String {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let Some(start) = lines.iter().position(|l| strip_ansi(l) == heading) else {
+        return text.to_string();
+    };
+    let end = lines[start + 1..]
+        .iter()
+        .position(|l| l.trim().is_empty())
+        .map_or(lines.len(), |i| start + 1 + i);
+
+    // The ungrouped entries go at `rest_at` among the groups.
+    let mut sections: Vec<(&str, Vec<&str>)> =
+        groups.iter().map(|(h, _)| (*h, Vec::new())).collect();
+    sections.insert(rest_at, (heading, Vec::new()));
+    let mut target: Option<usize> = None;
+    for line in &lines[start + 1..end] {
+        let plain = strip_ansi(line);
+        if is_start(&plain) {
+            let k = key(&plain);
+            target = if hide.contains(&k.as_str()) {
+                None
+            } else {
+                Some(
+                    groups
+                        .iter()
+                        .position(|(_, keys)| keys.contains(&k.as_str()))
+                        .map_or(rest_at, |i| if i < rest_at { i } else { i + 1 }),
+                )
+            };
+        }
+        if let Some(t) = target {
+            sections[t].1.push(line);
+        }
+    }
+
+    let body: Vec<String> = sections
+        .into_iter()
+        .filter(|(_, items)| !items.is_empty())
+        .map(|(h, items)| {
+            let items = if align {
+                realign(&items)
+            } else {
+                items.iter().map(|l| l.to_string()).collect()
+            };
+            format!("{}\n{}", styled_heading(h), items.join("\n"))
+        })
+        .collect();
+    let mut out: Vec<String> = lines[..start].iter().map(|l| l.to_string()).collect();
+    out.push(body.join("\n\n"));
+    out.extend(lines[end..].iter().map(|l| l.to_string()));
+    out.join("\n")
+}
+
+fn option_key(plain: &str) -> String {
+    plain
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .find_map(|t| t.strip_prefix("--"))
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn finalize_help(cmd: &mut clap::Command, is_root: bool) {
     let taken = std::mem::replace(cmd, clap::Command::new(""));
     let template = build_help_template(&taken);
     let mut taken = taken.help_template(template);
@@ -327,10 +494,39 @@ fn finalize_help(cmd: &mut clap::Command) {
         // applies since --help now renders identically to -h.
         .replace("Print help (see more with '--help')", "Print help");
     let rendered = lowercase_usage(&rendered);
+    let rendered = regroup_section(
+        &rendered,
+        "OPTIONS",
+        |l| l.trim_start().starts_with('-'),
+        option_key,
+        if is_root {
+            ROOT_OPTION_GROUPS
+        } else {
+            OPTION_GROUPS
+        },
+        &[],
+        true,
+        1,
+    );
+    let rendered = if is_root {
+        // `help` is redundant with `-h` and clutters the list.
+        regroup_section(
+            &rendered,
+            "COMMANDS",
+            |l| l.starts_with("  ") && !l.starts_with("   "),
+            |l| l.split_whitespace().next().unwrap_or_default().to_string(),
+            COMMAND_GROUPS,
+            &["help"],
+            false,
+            0,
+        )
+    } else {
+        rendered
+    };
     taken = taken.override_help(rendered);
 
     for sub in taken.get_subcommands_mut() {
-        finalize_help(sub);
+        finalize_help(sub, false);
     }
     *cmd = taken;
 }

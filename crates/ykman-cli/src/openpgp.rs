@@ -136,8 +136,8 @@ pub enum OpenpgpKeysAction {
         key: CliKeyRef,
         /// Output file
         output: String,
-        /// Output format
-        #[arg(short = 'F', long, default_value = "pem")]
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
         /// PIN for attestation
         #[arg(short = 'P', long)]
@@ -153,8 +153,8 @@ pub enum OpenpgpCertAction {
         key: CliKeyRef,
         /// Output file
         output: String,
-        /// Output format
-        #[arg(short = 'F', long, default_value = "pem")]
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
     /// Import certificate

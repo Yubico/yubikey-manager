@@ -104,10 +104,10 @@ pub enum PivAccessAction {
         pin_retries: u8,
         /// PUK retry count
         puk_retries: u8,
-        /// Current management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Current management key (hex)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// Confirm changing retry counters without prompting
@@ -116,10 +116,10 @@ pub enum PivAccessAction {
     },
     /// Change the management key
     ChangeManagementKey {
-        /// Current management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Current management key (hex)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// New management key (hex, 16, 24, or 32 bytes)
+        /// New management key (hex)
         #[arg(short = 'n', long)]
         new_management_key: Option<String>,
         /// Algorithm for the new management key
@@ -157,14 +157,14 @@ pub enum PivKeysAction {
         /// Touch policy for the generated key
         #[arg(long, default_value = "default")]
         touch_policy: CliTouchPolicy,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
-        /// Output format
-        #[arg(short = 'F', long, default_value = "pem")]
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
     /// Import a private key
@@ -179,10 +179,10 @@ pub enum PivKeysAction {
         /// Touch policy for the imported key
         #[arg(long, default_value = "default")]
         touch_policy: CliTouchPolicy,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// Password for decrypting password-protected key files
@@ -200,8 +200,8 @@ pub enum PivKeysAction {
         slot: String,
         /// Output certificate file
         output: String,
-        /// Output format
-        #[arg(short = 'F', long, default_value = "pem")]
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
     /// Export public key
@@ -210,8 +210,8 @@ pub enum PivKeysAction {
         slot: String,
         /// Output file
         output: String,
-        /// Output format
-        #[arg(short = 'F', long, default_value = "pem")]
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
         /// Verify public key against slot certificate
         #[arg(short = 'v', long)]
@@ -226,10 +226,10 @@ pub enum PivKeysAction {
         source: String,
         /// Destination slot
         dest: String,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -237,10 +237,10 @@ pub enum PivKeysAction {
     Delete {
         /// PIV slot
         slot: String,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -254,8 +254,8 @@ pub enum PivCertAction {
         slot: String,
         /// Output file
         output: String,
-        /// Output format
-        #[arg(short = 'F', long, default_value = "pem")]
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
     /// Import certificate to slot
@@ -264,10 +264,10 @@ pub enum PivCertAction {
         slot: String,
         /// Certificate file
         cert_file: String,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// Compress certificate before importing
@@ -287,10 +287,10 @@ pub enum PivCertAction {
     Delete {
         /// PIV slot
         slot: String,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// Don't update CHUID after deleting certificate
@@ -313,10 +313,10 @@ pub enum PivCertAction {
         /// Hash algorithm
         #[arg(short = 'a', long, default_value = "sha256")]
         hash_algorithm: CliHashAlgorithm,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// Don't update CHUID after generating certificate
@@ -362,10 +362,10 @@ pub enum PivObjectAction {
         object: String,
         /// Data file
         data: String,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -373,10 +373,10 @@ pub enum PivObjectAction {
     Generate {
         /// Object type: CHUID or CCC
         object: String,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },

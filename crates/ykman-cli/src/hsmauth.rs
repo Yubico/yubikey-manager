@@ -38,7 +38,7 @@ pub enum HsmauthCredAction {
         /// Credential label
         label: String,
         /// Password to protect the credential
-        #[arg(short = 'c', long)]
+        #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
         #[arg(short = 'm', long)]
@@ -61,7 +61,7 @@ pub enum HsmauthCredAction {
         #[arg(short = 'g', long)]
         generate: bool,
         /// Password to protect the credential
-        #[arg(short = 'c', long)]
+        #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
         #[arg(short = 'm', long)]
@@ -77,7 +77,7 @@ pub enum HsmauthCredAction {
         /// Derivation password
         derivation_password: String,
         /// Password to protect the credential
-        #[arg(short = 'c', long)]
+        #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
         #[arg(short = 'm', long)]
@@ -102,7 +102,7 @@ pub enum HsmauthCredAction {
         /// Credential label
         label: String,
         /// Current credential password
-        #[arg(short = 'c', long)]
+        #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// New credential password
         #[arg(short = 'n', long)]
@@ -119,7 +119,7 @@ pub enum HsmauthCredAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Password to protect credential
-        #[arg(short = 'c', long)]
+        #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
         #[arg(short = 'm', long)]
@@ -134,8 +134,8 @@ pub enum HsmauthCredAction {
         label: String,
         /// Output file (- for stdout)
         output: String,
-        /// Output format
-        #[arg(short = 'F', long, default_value = "pem")]
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
 }
