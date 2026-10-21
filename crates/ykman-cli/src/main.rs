@@ -50,7 +50,8 @@ use scp::{ScpInputs, ScpParams};
       \n  $ ykman --device 123456 info\
       \n\
       \nLearn more:\
-      \n  https://docs.yubico.com/software/yubikey/tools/ykman/"
+      \n  Use `ykman <command> <subcommand> --help` for more information about a command.\
+      \n  Read the manual at https://docs.yubico.com/ykman/"
 )]
 struct Cli {
     /// Use the YubiKey with this serial number
