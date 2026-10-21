@@ -50,3 +50,23 @@ def test_scp_apdus(config, size, ccid_connection, scp_params, version):
         # ECHO command
         resp = protocol.send_apdu(0, 1, 0, 0, payload)
         assert resp == payload
+
+
+@pytest.mark.parametrize("native", (False, True), ids=("wrapped", "native"))
+def test_invalid_scp_params_preserve_native_connection(
+    scp_session_constructor, invalid_scp_params, ccid_connection, scp_params, native
+):
+    connection = ccid_connection._native if native else ccid_connection
+    payload = b"connection still usable"
+    with SmartCardProtocol(connection) as protocol:
+        protocol.select(AID.MANAGEMENT)
+        assert protocol.send_apdu(0, 1, 0, 0, payload) == payload
+
+    with pytest.raises(ValueError):
+        scp_session_constructor(connection, scp_key_params=invalid_scp_params)
+
+    with SmartCardProtocol(connection) as protocol:
+        # No SELECT: failed validation must not reset the selected application.
+        assert protocol.send_apdu(0, 1, 0, 0, payload) == payload
+        protocol.init_scp(scp_params)
+        assert protocol.send_apdu(0, 1, 0, 0, payload) == payload

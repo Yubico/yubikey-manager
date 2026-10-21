@@ -248,10 +248,12 @@ impl PyCtap2SessionCcid {
         connection: &Bound<'_, PyAny>,
         scp_key_params: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
+        let scp_params = scp_key_params
+            .map(crate::py_bridge::scp_key_params_from_py)
+            .transpose()?;
         let py_connection: Py<PyAny> = connection.clone().unbind();
         let conn = extract_smartcard_connection(connection)?;
-        let ctap = if let Some(params) = scp_key_params {
-            let scp_params = crate::py_bridge::scp_key_params_from_py(params)?;
+        let ctap = if let Some(scp_params) = scp_params {
             CtapSession::new_with_scp(conn, &scp_params).map_err(|(e, conn)| {
                 let _ = restore_smartcard_connection(connection, conn);
                 ctap_err(e)

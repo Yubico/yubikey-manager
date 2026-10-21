@@ -198,6 +198,9 @@ impl SmartCardConnection for PythonSmartCardConnection {
 ///
 /// **Slow path**: wrap the Python object in a `PythonSmartCardConnection`
 /// bridge that calls `send_and_receive()` via the GIL.
+///
+/// Validate other fallible inputs before calling: the native fast path
+/// transfers ownership out of the Python connection.
 pub fn extract_smartcard_connection(obj: &Bound<'_, PyAny>) -> PyResult<BoxedSmartCardConnection> {
     // Fast path: direct PyO3 PcscConnection pyclass
     if let Ok(pcsc) = obj.cast::<PcscConnection>() {
