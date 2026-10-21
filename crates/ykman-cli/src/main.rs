@@ -478,9 +478,7 @@ fn finalize_help(cmd: &mut clap::Command, is_root: bool) {
         OPTION_GROUPS,
         &[],
         true,
-        // The root's own options are only general flags, so they go last;
-        // elsewhere a command's own options come before the shared group.
-        if is_root { OPTION_GROUPS.len() } else { 0 },
+        OPTION_GROUPS.len(),
     );
     let rendered = if is_root {
         // `help` is redundant with `-h` and clutters the list.
