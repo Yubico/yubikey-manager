@@ -51,7 +51,7 @@ use scp::{ScpInputs, ScpParams};
       \n\
       \nLearn more:\
       \n  Run `ykman <command> --help` for details about a command.\
-      \n  Read the manual at https://docs.yubico.com/ykman/"
+      \n  Read the manual at https://docs.yubico.com/ykman"
 )]
 struct Cli {
     /// Use the YubiKey with this serial number
