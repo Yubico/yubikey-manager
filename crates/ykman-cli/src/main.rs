@@ -43,14 +43,14 @@ use scp::{ScpInputs, ScpParams};
     about = "Configure your YubiKey via the command line.",
     version,
     after_help = "Examples:\n\
-      \n  List connected YubiKeys, only output serial number:\
+      \n  List only the serial numbers:\
       \n  $ ykman list --serials\
       \n\
-      \n  Show information about YubiKey with serial number 123456:\
+      \n  Show info for the YubiKey with serial 123456:\
       \n  $ ykman --device 123456 info\
       \n\
       \nLearn more:\
-      \n  Use `ykman <command> <subcommand> --help` for more information about a command.\
+      \n  Run `ykman <command> --help` for details about a command.\
       \n  Read the manual at https://docs.yubico.com/ykman/"
 )]
 struct Cli {
