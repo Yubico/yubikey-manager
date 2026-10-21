@@ -15,37 +15,54 @@ name = "ykman"
 path = "src/lib.rs"
 
 [features]
-default = ["hardware"]
+default = ["hardware", "full"]
 hardware = ["yubikit/pcsc", "yubikit/hid"]
+full = [
+    "dep:chrono",
+    "dep:clap",
+    "dep:ctrlc",
+    "dep:dirs",
+    "dep:fernet",
+    "dep:keyring-core",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:dbus-secret-service-keyring-store",
+    "dep:apple-native-keyring-store",
+    "dep:windows-native-keyring-store",
+    "dep:windows-sys",
+]
+# this feature exists only as an explicit name for
+# consumers that want only PIV functions, for example, ykcs11.
+piv = []
 
 [dependencies]
 yubikit.workspace = true
-chrono.workspace = true
+chrono = { workspace = true, optional = true }
 getrandom.workspace = true
-clap.workspace = true
-ctrlc.workspace = true
+clap = { workspace = true, optional = true }
+ctrlc = { workspace = true, optional = true }
 hex.workspace = true
 log = { workspace = true, features = ["std"] }
 sha2.workspace = true
-serde.workspace = true
-serde_json = { workspace = true, features = ["preserve_order", "raw_value"] }
-dirs.workspace = true
-fernet.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, features = ["preserve_order", "raw_value"], optional = true }
+dirs = { workspace = true, optional = true }
+fernet = { workspace = true, optional = true }
 thiserror.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring-core.workspace = true
-dbus-secret-service-keyring-store.workspace = true
+keyring-core = { workspace = true, optional = true }
+dbus-secret-service-keyring-store = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring-core.workspace = true
-apple-native-keyring-store.workspace = true
+keyring-core = { workspace = true, optional = true }
+apple-native-keyring-store = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring-core.workspace = true
-windows-native-keyring-store.workspace = true
-windows-sys = { workspace = true, features = [
+keyring-core = { workspace = true, optional = true }
+windows-native-keyring-store = { workspace = true, optional = true }
+windows-sys = { workspace = true, optional = true, features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
     "Win32_Security_WinTrust",
@@ -56,7 +73,7 @@ windows-sys = { workspace = true, features = [
 ] }
 
 [target.'cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))'.dependencies]
-keyring-core = { workspace = true, features = ["sample"] }
+keyring-core = { workspace = true, optional = true, features = ["sample"] }
 
 [dev-dependencies]
 base64.workspace = true

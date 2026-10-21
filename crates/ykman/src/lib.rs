@@ -1,8 +1,15 @@
+#[cfg(feature = "full")]
 pub mod appdata;
+#[cfg(feature = "full")]
 pub mod cancel;
+#[cfg(feature = "full")]
 pub mod device;
+#[cfg(feature = "full")]
 pub mod diagnostics;
+#[cfg(feature = "full")]
 pub mod keyboard;
+#[cfg(feature = "full")]
 pub mod logging;
 pub mod piv;
+#[cfg(feature = "full")]
 pub mod rpc;
