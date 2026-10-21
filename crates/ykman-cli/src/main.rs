@@ -310,10 +310,16 @@ fn lowercase_usage(text: &str) -> String {
 /// Option groups for the (mostly global) options, shown as their own help
 /// sections; anything not listed stays under "OPTIONS".
 const OPTION_GROUPS: &[(&str, &[&str])] = &[
-    ("DEVICE OPTIONS", &["device"]),
     (
-        "SECURE CHANNEL OPTIONS",
-        &["scp", "scp-ca", "scp-sd", "scp-oce", "scp-password"],
+        "DEVICE OPTIONS",
+        &[
+            "device",
+            "scp",
+            "scp-ca",
+            "scp-sd",
+            "scp-oce",
+            "scp-password",
+        ],
     ),
     (
         "OUTPUT OPTIONS",
@@ -322,14 +328,13 @@ const OPTION_GROUPS: &[(&str, &[&str])] = &[
 ];
 
 /// Same as [`OPTION_GROUPS`] for the root command, where the only ungrouped
-/// options are `-h`/`-V`; these and the device/output options are folded into
-/// a single "OPTIONS" section.
+/// options are `-h`/`-V`; these and the output options are folded into a single
+/// "OPTIONS" section.
 const ROOT_OPTION_GROUPS: &[(&str, &[&str])] = &[
-    OPTION_GROUPS[1],
+    OPTION_GROUPS[0],
     (
         "OPTIONS",
         &[
-            "device",
             "color",
             "no-color",
             "log-level",
