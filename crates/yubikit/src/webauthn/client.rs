@@ -718,7 +718,9 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         }
 
         let hmac_state = ctx.hmac_secret_state;
-        Ok((extensions::build_extensions_cbor(entries), hmac_state))
+        let inputs = extensions::build_extensions_cbor(entries)
+            .map_err(ClientError::ConfigurationUnsupported)?;
+        Ok((inputs, hmac_state))
     }
 
     /// Build CTAP2 extension CBOR from authentication processors.
@@ -744,7 +746,9 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
         }
 
         let hmac_state = ctx.hmac_secret_state;
-        Ok((extensions::build_extensions_cbor(entries), hmac_state))
+        let inputs = extensions::build_extensions_cbor(entries)
+            .map_err(ClientError::ConfigurationUnsupported)?;
+        Ok((inputs, hmac_state))
     }
 
     /// Parse extension outputs from a makeCredential response.
@@ -1200,6 +1204,162 @@ fn extract_credential_id(auth_data: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::Version;
+    use crate::ctap::CtapSession;
+    use crate::fido::{CtapHidCapability, FidoConnection, FidoError};
+
+    struct InfoOnlyConnection;
+
+    impl Connection for InfoOnlyConnection {
+        type Error = FidoError;
+
+        fn close(&mut self) {}
+    }
+
+    impl FidoConnection for InfoOnlyConnection {
+        fn call(
+            &mut self,
+            cmd: u8,
+            data: &[u8],
+            _on_keepalive: Option<&mut dyn FnMut(u8)>,
+            _cancel: Option<&dyn Fn() -> bool>,
+        ) -> Result<Vec<u8>, FidoError> {
+            assert_eq!(cmd, 0x10);
+            assert_eq!(data, &[0x04], "Unexpected authenticator command");
+            let info = cbor::Value::Map(vec![(
+                cbor::Value::Int(2),
+                cbor::Value::Array(vec![cbor::Value::Text("credProtect".into())]),
+            )]);
+            let mut response = vec![0];
+            response.extend_from_slice(&info.encode());
+            Ok(response)
+        }
+
+        fn device_version(&self) -> Version {
+            Version(5, 7, 2)
+        }
+
+        fn capabilities(&self) -> CtapHidCapability {
+            CtapHidCapability::from_raw(CtapHidCapability::CBOR)
+        }
+    }
+
+    struct NoInteraction;
+
+    impl UserInteraction for NoInteraction {
+        fn prompt_up(&self) {
+            panic!("Unexpected touch request");
+        }
+
+        fn request_pin(&self, _: Permissions, _: Option<&str>) -> Option<Ctap2Pin> {
+            panic!("Unexpected PIN request");
+        }
+
+        fn request_uv(&self, _: Permissions, _: Option<&str>) -> bool {
+            panic!("Unexpected UV request");
+        }
+    }
+
+    struct ExtraCredProtect;
+
+    impl extensions::Ctap2Extension for ExtraCredProtect {
+        fn make_credential(
+            &self,
+            _: &crate::ctap2::Info,
+            _: &PublicKeyCredentialCreationOptions,
+        ) -> Result<Option<Box<dyn extensions::RegistrationProcessor>>, String> {
+            Ok(Some(Box::new(Self)))
+        }
+
+        fn get_assertion(
+            &self,
+            _: &crate::ctap2::Info,
+            _: &PublicKeyCredentialRequestOptions,
+        ) -> Result<Option<Box<dyn extensions::AuthenticationProcessor>>, String> {
+            Ok(Some(Box::new(Self)))
+        }
+    }
+
+    impl extensions::RegistrationProcessor for ExtraCredProtect {
+        fn prepare_inputs(
+            &self,
+            _: &mut extensions::ExtensionContext,
+        ) -> Result<Vec<(String, cbor::Value)>, String> {
+            Ok(vec![("credProtect".into(), cbor::Value::Int(1))])
+        }
+
+        fn prepare_outputs(
+            &self,
+            _: &extensions::OutputContext<'_>,
+            _: &mut extensions::RegistrationExtensionOutputs,
+        ) {
+        }
+    }
+
+    impl extensions::AuthenticationProcessor for ExtraCredProtect {
+        fn prepare_inputs(
+            &self,
+            _: Option<&[u8]>,
+            _: &mut extensions::ExtensionContext,
+        ) -> Result<Vec<(String, cbor::Value)>, String> {
+            Ok(vec![("credProtect".into(), cbor::Value::Int(1))])
+        }
+
+        fn prepare_outputs(
+            &self,
+            _: &extensions::OutputContext<'_>,
+            _: &mut extensions::AuthenticationExtensionOutputs,
+        ) {
+        }
+    }
+
+    #[test]
+    fn test_extension_collisions_block_registration_and_authentication() {
+        let session = CtapSession::new_fido(InfoOnlyConnection)
+            .map_err(|(e, _)| e)
+            .unwrap();
+        let session = Ctap2Session::new(session).map_err(|(e, _)| e).unwrap();
+        let mut client = WebAuthnClient::with_extensions(
+            session,
+            NoInteraction,
+            DefaultClientDataCollector::new("https://example.com"),
+            vec![
+                Box::new(extensions::cred_protect::CredProtectExtension),
+                Box::new(ExtraCredProtect),
+            ],
+        );
+        let options = PublicKeyCredentialCreationOptions::from_json(
+            r#"{
+                "rp": {"id": "example.com", "name": "Example"},
+                "user": {"id": "AQ", "name": "user", "displayName": "User"},
+                "challenge": "AQ",
+                "pubKeyCredParams": [{"type": "public-key", "alg": -7}],
+                "authenticatorSelection": {"userVerification": "discouraged"},
+                "extensions": {
+                    "credentialProtectionPolicy": "userVerificationRequired",
+                    "enforceCredentialProtectionPolicy": true
+                }
+            }"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            client.make_credential(&options, None),
+            Err(ClientError::ConfigurationUnsupported(message))
+                if message == "Duplicate extension input: credProtect"
+        ));
+
+        client.extensions = vec![Box::new(ExtraCredProtect), Box::new(ExtraCredProtect)];
+        let options = PublicKeyCredentialRequestOptions::from_json(
+            r#"{"challenge": "AQ", "rpId": "example.com", "userVerification": "discouraged"}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            client.get_assertion(&options, None),
+            Err(ClientError::ConfigurationUnsupported(message))
+                if message == "Duplicate extension input: credProtect"
+        ));
+        client.with_session(|session| session.get_info()).unwrap();
+    }
 
     #[test]
     fn test_extract_credential_id() {

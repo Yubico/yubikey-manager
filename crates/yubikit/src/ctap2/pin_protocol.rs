@@ -59,12 +59,21 @@ impl PinProtocol {
     ///
     /// Returns `(platform_cose_key, shared_secret)`. The platform COSE key
     /// is sent to the authenticator; the shared secret is used locally for
-    /// encrypt/decrypt/authenticate.
+    /// encrypt/decrypt/authenticate. The peer must declare integer COSE labels
+    /// `kty=2`, `alg=-25`, and `crv=1` for the CTAP P-256 key agreement profile.
     pub(crate) fn encapsulate(
         &self,
         peer_cose_key: &CoseKey,
     ) -> Result<(CoseKey, Zeroizing<Vec<u8>>), String> {
         let peer_map = peer_cose_key.as_map().ok_or("peer key is not a CBOR map")?;
+
+        for (label, expected, name) in [(1, 2, "kty"), (3, -25, "alg"), (-1, 1, "crv")] {
+            if peer_cose_key.map_get_int(label).and_then(Value::as_int) != Some(expected) {
+                return Err(format!(
+                    "invalid peer key {name}: expected integer {expected}"
+                ));
+            }
+        }
 
         let x = map_get_bytes(peer_map, -2).ok_or("missing x coordinate (-2)")?;
         let y = map_get_bytes(peer_map, -3).ok_or("missing y coordinate (-3)")?;
@@ -232,6 +241,68 @@ fn map_get_bytes(map: &[(Value, Value)], key: i64) -> Option<&[u8]> {
 mod tests {
     use super::*;
     use sha2::{Digest, Sha256};
+
+    fn peer_key() -> CoseKey {
+        let key = SecretKey::random(&mut OsRng).public_key();
+        let point = key.to_encoded_point(false);
+        Value::Map(vec![
+            (Value::Int(1), Value::Int(2)),
+            (Value::Int(3), Value::Int(-25)),
+            (Value::Int(-1), Value::Int(1)),
+            (Value::Int(-2), Value::Bytes(point.x().unwrap().to_vec())),
+            (Value::Int(-3), Value::Bytes(point.y().unwrap().to_vec())),
+        ])
+    }
+
+    #[test]
+    fn test_encapsulate_requires_integer_peer_profile_labels() {
+        let key = peer_key();
+        for protocol in [PinProtocol::V1, PinProtocol::V2] {
+            for label in [1, 3, -1] {
+                for replacement in [
+                    None,
+                    Some(Value::Int(0)),
+                    Some(Value::Bool(true)),
+                    Some(Value::Text("1".into())),
+                    Some(Value::Bytes(vec![1])),
+                ] {
+                    let mut entries = key.as_map().unwrap().to_vec();
+                    entries.retain(|(k, _)| k != &Value::Int(label));
+                    if let Some(value) = replacement {
+                        entries.push((Value::Int(label), value));
+                    }
+                    assert!(
+                        protocol.encapsulate(&Value::Map(entries)).is_err(),
+                        "{protocol:?} accepted invalid label {label}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_encapsulate_accepts_profile_and_validates_coordinates() {
+        let key = peer_key();
+        for protocol in [PinProtocol::V1, PinProtocol::V2] {
+            let (platform, secret) = protocol.encapsulate(&key).unwrap();
+            assert_eq!(platform.map_get_int(1).and_then(Value::as_int), Some(2));
+            assert_eq!(platform.map_get_int(3).and_then(Value::as_int), Some(-25));
+            assert_eq!(platform.map_get_int(-1).and_then(Value::as_int), Some(1));
+            assert_eq!(
+                secret.len(),
+                if protocol == PinProtocol::V1 { 32 } else { 64 }
+            );
+
+            for coordinate in [-2, -3] {
+                for value in [Value::Bytes(vec![0; 31]), Value::Bytes(vec![0; 32])] {
+                    let mut entries = key.as_map().unwrap().to_vec();
+                    entries.retain(|(k, _)| k != &Value::Int(coordinate));
+                    entries.push((Value::Int(coordinate), value));
+                    assert!(protocol.encapsulate(&Value::Map(entries)).is_err());
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_pin_protocol_v1_encrypt_decrypt() {

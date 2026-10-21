@@ -26,6 +26,8 @@
 //! for a given ceremony, which handles building authenticator inputs and parsing
 //! outputs.
 
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::cbor::{self, Value};
@@ -117,6 +119,8 @@ pub trait Ctap2Extension {
 }
 
 /// Per-request registration extension processing.
+///
+/// Duplicate input identifiers, including those from other processors, are rejected.
 pub trait RegistrationProcessor {
     /// Additional PIN/UV token permissions required by this extension.
     fn permissions(&self) -> Permissions {
@@ -133,6 +137,8 @@ pub trait RegistrationProcessor {
 }
 
 /// Per-request authentication extension processing.
+///
+/// Duplicate input identifiers, including those from other processors, are rejected.
 pub trait AuthenticationProcessor {
     /// Additional PIN/UV token permissions required by this extension.
     fn permissions(&self) -> Permissions {
@@ -358,16 +364,24 @@ fn cbor_item_length(data: &[u8]) -> Option<usize> {
 // CBOR input builder
 // ---------------------------------------------------------------------------
 
-/// Build a CBOR `Value::Map` from extension entries for the CTAP2 extensions parameter.
-pub(crate) fn build_extensions_cbor(entries: Vec<(String, Value)>) -> Option<Value> {
+/// Build the CTAP2 extensions map, rejecting duplicate input identifiers.
+pub(crate) fn build_extensions_cbor(
+    entries: Vec<(String, Value)>,
+) -> Result<Option<Value>, String> {
     if entries.is_empty() {
-        return None;
+        return Ok(None);
+    }
+    let mut names = BTreeSet::new();
+    for (name, _) in &entries {
+        if !names.insert(name) {
+            return Err(format!("Duplicate extension input: {name}"));
+        }
     }
     let map: Vec<(Value, Value)> = entries
         .into_iter()
         .map(|(k, v)| (Value::Text(k), v))
         .collect();
-    Some(Value::Map(map))
+    Ok(Some(Value::Map(map)))
 }
 
 // ---------------------------------------------------------------------------
@@ -407,14 +421,28 @@ mod tests {
             ("credProtect".into(), Value::Int(3)),
             ("minPinLength".into(), Value::Bool(true)),
         ];
-        let cbor = build_extensions_cbor(entries).unwrap();
+        let cbor = build_extensions_cbor(entries).unwrap().unwrap();
         let map = cbor.as_map().unwrap();
         assert_eq!(map.len(), 2);
     }
 
     #[test]
     fn test_build_extensions_cbor_empty() {
-        assert!(build_extensions_cbor(vec![]).is_none());
+        assert!(build_extensions_cbor(vec![]).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_build_extensions_cbor_rejects_duplicates() {
+        for policies in [[3, 1], [1, 3], [3, 3]] {
+            let entries = policies
+                .into_iter()
+                .map(|policy| ("credProtect".into(), Value::Int(policy)))
+                .collect();
+            assert_eq!(
+                build_extensions_cbor(entries).unwrap_err(),
+                "Duplicate extension input: credProtect"
+            );
+        }
     }
 
     #[test]

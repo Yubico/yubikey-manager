@@ -178,7 +178,12 @@ fn cbor_value_to_py(py: Python<'_>, value: &cbor::Value) -> PyResult<Py<PyAny>> 
         cbor::Value::Map(entries) => {
             let dict = PyDict::new(py);
             for (k, v) in entries {
-                dict.set_item(cbor_value_to_py(py, k)?, cbor_value_to_py(py, v)?)?;
+                let key = cbor_value_to_py(py, k)?;
+                // CBOR distinguishes integer and boolean keys; Python dictionaries do not.
+                if dict.contains(key.bind(py))? {
+                    return Err(PyValueError::new_err("CBOR map keys collide in Python"));
+                }
+                dict.set_item(key, cbor_value_to_py(py, v)?)?;
             }
             Ok(dict.into())
         }

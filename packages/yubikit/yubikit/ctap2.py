@@ -115,6 +115,7 @@ class Ctap2Session(Session):
         return self._version
 
     def get_info(self) -> dict[str, Any]:
+        """Get authenticator information, rejecting CBOR keys that collide in Python."""
         return self._native.get_info()
 
     def selection(
