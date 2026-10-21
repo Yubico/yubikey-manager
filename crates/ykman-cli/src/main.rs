@@ -47,7 +47,10 @@ use scp::{ScpInputs, ScpParams};
       \n  $ ykman list --serials\
       \n\
       \n  Show information about YubiKey with serial number 123456:\
-      \n  $ ykman --device 123456 info"
+      \n  $ ykman --device 123456 info\
+      \n\
+      \nLearn more:\
+      \n  https://docs.yubico.com/software/yubikey/tools/ykman/"
 )]
 struct Cli {
     /// Use the YubiKey with this serial number
@@ -464,6 +467,10 @@ fn finalize_help(cmd: &mut clap::Command, is_root: bool) {
         .replace(
             "Examples:\n\n",
             &format!("{}\n", styled_heading("EXAMPLES")),
+        )
+        .replace(
+            "Learn more:\n",
+            &format!("{}\n", styled_heading("LEARN MORE")),
         )
         // We always bake the compact/short-form help (see comment above), so
         // the built-in help text's own "--help shows more" hint no longer
