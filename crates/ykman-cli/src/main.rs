@@ -75,15 +75,15 @@ struct Cli {
     scp_password: Option<String>,
 
     /// Show diagnostic information
-    #[arg(long)]
+    #[arg(long, hide = true)]
     diagnose: bool,
 
     /// Show third-party licenses
-    #[arg(long)]
+    #[arg(long, hide = true)]
     licenses: bool,
 
     /// Generate completion (bash, zsh, fish, ...)
-    #[arg(long, value_name = "SHELL", hide_possible_values = true)]
+    #[arg(long, value_name = "SHELL", hide = true)]
     completion: Option<Shell>,
 
     /// Log level: error, warning, info, debug, traffic
@@ -310,11 +310,6 @@ fn lowercase_usage(text: &str) -> String {
 /// Option groups for the (mostly global) options, shown as their own help
 /// sections; anything not listed stays under "OPTIONS".
 const OPTION_GROUPS: &[(&str, &[&str])] = &[
-    // Flags that run an action and exit rather than modify other commands.
-    (
-        "ADDITIONAL COMMANDS",
-        &["diagnose", "licenses", "completion"],
-    ),
     ("DEVICE OPTIONS", &["device"]),
     (
         "SECURE CHANNEL OPTIONS",
@@ -330,8 +325,7 @@ const OPTION_GROUPS: &[(&str, &[&str])] = &[
 /// options are `-h`/`-V`; these and the device/output options are folded into
 /// a single "OPTIONS" section.
 const ROOT_OPTION_GROUPS: &[(&str, &[&str])] = &[
-    OPTION_GROUPS[0],
-    OPTION_GROUPS[2],
+    OPTION_GROUPS[1],
     (
         "OPTIONS",
         &[
@@ -353,7 +347,10 @@ const COMMAND_GROUPS: &[(&str, &[&str])] = &[
         "APPLICATION COMMANDS",
         &["oath", "otp", "piv", "fido", "openpgp", "hsmauth", "sd"],
     ),
-    ("ADVANCED COMMANDS", &["apdu"]),
+    (
+        "ADDITIONAL COMMANDS",
+        &["apdu", "diagnose", "licenses", "completion"],
+    ),
 ];
 
 /// Re-pads the description column of option lines so each section is aligned
@@ -506,7 +503,7 @@ fn finalize_help(cmd: &mut clap::Command, is_root: bool) {
         },
         &[],
         true,
-        1,
+        0,
     );
     let rendered = if is_root {
         // `help` is redundant with `-h` and clutters the list.
@@ -689,6 +686,15 @@ enum Commands {
         #[command(flatten)]
         args: apdu::ApduArgs,
     },
+    /// Show diagnostic information
+    Diagnose,
+    /// Show third-party licenses
+    Licenses,
+    /// Generate shell completion
+    Completion {
+        /// Shell to generate completion for
+        shell: Shell,
+    },
 }
 
 fn run() -> Result<()> {
@@ -698,19 +704,28 @@ fn run() -> Result<()> {
     color::init(cli.no_color, cli.color);
     init_logging(&cli)?;
 
-    if cli.diagnose {
-        diagnose::run_diagnose()?;
-        return Ok(());
-    }
-
-    if cli.licenses {
-        print_licenses();
-        return Ok(());
-    }
-
-    if let Some(shell) = cli.completion {
-        print_completion(shell);
-        return Ok(());
+    // The `--diagnose`, `--licenses` and `--completion` flags are hidden
+    // aliases of the commands with the same names.
+    let command = if cli.diagnose {
+        Some(Commands::Diagnose)
+    } else if cli.licenses {
+        Some(Commands::Licenses)
+    } else if let Some(shell) = cli.completion {
+        Some(Commands::Completion { shell })
+    } else {
+        cli.command
+    };
+    match command {
+        Some(Commands::Diagnose) => return diagnose::run_diagnose(),
+        Some(Commands::Licenses) => {
+            print_licenses();
+            return Ok(());
+        }
+        Some(Commands::Completion { shell }) => {
+            print_completion(shell);
+            return Ok(());
+        }
+        _ => {}
     }
 
     let scp_params = scp::parse_scp_params(ScpInputs {
@@ -722,7 +737,7 @@ fn run() -> Result<()> {
     })?;
     let ctx = CommandContext::new(cli.device, scp_params.clone());
 
-    let command = command_or_help(cli.command);
+    let command = command_or_help(command);
 
     run_command(command, cli.device, &ctx, &scp_params)?;
     Ok(())
@@ -735,6 +750,9 @@ fn run_command(
     scp_params: &ScpParams,
 ) -> Result<()> {
     match command {
+        Commands::Diagnose | Commands::Licenses | Commands::Completion { .. } => {
+            unreachable!("handled in run()")
+        }
         Commands::List { serials, readers } => {
             if device_filter.is_some() {
                 return Err(anyhow!("--device can't be used with 'list'."));

@@ -61,4 +61,14 @@ fn test_info_check_fips() {
 fn test_diagnose() {
     require_device_configured!();
     ykman().arg("--diagnose").assert().success();
+    ykman().arg("diagnose").assert().success();
+}
+
+#[test]
+fn test_licenses_and_completion_commands() {
+    require_device_configured!();
+    ykman().arg("licenses").assert().success();
+    ykman().args(["completion", "bash"]).assert().success();
+    ykman().arg("--licenses").assert().success();
+    ykman().args(["--completion", "bash"]).assert().success();
 }
