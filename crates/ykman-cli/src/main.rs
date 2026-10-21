@@ -101,7 +101,7 @@ struct Cli {
     log_file: Option<String>,
 
     /// Disable colour (same as --color=never)
-    #[arg(long, global = true, conflicts_with = "color")]
+    #[arg(long, global = true, conflicts_with = "color", hide = true)]
     no_color: bool,
 
     /// Colour output: always, auto, never
@@ -321,10 +321,7 @@ const OPTION_GROUPS: &[(&str, &[&str])] = &[
             "scp-password",
         ],
     ),
-    (
-        "OUTPUT OPTIONS",
-        &["color", "no-color", "log-level", "log-file"],
-    ),
+    ("OUTPUT OPTIONS", &["color", "log-level", "log-file"]),
 ];
 
 /// Same as [`OPTION_GROUPS`] for the root command, where the only ungrouped
@@ -334,14 +331,7 @@ const ROOT_OPTION_GROUPS: &[(&str, &[&str])] = &[
     OPTION_GROUPS[0],
     (
         "OPTIONS",
-        &[
-            "color",
-            "no-color",
-            "log-level",
-            "log-file",
-            "help",
-            "version",
-        ],
+        &["color", "log-level", "log-file", "help", "version"],
     ),
 ];
 
