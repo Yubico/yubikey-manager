@@ -71,4 +71,5 @@ fn test_licenses_and_completion_commands() {
     ykman().args(["completion", "bash"]).assert().success();
     ykman().arg("--licenses").assert().success();
     ykman().args(["--completion", "bash"]).assert().success();
+    ykman().arg("version").assert().success();
 }

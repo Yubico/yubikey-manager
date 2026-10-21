@@ -352,10 +352,7 @@ const COMMAND_GROUPS: &[(&str, &[&str])] = &[
         "APPLICATION COMMANDS",
         &["oath", "otp", "piv", "fido", "openpgp", "hsmauth", "sd"],
     ),
-    (
-        "ADDITIONAL COMMANDS",
-        &["apdu", "diagnose", "licenses", "completion"],
-    ),
+    ("ADDITIONAL COMMANDS", &["apdu", "diagnose", "licenses"]),
 ];
 
 /// Re-pads the description column of option lines so each section is aligned
@@ -695,7 +692,11 @@ enum Commands {
     Diagnose,
     /// Show third-party licenses
     Licenses,
+    /// Show the version
+    #[command(hide = true)]
+    Version,
     /// Generate shell completion
+    #[command(hide = true)]
     Completion {
         /// Shell to generate completion for
         shell: Shell,
@@ -722,6 +723,10 @@ fn run() -> Result<()> {
     };
     match command {
         Some(Commands::Diagnose) => return diagnose::run_diagnose(),
+        Some(Commands::Version) => {
+            print!("{}", build_cli_command().render_version());
+            return Ok(());
+        }
         Some(Commands::Licenses) => {
             print_licenses();
             return Ok(());
@@ -755,7 +760,10 @@ fn run_command(
     scp_params: &ScpParams,
 ) -> Result<()> {
     match command {
-        Commands::Diagnose | Commands::Licenses | Commands::Completion { .. } => {
+        Commands::Diagnose
+        | Commands::Licenses
+        | Commands::Version
+        | Commands::Completion { .. } => {
             unreachable!("handled in run()")
         }
         Commands::List { serials, readers } => {
