@@ -17,6 +17,7 @@
 //!
 //! Supported types: unsigned/negative integers, byte strings, text strings,
 //! arrays, maps, and booleans. Maps are encoded using CTAP2 canonical ordering.
+//! Decoding rejects maps with duplicate keys.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -89,6 +90,9 @@ pub enum CborError {
     /// Trailing bytes remain after decoding a complete CBOR value.
     #[error("Extraneous data after CBOR value")]
     ExtraneousData,
+    /// A map contains multiple entries with the same key.
+    #[error("Duplicate map key")]
+    DuplicateKey,
     /// An integer value exceeds the representable range.
     #[error("Integer overflow")]
     IntegerOverflow,
@@ -309,13 +313,23 @@ fn decode_from_depth(data: &[u8], depth: usize) -> Result<(Value, &[u8]), CborEr
                 entries.push((k, v));
                 remaining = r;
             }
+            // Canonical encodings also identify equivalent non-minimal encodings
+            // and map keys whose entries are in different orders.
+            let mut keys: Vec<_> = entries
+                .iter()
+                .map(|(k, _)| Zeroizing::new(k.encode()))
+                .collect();
+            keys.sort_unstable_by(|a, b| a.as_slice().cmp(b.as_slice()));
+            if keys.windows(2).any(|pair| pair[0] == pair[1]) {
+                return Err(CborError::DuplicateKey);
+            }
             Ok((Value::Map(entries), remaining))
         }
         7 => {
-            // Simple values (bool)
-            match val {
-                20 => Ok((Value::Bool(false), rest)),
-                21 => Ok((Value::Bool(true), rest)),
+            // Only the exact boolean encodings are supported, not float payloads.
+            match data[0] {
+                0xf4 => Ok((Value::Bool(false), rest)),
+                0xf5 => Ok((Value::Bool(true), rest)),
                 _ => Err(CborError::UnsupportedMajorType(7)),
             }
         }
@@ -503,6 +517,34 @@ mod tests {
     }
 
     #[test]
+    fn test_reject_float_and_extended_simple_values() {
+        for (header, width) in [(0xf8, 1), (0xf9, 2), (0xfa, 4), (0xfb, 8)] {
+            for bits in [0u64, 20, 21] {
+                let mut encoded = vec![header];
+                encoded.extend_from_slice(&bits.to_be_bytes()[8 - width..]);
+                assert!(matches!(
+                    decode(&encoded),
+                    Err(CborError::UnsupportedMajorType(7))
+                ));
+                assert!(matches!(
+                    decode_from(&encoded),
+                    Err(CborError::UnsupportedMajorType(7))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn test_decode_from_bool_preserves_remaining_bytes() {
+        for (header, value) in [(0xf4, false), (0xf5, true)] {
+            let encoded = [header, 0x01];
+            let (decoded, remaining) = decode_from(&encoded).unwrap();
+            assert_eq!(decoded, Value::Bool(value));
+            assert_eq!(remaining, &[0x01]);
+        }
+    }
+
+    #[test]
     fn test_encode_decode_bytes() {
         let data = b"hello";
         let encoded = Value::Bytes(data.to_vec()).encode();
@@ -534,6 +576,79 @@ mod tests {
         let encoded = map.encode();
         let decoded = decode(&encoded).unwrap();
         assert_eq!(decoded, map);
+    }
+
+    #[test]
+    fn test_duplicate_map_keys() {
+        for key in [
+            Value::Int(1),
+            Value::Int(-1),
+            Value::Text("key".into()),
+            Value::Bytes(vec![1, 2]),
+            Value::Bool(true),
+            Value::Array(vec![Value::Int(1)]),
+            Value::Map(vec![(Value::Int(1), Value::Int(2))]),
+        ] {
+            let map = Value::Map(vec![
+                (key.clone(), Value::Int(1)),
+                (Value::Text("other".into()), Value::Int(2)),
+                (key, Value::Int(3)),
+            ]);
+            let encoded = map.encode();
+            assert!(matches!(decode(&encoded), Err(CborError::DuplicateKey)));
+            assert!(matches!(
+                decode_from(&encoded),
+                Err(CborError::DuplicateKey)
+            ));
+        }
+    }
+
+    #[test]
+    fn test_duplicate_map_keys_non_minimal_encoding() {
+        // Both 0x01 and 0x18 0x01 decode to Int(1).
+        let encoded = [0xa2, 0x01, 0x00, 0x18, 0x01, 0x01];
+        assert!(matches!(decode(&encoded), Err(CborError::DuplicateKey)));
+    }
+
+    #[test]
+    fn test_duplicate_map_keys_different_map_order() {
+        // The two map keys have identical entries in opposite orders.
+        let encoded = [
+            0xa2, 0xa2, 0x01, 0x02, 0x03, 0x04, 0x00, 0xa2, 0x03, 0x04, 0x01, 0x02, 0x01,
+        ];
+        assert!(matches!(decode(&encoded), Err(CborError::DuplicateKey)));
+    }
+
+    #[test]
+    fn test_duplicate_map_keys_nested() {
+        let duplicate = Value::Map(vec![
+            (Value::Int(1), Value::Bool(true)),
+            (Value::Int(1), Value::Bool(false)),
+        ]);
+        for value in [
+            Value::Array(vec![duplicate.clone()]),
+            Value::Map(vec![(Value::Int(1), duplicate.clone())]),
+            Value::Map(vec![(duplicate, Value::Int(1))]),
+        ] {
+            assert!(matches!(
+                decode(&value.encode()),
+                Err(CborError::DuplicateKey)
+            ));
+        }
+    }
+
+    #[test]
+    fn test_distinct_map_keys() {
+        let map = Value::Map(vec![
+            (Value::Int(1), Value::Int(0)),
+            (Value::Int(-1), Value::Int(0)),
+            (Value::Bool(true), Value::Int(0)),
+            (Value::Bytes(b"1".to_vec()), Value::Int(0)),
+            (Value::Text("1".into()), Value::Int(0)),
+            (Value::Array(vec![Value::Int(1)]), Value::Int(0)),
+        ]);
+        let encoded = map.encode();
+        assert_eq!(decode(&encoded).unwrap().as_map().unwrap().len(), 6);
     }
 
     #[test]
