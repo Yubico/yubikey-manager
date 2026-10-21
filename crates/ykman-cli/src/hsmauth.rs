@@ -105,7 +105,7 @@ pub enum HsmauthCredAction {
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// New credential password
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PASSWORD")]
         new_credential_password: Option<String>,
     },
     /// Import an asymmetric credential
@@ -149,7 +149,7 @@ pub enum HsmauthAccessAction {
         #[arg(short = 'm', long)]
         management_password: Option<String>,
         /// New management password
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PASSWORD")]
         new_management_password: Option<String>,
         /// Generate a random management password
         #[arg(short = 'g', long)]

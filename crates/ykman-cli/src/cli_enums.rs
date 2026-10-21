@@ -32,6 +32,28 @@ pub enum CliKeyType {
     MlKem1024,
 }
 
+/// Key types of devices without slot metadata (firmware < 5.3).
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum CliLegacyKeyType {
+    Rsa1024,
+    Rsa2048,
+    #[value(alias = "ecc-p256", alias = "p256")]
+    Eccp256,
+    #[value(alias = "ecc-p384", alias = "p384")]
+    Eccp384,
+}
+
+impl From<CliLegacyKeyType> for yubikit::piv::KeyType {
+    fn from(v: CliLegacyKeyType) -> Self {
+        match v {
+            CliLegacyKeyType::Rsa1024 => Self::Rsa1024,
+            CliLegacyKeyType::Rsa2048 => Self::Rsa2048,
+            CliLegacyKeyType::Eccp256 => Self::EccP256,
+            CliLegacyKeyType::Eccp384 => Self::EccP384,
+        }
+    }
+}
+
 impl From<CliKeyType> for yubikit::piv::KeyType {
     fn from(v: CliKeyType) -> Self {
         match v {

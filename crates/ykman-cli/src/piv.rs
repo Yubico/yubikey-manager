@@ -26,8 +26,8 @@ use ykman::piv::{
 use yubikit::smartcard::{SmartCardConnection, SmartCardError, Sw};
 
 use crate::cli_enums::{
-    CliDecryptionPadding, CliFormat, CliHashAlgorithm, CliKeyType, CliMgmtKeyType, CliPinPolicy,
-    CliSignaturePadding, CliTouchPolicy,
+    CliDecryptionPadding, CliFormat, CliHashAlgorithm, CliKeyType, CliLegacyKeyType,
+    CliMgmtKeyType, CliPinPolicy, CliSignaturePadding, CliTouchPolicy,
 };
 use crate::color;
 use crate::scp::ScpParams;
@@ -124,10 +124,10 @@ pub enum PivAccessAction {
         #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
         /// New management key (hex)
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "KEY")]
         new_management_key: Option<String>,
         /// Algorithm for the new management key
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "ALGORITHM")]
         algorithm: Option<CliMgmtKeyType>,
         /// Require touch when using the new management key
         #[arg(short = 't', long)]
@@ -197,23 +197,22 @@ pub enum PivKeysAction {
     Sign {
         #[command(flatten)]
         operation: KeyOperation,
-        /// Hash for RSA/ECDSA (default: sha256); not used with Ed25519 or ML-DSA
-        #[arg(short = 'a', long)]
+        /// Hash for RSA/ECDSA (default: sha256)
+        #[arg(short = 'a', long, value_name = "HASH")]
         hash_algorithm: Option<CliHashAlgorithm>,
         /// Input is already a digest (RSA/ECDSA only)
         #[arg(long)]
         prehashed: bool,
-        /// RSA signature padding (default: pkcs1v15); PSS uses a digest-length salt
+        /// RSA padding (default: pkcs1v15; PSS salt is digest length)
         #[arg(long)]
         padding: Option<CliSignaturePadding>,
         /// ML-DSA context string (at most 255 bytes)
         #[arg(long, conflicts_with = "mu")]
         context: Option<String>,
-        /// Input is a precomputed 64-byte ML-DSA message representative (external mu)
+        /// Input is a precomputed 64-byte ML-DSA mu (external mu)
         #[arg(long, conflicts_with = "compute_mu")]
         mu: bool,
-        /// Compute the ML-DSA mu on the host and sign it as external mu, allowing
-        /// messages of any size
+        /// Compute the ML-DSA mu on the host (allows messages of any size)
         #[arg(long)]
         compute_mu: bool,
     },
@@ -224,8 +223,8 @@ pub enum PivKeysAction {
         /// RSA encryption padding
         #[arg(long, default_value = "oaep")]
         padding: CliDecryptionPadding,
-        /// OAEP hash and MGF1 hash (default: sha256); the OAEP label is empty
-        #[arg(short = 'a', long)]
+        /// OAEP and MGF1 hash (default: sha256; empty label)
+        #[arg(short = 'a', long, value_name = "HASH")]
         hash_algorithm: Option<CliHashAlgorithm>,
     },
     /// Decapsulate ML-KEM ciphertext and output the raw shared secret
@@ -303,12 +302,12 @@ pub struct KeyOperation {
     input: String,
     /// Output file, or - for binary stdout
     output: String,
-    /// PIN (prompted for only when required by the slot policy)
+    /// PIN (prompted for only if the slot policy requires it)
     #[arg(short = 'P', long)]
     pin: Option<String>,
     /// Key algorithm for devices without slot metadata
     #[arg(long)]
-    algorithm: Option<CliKeyType>,
+    algorithm: Option<CliLegacyKeyType>,
 }
 
 #[derive(Subcommand)]
@@ -373,10 +372,10 @@ pub enum PivCertAction {
         #[arg(short = 's', long)]
         subject: String,
         /// Validity period in days
-        #[arg(long, default_value_t = 365)]
+        #[arg(long, value_name = "DAYS", default_value_t = 365)]
         valid_days: u32,
         /// Hash algorithm
-        #[arg(short = 'a', long, default_value = "sha256")]
+        #[arg(short = 'a', long, value_name = "HASH", default_value = "sha256")]
         hash_algorithm: CliHashAlgorithm,
         /// Management key (hex)
         #[arg(short = 'm', long, value_name = "KEY")]
@@ -401,7 +400,7 @@ pub enum PivCertAction {
         #[arg(short = 's', long)]
         subject: String,
         /// Hash algorithm
-        #[arg(short = 'a', long, default_value = "sha256")]
+        #[arg(short = 'a', long, value_name = "HASH", default_value = "sha256")]
         hash_algorithm: CliHashAlgorithm,
         /// PIN for signing the CSR
         #[arg(short = 'P', long)]
@@ -1531,7 +1530,7 @@ enum SignRequest {
 fn operation_key_type<C: SmartCardConnection>(
     session: &mut PivSession<C>,
     slot: Slot,
-    algorithm: Option<CliKeyType>,
+    algorithm: Option<CliLegacyKeyType>,
 ) -> Result<(KeyType, PinPolicy, TouchPolicy, Option<PublicKey>)> {
     if session.version() < Version(5, 3, 0) {
         return algorithm

@@ -36,10 +36,10 @@ pub enum ConfigAction {
         #[arg(long)]
         no_touch_eject: bool,
         /// Auto-eject timeout in seconds
-        #[arg(long)]
+        #[arg(long, value_name = "SECONDS")]
         autoeject_timeout: Option<u16>,
         /// Challenge-response timeout in seconds
-        #[arg(long)]
+        #[arg(long, value_name = "SECONDS")]
         chalresp_timeout: Option<u8>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -110,10 +110,10 @@ pub enum ConfigAction {
         #[arg(long)]
         touch_eject: bool,
         /// Auto-eject timeout in seconds
-        #[arg(long)]
+        #[arg(long, value_name = "SECONDS")]
         autoeject_timeout: Option<u16>,
         /// Challenge-response timeout in seconds
-        #[arg(long)]
+        #[arg(long, value_name = "SECONDS")]
         chalresp_timeout: Option<u8>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
