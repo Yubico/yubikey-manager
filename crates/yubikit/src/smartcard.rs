@@ -646,6 +646,7 @@ pub struct SmartCardProtocol<C: SmartCardConnection> {
     max_apdu_size: usize,
     ins_send_remaining: u8,
     scp_state: Option<ScpState>,
+    scp_failed: bool,
     touch_workaround: bool,
     last_long_resp: Option<Instant>,
 }
@@ -659,6 +660,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             max_apdu_size: MaxApduSize::Neo as usize,
             ins_send_remaining: INS_SEND_REMAINING,
             scp_state: None,
+            scp_failed: false,
             touch_workaround: false,
             last_long_resp: None,
         }
@@ -720,6 +722,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         log::debug!("Selecting AID: {}", crate::logging::hex_encode(aid));
         // Reset SCP state for SELECT
         self.scp_state = None;
+        self.scp_failed = false;
 
         match self.send_apdu(0, INS_SELECT, P1_SELECT, P2_SELECT, aid) {
             Ok(resp) => Ok(resp),
@@ -769,8 +772,13 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         data: &[u8],
         le: u16,
     ) -> Result<Vec<u8>, SmartCardError> {
+        if self.scp_failed {
+            return Err(SmartCardError::InvalidState(
+                "SCP session is invalid; select an application or reinitialize SCP".into(),
+            ));
+        }
         let (resp, sw) = if self.scp_state.is_some() {
-            self.send_apdu_scp(cla, ins, p1, p2, data, le, true)?
+            self.send_apdu_scp(cla, ins, p1, p2, data, le, true, true)?
         } else {
             self.send_apdu_raw(cla, ins, p1, p2, data, le)?
         };
@@ -897,6 +905,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
     fn set_scp_state(&mut self, state: ScpState) {
         log::info!("SCP secure channel established");
         self.scp_state = Some(state);
+        self.scp_failed = false;
     }
 
     /// Check if SCP is active.
@@ -914,8 +923,15 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         data: &[u8],
         le: u16,
         encrypt: bool,
+        authenticate_response: bool,
     ) -> Result<(Vec<u8>, u16), SmartCardError> {
-        let scp = self.scp_state.as_mut().unwrap();
+        let mut scp = self
+            .scp_state
+            .take()
+            .ok_or_else(|| SmartCardError::InvalidState("SCP is not initialized".into()))?;
+        // Restore state only after the complete exchange succeeds. A failed
+        // exchange must neither reuse out-of-sync keys nor fall back to plaintext.
+        self.scp_failed = true;
         let cla = cla | 0x04;
 
         let enc_data = if encrypt {
@@ -966,18 +982,29 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         let (mut resp, sw) = self.send_apdu_raw(cla, ins, p1, p2, &full_data, le)?;
 
         // Un-MAC and decrypt response
-        let scp = self.scp_state.as_mut().unwrap();
-        if !resp.is_empty() {
+        // SCP03 6.2.5 exempts error status words, but not success or warnings,
+        // from R-MAC. Authenticate any supplied response data as well.
+        if authenticate_response
+            && (!resp.is_empty() || sw == SW_OK || matches!(sw >> 8, 0x62 | 0x63))
+        {
             resp = scp.unmac(&resp, sw)?;
             if !resp.is_empty() {
                 resp = scp.decrypt(&resp)?;
             }
+        } else if !authenticate_response && !resp.is_empty() {
+            return Err(SmartCardError::InvalidData(
+                "Unexpected data in EXTERNAL AUTHENTICATE response".into(),
+            ));
         }
 
+        self.scp_state = Some(scp);
+        self.scp_failed = false;
         Ok((resp, sw))
     }
 
-    /// Send an SCP APDU without encrypting the data (for EXTERNAL AUTHENTICATE).
+    /// Send an SCP APDU without encrypting command data.
+    /// Response authentication is still required; SCP03 initialization handles
+    /// the EXTERNAL AUTHENTICATE exception internally.
     pub fn send_apdu_scp_no_encrypt(
         &mut self,
         cla: u8,
@@ -986,7 +1013,23 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         p2: u8,
         data: &[u8],
     ) -> Result<(Vec<u8>, u16), SmartCardError> {
-        self.send_apdu_scp(cla, ins, p1, p2, data, 0, false)
+        self.send_apdu_scp(cla, ins, p1, p2, data, 0, false, true)
+    }
+
+    /// Send an unprotected handshake command while ordinary APDUs are blocked.
+    fn send_scp_setup(
+        &mut self,
+        cla: u8,
+        ins: u8,
+        p1: u8,
+        p2: u8,
+        data: &[u8],
+    ) -> Result<Vec<u8>, SmartCardError> {
+        let (resp, sw) = self.send_apdu_raw(cla, ins, p1, p2, data, 0)?;
+        if sw != SW_OK {
+            return Err(SmartCardError::Apdu { data: resp, sw });
+        }
+        Ok(resp)
     }
 
     // -------------------------------------------------------------------
@@ -995,6 +1038,8 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
     /// Perform the SCP03 handshake and establish a secure channel.
     /// Returns the static DEK if provided in key params.
+    /// Failed establishment or secure messaging blocks ordinary APDUs until
+    /// an application is selected or SCP is reinitialized.
     pub fn init_scp03(
         &mut self,
         kvn: u8,
@@ -1002,13 +1047,15 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         key_mac: &[u8],
         key_dek: Option<&[u8]>,
     ) -> Result<Option<Dek>, SmartCardError> {
+        self.scp_state = None;
+        self.scp_failed = true;
         // 1. Generate host challenge
         let mut host_challenge = [0u8; 8];
         getrandom::fill(&mut host_challenge)
             .map_err(|e| SmartCardError::InvalidState(format!("RNG error: {e}")))?;
 
         // 2. INITIALIZE UPDATE
-        let resp = self.send_apdu(0x80, 0x50, kvn, 0x00, &host_challenge)?;
+        let resp = self.send_scp_setup(0x80, 0x50, kvn, 0x00, &host_challenge)?;
         if resp.len() < 29 {
             return Err(SmartCardError::InvalidData(format!(
                 "INITIALIZE UPDATE response too short: {} bytes",
@@ -1057,10 +1104,18 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
         // 7. Set SCP state (copies keys into ScpState which has ZeroizeOnDrop)
         let state = ScpState::new(*key_senc, *key_smac, *key_srmac, None, None)?;
-        self.set_scp_state(state);
+        self.scp_state = Some(state);
 
-        // 8. EXTERNAL AUTHENTICATE (MAC but no encryption)
-        self.send_apdu_scp_no_encrypt(0x84, 0x82, 0x33, 0x00, &host_cryptogram)?;
+        // EXTERNAL AUTHENTICATE has neither response data nor R-MAC (SCP03
+        // 7.1.2.6); its status must still confirm that the card accepted us.
+        let (resp, sw) =
+            self.send_apdu_scp(0x84, 0x82, 0x33, 0x00, &host_cryptogram, 0, false, false)?;
+        if sw != SW_OK {
+            self.scp_state = None;
+            self.scp_failed = true;
+            return Err(SmartCardError::Apdu { data: resp, sw });
+        }
+        log::info!("SCP secure channel established");
 
         Ok(key_dek.map(|d| {
             let mut arr = [0u8; 16];
@@ -1081,6 +1136,9 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
     /// - `sk_oce_ecka`: OCE private key (raw 32-byte scalar, for 11a/c)
     /// - `certificates`: DER-encoded certificate chain, leaf-last (for 11a/c)
     /// - `oce_ref`: `(kid, kvn)` for the OCE key reference (for 11a/c)
+    ///
+    /// Failed establishment or secure messaging blocks ordinary APDUs until
+    /// an application is selected or SCP is reinitialized.
     pub fn init_scp11(
         &mut self,
         kid: u8,
@@ -1090,6 +1148,8 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         certificates: &[&[u8]],
         oce_ref: Option<(u8, u8)>,
     ) -> Result<Option<Dek>, SmartCardError> {
+        self.scp_state = None;
+        self.scp_failed = true;
         use crate::__internal::tlv::tlv_encode;
         use elliptic_curve::sec1::FromEncodedPoint;
         use p256::{
@@ -1118,7 +1178,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             let n = certificates.len();
             for (i, cert) in certificates.iter().enumerate() {
                 let p2 = if i < n - 1 { oce_kid | 0x80 } else { oce_kid };
-                self.send_apdu(0x80, 0x2A, oce_kvn, p2, cert)?;
+                self.send_scp_setup(0x80, 0x2A, oce_kvn, p2, cert)?;
             }
         }
 
@@ -1150,7 +1210,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
         // Send key agreement
         let ins = if is_scp11b { 0x88 } else { 0x82 };
-        let resp = self.send_apdu(0x80, ins, kvn, kid, &key_agreement_data)?;
+        let resp = self.send_scp_setup(0x80, ins, kvn, kid, &key_agreement_data)?;
 
         // Parse response TLVs
         let mut epk_sd_ecka_bytes: Option<&[u8]> = None;
@@ -1383,6 +1443,375 @@ fn scp03_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> Result<Zeroizing<V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TEST_KEY_ENC: [u8; 16] = [0x11; 16];
+    const TEST_KEY_MAC: [u8; 16] = [0x22; 16];
+
+    #[derive(Clone)]
+    enum TestScpResponse {
+        Protected(Vec<u8>, u16),
+        Bare(Vec<u8>, u16),
+        WrongMac,
+        BadPadding,
+        TransportFailure,
+    }
+
+    struct ScpTestConnection {
+        sent: Vec<Vec<u8>>,
+        state: Option<ScpState>,
+        external_response: (Vec<u8>, u16),
+        fail_external_transport: bool,
+        corrupt_handshake: bool,
+        response: TestScpResponse,
+    }
+
+    impl ScpTestConnection {
+        fn new() -> Self {
+            Self {
+                sent: Vec::new(),
+                state: None,
+                external_response: (Vec::new(), SW_OK),
+                fail_external_transport: false,
+                corrupt_handshake: false,
+                response: TestScpResponse::Protected(Vec::new(), SW_OK),
+            }
+        }
+
+        fn initialize_scp03(&mut self, host_challenge: &[u8]) -> Vec<u8> {
+            let card_challenge = [0x33; 8];
+            let context = [host_challenge, &card_challenge].concat();
+            let senc = scp03_derive(&TEST_KEY_ENC, 0x04, &context, 0x80).unwrap();
+            let smac = scp03_derive(&TEST_KEY_MAC, 0x06, &context, 0x80).unwrap();
+            let srmac = scp03_derive(&TEST_KEY_MAC, 0x07, &context, 0x80).unwrap();
+            let mut cryptogram = scp03_derive(&smac, 0x00, &context, 0x40).unwrap();
+            if self.corrupt_handshake {
+                cryptogram[0] ^= 1;
+            }
+            self.state = Some(
+                ScpState::new(
+                    senc.as_slice().try_into().unwrap(),
+                    smac.as_slice().try_into().unwrap(),
+                    srmac.as_slice().try_into().unwrap(),
+                    None,
+                    None,
+                )
+                .unwrap(),
+            );
+            [vec![0; 13], card_challenge.to_vec(), cryptogram.to_vec()].concat()
+        }
+
+        fn initialize_scp11b(&mut self, request: &[u8]) -> Vec<u8> {
+            use crate::__internal::tlv::{tlv_encode, tlv_parse};
+            use p256::elliptic_curve::sec1::ToEncodedPoint;
+
+            let mut offset = 0;
+            let mut host_key = None;
+            while offset < request.len() {
+                let (tag, start, len, end) = tlv_parse(request, offset).unwrap();
+                if tag == 0x5f49 {
+                    host_key = Some(
+                        p256::PublicKey::from_sec1_bytes(&request[start..start + len]).unwrap(),
+                    );
+                }
+                offset = end;
+            }
+            let host_key = host_key.unwrap();
+            let static_key = p256::SecretKey::from_slice(&[2; 32]).unwrap();
+            let ephemeral_key = p256::SecretKey::from_slice(&[3; 32]).unwrap();
+            let shared1 =
+                p256::ecdh::diffie_hellman(ephemeral_key.to_nonzero_scalar(), host_key.as_affine());
+            let shared2 =
+                p256::ecdh::diffie_hellman(static_key.to_nonzero_scalar(), host_key.as_affine());
+            let secret = [
+                shared1.raw_secret_bytes().as_slice(),
+                shared2.raw_secret_bytes().as_slice(),
+            ]
+            .concat();
+            let keys = x963_kdf(&secret, &[0x3c, 0x88, 0x10], 80);
+            let card_key = tlv_encode(
+                0x5f49,
+                ephemeral_key
+                    .public_key()
+                    .to_encoded_point(false)
+                    .as_bytes(),
+            );
+            let mut receipt = aes_cmac(&keys[..16], &[request, &card_key].concat()).unwrap();
+            if self.corrupt_handshake {
+                receipt[0] ^= 1;
+            }
+            self.state = Some(
+                ScpState::new(
+                    keys[16..32].try_into().unwrap(),
+                    keys[32..48].try_into().unwrap(),
+                    keys[48..64].try_into().unwrap(),
+                    Some(receipt.to_vec()),
+                    Some(1),
+                )
+                .unwrap(),
+            );
+            [card_key, tlv_encode(0x86, &receipt)].concat()
+        }
+
+        fn protected_response(state: &ScpState, ciphertext: &[u8], sw: u16) -> (Vec<u8>, u16) {
+            let mac_input = [ciphertext, &sw.to_be_bytes()].concat();
+            let (_, mac) =
+                calculate_mac_inner(&state.key_srmac, &state.mac_chain, &mac_input).unwrap();
+            ([ciphertext, &mac].concat(), sw)
+        }
+    }
+
+    impl crate::core::Connection for ScpTestConnection {
+        type Error = SmartCardError;
+
+        fn close(&mut self) {}
+    }
+
+    impl SmartCardConnection for ScpTestConnection {
+        fn transport(&self) -> Transport {
+            Transport::Usb
+        }
+
+        fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+            self.sent.push(apdu.to_vec());
+            if apdu[1] == INS_SELECT {
+                self.state = None;
+                return Ok((Vec::new(), SW_OK));
+            }
+            if apdu[..2] == [0x80, 0x50] {
+                return Ok((self.initialize_scp03(&apdu[5..13]), SW_OK));
+            }
+            if apdu[..2] == [0x80, 0x88] {
+                return Ok((
+                    self.initialize_scp11b(&apdu[5..5 + usize::from(apdu[4])]),
+                    SW_OK,
+                ));
+            }
+
+            let state = self.state.as_mut().expect("Unexpected unprotected command");
+            let mac_offset = apdu.len() - 9;
+            let mac = state.mac(&apdu[..mac_offset]).unwrap();
+            assert_eq!(mac, apdu[mac_offset..apdu.len() - 1]);
+            if apdu[..4] == [0x84, 0x82, 0x33, 0x00] {
+                if self.fail_external_transport {
+                    return Err(SmartCardError::Transport(Box::new(std::io::Error::other(
+                        "EXTERNAL AUTHENTICATE transport failure",
+                    ))));
+                }
+                return Ok(self.external_response.clone());
+            }
+            state.enc_counter += 1;
+            match &self.response {
+                TestScpResponse::Protected(data, sw) => {
+                    let encrypted = if data.is_empty() {
+                        Vec::new()
+                    } else {
+                        let mut padded = data.clone();
+                        padded.push(0x80);
+                        padded.resize(padded.len().div_ceil(16) * 16, 0);
+                        aes_cbc_encrypt(&state.key_senc, state.enc_counter - 1, true, &padded)?
+                    };
+                    Ok(Self::protected_response(state, &encrypted, *sw))
+                }
+                TestScpResponse::Bare(data, sw) => Ok((data.clone(), *sw)),
+                TestScpResponse::WrongMac => {
+                    let (mut data, sw) = Self::protected_response(state, &[], SW_OK);
+                    data[0] ^= 1;
+                    Ok((data, sw))
+                }
+                TestScpResponse::BadPadding => {
+                    let encrypted =
+                        aes_cbc_encrypt(&state.key_senc, state.enc_counter - 1, true, &[0; 16])?;
+                    Ok(Self::protected_response(state, &encrypted, SW_OK))
+                }
+                TestScpResponse::TransportFailure => Err(SmartCardError::Transport(Box::new(
+                    std::io::Error::other("Protected command transport failure"),
+                ))),
+            }
+        }
+    }
+
+    fn established_scp(scp11: bool) -> SmartCardProtocol<ScpTestConnection> {
+        let mut protocol = SmartCardProtocol::new(ScpTestConnection::new());
+        if scp11 {
+            use p256::elliptic_curve::sec1::ToEncodedPoint;
+
+            let static_key = p256::SecretKey::from_slice(&[2; 32]).unwrap();
+            protocol
+                .init_scp11(
+                    0x13,
+                    1,
+                    static_key.public_key().to_encoded_point(false).as_bytes(),
+                    None,
+                    &[],
+                    None,
+                )
+                .unwrap();
+        } else {
+            protocol
+                .init_scp03(0, &TEST_KEY_ENC, &TEST_KEY_MAC, None)
+                .unwrap();
+        }
+        assert!(protocol.has_scp());
+        protocol
+    }
+
+    fn assert_scp_failed(protocol: &mut SmartCardProtocol<ScpTestConnection>) {
+        assert!(!protocol.has_scp());
+        let sent = protocol.connection.sent.len();
+        assert!(matches!(
+            protocol.send_apdu(0, 0xda, 0, 0, b"secret"),
+            Err(SmartCardError::InvalidState(_))
+        ));
+        assert_eq!(protocol.connection.sent.len(), sent);
+    }
+
+    #[test]
+    fn test_scp03_rejected_external_authenticate_invalidates_session() {
+        for sw in [0x6300, 0x6982, 0x6985] {
+            let mut connection = ScpTestConnection::new();
+            connection.external_response.1 = sw;
+            let mut protocol = SmartCardProtocol::new(connection);
+            assert!(matches!(
+                protocol.init_scp03(0, &TEST_KEY_ENC, &TEST_KEY_MAC, None),
+                Err(SmartCardError::Apdu { sw: actual, .. }) if actual == sw
+            ));
+            assert_scp_failed(&mut protocol);
+        }
+    }
+
+    #[test]
+    fn test_scp03_external_authenticate_failures_invalidate_session() {
+        for transport_failure in [false, true] {
+            let mut connection = ScpTestConnection::new();
+            connection.fail_external_transport = transport_failure;
+            if !transport_failure {
+                connection.external_response.0 = vec![0; 8];
+            }
+            let mut protocol = SmartCardProtocol::new(connection);
+            assert!(
+                protocol
+                    .init_scp03(0, &TEST_KEY_ENC, &TEST_KEY_MAC, None)
+                    .is_err()
+            );
+            assert_scp_failed(&mut protocol);
+        }
+    }
+
+    #[test]
+    fn test_scp_missing_or_invalid_response_protection_invalidates_session() {
+        for scp11 in [false, true] {
+            for response in [
+                TestScpResponse::Bare(Vec::new(), SW_OK),
+                TestScpResponse::Bare(Vec::new(), 0x6285),
+                TestScpResponse::Bare(Vec::new(), 0x63c0),
+                TestScpResponse::Bare(vec![0; 7], SW_OK),
+                TestScpResponse::WrongMac,
+                TestScpResponse::BadPadding,
+                TestScpResponse::TransportFailure,
+            ] {
+                let mut protocol = established_scp(scp11);
+                protocol.connection.response = response;
+                assert!(protocol.send_apdu(0, 0xda, 0, 0, b"secret").is_err());
+                assert_scp_failed(&mut protocol);
+            }
+        }
+    }
+
+    #[test]
+    fn test_scp_authenticated_success_and_warnings() {
+        for scp11 in [false, true] {
+            let mut protocol = established_scp(scp11);
+            for data in [Vec::new(), b"response".to_vec()] {
+                for sw in [SW_OK, 0x6285, 0x63c0] {
+                    protocol.connection.response = TestScpResponse::Protected(data.clone(), sw);
+                    let result = protocol.send_apdu(0, 0xda, 0, 0, b"secret");
+                    if sw == SW_OK {
+                        assert_eq!(result.unwrap(), data);
+                    } else {
+                        assert!(matches!(
+                            result,
+                            Err(SmartCardError::Apdu { data: actual, sw: actual_sw })
+                                if actual == data && actual_sw == sw
+                        ));
+                    }
+                    assert!(protocol.has_scp());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_scp_bare_error_status_is_not_a_success_or_warning() {
+        for scp11 in [false, true] {
+            let mut protocol = established_scp(scp11);
+            for sw in [0x6700, 0x6982, 0x6a88, 0x6f00] {
+                protocol.connection.response = TestScpResponse::Bare(Vec::new(), sw);
+                assert!(matches!(
+                    protocol.send_apdu(0, 0xda, 0, 0, b"secret"),
+                    Err(SmartCardError::Apdu { sw: actual, .. }) if actual == sw
+                ));
+                assert!(protocol.has_scp());
+            }
+            protocol.connection.response = TestScpResponse::Protected(Vec::new(), SW_OK);
+            assert!(protocol.send_apdu(0, 0xda, 0, 0, b"secret").is_ok());
+        }
+    }
+
+    #[test]
+    fn test_scp_no_encrypt_still_authenticates_ordinary_success() {
+        let mut protocol = established_scp(false);
+        protocol.connection.response = TestScpResponse::Bare(Vec::new(), SW_OK);
+        assert!(
+            protocol
+                .send_apdu_scp_no_encrypt(0x80, 0xca, 0, 0, &[])
+                .is_err()
+        );
+        assert_scp_failed(&mut protocol);
+    }
+
+    #[test]
+    fn test_scp_reinitialization_and_select_recover_failed_session() {
+        for scp11 in [false, true] {
+            let mut protocol = established_scp(scp11);
+            protocol.connection.corrupt_handshake = true;
+            if scp11 {
+                use p256::elliptic_curve::sec1::ToEncodedPoint;
+
+                let static_key = p256::SecretKey::from_slice(&[2; 32]).unwrap();
+                assert!(
+                    protocol
+                        .init_scp11(
+                            0x13,
+                            1,
+                            static_key.public_key().to_encoded_point(false).as_bytes(),
+                            None,
+                            &[],
+                            None,
+                        )
+                        .is_err()
+                );
+            } else {
+                assert!(
+                    protocol
+                        .init_scp03(0, &TEST_KEY_ENC, &TEST_KEY_MAC, None)
+                        .is_err()
+                );
+            }
+            assert_scp_failed(&mut protocol);
+            protocol.connection.corrupt_handshake = false;
+            protocol
+                .init_scp03(0, &TEST_KEY_ENC, &TEST_KEY_MAC, None)
+                .unwrap();
+            assert!(protocol.send_apdu(0, 0xda, 0, 0, b"secret").is_ok());
+
+            protocol.connection.response = TestScpResponse::WrongMac;
+            assert!(protocol.send_apdu(0, 0xda, 0, 0, b"secret").is_err());
+            assert_scp_failed(&mut protocol);
+            protocol.select(Aid::MANAGEMENT).unwrap();
+            assert!(!protocol.has_scp());
+            assert!(!protocol.scp_failed);
+        }
+    }
 
     #[test]
     fn test_scp_state_rejects_invalid_mac_chain_length() {
