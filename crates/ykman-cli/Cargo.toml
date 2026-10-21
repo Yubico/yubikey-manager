@@ -39,6 +39,8 @@ elliptic-curve = { workspace = true, features = ["pkcs8", "sec1"] }
 p256 = { workspace = true, features = ["pkcs8", "ecdsa"] }
 p384 = { workspace = true, features = ["pkcs8", "ecdsa"] }
 sha2.workspace = true
+subtle.workspace = true
+zeroize.workspace = true
 quick-xml.workspace = true
 rpassword.workspace = true
 terminal_size.workspace = true

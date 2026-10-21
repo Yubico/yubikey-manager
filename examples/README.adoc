@@ -1,11 +1,11 @@
 == Example scripts
-The files in this repository are examples of scripting with ykman. Scripts can
+The files in this repository are examples of scripting with yubikit. Scripts can
 be much more flexible and more powerful than invoking the built-in commands in
 `ykman`, and can be used for programming YubiKeys in batches. For an
 introduction on this type of scripting, see
 link:../doc/Scripting.adoc[Scripting].
 
 === Running a script
-Run scripts with the Python interpreter (with `yubikey-manager` installed):
+Run scripts with the Python interpreter (with `yubikit` installed):
 
   python script_file.py [args...]

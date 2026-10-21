@@ -2,7 +2,7 @@
 WebAuthn registration + authentication using a FIDO2 security key.
 
 Demonstrates:
-  1. Discovering a YubiKey via ykman
+  1. Discovering a YubiKey via yubikit
   2. Creating a WebAuthnClient with console-based interaction
   3. Performing a registration ceremony (make_credential)
   4. Using the resulting credential to perform authentication (get_assertion)

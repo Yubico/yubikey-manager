@@ -13,12 +13,20 @@ the core logic (transport, session management, device enumeration) is
 implemented in Rust and exposed to Python through a native extension module
 and a Python wrapper that adapt the native API to familiar Python idioms.
 
-In 5.x there were two top-level packages, yubikit and ykman. In 6.x only yubikit
-is used, with additional functionality provided to replace that of ykman. The
-ykman CLI tool is now fully written in Rust.
+In 5.x there were two top-level packages, yubikit and ykman. In 6.x yubikit is
+the main library, with additional functionality provided to replace most of
+that of ykman. The ykman CLI tool is now fully written in Rust.
 
-Note: The `yubikey-manager` Python package still exists, but is only a thin wrapper
-around the ykman CLI tool. It does not include any Python library code.
+Note: The `yubikey-manager` Python package still exists, but only provides the
+ykman CLI tool. It no longer contains any Python library code. The remaining
+Python helpers from `ykman` have moved into `yubikit`:
+
+* The certificate, CSR, CHUID, and CCC generation helpers and the certificate
+  and CSR signing helpers from `ykman.piv` are now in `yubikit.piv`.
+* Pivman data and management-key helpers from `ykman.piv` are now in
+  `yubikit.pivman`.
+* `ykman.scripting` is now `yubikit.scripting` (see
+  link:Scripting.adoc[Scripting]).
 
 === Package layout
 
@@ -30,7 +38,8 @@ around the ykman CLI tool. It does not include any Python library code.
 | `pip install yubikit`
 
 | Single package providing both `yubikit` and `ykman`
-| Single package providing `yubikit` only
+| `yubikit` library, including the former `ykman.piv` and
+  `ykman.scripting` helpers; `yubikey-manager` only provides the CLI
 
 | Pure Python
 | Rust core + Python wrapper
@@ -89,6 +98,15 @@ pids, state = scan_devices()
 
 | `from ykman.device import list_all_devices, scan_devices`
 | `from yubikit.device import list_all_devices, scan_devices`
+
+| `from ykman.piv import generate_csr, generate_self_signed_certificate, generate_chuid, generate_ccc, sign_certificate_builder, sign_csr_builder`
+| Import these functions from `yubikit.piv` instead
+
+| `from ykman.piv import PivmanData, get_pivman_data, pivman_set_mgm_key`
+| Import these helpers from `yubikit.pivman` instead
+
+| `from ykman import scripting`
+| `from yubikit import scripting`
 |===
 
 == YubiKeyDevice
@@ -169,11 +187,11 @@ Types in `yubikit.core` are largely unchanged:
 * `Version`, `TRANSPORT`, `USB_INTERFACE`, `PID`, `CAPABILITY` — same API
 * `Tlv` — encoding/decoding is now backed by Rust (`_yubikit_native.core`)
 * `int2bytes()`, `bytes2int()` — backed by Rust
-
-=== Removed
-
-* `require_version()` — removed; version checks are now internal to sessions
-* `CommandError`, `BadResponseError` — replaced by native exceptions
+* `require_version()` — still available, but sessions perform their own
+  version checks internally
+* `CommandError` and its subclasses (`BadResponseError`, `TimeoutError`,
+  `ApplicationNotAvailableError`, `InvalidPinError`) and `NotSupportedError`
+  — same exception hierarchy, now also raised for errors from the native layer
 
 
 == Dependencies
@@ -184,9 +202,14 @@ The following Python packages are no longer required:
 
 * `pyscard` / `smartcard` — replaced by Rust PC/SC
 * `fido2` — replaced by Rust CTAP implementation
-* `cryptography` — still required for some Python-side crypto (SCP, etc.)
 * `keyring` — removed
 * `platformdirs` — replaced by Rust app data handling
+
+=== Remaining Python dependencies
+
+* `cryptography` (>= 42) — still used for key and certificate types in the
+  Python API. ML-DSA and ML-KEM keys in PIV require cryptography >= 48, and
+  ML-DSA certificates and CSRs require cryptography >= 49.
 
 === New build dependency
 
@@ -218,6 +241,18 @@ Building from source requires Rust (stable) and `maturin`. The latter is handled
 
 | `ykman.util`
 | Functionality moved to Rust core
+
+| `ykman.piv`
+| Generation and signing helpers moved to `yubikit.piv`; Pivman helpers
+  moved to `yubikit.pivman`
+
+| `ykman.piv.check_key()`, `list_certificates()`, `get_piv_info()`,
+  `generate_random_management_key()`
+| Removed; use `PivSession` methods for signing and reading certificates,
+  and `os.urandom(algorithm.key_len)` to generate a management key
+
+| `ykman.scripting`
+| `yubikit.scripting`
 
 | `yubikit.support.read_info()`
 | Use `device.info` instead

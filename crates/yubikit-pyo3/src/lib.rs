@@ -23,6 +23,7 @@ mod py_management;
 mod py_oath;
 mod py_openpgp;
 mod py_otp;
+mod py_padding;
 mod py_pcsc;
 mod py_piv;
 mod py_securitydomain;
@@ -39,6 +40,7 @@ fn _yubikit_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     py_hid::register(m)?;
     py_core::register(m)?;
     py_oath::register(m)?;
+    py_padding::register(m)?;
     py_device::register(m)?;
     register_sessions(m)?;
     Ok(())

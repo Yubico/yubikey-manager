@@ -1,6 +1,6 @@
 == Running custom scripts
-You can write custom Python scripts using the yubikey-manager library to
-interact with YubiKeys.
+You can write custom Python scripts using the yubikit library to interact
+with YubiKeys.
 
 WARNING: Never run a script without fully understanding what it does!
 
@@ -13,7 +13,7 @@ See also: link:Library_Usage.adoc[Library Usage].
 
 
 === Invoking the script
-To run a script, use the Python interpreter directly (with `yubikit` and `ykman`
+To run a script, use the Python interpreter directly (with `yubikit`
 installed):
 
   python myscript.py
@@ -33,7 +33,7 @@ These arguments are accessible in the standard Python way of using sys.argv:
 
 === Scripting utilities
 We include some functions which may be helpful for scripting purposes in
-`ykman/scripting.py`, such as connecting to one or more YubiKeys to perform
+`yubikit.scripting`, such as connecting to one or more YubiKeys to perform
 actions upon them. See "Writing your first script" below for some example
 usage.
 
@@ -64,7 +64,7 @@ its serial number. Modify the `myscript.py` file to contain the following:
 
 [source,py]
 ----
-from ykman import scripting as s
+from yubikit import scripting as s
 
 device = s.single()
 print("Found a YubiKey:", device)
@@ -88,7 +88,7 @@ connected, to prevent accidental programming of the wrong YubiKey.
 
 [source,py]
 ----
-from ykman import scripting as s
+from yubikit import scripting as s
 import sys
 
 try:

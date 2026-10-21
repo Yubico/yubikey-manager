@@ -48,7 +48,6 @@ use des::TdesEde3;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use sha2::Digest;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 use x509_cert::der;
@@ -1129,6 +1128,8 @@ const TAG_AUTH_CHALLENGE: u32 = 0x81;
 const TAG_AUTH_RESPONSE: u32 = 0x82;
 const TAG_AUTH_EXPONENTIATION: u32 = 0x85;
 const TAG_AUTH_KEM: u32 = 0x86;
+const TAG_AUTH_CONTEXT: u32 = 0x87;
+const TAG_AUTH_MU: u32 = 0x88;
 const TAG_GEN_ALGORITHM: u32 = 0x80;
 const TAG_OBJ_DATA: u32 = 0x53;
 const TAG_OBJ_ID: u32 = 0x5C;
@@ -1401,6 +1402,12 @@ pub fn check_key_support(
                 "PIN_POLICY.NEVER not allowed on YubiKey FIPS".into(),
             ));
         }
+    }
+
+    if key_type == KeyType::Rsa1024 && version >= Version(6, 0, 0) {
+        return Err(PivError::NotSupported(
+            "RSA 1024 not supported on YubiKey 6 or later".into(),
+        ));
     }
 
     // New key types
@@ -1698,7 +1705,13 @@ impl<C: SmartCardConnection> PivSession<C> {
     ) -> Result<(), PivError> {
         log::debug!("Setting management key");
         let key_type = management_key.key_type();
-        if key_type != ManagementKeyType::Tdes {
+        if key_type == ManagementKeyType::Tdes {
+            if self.version >= Version(6, 0, 0) {
+                return Err(PivError::NotSupported(
+                    "TDES management key not supported on YubiKey 6 or later".into(),
+                ));
+            }
+        } else {
             require_version(self.version, Version(5, 4, 0), "AES management key")?;
         }
 
@@ -2119,6 +2132,57 @@ impl<C: SmartCardConnection> PivSession<C> {
         log::debug!("Signing with key in slot {:?}", slot);
         let message_tlv = tlv_encode(TAG_AUTH_CHALLENGE, message);
         self.use_private_key(slot, key_type, &message_tlv)
+    }
+
+    /// Sign a message with an ML-DSA key and a context string (FIPS 204, at
+    /// most 255 bytes). An empty context is the same as [`sign`](Self::sign).
+    pub fn sign_with_context(
+        &mut self,
+        slot: Slot,
+        key_type: KeyType,
+        message: &[u8],
+        context: &[u8],
+    ) -> Result<Vec<u8>, PivError> {
+        log::debug!("Signing with context with key in slot {:?}", slot);
+        if key_type.algorithm() != Algorithm::MlDsa {
+            return Err(PivError::InvalidData(
+                "A signature context is only supported for ML-DSA".into(),
+            ));
+        }
+        if context.len() > 255 {
+            return Err(PivError::InvalidData(
+                "ML-DSA context must be at most 255 bytes".into(),
+            ));
+        }
+        let mut data = Vec::new();
+        if !context.is_empty() {
+            data = tlv_encode(TAG_AUTH_CONTEXT, context);
+        }
+        data.extend_from_slice(&tlv_encode(TAG_AUTH_CHALLENGE, message));
+        self.use_private_key(slot, key_type, &data)
+    }
+
+    /// Sign an externally computed ML-DSA message representative μ (64 bytes,
+    /// FIPS 204 "external μ"). The signature verifies against the message and
+    /// context that μ was computed from.
+    pub fn sign_external_mu(
+        &mut self,
+        slot: Slot,
+        key_type: KeyType,
+        mu: &[u8],
+    ) -> Result<Vec<u8>, PivError> {
+        log::debug!("Signing external mu with key in slot {:?}", slot);
+        if key_type.algorithm() != Algorithm::MlDsa {
+            return Err(PivError::InvalidData(
+                "External mu is only supported for ML-DSA".into(),
+            ));
+        }
+        if mu.len() != 64 {
+            return Err(PivError::InvalidData(
+                "ML-DSA mu must be exactly 64 bytes".into(),
+            ));
+        }
+        self.use_private_key(slot, key_type, &tlv_encode(TAG_AUTH_MU, mu))
     }
 
     /// Decrypt ciphertext with an RSA private key in a slot.
@@ -2580,51 +2644,6 @@ pub enum HashAlgorithm {
 }
 
 // ---------------------------------------------------------------------------
-// Hashing & PKCS#1 v1.5 padding
-// ---------------------------------------------------------------------------
-
-const DIGEST_INFO_SHA256: &[u8] = &[
-    0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
-    0x00, 0x04, 0x20,
-];
-const DIGEST_INFO_SHA384: &[u8] = &[
-    0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05,
-    0x00, 0x04, 0x30,
-];
-const DIGEST_INFO_SHA512: &[u8] = &[
-    0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05,
-    0x00, 0x04, 0x40,
-];
-
-/// Compute the hash of `data` using the specified algorithm.
-pub(crate) fn hash_data(hash_alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {
-    match hash_alg {
-        HashAlgorithm::Sha256 => sha2::Sha256::digest(data).to_vec(),
-        HashAlgorithm::Sha384 => sha2::Sha384::digest(data).to_vec(),
-        HashAlgorithm::Sha512 => sha2::Sha512::digest(data).to_vec(),
-    }
-}
-
-/// Construct a PKCS#1 v1.5 signature padding block from a hash digest.
-fn pkcs1v15_pad(hash_alg: HashAlgorithm, hash: &[u8], key_byte_len: usize) -> Vec<u8> {
-    let digest_info_prefix = match hash_alg {
-        HashAlgorithm::Sha256 => DIGEST_INFO_SHA256,
-        HashAlgorithm::Sha384 => DIGEST_INFO_SHA384,
-        HashAlgorithm::Sha512 => DIGEST_INFO_SHA512,
-    };
-    let t_len = digest_info_prefix.len() + hash.len();
-    let pad_len = key_byte_len - 3 - t_len;
-    let mut padded = Vec::with_capacity(key_byte_len);
-    padded.push(0x00);
-    padded.push(0x01);
-    padded.extend(std::iter::repeat_n(0xFF, pad_len));
-    padded.push(0x00);
-    padded.extend_from_slice(digest_info_prefix);
-    padded.extend_from_slice(hash);
-    padded
-}
-
-// ---------------------------------------------------------------------------
 // Device public key → PublicKey conversion
 // ---------------------------------------------------------------------------
 
@@ -2929,19 +2948,21 @@ impl<C: SmartCardConnection> DynSignatureAlgorithmIdentifier for PivSigner<'_, C
 
 impl<C: SmartCardConnection> signature::Signer<PivSignature> for PivSigner<'_, C> {
     fn try_sign(&self, msg: &[u8]) -> Result<PivSignature, signature::Error> {
-        let message = match self.key_type {
-            KeyType::EccP256 | KeyType::EccP384 => hash_data(self.hash_alg, msg),
-            KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
-                let hash = hash_data(self.hash_alg, msg);
-                let key_byte_len = (self.key_type.bit_len() / 8) as usize;
-                pkcs1v15_pad(self.hash_alg, &hash, key_byte_len)
+        let hash_alg = match self.key_type.algorithm() {
+            Algorithm::Ec if matches!(self.key_type, KeyType::EccP256 | KeyType::EccP384) => {
+                Some(self.hash_alg)
             }
-            KeyType::Ed25519 => msg.to_vec(),
-            KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => msg.to_vec(),
-            KeyType::X25519 | KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
-                return Err(signature::Error::new());
-            }
+            Algorithm::Rsa => Some(self.hash_alg),
+            _ => None,
         };
+        let message = crate::__internal::padding::prepare_signature(
+            self.key_type,
+            msg,
+            hash_alg,
+            false,
+            None,
+        )
+        .map_err(signature::Error::from_source)?;
 
         let mut session = self.session.borrow_mut();
         let raw_sig = session
@@ -3354,6 +3375,34 @@ mod tests {
                 PinPolicy::Default,
                 TouchPolicy::Default,
                 false,
+                false
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_check_key_support_rsa1024() {
+        for (version, ok) in [(Version(5, 7, 0), true), (Version(6, 0, 0), false)] {
+            for generate in [true, false] {
+                let result = check_key_support(
+                    version,
+                    KeyType::Rsa1024,
+                    PinPolicy::Default,
+                    TouchPolicy::Default,
+                    generate,
+                    false,
+                );
+                assert_eq!(result.is_ok(), ok, "{version:?} generate={generate}");
+            }
+        }
+        assert!(
+            check_key_support(
+                Version(6, 0, 0),
+                KeyType::Rsa2048,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                true,
                 false
             )
             .is_ok()

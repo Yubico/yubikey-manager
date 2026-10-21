@@ -87,7 +87,6 @@ def find_scp11_params(
                     logger.debug("Validating KLCC CA using supplied file")
                     parent = root_ca
                     for cert in chain:
-                        # Requires cryptography >= 40
                         cert.verify_directly_issued_by(parent)
                         parent = cert
                     logger.info("KLCC CA validated")

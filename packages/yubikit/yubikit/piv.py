@@ -29,18 +29,29 @@ from __future__ import annotations
 
 import gzip
 import logging
+import os
 import re
 import zlib
 from dataclasses import astuple, dataclass
-from datetime import date
+from datetime import date, datetime
 from enum import Enum, IntEnum, unique
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, TypeAlias, cast
+from uuid import uuid4
 
 from cryptography import x509
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa, x25519
-from cryptography.hazmat.primitives.asymmetric.padding import AsymmetricPadding
+from cryptography.hazmat.primitives.asymmetric.padding import (
+    MGF1,
+    OAEP,
+    PSS,
+    AsymmetricPadding,
+    PKCS1v15,
+)
+from cryptography.hazmat.primitives.asymmetric.types import (
+    CertificatePublicKeyTypes,
+    PublicKeyTypes,
+)
 from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
@@ -53,6 +64,7 @@ from cryptography.hazmat.primitives.serialization import (
 from .core import (
     BadResponseError,
     InvalidPinError,  # noqa: F401 - re-exported
+    NotSupportedError,
     Session,
     Tlv,
     Version,
@@ -65,32 +77,47 @@ from .core.smartcard import (
 )
 
 if TYPE_CHECKING:
-    # This type isn't available on cryptography <40.
-    from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
+    # These aren't available before cryptography 48.
+    from cryptography.hazmat.primitives.asymmetric import mldsa, mlkem
 
+from _yubikit_native import padding as _native_padding
 from _yubikit_native.sessions import PivSession as _NativePivSession
 
 logger = logging.getLogger(__name__)
 
 
-PublicKey: TypeAlias = (
+# String aliases, since ML-DSA and ML-KEM need cryptography >= 48. ML-KEM-512 is
+# not supported by cryptography.
+PublicKey: TypeAlias = """
     rsa.RSAPublicKey
     | ec.EllipticCurvePublicKey
     | ed25519.Ed25519PublicKey
     | x25519.X25519PublicKey
-)
-PrivateKey: TypeAlias = (
+    | mldsa.MLDSA44PublicKey
+    | mldsa.MLDSA65PublicKey
+    | mldsa.MLDSA87PublicKey
+    | mlkem.MLKEM768PublicKey
+    | mlkem.MLKEM1024PublicKey
+"""
+PrivateKey: TypeAlias = """
     rsa.RSAPrivateKeyWithSerialization
     | ec.EllipticCurvePrivateKeyWithSerialization
     | ed25519.Ed25519PrivateKey
     | x25519.X25519PrivateKey
-)
+    | mldsa.MLDSA44PrivateKey
+    | mldsa.MLDSA65PrivateKey
+    | mldsa.MLDSA87PrivateKey
+    | mlkem.MLKEM768PrivateKey
+    | mlkem.MLKEM1024PrivateKey
+"""
 
 
 @unique
 class ALGORITHM(str, Enum):
     EC = "ec"
     RSA = "rsa"
+    MLDSA = "mldsa"
+    MLKEM = "mlkem"
 
 
 @unique
@@ -103,18 +130,32 @@ class KEY_TYPE(IntEnum):
     ECCP384 = 0x14
     ED25519 = 0xE0
     X25519 = 0xE1
+    MLDSA44 = 0xE2
+    MLDSA65 = 0xE3
+    MLDSA87 = 0xE4
+    MLKEM512 = 0xE5
+    MLKEM768 = 0xE6
+    MLKEM1024 = 0xE7
 
     def __str__(self):
         return self.name
 
     @property
     def algorithm(self) -> ALGORITHM:
-        return ALGORITHM.RSA if self.name.startswith("RSA") else ALGORITHM.EC
+        if self.name.startswith("RSA"):
+            return ALGORITHM.RSA
+        if self.name.startswith("MLDSA"):
+            return ALGORITHM.MLDSA
+        if self.name.startswith("MLKEM"):
+            return ALGORITHM.MLKEM
+        return ALGORITHM.EC
 
     @property
     def bit_len(self) -> int:
         if self in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
             return 256
+        if self.algorithm in (ALGORITHM.MLDSA, ALGORITHM.MLKEM):
+            raise ValueError("No bit_len")
         match = re.search(r"\d+$", self.name)
         if match:
             return int(match.group())
@@ -138,7 +179,43 @@ class KEY_TYPE(IntEnum):
             return cls.ED25519
         elif isinstance(key, x25519.X25519PublicKey):
             return cls.X25519
+        for key_class, key_type in _PQC_PUBLIC_KEY_TYPES.items():
+            if isinstance(key, key_class):
+                return cls(key_type)
         raise ValueError(f"Unsupported key type: {type(key).__name__}")
+
+
+_PQC_PUBLIC_KEY_TYPES: dict[type, KEY_TYPE] = {}
+try:
+    from cryptography.hazmat.primitives.asymmetric import mldsa as _mldsa
+
+    _PQC_PUBLIC_KEY_TYPES.update(
+        {
+            _mldsa.MLDSA44PublicKey: KEY_TYPE.MLDSA44,
+            _mldsa.MLDSA65PublicKey: KEY_TYPE.MLDSA65,
+            _mldsa.MLDSA87PublicKey: KEY_TYPE.MLDSA87,
+        }
+    )
+except ImportError:  # Not available in older versions of cryptography
+    pass
+try:
+    from cryptography.hazmat.primitives.asymmetric import mlkem as _mlkem
+
+    _PQC_PUBLIC_KEY_TYPES.update(
+        {
+            _mlkem.MLKEM768PublicKey: KEY_TYPE.MLKEM768,
+            _mlkem.MLKEM1024PublicKey: KEY_TYPE.MLKEM1024,
+        }
+    )
+except ImportError:  # Not available in older versions of cryptography
+    pass
+
+# ML-KEM ciphertext lengths, which are unique per parameter set (FIPS 203).
+_ML_KEM_CIPHERTEXT_KEY_TYPES = {
+    768: KEY_TYPE.MLKEM512,
+    1088: KEY_TYPE.MLKEM768,
+    1568: KEY_TYPE.MLKEM1024,
+}
 
 
 @unique
@@ -505,39 +582,88 @@ class Chuid:
         )
 
 
+def _mgf1_hash_name(mgf) -> str:
+    if not isinstance(mgf, MGF1):
+        raise TypeError(f"Unsupported mask generation function: {mgf}")
+    return mgf._algorithm.name
+
+
 def _pad_message(key_type, message, hash_algorithm, padding):
     if key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
         return message
-    if key_type.algorithm == ALGORITHM.EC:
+    if key_type.algorithm == ALGORITHM.MLDSA:
         if isinstance(hash_algorithm, Prehashed):
-            hashed = message
-        else:
-            h = hashes.Hash(hash_algorithm, default_backend())
-            h.update(message)
-            hashed = h.finalize()
-        byte_len = key_type.bit_len // 8
-        if len(hashed) < byte_len:
-            return hashed.rjust(byte_len // 8, b"\0")
-        return hashed[:byte_len]
-    elif key_type.algorithm == ALGORITHM.RSA:
-        # Sign with a dummy key, then encrypt the signature to get the padded message
-        e = 65537
-        dummy = rsa.generate_private_key(e, key_type.bit_len, default_backend())
-        signature = dummy.sign(message, padding, hash_algorithm)
-        # Raw (textbook) RSA encrypt
-        n = dummy.public_key().public_numbers().n
-        return int2bytes(pow(bytes2int(signature), e, n), key_type.bit_len // 8)
-    else:
+            raise ValueError("ML-DSA does not support prehashed messages")
+        return message
+    if key_type.algorithm not in (ALGORITHM.EC, ALGORITHM.RSA):
         raise ValueError(f"Unsupported algorithm {key_type.algorithm}")
+    if isinstance(hash_algorithm, Prehashed):
+        if len(message) != hash_algorithm.digest_size:
+            raise ValueError("The provided data must be the same length as the hash")
+        hashed = message
+        hash_name = hash_algorithm._algorithm.name
+    else:
+        h = hashes.Hash(hash_algorithm)
+        h.update(message)
+        hashed = h.finalize()
+        hash_name = hash_algorithm.name
+    if key_type.algorithm == ALGORITHM.EC:
+        return hashed[: key_type.bit_len // 8]
+
+    if isinstance(padding, PKCS1v15):
+        return _native_padding.pkcs1v15_sign_pad(key_type.bit_len, hash_name, hashed)
+    if isinstance(padding, PSS):
+        salt_length = padding._salt_length
+        if isinstance(salt_length, int):
+            salt_len: int | None = salt_length
+        elif salt_length is PSS.MAX_LENGTH:
+            salt_len = None
+        elif salt_length is PSS.DIGEST_LENGTH:
+            salt_len = len(hashed)
+        else:
+            raise ValueError(f"Unsupported PSS salt length for signing: {salt_length}")
+        return _native_padding.pss_sign_pad(
+            key_type.bit_len,
+            hash_name,
+            hashed,
+            salt_len,
+            _mgf1_hash_name(padding._mgf),
+        )
+    raise ValueError(f"Unsupported padding: {padding}")
 
 
 def _unpad_message(padded, padding):
-    e = 65537
-    dummy = rsa.generate_private_key(e, len(padded) * 8, default_backend())
-    # Raw (textbook) RSA encrypt
-    n = dummy.public_key().public_numbers().n
-    encrypted = int2bytes(pow(bytes2int(padded), e, n), len(padded))
-    return dummy.decrypt(encrypted, padding)
+    if isinstance(padding, PKCS1v15):
+        return _native_padding.pkcs1v15_decrypt_unpad(padded)
+    if isinstance(padding, OAEP):
+        return _native_padding.oaep_decrypt_unpad(
+            padded,
+            padding._algorithm.name,
+            _mgf1_hash_name(padding._mgf),
+            padding._label or b"",
+        )
+    raise ValueError(f"Unsupported padding: {padding}")
+
+
+def calculate_ml_dsa_mu(
+    public_key: (
+        mldsa.MLDSA44PublicKey | mldsa.MLDSA65PublicKey | mldsa.MLDSA87PublicKey | bytes
+    ),
+    message: bytes,
+    context: bytes = b"",
+) -> bytes:
+    """Calculate the ML-DSA message representative (mu) for external mu signing.
+
+    With cryptography >= 50, mldsa.MLDSAMuHasher can be used instead to
+    calculate mu incrementally.
+
+    :param public_key: The ML-DSA public key, or its raw encoding.
+    :param message: The message to sign.
+    :param context: An optional context string (at most 255 bytes).
+    """
+    if not isinstance(public_key, bytes):
+        public_key = public_key.public_bytes_raw()
+    return _native_padding.ml_dsa_mu(public_key, context, message)
 
 
 def decompress_certificate(cert_data: bytes) -> bytes:
@@ -575,6 +701,230 @@ def decompress_certificate(cert_data: bytes) -> bytes:
             logger.warning("Unknown compression type")
 
     raise BadResponseError("Failed to decompress certificate")
+
+
+def generate_chuid() -> bytes:
+    """Generate a CHUID (Cardholder Unique Identifier)."""
+
+    chuid = Chuid(
+        # Non-Federal Issuer FASC-N
+        fasc_n=FascN(9999, 9999, 999999, 0, 1, 0000000000, 3, 0000, 1),
+        guid=uuid4().bytes,
+        # Expires on: 2030-01-01
+        expiration_date=date(2030, 1, 1),
+        asymmetric_signature=b"",
+    )
+
+    return bytes(chuid)
+
+
+def generate_ccc() -> bytes:
+    """Generate a CCC (Card Capability Container)."""
+    return (
+        Tlv(0xF0, b"\xa0\x00\x00\x01\x16\xff\x02" + os.urandom(14))
+        + Tlv(0xF1, b"\x21")
+        + Tlv(0xF2, b"\x21")
+        + Tlv(0xF3)
+        + Tlv(0xF4, b"\x00")
+        + Tlv(0xF5, b"\x10")
+        + Tlv(0xF6)
+        + Tlv(0xF7)
+        + Tlv(0xFA)
+        + Tlv(0xFB)
+        + Tlv(0xFC)
+        + Tlv(0xFD)
+        + Tlv(TAG_LRC)
+    )
+
+
+_AllowedHashTypes: TypeAlias = (
+    hashes.SHA224
+    | hashes.SHA256
+    | hashes.SHA384
+    | hashes.SHA512
+    | hashes.SHA3_224
+    | hashes.SHA3_256
+    | hashes.SHA3_384
+    | hashes.SHA3_512
+)
+
+
+def _dummy_key(key_type):
+    if key_type.algorithm == ALGORITHM.RSA:
+        return rsa.generate_private_key(65537, key_type.bit_len)
+    if key_type == KEY_TYPE.ECCP256:
+        return ec.generate_private_key(ec.SECP256R1())
+    if key_type == KEY_TYPE.ECCP384:
+        return ec.generate_private_key(ec.SECP384R1())
+    if key_type == KEY_TYPE.ED25519:
+        return ed25519.Ed25519PrivateKey.generate()
+    if key_type == KEY_TYPE.X25519:
+        return x25519.X25519PrivateKey.generate()
+    if key_type.algorithm == ALGORITHM.MLDSA:
+        try:
+            # ML-DSA certificates and CSRs require cryptography >= 49.
+            from cryptography.hazmat.primitives.asymmetric import mldsa
+        except ImportError:
+            raise NotSupportedError("ML-DSA requires a newer version of cryptography")
+        return getattr(mldsa, f"{key_type.name}PrivateKey").generate()
+    raise ValueError("Invalid algorithm")
+
+
+def _hash(key_type, hash_algorithm):
+    if (
+        key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519)
+        or key_type.algorithm == ALGORITHM.MLDSA
+    ):
+        return None
+    return hash_algorithm()
+
+
+def sign_certificate_builder(
+    session: PivSession,
+    slot: SLOT,
+    key_type: KEY_TYPE,
+    builder: x509.CertificateBuilder,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
+) -> x509.Certificate:
+    """Sign a Certificate.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param key_type: The key type.
+    :param builder: The x509 certificate builder object.
+    :param hash_algorithm: The hash algorithm, ignored for Curve 25519 and ML-DSA.
+    """
+    logger.debug("Signing a certificate")
+    dummy_key = _dummy_key(key_type)
+    assert not isinstance(dummy_key, x25519.X25519PrivateKey)  # noqa: S101
+    cert = builder.sign(dummy_key, _hash(key_type, hash_algorithm))
+
+    sig = session.sign(
+        slot,
+        key_type,
+        cert.tbs_certificate_bytes,
+        _hash(key_type, hash_algorithm),
+        PKCS1v15(),  # Only used for RSA
+    )
+
+    seq = Tlv.parse_list(Tlv.unpack(0x30, cert.public_bytes(Encoding.DER)))
+    # Replace signature, add unused bits = 0
+    seq[2] = Tlv(seq[2].tag, b"\0" + sig)
+    # Re-assemble sequence
+    der = Tlv(0x30, b"".join(seq))
+
+    return x509.load_der_x509_certificate(der)
+
+
+def sign_csr_builder(
+    session: PivSession,
+    slot: SLOT,
+    public_key: PublicKeyTypes,
+    builder: x509.CertificateSigningRequestBuilder,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
+) -> x509.CertificateSigningRequest:
+    """Sign a CSR.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
+    :param builder: The x509 certificate signing request builder
+        object.
+    :param hash_algorithm: The hash algorithm, ignored for Curve 25519 and ML-DSA.
+    """
+    logger.debug("Signing a CSR")
+    key_type = KEY_TYPE.from_public_key(public_key)
+    dummy_key = _dummy_key(key_type)
+    assert not isinstance(dummy_key, x25519.X25519PrivateKey)  # noqa: S101
+
+    csr = builder.sign(dummy_key, _hash(key_type, hash_algorithm))
+    seq = Tlv.parse_list(Tlv.unpack(0x30, csr.public_bytes(Encoding.DER)))
+
+    # Replace public key
+    pub_format = (
+        PublicFormat.PKCS1
+        if key_type.algorithm == ALGORITHM.RSA
+        else PublicFormat.SubjectPublicKeyInfo
+    )
+    dummy_bytes = dummy_key.public_key().public_bytes(Encoding.DER, pub_format)
+    pub_bytes = public_key.public_bytes(Encoding.DER, pub_format)
+    seq[0] = Tlv(seq[0].replace(dummy_bytes, pub_bytes))
+
+    sig = session.sign(
+        slot,
+        key_type,
+        seq[0],
+        _hash(key_type, hash_algorithm),
+        PKCS1v15(),  # Only used for RSA
+    )
+
+    # Replace signature, add unused bits = 0
+    seq[2] = Tlv(seq[2].tag, b"\0" + sig)
+    # Re-assemble sequence
+    der = Tlv(0x30, b"".join(seq))
+
+    return x509.load_der_x509_csr(der)
+
+
+def generate_self_signed_certificate(
+    session: PivSession,
+    slot: SLOT,
+    public_key: PublicKeyTypes,
+    subject_str: str,
+    valid_from: datetime,
+    valid_to: datetime,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
+) -> x509.Certificate:
+    """Generate a self-signed certificate using a private key in a slot.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
+    :param subject_str: The subject RFC 4514 string.
+    :param valid_from: The date from when the certificate is valid.
+    :param valid_to: The date when the certificate expires.
+    :param hash_algorithm: The hash algorithm.
+    """
+    logger.debug("Generating a self-signed certificate")
+    key_type = KEY_TYPE.from_public_key(public_key)
+    if TYPE_CHECKING:
+        public_key = cast(CertificatePublicKeyTypes, public_key)
+
+    subject = x509.Name.from_rfc4514_string(subject_str)
+    builder = (
+        x509.CertificateBuilder()
+        .public_key(public_key)
+        .subject_name(subject)
+        .issuer_name(subject)  # Same as subject on self-signed certificate.
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(valid_from)
+        .not_valid_after(valid_to)
+    )
+
+    return sign_certificate_builder(session, slot, key_type, builder, hash_algorithm)
+
+
+def generate_csr(
+    session: PivSession,
+    slot: SLOT,
+    public_key: PublicKeyTypes,
+    subject_str: str,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
+) -> x509.CertificateSigningRequest:
+    """Generate a CSR using a private key in a slot.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
+    :param subject_str: The subject RFC 4514 string.
+    :param hash_algorithm: The hash algorithm.
+    """
+    logger.debug("Generating a CSR")
+    builder = x509.CertificateSigningRequestBuilder().subject_name(
+        x509.Name.from_rfc4514_string(subject_str)
+    )
+
+    return sign_csr_builder(session, slot, public_key, builder, hash_algorithm)
 
 
 class PivSession(Session):
@@ -800,21 +1150,55 @@ class PivSession(Session):
         message: bytes,
         hash_algorithm: hashes.HashAlgorithm | None,
         padding: AsymmetricPadding | None = None,
+        context: bytes | None = None,
     ) -> bytes:
         """Sign message with key.
 
         Requires PIN verification.
+
+        Ed25519 and ML-DSA keys sign the message directly, and ignore
+        hash_algorithm and padding. The YubiKey limits the size of messages it
+        can sign with ML-DSA; use :meth:`sign_external_mu` for larger messages.
 
         :param slot: The slot of the key to use.
         :param key_type: The type of the key to sign with.
         :param message: The message to sign.
         :param hash_algorithm: The pre-signature hash algorithm to use.
         :param padding: The pre-signature padding.
+        :param context: An ML-DSA context string (at most 255 bytes).
         """
         slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
+        if context is not None:
+            if key_type.algorithm != ALGORITHM.MLDSA:
+                raise ValueError("A context can only be used with ML-DSA keys")
+            if len(context) > 255:
+                raise ValueError("ML-DSA context must be at most 255 bytes")
+            return self._native.sign_with_context(
+                int(slot), int(key_type), message, context
+            )
         padded = _pad_message(key_type, message, hash_algorithm, padding)
         return self._native.sign(int(slot), int(key_type), padded)
+
+    def sign_external_mu(self, slot: SLOT, key_type: KEY_TYPE, mu: bytes) -> bytes:
+        """Sign a precomputed ML-DSA message representative (external mu).
+
+        The resulting signature verifies against the original message. Use
+        :func:`calculate_ml_dsa_mu` to compute mu.
+
+        Requires PIN verification.
+
+        :param slot: The slot of the key to use.
+        :param key_type: The ML-DSA type of the key to sign with.
+        :param mu: The 64 byte message representative.
+        """
+        slot = SLOT(slot)
+        key_type = KEY_TYPE(key_type)
+        if key_type.algorithm != ALGORITHM.MLDSA:
+            raise ValueError("External mu can only be used with ML-DSA keys")
+        if len(mu) != 64:
+            raise ValueError("ML-DSA mu must be exactly 64 bytes")
+        return self._native.sign_external_mu(int(slot), int(key_type), mu)
 
     def decrypt(
         self, slot: SLOT, cipher_text: bytes, padding: AsymmetricPadding
@@ -855,6 +1239,20 @@ class PivSession(Session):
             )
         return self._native.calculate_secret(int(slot), int(key_type), data)
 
+    def decapsulate(self, slot: SLOT, cipher_text: bytes) -> bytes:
+        """Decapsulate an ML-KEM ciphertext, recovering the shared secret.
+
+        Requires PIN verification.
+
+        :param slot: The slot of the ML-KEM key.
+        :param cipher_text: The ML-KEM ciphertext.
+        """
+        slot = SLOT(slot)
+        key_type = _ML_KEM_CIPHERTEXT_KEY_TYPES.get(len(cipher_text))
+        if key_type is None:
+            raise ValueError(f"Invalid ML-KEM ciphertext length: {len(cipher_text)}")
+        return self._native.calculate_secret(int(slot), int(key_type), cipher_text)
+
     def get_object(self, object_id: int) -> bytes:
         """Get object by ID.
 
@@ -882,7 +1280,7 @@ class PivSession(Session):
         slot = SLOT(slot)
         der_bytes = self._native.get_certificate(int(slot))
         try:
-            return x509.load_der_x509_certificate(der_bytes, default_backend())
+            return x509.load_der_x509_certificate(der_bytes)
         except Exception as e:
             raise BadResponseError("Invalid certificate", e)
 
@@ -933,7 +1331,11 @@ class PivSession(Session):
             key_der = private_key.private_bytes(
                 Encoding.DER, PrivateFormat.TraditionalOpenSSL, NoEncryption()
             )
-        elif key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+        elif key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519) or key_type.algorithm in (
+            ALGORITHM.MLDSA,
+            ALGORITHM.MLKEM,
+        ):
+            # For ML-DSA and ML-KEM, this is the seed.
             key_der = private_key.private_bytes(
                 Encoding.Raw, PrivateFormat.Raw, NoEncryption()
             )
@@ -972,6 +1374,14 @@ class PivSession(Session):
         """
         slot = SLOT(slot)
         key_type = KEY_TYPE(key_type)
+        if (
+            key_type.algorithm in (ALGORITHM.MLDSA, ALGORITHM.MLKEM)
+            and key_type not in _PQC_PUBLIC_KEY_TYPES.values()
+        ):
+            # Fail before generating, since the public key couldn't be returned.
+            raise NotSupportedError(
+                f"{key_type} public keys are not supported by cryptography"
+            )
         logger.debug(
             f"Generating key with pin_policy={pin_policy}, touch_policy={touch_policy}"
         )
@@ -992,7 +1402,7 @@ class PivSession(Session):
         """
         slot = SLOT(slot)
         der_bytes = self._native.attest_key(int(slot))
-        return x509.load_der_x509_certificate(der_bytes, default_backend())
+        return x509.load_der_x509_certificate(der_bytes)
 
     def move_key(self, from_slot: SLOT, to_slot: SLOT) -> None:
         """Move key from one slot to another.
