@@ -307,33 +307,19 @@ fn lowercase_usage(text: &str) -> String {
     transform_section(text, "USAGE", |content| Some(content.to_lowercase()))
 }
 
-/// Option groups for the (mostly global) options, shown as their own help
-/// sections; anything not listed stays under "OPTIONS".
-const OPTION_GROUPS: &[(&str, &[&str])] = &[
-    (
-        "DEVICE OPTIONS",
-        &[
-            "device",
-            "scp",
-            "scp-ca",
-            "scp-sd",
-            "scp-oce",
-            "scp-password",
-        ],
-    ),
-    ("OUTPUT OPTIONS", &["color", "log-level", "log-file"]),
-];
-
-/// Same as [`OPTION_GROUPS`] for the root command, where the only ungrouped
-/// options are `-h`/`-V`; these and the output options are folded into a single
-/// "OPTIONS" section.
-const ROOT_OPTION_GROUPS: &[(&str, &[&str])] = &[
-    OPTION_GROUPS[0],
-    (
-        "OPTIONS",
-        &["color", "log-level", "log-file", "help", "version"],
-    ),
-];
+/// Option groups shown as their own help section; everything else stays
+/// under "OPTIONS".
+const OPTION_GROUPS: &[(&str, &[&str])] = &[(
+    "DEVICE OPTIONS",
+    &[
+        "device",
+        "scp",
+        "scp-ca",
+        "scp-sd",
+        "scp-oce",
+        "scp-password",
+    ],
+)];
 
 /// Top-level command groups, mirroring the sectioned layout of `gh --help`.
 const COMMAND_GROUPS: &[(&str, &[&str])] = &[
@@ -489,14 +475,12 @@ fn finalize_help(cmd: &mut clap::Command, is_root: bool) {
         "OPTIONS",
         |l| l.trim_start().starts_with('-'),
         option_key,
-        if is_root {
-            ROOT_OPTION_GROUPS
-        } else {
-            OPTION_GROUPS
-        },
+        OPTION_GROUPS,
         &[],
         true,
-        0,
+        // The root's own options are only general flags, so they go last;
+        // elsewhere a command's own options come before the shared group.
+        if is_root { OPTION_GROUPS.len() } else { 0 },
     );
     let rendered = if is_root {
         // `help` is redundant with `-h` and clutters the list.
