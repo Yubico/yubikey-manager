@@ -10,7 +10,7 @@
 //! fill-in to complete.
 
 use std::io::{IsTerminal, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -31,7 +31,7 @@ const FILL_TICKS: usize = 5;
 
 fn bar_width() -> usize {
     terminal_size::terminal_size()
-        .map(|(w, _)| (w.0 as usize).saturating_sub(2))
+        .map(|(w, _)| (w.0 as usize).saturating_sub(10))
         .unwrap_or(MAX_BAR_WIDTH)
         .clamp(10, MAX_BAR_WIDTH)
 }
@@ -101,7 +101,7 @@ struct State {
 }
 
 struct Inner {
-    total: usize,
+    total: AtomicUsize,
     unicode: bool,
     live: bool,
     stop: AtomicBool,
@@ -109,6 +109,10 @@ struct Inner {
 }
 
 impl Inner {
+    fn total(&self) -> usize {
+        self.total.load(Ordering::Relaxed)
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -117,8 +121,9 @@ impl Inner {
     /// animating.
     fn redraw(&self, st: &mut State) -> bool {
         let width = bar_width();
-        let seg = segment_width(self.total, width);
-        let cells = seg * self.total;
+        let total = self.total();
+        let seg = segment_width(total, width);
+        let cells = seg * total;
         let target = (seg * st.target_done).min(cells);
         if st.shown < target {
             st.shown = (st.shown + seg.div_ceil(FILL_TICKS)).min(target);
@@ -133,7 +138,8 @@ impl Inner {
         }
         let _ = writeln!(err, "\x1b[2K{}", render_status(&st.status, st.tone));
         let bar = render_cells(cells, st.shown, self.unicode, true);
-        let _ = writeln!(err, "\x1b[2K{bar}");
+        let counter = color::dim(&format!("{}/{total}", st.target_done));
+        let _ = writeln!(err, "\x1b[2K{bar} {counter}");
         let _ = err.flush();
         st.drawn = 2;
         filling
@@ -149,7 +155,7 @@ impl StepProgress {
     pub fn new(total: usize) -> Self {
         Self {
             inner: Arc::new(Inner {
-                total,
+                total: AtomicUsize::new(total),
                 unicode: crate::info::use_unicode(),
                 live: std::io::stderr().is_terminal() && color::enabled(),
                 stop: AtomicBool::new(false),
@@ -168,13 +174,23 @@ impl StepProgress {
         }
     }
 
+    /// Change the number of segments, for flows that only learn the real
+    /// count part-way through. Call before the next `update`.
+    pub fn set_total(&self, total: usize) {
+        let mut st = self.inner.lock();
+        if self.inner.total() != total {
+            self.inner.total.store(total, Ordering::Relaxed);
+            st.shown = 0;
+        }
+    }
+
     /// Show `status` with `done` completed segments.
     pub fn update(&self, done: usize, status: &str) {
         self.draw(done, status, Tone::Normal, false);
     }
 
     pub fn finish(&self, status: &str) {
-        self.draw(self.inner.total, status, Tone::Normal, true);
+        self.draw(self.inner.total(), status, Tone::Normal, true);
     }
 
     /// Mark the flow as failed, keeping the bar where it stopped.
@@ -193,7 +209,7 @@ impl StepProgress {
             let _ = writeln!(
                 err,
                 "{}",
-                render_plain(inner.total, done, status, inner.unicode)
+                render_plain(inner.total(), done, status, inner.unicode)
             );
             return;
         }
@@ -203,7 +219,7 @@ impl StepProgress {
                 st.started = true;
                 eprintln!();
                 // First draw shows its position immediately.
-                let seg = segment_width(inner.total, bar_width());
+                let seg = segment_width(inner.total(), bar_width());
                 st.shown = seg * done;
             }
             st.target_done = done;

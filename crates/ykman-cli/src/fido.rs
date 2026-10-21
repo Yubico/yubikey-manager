@@ -1409,23 +1409,28 @@ pub fn run_fingerprints_add(
         // Set up Ctrl+C cancellation
         cancel::clear();
 
-        // Begin enrollment
-        eprintln!("Place your finger against the sensor now...");
+        // Begin enrollment. Five scans is typical; the first scan reveals
+        // the real number.
+        let progress = StepProgress::new(5);
+        progress.update(0, "Place your finger against the sensor now");
         let resp = bio
             .enroll_begin(None, Some(&mut |_| {}), Some(&cancel::is_cancelled))
-            .map_err(|e| map_enroll_error(e, "Enrollment failed"))?;
+            .map_err(|e| {
+                progress.fail(0, "Enrollment failed");
+                map_enroll_error(e, "Enrollment failed")
+            })?;
 
         let template_id = resp.template_id.clone();
-        let remaining = resp.remaining_samples;
+        let mut scans_remaining = resp.remaining_samples;
 
-        if remaining > 0 {
-            eprintln!("{remaining} more scans needed.");
+        let total = scans_remaining as usize + 1;
+        progress.set_total(total);
+        let done = |remaining: u32| total.saturating_sub(remaining as usize);
+        if scans_remaining > 0 {
+            progress.update(1, "Lift your finger and place it on the sensor again");
         }
 
-        // Continue capturing
-        let mut scans_remaining = remaining;
         while scans_remaining > 0 {
-            eprintln!("Place your finger against the sensor now...");
             match bio.enroll_capture_next(
                 &template_id,
                 None,
@@ -1433,36 +1438,48 @@ pub fn run_fingerprints_add(
                 Some(&cancel::is_cancelled),
             ) {
                 Ok(resp) => {
+                    let counted = resp.remaining_samples < scans_remaining;
                     scans_remaining = resp.remaining_samples;
                     if scans_remaining > 0 {
-                        eprintln!("{scans_remaining} more scans needed.");
+                        let status = if counted {
+                            "Lift your finger and place it on the sensor again"
+                        } else {
+                            "Scan not counted. Adjust your finger and try again"
+                        };
+                        progress.update(done(scans_remaining), status);
                     }
                 }
                 Err(e) => {
-                    if get_ctap_status(&e) == Some(CtapStatus::KeepaliveCancel) {
-                        return Err(anyhow!(
-                            "Fingerprint enrollment aborted by user.".to_string(),
-                        ));
+                    let fatal = match get_ctap_status(&e) {
+                        Some(CtapStatus::KeepaliveCancel) => {
+                            Some("Fingerprint enrollment aborted by user.")
+                        }
+                        Some(CtapStatus::FpDatabaseFull) => {
+                            Some("Fingerprint storage full. Remove some fingerprints first.")
+                        }
+                        Some(CtapStatus::UserActionTimeout) => {
+                            Some("Failed to add fingerprint due to user inactivity.")
+                        }
+                        _ => None,
+                    };
+                    if let Some(msg) = fatal {
+                        progress.fail(done(scans_remaining), msg);
+                        return Err(anyhow!(msg.to_string()));
                     }
-                    if get_ctap_status(&e) == Some(CtapStatus::FpDatabaseFull) {
-                        return Err(anyhow!(
-                            "Fingerprint storage full. Remove some fingerprints first.".to_string(),
-                        ));
-                    }
-                    if get_ctap_status(&e) == Some(CtapStatus::UserActionTimeout) {
-                        return Err(anyhow!(
-                            "Failed to add fingerprint due to user inactivity.".to_string(),
-                        ));
-                    }
-                    eprintln!("Capture failed. Re-center your finger, and try again.");
+                    progress.update(
+                        done(scans_remaining),
+                        "Capture failed. Re-center your finger and try again",
+                    );
                 }
             }
         }
 
-        eprintln!("Capture complete.");
-        bio.set_name(&template_id, name)
-            .map_err(|e| anyhow!("Failed to set fingerprint name: {e}"))?;
-        println!("Fingerprint registered.");
+        progress.update(total, "Capture complete");
+        if let Err(e) = bio.set_name(&template_id, name) {
+            progress.fail(total, "Failed to set fingerprint name");
+            return Err(anyhow!("Failed to set fingerprint name: {e}"));
+        }
+        progress.finish("Fingerprint registered");
         Ok(())
     })
 }
