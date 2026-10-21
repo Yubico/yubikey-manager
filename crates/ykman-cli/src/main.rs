@@ -43,10 +43,10 @@ use scp::{ScpInputs, ScpParams};
     about = "Configure your YubiKey via the command line.",
     version,
     after_help = "Examples:\n\
-      \n  List only the serial numbers:\
+      \n  List connected YubiKeys, only output serial number:\
       \n  $ ykman list --serials\
       \n\
-      \n  Show info for the YubiKey with serial 123456:\
+      \n  Show information about YubiKey with serial number 123456:\
       \n  $ ykman --device 123456 info\
       \n\
       \nLearn more:\
@@ -311,19 +311,27 @@ fn lowercase_usage(text: &str) -> String {
     transform_section(text, "USAGE", |content| Some(content.to_lowercase()))
 }
 
-/// Option groups shown as their own help section; everything else stays
-/// under "OPTIONS".
-const OPTION_GROUPS: &[(&str, &[&str])] = &[(
-    "DEVICE OPTIONS",
-    &[
-        "device",
-        "scp",
-        "scp-ca",
-        "scp-sd",
-        "scp-oce",
-        "scp-password",
-    ],
-)];
+const SCP_OPTIONS: (&str, &[&str]) = (
+    "SECURE CHANNEL OPTIONS",
+    &["scp", "scp-ca", "scp-sd", "scp-oce", "scp-password"],
+);
+
+/// Option groups shown as their own help sections; whatever isn't listed (a
+/// command's own options) stays under "OPTIONS".
+const OPTION_GROUPS: &[(&str, &[&str])] = &[
+    SCP_OPTIONS,
+    (
+        "GLOBAL OPTIONS",
+        &[
+            "device",
+            "log-level",
+            "log-file",
+            "color",
+            "help",
+            "version",
+        ],
+    ),
+];
 
 /// Top-level command groups, mirroring the sectioned layout of `gh --help`.
 const COMMAND_GROUPS: &[(&str, &[&str])] = &[
@@ -486,23 +494,20 @@ fn finalize_help(cmd: &mut clap::Command, is_root: bool) {
         OPTION_GROUPS,
         &[],
         true,
-        OPTION_GROUPS.len(),
+        0,
     );
-    let rendered = if is_root {
-        // `help` is redundant with `-h` and clutters the list.
-        regroup_section(
-            &rendered,
-            "COMMANDS",
-            |l| l.starts_with("  ") && !l.starts_with("   "),
-            |l| l.split_whitespace().next().unwrap_or_default().to_string(),
-            COMMAND_GROUPS,
-            &["help"],
-            false,
-            0,
-        )
-    } else {
-        rendered
-    };
+    // `help` is redundant with `-h` and clutters the list. Only the root's
+    // commands are split into sections.
+    let rendered = regroup_section(
+        &rendered,
+        "COMMANDS",
+        |l| l.starts_with("  ") && !l.starts_with("   "),
+        |l| l.split_whitespace().next().unwrap_or_default().to_string(),
+        if is_root { COMMAND_GROUPS } else { &[] },
+        &["help"],
+        false,
+        0,
+    );
     taken = taken.override_help(rendered);
 
     for sub in taken.get_subcommands_mut() {
