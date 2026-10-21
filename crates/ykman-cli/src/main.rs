@@ -55,7 +55,7 @@ struct Cli {
     #[arg(long = "scp", global = true)]
     scp_cred: Vec<String>,
 
-    /// CA certificate for SCP11 card key verification (PEM/DER file)
+    /// CA certificate for SCP11 card key verification; alone, requests SCP11b (PEM/DER file)
     #[arg(long, global = true)]
     scp_ca: Option<String>,
 
