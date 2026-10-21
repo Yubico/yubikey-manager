@@ -179,6 +179,26 @@ NOTE: Session classes are now backed by Rust implementations via PyO3.
 The Python-visible API is the same, but internal implementation details
 (private attributes, monkey-patching) will no longer work.
 
+=== OATH reset closes the session
+
+`OathSession.reset()` still returns `None`, but now closes the session on
+every reset attempt, including failures. The underlying connection remains
+open and is restored for reuse. Reset no longer re-selects the application
+or leaves a usable session without its previous secure channel.
+
+Create a new session to continue, supplying SCP parameters again if required:
+
+[source,python]
+----
+oath = OathSession(conn, scp_key_params)
+oath.reset()
+oath = OathSession(conn, scp_key_params)
+----
+
+Native-backed operations and state properties on the old session raise
+`RuntimeError`. Its cached `version` and `device_id` remain pre-reset
+snapshots; obtain the regenerated device ID from the new session.
+
 
 == Core types
 

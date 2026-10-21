@@ -159,7 +159,8 @@ class OathSession(Session):
     def device_id(self) -> str:
         """The device ID.
 
-        A random static identifier that is re-generated on reset.
+        A random static identifier that is re-generated on reset. This property
+        retains the pre-reset identifier after this session is closed.
         """
         return self._device_id
 
@@ -174,9 +175,16 @@ class OathSession(Session):
         return self._native.locked
 
     def reset(self) -> None:
-        """Perform a factory reset on the OATH application."""
-        self._native.reset()
-        self._device_id = self._native.device_id
+        """Factory reset OATH and close this session, even if reset fails.
+
+        The connection is restored for reuse, not disconnected. Open a new
+        session to continue, passing SCP parameters again if needed. The
+        cached version and device_id remain snapshots of this closed session.
+        """
+        try:
+            self._native.reset()
+        finally:
+            self.close()
 
     def derive_key(self, password: str) -> bytes:
         """Derive an access key from a password.

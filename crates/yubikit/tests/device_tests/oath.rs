@@ -3,6 +3,13 @@ use yubikit::oath::{CredentialData, HashAlgorithm, OathSession, OathType};
 
 fn open_oath_session(tc: &TestConnection) -> OathSession<PcscSmartCardConnection> {
     let conn = open_smartcard_connection(tc);
+    open_oath_session_on_connection(tc, conn)
+}
+
+fn open_oath_session_on_connection(
+    tc: &TestConnection,
+    conn: PcscSmartCardConnection,
+) -> OathSession<PcscSmartCardConnection> {
     if let Some((kid, kvn, pk)) = scp_params(tc) {
         let params = make_scp_key_params(kid, kvn, &pk);
         OathSession::new_with_scp(conn, &params).expect("OathSession with SCP")
@@ -12,15 +19,22 @@ fn open_oath_session(tc: &TestConnection) -> OathSession<PcscSmartCardConnection
 }
 
 /// On FIPS keys, set an access key after reset so operations are allowed.
-fn reset_oath(session: &mut OathSession<PcscSmartCardConnection>) {
+fn reset_oath(
+    session: OathSession<PcscSmartCardConnection>,
+    tc: &TestConnection,
+) -> Option<OathSession<PcscSmartCardConnection>> {
     if device_is_fips() && get_device().transport() == Transport::Nfc {
-        skip!("OATH blocked on FIPS+NFC");
+        record_skip();
+        eprintln!("SKIP: OATH blocked on FIPS+NFC");
+        return None;
     }
-    session.reset().expect("reset");
+    let conn = session.reset().map_err(|(error, _)| error).expect("reset");
+    let mut session = open_oath_session_on_connection(tc, conn);
     if device_is_fips() {
         let key = session.derive_key("fips-test-password");
         session.set_key(&key).expect("FIPS: set OATH access key");
     }
+    Some(session)
 }
 
 #[rstest]
@@ -39,8 +53,16 @@ fn test_oath_session_version(#[case] tc: TestConnection) {
 fn test_oath_reset_and_list(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
-    let mut session = open_oath_session(&tc);
-    reset_oath(&mut session);
+    let session = open_oath_session(&tc);
+    let old_id = session.device_id().to_owned();
+    let Some(mut session) = reset_oath(session, &tc) else {
+        return;
+    };
+    assert_ne!(session.device_id(), old_id);
+    assert_eq!(
+        session.protocol().has_scp(),
+        matches!(tc, TestConnection::SmartCardScp11b)
+    );
 
     let creds = session.list_credentials().expect("list_credentials");
     assert!(creds.is_empty(), "Expected no credentials after reset");
@@ -52,8 +74,9 @@ fn test_oath_reset_and_list(#[case] tc: TestConnection) {
 fn test_oath_put_list_delete(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
-    let mut session = open_oath_session(&tc);
-    reset_oath(&mut session);
+    let Some(mut session) = reset_oath(open_oath_session(&tc), &tc) else {
+        return;
+    };
 
     let cred_data = CredentialData {
         name: "test@example.com".into(),
@@ -88,8 +111,9 @@ fn test_oath_put_list_delete(#[case] tc: TestConnection) {
 fn test_oath_calculate_all(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
-    let mut session = open_oath_session(&tc);
-    reset_oath(&mut session);
+    let Some(mut session) = reset_oath(open_oath_session(&tc), &tc) else {
+        return;
+    };
 
     let cred_data = CredentialData {
         name: "calc@test.com".into(),
@@ -121,11 +145,12 @@ fn test_oath_calculate_all(#[case] tc: TestConnection) {
 fn test_oath_access_key_lifecycle(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
-    let mut session = open_oath_session(&tc);
+    let session = open_oath_session(&tc);
     if device_is_fips() && get_device().transport() == Transport::Nfc {
         skip!("OATH blocked on FIPS+NFC");
     }
-    session.reset().expect("reset");
+    let conn = session.reset().map_err(|(error, _)| error).expect("reset");
+    let mut session = open_oath_session_on_connection(&tc, conn);
 
     if device_is_fips() {
         // FIPS requires an access key to be set before operations.
@@ -149,7 +174,8 @@ fn test_oath_access_key_lifecycle(#[case] tc: TestConnection) {
         session.set_key(&new_key).expect("change key");
 
         // Clean up
-        session.reset().expect("reset");
+        let conn = session.reset().map_err(|(error, _)| error).expect("reset");
+        let mut session = open_oath_session_on_connection(&tc, conn);
         let key = session.derive_key("cleanup");
         session.set_key(&key).expect("FIPS cleanup set_key");
     } else {
@@ -176,11 +202,11 @@ fn test_oath_access_key_lifecycle(#[case] tc: TestConnection) {
 
         // Re-open — should be unlocked
         drop(session);
-        let mut session = open_oath_session(&tc);
+        let session = open_oath_session(&tc);
         assert!(!session.has_key());
         assert!(!session.locked());
 
-        session.reset().expect("reset");
+        session.reset().map_err(|(error, _)| error).expect("reset");
     }
 }
 
@@ -191,8 +217,9 @@ fn test_oath_rename_credential(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
     require_version!(Version(5, 3, 1));
-    let mut session = open_oath_session(&tc);
-    reset_oath(&mut session);
+    let Some(mut session) = reset_oath(open_oath_session(&tc), &tc) else {
+        return;
+    };
 
     let cred_data = CredentialData {
         name: "original@test.com".into(),
@@ -217,7 +244,7 @@ fn test_oath_rename_credential(#[case] tc: TestConnection) {
     assert_eq!(creds[0].issuer.as_deref(), Some("NewIssuer"));
     assert_eq!(creds[0].name, "renamed@test.com");
 
-    reset_oath(&mut session);
+    let _ = reset_oath(session, &tc);
 }
 
 #[rstest]
@@ -226,8 +253,9 @@ fn test_oath_rename_credential(#[case] tc: TestConnection) {
 fn test_oath_calculate_single(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
-    let mut session = open_oath_session(&tc);
-    reset_oath(&mut session);
+    let Some(mut session) = reset_oath(open_oath_session(&tc), &tc) else {
+        return;
+    };
 
     // Add HOTP credential
     let hotp_data = CredentialData {
@@ -275,7 +303,7 @@ fn test_oath_calculate_single(#[case] tc: TestConnection) {
         .expect("calculate totp256");
     assert_eq!(code.value.len(), 8, "Expected 8-digit code");
 
-    reset_oath(&mut session);
+    let _ = reset_oath(session, &tc);
 }
 
 /// Test HOTP with RFC 4226 test vectors.
@@ -287,8 +315,9 @@ fn test_oath_calculate_single(#[case] tc: TestConnection) {
 fn test_oath_hotp_rfc4226_vectors(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
-    let mut session = open_oath_session(&tc);
-    reset_oath(&mut session);
+    let Some(mut session) = reset_oath(open_oath_session(&tc), &tc) else {
+        return;
+    };
 
     let expected = ["755224", "287082", "359152", "969429", "338314"];
 
@@ -315,7 +344,7 @@ fn test_oath_hotp_rfc4226_vectors(#[case] tc: TestConnection) {
         );
     }
 
-    reset_oath(&mut session);
+    let _ = reset_oath(session, &tc);
 }
 
 /// Test TOTP with SHA-256, verifying consistency: same timestamp → same code.
@@ -325,8 +354,9 @@ fn test_oath_hotp_rfc4226_vectors(#[case] tc: TestConnection) {
 fn test_oath_totp_sha256_consistency(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
-    let mut session = open_oath_session(&tc);
-    reset_oath(&mut session);
+    let Some(mut session) = reset_oath(open_oath_session(&tc), &tc) else {
+        return;
+    };
 
     let cred_data = CredentialData {
         name: "sha256-totp@test".into(),
@@ -366,7 +396,7 @@ fn test_oath_totp_sha256_consistency(#[case] tc: TestConnection) {
         "Different time step should give different code"
     );
 
-    reset_oath(&mut session);
+    let _ = reset_oath(session, &tc);
 }
 
 /// Test OATH with SHA-512 algorithm (covers all hash algorithm variants).
@@ -377,8 +407,9 @@ fn test_oath_totp_sha512(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
     require_version!(Version(4, 0, 0));
-    let mut session = open_oath_session(&tc);
-    reset_oath(&mut session);
+    let Some(mut session) = reset_oath(open_oath_session(&tc), &tc) else {
+        return;
+    };
 
     let cred_data = CredentialData {
         name: "sha512@test".into(),
@@ -397,5 +428,5 @@ fn test_oath_totp_sha512(#[case] tc: TestConnection) {
     let code = session.calculate_code(&cred, 59).expect("calculate");
     assert_eq!(code.value.len(), 8);
 
-    reset_oath(&mut session);
+    let _ = reset_oath(session, &tc);
 }

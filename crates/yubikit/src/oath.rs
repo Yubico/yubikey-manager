@@ -675,19 +675,31 @@ impl<C: SmartCardConnection> OathSession<C> {
         self.protocol.into_connection()
     }
 
-    /// Factory reset the OATH application.
-    pub fn reset(&mut self) -> Result<(), OathError> {
+    /// Factory reset the OATH application, consuming this session.
+    ///
+    /// Returns the connection on success or alongside the error on failure.
+    /// A failed exchange can leave the device's reset state uncertain, so the
+    /// session is consumed even on error. No SELECT or subsequent commands are sent.
+    /// Open a new session to continue, explicitly re-establishing SCP if needed.
+    ///
+    /// ```compile_fail
+    /// # use yubikit::{oath::OathSession, smartcard::SmartCardConnection};
+    /// # fn cannot_reuse<C: SmartCardConnection>(session: OathSession<C>) {
+    /// let _ = session.reset();
+    /// let _ = session.device_id(); // The session has been consumed.
+    /// # }
+    /// ```
+    pub fn reset(mut self) -> Result<C, (OathError, C)> {
         log::debug!("Resetting OATH application");
-        self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD, &[])?;
-        let resp = self.protocol.select(Aid::OATH)?;
-        let (_, salt, challenge) =
-            parse_select(&resp).map_err(|e| OathError::InvalidData(e.to_string()))?;
-        self.salt = salt;
-        self.challenge = challenge;
-        self.has_key = false;
-        self.device_id = get_device_id(&self.salt);
-        log::info!("OATH application reset");
-        Ok(())
+        let result = self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD, &[]);
+        let connection = self.into_connection();
+        match result {
+            Ok(_) => {
+                log::info!("OATH application reset");
+                Ok(connection)
+            }
+            Err(error) => Err((error.into(), connection)),
+        }
     }
 
     /// Derive an access key from a password.
@@ -957,6 +969,82 @@ fn rand_bytes<const N: usize>() -> [u8; N] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug)]
+    struct ResetConnection {
+        sent: Vec<Vec<u8>>,
+        reset_sw: Option<u16>,
+        reset: bool,
+    }
+
+    impl crate::core::Connection for ResetConnection {
+        type Error = SmartCardError;
+
+        fn close(&mut self) {}
+    }
+
+    impl SmartCardConnection for ResetConnection {
+        fn transport(&self) -> crate::core::Transport {
+            crate::core::Transport::Usb
+        }
+
+        fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+            self.sent.push(apdu.to_vec());
+            match apdu[1] {
+                0xa4 => Ok((
+                    [
+                        tlv_encode(TAG_VERSION, &[5, 7, 2]),
+                        tlv_encode(TAG_NAME, if self.reset { b"new salt" } else { b"old salt" }),
+                    ]
+                    .concat(),
+                    0x9000,
+                )),
+                INS_RESET => {
+                    assert_eq!(&apdu[..4], &[0, INS_RESET, 0xde, 0xad]);
+                    let sw = self.reset_sw.ok_or_else(|| {
+                        SmartCardError::Transport(Box::new(std::io::Error::other(
+                            "Reset transport failure",
+                        )))
+                    })?;
+                    self.reset = sw == 0x9000;
+                    Ok((Vec::new(), sw))
+                }
+                INS_LIST => Ok((Vec::new(), 0x9000)),
+                _ => panic!("Unexpected APDU"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_reset_returns_connection_without_reselecting_on_success_or_failure() {
+        for sw in [Some(0x9000), Some(0x6982), None] {
+            let connection = ResetConnection {
+                sent: Vec::new(),
+                reset_sw: sw,
+                reset: false,
+            };
+            let session = OathSession::new(connection).unwrap();
+            let old_id = session.device_id().to_owned();
+            let connection = match (sw, session.reset()) {
+                (Some(0x9000), Ok(connection)) => connection,
+                (
+                    Some(0x6982),
+                    Err((
+                        OathError::Connection(SmartCardError::Apdu { sw: 0x6982, .. }),
+                        connection,
+                    )),
+                ) => connection,
+                (None, Err((OathError::Connection(SmartCardError::Transport(_)), connection))) => {
+                    connection
+                }
+                (_, result) => panic!("Unexpected reset result: {result:?}"),
+            };
+            assert_eq!(connection.sent.len(), 2);
+            let mut reopened = OathSession::new(connection).unwrap();
+            assert_eq!(reopened.device_id() != old_id, sw == Some(0x9000));
+            assert!(reopened.list_credentials().unwrap().is_empty());
+        }
+    }
 
     #[test]
     fn test_format_parse_cred_id_totp() {

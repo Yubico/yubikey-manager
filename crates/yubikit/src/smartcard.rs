@@ -1454,6 +1454,7 @@ fn scp03_derive(key: &[u8], t: u8, context: &[u8], l: u16) -> Result<Zeroizing<V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::__internal::tlv::tlv_encode;
 
     const TEST_KEY_ENC: [u8; 16] = [0x11; 16];
     const TEST_KEY_MAC: [u8; 16] = [0x22; 16];
@@ -1590,6 +1591,12 @@ mod tests {
             self.sent.push(apdu.to_vec());
             if apdu[1] == INS_SELECT {
                 self.state = None;
+                if apdu.get(5..5 + usize::from(apdu[4])) == Some(Aid::OATH) {
+                    return Ok((
+                        [tlv_encode(0x79, &[5, 7, 2]), tlv_encode(0x71, b"old salt")].concat(),
+                        SW_OK,
+                    ));
+                }
                 return Ok((Vec::new(), SW_OK));
             }
             if apdu[..2] == [0x80, 0x50] {
@@ -1755,6 +1762,57 @@ mod tests {
             .put_key_ec_private(key, &[1; 32], Curve::Secp256r1, 0)
             .unwrap();
         assert!(session.protocol().has_scp());
+    }
+
+    #[test]
+    fn test_oath_reset_returns_connection_without_post_reset_scp_downgrade() {
+        use crate::oath::OathSession;
+        use p256::elliptic_curve::sec1::ToEncodedPoint;
+
+        for scp11 in [false, true] {
+            for response in [
+                TestScpResponse::Protected(Vec::new(), SW_OK),
+                TestScpResponse::Bare(Vec::new(), 0x6982),
+                TestScpResponse::WrongMac,
+                TestScpResponse::TransportFailure,
+            ] {
+                let params = if scp11 {
+                    let key = p256::SecretKey::from_slice(&[2; 32]).unwrap();
+                    ScpKeyParams::Scp11b {
+                        kid: 0x13,
+                        kvn: 1,
+                        pk_sd_ecka: key.public_key().to_encoded_point(false).as_bytes().to_vec(),
+                    }
+                } else {
+                    ScpKeyParams::Scp03 {
+                        kvn: 0,
+                        key_enc: TEST_KEY_ENC,
+                        key_mac: TEST_KEY_MAC,
+                        key_dek: None,
+                    }
+                };
+                let mut session = OathSession::new_with_scp(ScpTestConnection::new(), &params)
+                    .unwrap_or_else(|(error, _)| panic!("{error}"));
+                let sent = session.protocol().connection.sent.len();
+                let success = matches!(&response, TestScpResponse::Protected(_, SW_OK));
+                session.protocol_mut().connection.response = response;
+                let result = session.reset();
+                assert_eq!(result.is_ok(), success);
+                let mut connection = match result {
+                    Ok(connection) | Err((_, connection)) => connection,
+                };
+                assert_eq!(connection.sent.len(), sent + 1);
+                assert_eq!(
+                    &connection.sent.last().unwrap()[..4],
+                    &[0x04, 0x04, 0xde, 0xad]
+                );
+                connection.response = TestScpResponse::Protected(Vec::new(), SW_OK);
+                let mut reopened = OathSession::new_with_scp(connection, &params)
+                    .unwrap_or_else(|(error, _)| panic!("{error}"));
+                assert!(reopened.protocol().has_scp());
+                assert!(reopened.list_credentials().unwrap().is_empty());
+            }
+        }
     }
 
     #[test]

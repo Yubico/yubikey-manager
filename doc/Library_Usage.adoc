@@ -71,6 +71,12 @@ with dev.open_connection(SmartCardConnection) as connection:
     print(f"You have {attempts} PIN attempts left.")
 ----
 
+An OATH factory reset closes its `OathSession`, even if the reset raises an
+error. The connection is restored without being disconnected. To continue,
+construct a new `OathSession` on that connection and provide any required SCP
+parameters again. The closed session's cached version and device ID describe
+the old session, not the post-reset state.
+
 
 === Detecting YubiKey insertion
 Sometimes you'll want to do something when a YubiKey is inserted. You can use

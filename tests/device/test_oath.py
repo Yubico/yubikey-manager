@@ -17,20 +17,45 @@ KEY = bytes.fromhex("01020304050607080102030405060708")
 @pytest.fixture
 @condition.capability(CAPABILITY.OATH)
 def session(ccid_connection, info, scp_params):
-    oath = OathSession(ccid_connection)
-    oath.reset()
+    with OathSession(ccid_connection) as oath:
+        oath.reset()
 
+    params = None
     if CAPABILITY.OATH in info.fips_capable:
         if ccid_connection.transport == TRANSPORT.NFC:
-            oath.close()
-            oath = OathSession(ccid_connection, scp_params)
-        oath.set_key(KEY)
+            params = scp_params
 
-    yield oath
-    oath.close()
+    with OathSession(ccid_connection, params) as oath:
+        if CAPABILITY.OATH in info.fips_capable:
+            oath.set_key(KEY)
+        yield oath
 
 
 CRED_DATA = CredentialData("name", OATH_TYPE.TOTP, HASH_ALGORITHM.SHA1, b"secret")
+
+
+@condition.capability(CAPABILITY.OATH)
+@pytest.mark.parametrize("secure", (False, True), ids=("plain", "scp"))
+def test_reset_requires_new_session(ccid_connection, info, scp_params, secure):
+    if secure and scp_params is None:
+        pytest.skip("SCP11b key not available")
+    params = scp_params if secure else None
+    oath = OathSession(ccid_connection, params)
+    old_id = oath.device_id
+    oath.reset()
+    for operation in (
+        oath.list_credentials,
+        oath.reset,
+        lambda: oath.derive_key("password"),
+    ):
+        with pytest.raises(RuntimeError, match="Session is closed"):
+            operation()
+    oath.close()
+    with OathSession(ccid_connection, params) as reopened:
+        assert reopened.device_id != old_id
+        if CAPABILITY.OATH in info.fips_capable:
+            reopened.set_key(KEY)
+        assert reopened.list_credentials() == []
 
 
 class TestFunctions:

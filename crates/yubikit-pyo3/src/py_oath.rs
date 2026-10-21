@@ -136,8 +136,24 @@ impl OathSession {
         Ok(self.session()?.locked())
     }
 
-    fn reset(&mut self) -> PyResult<()> {
-        self.session_mut()?.reset().map_err(oath_err)
+    fn reset(&mut self, py: Python<'_>) -> PyResult<()> {
+        let session = self
+            .inner
+            .take()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))?;
+        let (connection, result) = match session.reset() {
+            Ok(connection) => (connection, Ok(())),
+            Err((error, connection)) => (connection, Err(oath_err(error))),
+        };
+        match restore_smartcard_connection(self.py_connection.bind(py), connection) {
+            Ok(()) => result,
+            Err(restore_error) => {
+                if let Err(reset_error) = result {
+                    restore_error.set_cause(py, Some(reset_error));
+                }
+                Err(restore_error)
+            }
+        }
     }
 
     fn derive_key(&self, password: &str) -> PyResult<Vec<u8>> {

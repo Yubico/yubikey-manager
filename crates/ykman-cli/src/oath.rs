@@ -517,11 +517,11 @@ pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -
         }
     }
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
-    let mut session = new_oath_session(dev, &scp_config)?;
+    let session = new_oath_session(dev, &scp_config)?;
     let device_id = session.device_id().to_string();
     session
         .reset()
-        .map_err(|e| anyhow!("Failed to reset OATH: {e}"))?;
+        .map_err(|(e, _)| anyhow!("Failed to reset OATH: {e}"))?;
 
     // Clean up any stored password for this device
     let mut keys = oath_keys()?;
