@@ -972,15 +972,11 @@ name = "yubikey-manager"
 version = "6.0.0.dev0"
 source = { editable = "packages/ykman" }
 dependencies = [
-    { name = "cryptography" },
     { name = "yubikit" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "cryptography", specifier = ">=42" },
-    { name = "yubikit", editable = "packages/yubikit" },
-]
+requires-dist = [{ name = "yubikit", editable = "packages/yubikit" }]
 
 [[package]]
 name = "yubikey-manager-workspace"
@@ -1020,4 +1016,4 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cryptography", specifier = ">=42,<52" }]
+requires-dist = [{ name = "cryptography", specifier = ">=42,<53" }]

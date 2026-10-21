@@ -17,7 +17,6 @@ import re
 import sys
 
 sys.path.insert(0, os.path.abspath("../packages/yubikit"))
-sys.path.insert(0, os.path.abspath("../packages/ykman"))
 
 
 def get_version():
@@ -195,7 +194,7 @@ intersphinx_mapping = {
 
 
 # Custom config
-autoapi_dirs = ["../packages/yubikit/yubikit", "../packages/ykman/ykman"]
+autoapi_dirs = ["../packages/yubikit/yubikit"]
 autoapi_options = [
     "members",
     "undoc-members",

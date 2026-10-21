@@ -11,7 +11,7 @@ Usage: chalresp-touch.py
 
 import threading
 
-from ykman import scripting as s
+from yubikit import scripting as s
 from yubikit.yubiotp import SLOT, YubiOtpSession
 
 device = s.single()

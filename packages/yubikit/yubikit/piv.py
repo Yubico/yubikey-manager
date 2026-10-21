@@ -29,12 +29,14 @@ from __future__ import annotations
 
 import gzip
 import logging
+import os
 import re
 import zlib
 from dataclasses import astuple, dataclass
-from datetime import date
+from datetime import date, datetime
 from enum import Enum, IntEnum, unique
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, TypeAlias, cast
+from uuid import uuid4
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
@@ -46,7 +48,10 @@ from cryptography.hazmat.primitives.asymmetric.padding import (
     AsymmetricPadding,
     PKCS1v15,
 )
-from cryptography.hazmat.primitives.asymmetric.types import PublicKeyTypes
+from cryptography.hazmat.primitives.asymmetric.types import (
+    CertificatePublicKeyTypes,
+    PublicKeyTypes,
+)
 from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
@@ -696,6 +701,230 @@ def decompress_certificate(cert_data: bytes) -> bytes:
             logger.warning("Unknown compression type")
 
     raise BadResponseError("Failed to decompress certificate")
+
+
+def generate_chuid() -> bytes:
+    """Generate a CHUID (Cardholder Unique Identifier)."""
+
+    chuid = Chuid(
+        # Non-Federal Issuer FASC-N
+        fasc_n=FascN(9999, 9999, 999999, 0, 1, 0000000000, 3, 0000, 1),
+        guid=uuid4().bytes,
+        # Expires on: 2030-01-01
+        expiration_date=date(2030, 1, 1),
+        asymmetric_signature=b"",
+    )
+
+    return bytes(chuid)
+
+
+def generate_ccc() -> bytes:
+    """Generate a CCC (Card Capability Container)."""
+    return (
+        Tlv(0xF0, b"\xa0\x00\x00\x01\x16\xff\x02" + os.urandom(14))
+        + Tlv(0xF1, b"\x21")
+        + Tlv(0xF2, b"\x21")
+        + Tlv(0xF3)
+        + Tlv(0xF4, b"\x00")
+        + Tlv(0xF5, b"\x10")
+        + Tlv(0xF6)
+        + Tlv(0xF7)
+        + Tlv(0xFA)
+        + Tlv(0xFB)
+        + Tlv(0xFC)
+        + Tlv(0xFD)
+        + Tlv(TAG_LRC)
+    )
+
+
+_AllowedHashTypes: TypeAlias = (
+    hashes.SHA224
+    | hashes.SHA256
+    | hashes.SHA384
+    | hashes.SHA512
+    | hashes.SHA3_224
+    | hashes.SHA3_256
+    | hashes.SHA3_384
+    | hashes.SHA3_512
+)
+
+
+def _dummy_key(key_type):
+    if key_type.algorithm == ALGORITHM.RSA:
+        return rsa.generate_private_key(65537, key_type.bit_len)
+    if key_type == KEY_TYPE.ECCP256:
+        return ec.generate_private_key(ec.SECP256R1())
+    if key_type == KEY_TYPE.ECCP384:
+        return ec.generate_private_key(ec.SECP384R1())
+    if key_type == KEY_TYPE.ED25519:
+        return ed25519.Ed25519PrivateKey.generate()
+    if key_type == KEY_TYPE.X25519:
+        return x25519.X25519PrivateKey.generate()
+    if key_type.algorithm == ALGORITHM.MLDSA:
+        try:
+            # ML-DSA certificates and CSRs require cryptography >= 49.
+            from cryptography.hazmat.primitives.asymmetric import mldsa
+        except ImportError:
+            raise NotSupportedError("ML-DSA requires a newer version of cryptography")
+        return getattr(mldsa, f"{key_type.name}PrivateKey").generate()
+    raise ValueError("Invalid algorithm")
+
+
+def _hash(key_type, hash_algorithm):
+    if (
+        key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519)
+        or key_type.algorithm == ALGORITHM.MLDSA
+    ):
+        return None
+    return hash_algorithm()
+
+
+def sign_certificate_builder(
+    session: PivSession,
+    slot: SLOT,
+    key_type: KEY_TYPE,
+    builder: x509.CertificateBuilder,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
+) -> x509.Certificate:
+    """Sign a Certificate.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param key_type: The key type.
+    :param builder: The x509 certificate builder object.
+    :param hash_algorithm: The hash algorithm, ignored for Curve 25519 and ML-DSA.
+    """
+    logger.debug("Signing a certificate")
+    dummy_key = _dummy_key(key_type)
+    assert not isinstance(dummy_key, x25519.X25519PrivateKey)  # noqa: S101
+    cert = builder.sign(dummy_key, _hash(key_type, hash_algorithm))
+
+    sig = session.sign(
+        slot,
+        key_type,
+        cert.tbs_certificate_bytes,
+        _hash(key_type, hash_algorithm),
+        PKCS1v15(),  # Only used for RSA
+    )
+
+    seq = Tlv.parse_list(Tlv.unpack(0x30, cert.public_bytes(Encoding.DER)))
+    # Replace signature, add unused bits = 0
+    seq[2] = Tlv(seq[2].tag, b"\0" + sig)
+    # Re-assemble sequence
+    der = Tlv(0x30, b"".join(seq))
+
+    return x509.load_der_x509_certificate(der)
+
+
+def sign_csr_builder(
+    session: PivSession,
+    slot: SLOT,
+    public_key: PublicKeyTypes,
+    builder: x509.CertificateSigningRequestBuilder,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
+) -> x509.CertificateSigningRequest:
+    """Sign a CSR.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
+    :param builder: The x509 certificate signing request builder
+        object.
+    :param hash_algorithm: The hash algorithm, ignored for Curve 25519 and ML-DSA.
+    """
+    logger.debug("Signing a CSR")
+    key_type = KEY_TYPE.from_public_key(public_key)
+    dummy_key = _dummy_key(key_type)
+    assert not isinstance(dummy_key, x25519.X25519PrivateKey)  # noqa: S101
+
+    csr = builder.sign(dummy_key, _hash(key_type, hash_algorithm))
+    seq = Tlv.parse_list(Tlv.unpack(0x30, csr.public_bytes(Encoding.DER)))
+
+    # Replace public key
+    pub_format = (
+        PublicFormat.PKCS1
+        if key_type.algorithm == ALGORITHM.RSA
+        else PublicFormat.SubjectPublicKeyInfo
+    )
+    dummy_bytes = dummy_key.public_key().public_bytes(Encoding.DER, pub_format)
+    pub_bytes = public_key.public_bytes(Encoding.DER, pub_format)
+    seq[0] = Tlv(seq[0].replace(dummy_bytes, pub_bytes))
+
+    sig = session.sign(
+        slot,
+        key_type,
+        seq[0],
+        _hash(key_type, hash_algorithm),
+        PKCS1v15(),  # Only used for RSA
+    )
+
+    # Replace signature, add unused bits = 0
+    seq[2] = Tlv(seq[2].tag, b"\0" + sig)
+    # Re-assemble sequence
+    der = Tlv(0x30, b"".join(seq))
+
+    return x509.load_der_x509_csr(der)
+
+
+def generate_self_signed_certificate(
+    session: PivSession,
+    slot: SLOT,
+    public_key: PublicKeyTypes,
+    subject_str: str,
+    valid_from: datetime,
+    valid_to: datetime,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
+) -> x509.Certificate:
+    """Generate a self-signed certificate using a private key in a slot.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
+    :param subject_str: The subject RFC 4514 string.
+    :param valid_from: The date from when the certificate is valid.
+    :param valid_to: The date when the certificate expires.
+    :param hash_algorithm: The hash algorithm.
+    """
+    logger.debug("Generating a self-signed certificate")
+    key_type = KEY_TYPE.from_public_key(public_key)
+    if TYPE_CHECKING:
+        public_key = cast(CertificatePublicKeyTypes, public_key)
+
+    subject = x509.Name.from_rfc4514_string(subject_str)
+    builder = (
+        x509.CertificateBuilder()
+        .public_key(public_key)
+        .subject_name(subject)
+        .issuer_name(subject)  # Same as subject on self-signed certificate.
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(valid_from)
+        .not_valid_after(valid_to)
+    )
+
+    return sign_certificate_builder(session, slot, key_type, builder, hash_algorithm)
+
+
+def generate_csr(
+    session: PivSession,
+    slot: SLOT,
+    public_key: PublicKeyTypes,
+    subject_str: str,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
+) -> x509.CertificateSigningRequest:
+    """Generate a CSR using a private key in a slot.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
+    :param subject_str: The subject RFC 4514 string.
+    :param hash_algorithm: The hash algorithm.
+    """
+    logger.debug("Generating a CSR")
+    builder = x509.CertificateSigningRequestBuilder().subject_name(
+        x509.Name.from_rfc4514_string(subject_str)
+    )
+
+    return sign_csr_builder(session, slot, public_key, builder, hash_algorithm)
 
 
 class PivSession(Session):

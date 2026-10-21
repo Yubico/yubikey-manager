@@ -17,10 +17,16 @@ In 5.x there were two top-level packages, yubikit and ykman. In 6.x yubikit is
 the main library, with additional functionality provided to replace most of
 that of ykman. The ykman CLI tool is now fully written in Rust.
 
-Note: The `yubikey-manager` Python package still exists. It mainly provides the
-ykman CLI tool, but also keeps a small amount of Python library code:
-`ykman.piv` (PIV helpers such as certificate and CSR generation) and
-`ykman.scripting` (see link:Scripting.adoc[Scripting]).
+Note: The `yubikey-manager` Python package still exists, but only provides the
+ykman CLI tool. It no longer contains any Python library code. The remaining
+Python helpers from `ykman` have moved into `yubikit`:
+
+* The certificate, CSR, CHUID, and CCC generation helpers and the certificate
+  and CSR signing helpers from `ykman.piv` are now in `yubikit.piv`.
+* Pivman data and management-key helpers from `ykman.piv` are now in
+  `yubikit.pivman`.
+* `ykman.scripting` is now `yubikit.scripting` (see
+  link:Scripting.adoc[Scripting]).
 
 === Package layout
 
@@ -32,8 +38,8 @@ ykman CLI tool, but also keeps a small amount of Python library code:
 | `pip install yubikit`
 
 | Single package providing both `yubikit` and `ykman`
-| `yubikit` library; `ykman.piv` and `ykman.scripting` remain in
-  `yubikey-manager`
+| `yubikit` library, including the former `ykman.piv` and
+  `ykman.scripting` helpers; `yubikey-manager` only provides the CLI
 
 | Pure Python
 | Rust core + Python wrapper
@@ -92,6 +98,15 @@ pids, state = scan_devices()
 
 | `from ykman.device import list_all_devices, scan_devices`
 | `from yubikit.device import list_all_devices, scan_devices`
+
+| `from ykman.piv import generate_csr, generate_self_signed_certificate, generate_chuid, generate_ccc, sign_certificate_builder, sign_csr_builder`
+| Import these functions from `yubikit.piv` instead
+
+| `from ykman.piv import PivmanData, get_pivman_data, pivman_set_mgm_key`
+| Import these helpers from `yubikit.pivman` instead
+
+| `from ykman import scripting`
+| `from yubikit import scripting`
 |===
 
 == YubiKeyDevice
@@ -226,6 +241,18 @@ Building from source requires Rust (stable) and `maturin`. The latter is handled
 
 | `ykman.util`
 | Functionality moved to Rust core
+
+| `ykman.piv`
+| Generation and signing helpers moved to `yubikit.piv`; Pivman helpers
+  moved to `yubikit.pivman`
+
+| `ykman.piv.check_key()`, `list_certificates()`, `get_piv_info()`,
+  `generate_random_management_key()`
+| Removed; use `PivSession` methods for signing and reading certificates,
+  and `os.urandom(algorithm.key_len)` to generate a management key
+
+| `ykman.scripting`
+| `yubikit.scripting`
 
 | `yubikit.support.read_info()`
 | Use `device.info` instead

@@ -1,22 +1,31 @@
 import gzip
 import hashlib
 import zlib
-from datetime import date
+from datetime import date, datetime, timezone
+from unittest.mock import Mock
 
 import pytest
+from cryptography import x509
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
 from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
-from yubikit.core import BadResponseError
+from yubikit.core import BadResponseError, Tlv
 from yubikit.piv import (
     ALGORITHM,
     KEY_TYPE,
+    SLOT,
+    TAG_LRC,
     Chuid,
     FascN,
+    PivSession,
     _pad_message,
     _unpad_message,
     calculate_ml_dsa_mu,
     decompress_certificate,
+    generate_ccc,
+    generate_chuid,
+    generate_csr,
+    generate_self_signed_certificate,
 )
 
 
@@ -76,6 +85,77 @@ def test_chuid_deserialize():
     )
 
     assert Chuid.from_bytes(bytes(chuid)) == chuid
+
+
+def test_generate_chuid():
+    chuid = Chuid.from_bytes(generate_chuid())
+    assert chuid.fasc_n == FascN(9999, 9999, 999999, 0, 1, 0, 3, 0, 1)
+    assert chuid.expiration_date == date(2030, 1, 1)
+    assert chuid.asymmetric_signature == b""
+    assert len(chuid.guid) == 16
+    assert chuid.guid != Chuid.from_bytes(generate_chuid()).guid
+
+
+def test_generate_ccc():
+    ccc = Tlv.parse_dict(generate_ccc())
+    assert ccc[0xF0].startswith(b"\xa0\x00\x00\x01\x16\xff\x02")
+    assert len(ccc[0xF0]) == 21
+    assert ccc[0xF0] != Tlv.parse_dict(generate_ccc())[0xF0]
+    assert ccc[0xF1] == ccc[0xF2] == b"\x21"
+    assert ccc[TAG_LRC] == b""
+
+
+@pytest.mark.parametrize(
+    "key_type",
+    [
+        KEY_TYPE.RSA2048,
+        KEY_TYPE.ECCP256,
+        KEY_TYPE.ECCP384,
+        KEY_TYPE.ED25519,
+        KEY_TYPE.MLDSA44,
+        KEY_TYPE.MLDSA65,
+        KEY_TYPE.MLDSA87,
+    ],
+)
+def test_generate_certificate_and_csr(key_type):
+    if key_type == KEY_TYPE.RSA2048:
+        private_key = rsa.generate_private_key(65537, 2048)
+    elif key_type in (KEY_TYPE.ECCP256, KEY_TYPE.ECCP384):
+        private_key = ec.generate_private_key(
+            ec.SECP256R1() if key_type == KEY_TYPE.ECCP256 else ec.SECP384R1()
+        )
+    elif key_type == KEY_TYPE.ED25519:
+        private_key = ed25519.Ed25519PrivateKey.generate()
+    else:
+        pytest.importorskip("cryptography", minversion="49")
+        mldsa = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.mldsa")
+        private_key = getattr(mldsa, f"{key_type.name}PrivateKey").generate()
+
+    def sign(slot, algorithm, data, hash_algorithm, rsa_padding):
+        assert slot == SLOT.SIGNATURE
+        assert algorithm == key_type
+        if isinstance(private_key, rsa.RSAPrivateKey):
+            return private_key.sign(data, rsa_padding, hash_algorithm)
+        if isinstance(private_key, ec.EllipticCurvePrivateKey):
+            return private_key.sign(data, ec.ECDSA(hash_algorithm))
+        return private_key.sign(data)
+
+    session = Mock(spec=PivSession)
+    session.sign.side_effect = sign
+    public_key = private_key.public_key()
+    now = datetime.now(timezone.utc)
+    certificate = generate_self_signed_certificate(
+        session, SLOT.SIGNATURE, public_key, "CN=alice", now, now
+    )
+    assert certificate.public_key() == public_key
+    assert certificate.subject == x509.Name.from_rfc4514_string("CN=alice")
+    certificate.verify_directly_issued_by(certificate)
+
+    csr = generate_csr(session, SLOT.SIGNATURE, public_key, "CN=alice")
+    assert csr.public_key() == public_key
+    assert csr.subject == certificate.subject
+    assert csr.is_signature_valid
+    assert session.sign.call_count == 2
 
 
 class TestDecompressCertificate:

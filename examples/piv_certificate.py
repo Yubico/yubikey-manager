@@ -28,13 +28,13 @@ import getpass
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import NameOID
-from ykman import scripting as s
-from ykman.piv import sign_certificate_builder
+from yubikit import scripting as s
 from yubikit.piv import (
     DEFAULT_MANAGEMENT_KEY,
     KEY_TYPE,
     SLOT,
     PivSession,
+    sign_certificate_builder,
 )
 
 # Use slot 9A (authentication), and key type RSA 2048

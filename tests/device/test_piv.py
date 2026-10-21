@@ -7,15 +7,6 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
-from ykman.piv import (
-    check_key,
-    generate_csr,
-    generate_self_signed_certificate,
-    get_piv_info,
-    get_pivman_data,
-    get_pivman_protected_data,
-    pivman_set_mgm_key,
-)
 from yubikit.core import TRANSPORT, NotSupportedError
 from yubikit.core.smartcard import AID, ApduError, SmartCardProtocol
 from yubikit.management import CAPABILITY, RELEASE_TYPE, ManagementSession
@@ -30,6 +21,13 @@ from yubikit.piv import (
     InvalidPinError,
     PivSession,
     calculate_ml_dsa_mu,
+    generate_csr,
+    generate_self_signed_certificate,
+)
+from yubikit.pivman import (
+    get_pivman_data,
+    get_pivman_protected_data,
+    pivman_set_mgm_key,
 )
 
 from ..util import open_file
@@ -285,7 +283,6 @@ class TestCertificateSignatures:
         )
         assert cert.public_key() == public_key
         verify_cert_signature(cert, public_key)
-        assert check_key(session, slot, public_key)
 
         csr = generate_csr(session, slot, public_key, "CN=alice")
         assert csr.public_key() == public_key
@@ -410,19 +407,6 @@ class TestPostQuantum:
             session.generate_key(SLOT.KEY_MANAGEMENT, KEY_TYPE.MLKEM512)
 
 
-class TestPivInfo:
-    def test_unsupported_certificate_public_key(self, session, keys):
-        with open_file("mlkem_512_cert.pem") as f:
-            cert = x509.load_pem_x509_certificate(f.read())
-        session.authenticate(keys.mgmt)
-        session.put_certificate(SLOT.AUTHENTICATION, cert)
-
-        objects = [o for o in get_piv_info(session) if isinstance(o, dict)][-1]
-        cert_data = objects[f"Slot {SLOT.AUTHENTICATION}"]
-        assert cert_data["Public key type"] == "Unsupported"
-        session.delete_certificate(SLOT.AUTHENTICATION)
-
-
 class TestKeyManagement:
     def test_delete_certificate_requires_authentication(self, session, keys, scp):
         generate_key(session, scp, keys, SLOT.AUTHENTICATION)
@@ -491,70 +475,6 @@ class TestKeyManagement:
 
         session.authenticate(keys.mgmt)
         session.put_certificate(SLOT.AUTHENTICATION, cert)
-
-    def _test_put_key_pairing(self, session, scp, keys, alg1, alg2):
-        # Set up a key in the slot and create a certificate for it
-        public_key = generate_key(
-            session, scp, keys, SLOT.AUTHENTICATION, key_type=alg1
-        )
-        session.authenticate(keys.mgmt)
-        session.verify_pin(keys.pin)
-        cert = generate_self_signed_certificate(
-            session, SLOT.AUTHENTICATION, public_key, "CN=test", NOW, NOW
-        )
-        session.put_certificate(SLOT.AUTHENTICATION, cert)
-        assert check_key(session, SLOT.AUTHENTICATION, cert.public_key())
-
-        cert2 = session.get_certificate(SLOT.AUTHENTICATION)
-        assert cert == cert2
-
-        session.delete_certificate(SLOT.AUTHENTICATION)
-
-        # Overwrite the key with one of the same type
-        generate_key(session, scp, keys, SLOT.AUTHENTICATION, key_type=alg1)
-        session.verify_pin(keys.pin)
-        assert not check_key(session, SLOT.AUTHENTICATION, cert.public_key())
-
-        # Overwrite the key with one of a different type
-        generate_key(session, scp, keys, SLOT.AUTHENTICATION, key_type=alg2)
-        session.verify_pin(keys.pin)
-        assert not check_key(session, SLOT.AUTHENTICATION, cert.public_key())
-
-    @condition.check(not_roca)
-    @condition.yk4_fips(False)
-    def test_put_certificate_verifies_key_pairing_rsa1024(
-        self, session, keys, info, scp
-    ):
-        if CAPABILITY.PIV in info.fips_capable:
-            pytest.skip("RSA1024 not available on YubiKey FIPS")
-        skip_unsupported_key_type(session, KEY_TYPE.RSA1024, info)
-        self._test_put_key_pairing(
-            session, scp, keys, KEY_TYPE.RSA1024, KEY_TYPE.ECCP256
-        )
-
-    @condition.check(not_roca)
-    def test_put_certificate_verifies_key_pairing_rsa2048(self, session, keys, scp):
-        self._test_put_key_pairing(
-            session, scp, keys, KEY_TYPE.RSA2048, KEY_TYPE.ECCP256
-        )
-
-    @condition.check(not_roca)
-    def test_put_certificate_verifies_key_pairing_eccp256_a(self, session, keys, scp):
-        self._test_put_key_pairing(
-            session, scp, keys, KEY_TYPE.ECCP256, KEY_TYPE.RSA2048
-        )
-
-    @condition.min_version(4)
-    def test_put_certificate_verifies_key_pairing_eccp256_b(self, session, keys, scp):
-        self._test_put_key_pairing(
-            session, scp, keys, KEY_TYPE.ECCP256, KEY_TYPE.ECCP384
-        )
-
-    @condition.min_version(4)
-    def test_put_certificate_verifies_key_pairing_eccp384(self, session, keys, scp):
-        self._test_put_key_pairing(
-            session, scp, keys, KEY_TYPE.ECCP384, KEY_TYPE.ECCP256
-        )
 
     def test_put_key_requires_authentication(self, session, keys):
         private_key = get_test_key()

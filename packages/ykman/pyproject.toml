@@ -16,7 +16,6 @@ classifiers = [
 ]
 dependencies = [
   "yubikit>=0.1.0.dev0",
-  "cryptography>=42",
 ]
 
 [project.urls]

@@ -42,7 +42,7 @@ Various helpers intended to simplify scripting.
 
 Add an import to your script:
 
-  from ykman import scripting as s
+  from yubikit import scripting as s
 
 Example usage:
 
