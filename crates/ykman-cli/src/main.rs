@@ -337,10 +337,11 @@ const ROOT_OPTION_GROUPS: &[(&str, &[&str])] = &[
 
 /// Top-level command groups, mirroring the sectioned layout of `gh --help`.
 const COMMAND_GROUPS: &[(&str, &[&str])] = &[
-    ("DEVICE COMMANDS", &["list", "info", "config"]),
     (
-        "APPLICATION COMMANDS",
-        &["oath", "otp", "piv", "fido", "openpgp", "hsmauth", "sd"],
+        "COMMANDS",
+        &[
+            "list", "info", "config", "oath", "otp", "piv", "fido", "openpgp", "hsmauth", "sd",
+        ],
     ),
     ("ADDITIONAL COMMANDS", &["apdu", "diagnose", "licenses"]),
 ];
