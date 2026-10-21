@@ -9,6 +9,7 @@ from yubikit.core import TRANSPORT, InvalidPinError
 from yubikit.core.smartcard import ApduError
 from yubikit.management import CAPABILITY
 from yubikit.openpgp import (
+    HASH_ALGORITHM,
     KEY_REF,
     OID,
     RSA_SIZE,
@@ -330,6 +331,24 @@ def test_kdf(session, keys):
     session.set_kdf(KdfNone())
     session.verify_admin(DEFAULT_ADMIN_PIN)
     session.verify_pin(DEFAULT_PIN)
+
+
+@condition.min_version(5, 2)
+@pytest.mark.parametrize("algorithm", list(HASH_ALGORITHM))
+@pytest.mark.parametrize("count", [1, 8, 15])
+def test_kdf_short_count_includes_full_pin(session, keys, algorithm, count):
+    session.verify_admin(keys.admin)
+    session.set_kdf(KdfIterSaltedS2k.create(algorithm, count))
+    try:
+        with pytest.raises(InvalidPinError):
+            session.verify_admin("12345679")
+        session.verify_admin(DEFAULT_ADMIN_PIN)
+
+        with pytest.raises(InvalidPinError):
+            session.verify_pin("123457")
+        session.verify_pin(DEFAULT_PIN)
+    finally:
+        session.set_kdf(KdfNone())
 
 
 @condition.min_version(5, 2)

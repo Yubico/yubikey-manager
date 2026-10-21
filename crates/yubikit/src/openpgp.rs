@@ -1221,7 +1221,7 @@ pub enum Kdf {
     IterSaltedS2k {
         /// Hash algorithm used for key derivation.
         hash_algorithm: HashAlgorithm,
-        /// Total number of bytes to hash (controls iteration count).
+        /// Requested byte count; at least one full salt-and-PIN sequence is hashed.
         iteration_count: u32,
         /// Salt for deriving the user PIN.
         salt_user: Vec<u8>,
@@ -1363,7 +1363,8 @@ impl Kdf {
     }
 }
 
-/// Iterated-salted S2K hash: hash `iteration_count` bytes of (salt || pin) repeated.
+/// Iterated-salted S2K hash: repeat (salt || pin) up to the requested byte count,
+/// always hashing at least one complete sequence (RFC 4880, section 3.7.1.3).
 fn kdf_s2k_hash(
     hash_algorithm: HashAlgorithm,
     iteration_count: u32,
@@ -1371,7 +1372,7 @@ fn kdf_s2k_hash(
     pin: &str,
 ) -> Zeroizing<Vec<u8>> {
     let data = Zeroizing::new([salt, pin.as_bytes()].concat());
-    let count = iteration_count as usize;
+    let count = (iteration_count as usize).max(data.len());
     let (full_rounds, trailing) = if data.is_empty() {
         (0, 0)
     } else {
@@ -2761,11 +2762,57 @@ mod tests {
     }
 
     #[test]
-    fn test_kdf_s2k_hash_basic() {
-        let result = kdf_s2k_hash(HashAlgorithm::Sha256, 14, b"saltslt", "123456");
-        // salt(7 bytes) + pin(6 bytes) = 13 bytes
-        // iteration_count=14 → 1 full round + 1 trailing byte
-        assert_eq!(result.len(), 32); // SHA256 output
+    fn test_kdf_s2k_hash_minimum_and_repetition() {
+        for algorithm in [HashAlgorithm::Sha256, HashAlgorithm::Sha512] {
+            for pin in ["123456", "12345678", "12345\u{e9}"] {
+                let data = [b"12345678".as_slice(), pin.as_bytes()].concat();
+                for count in [0, 1, 7, 8, 9, 13, 14, 15, 16, 27, 28, 29, 1024] {
+                    let mut input = data.clone();
+                    while input.len() < count as usize {
+                        let remaining = count as usize - input.len();
+                        input.extend_from_slice(&data[..remaining.min(data.len())]);
+                    }
+                    let expected = match algorithm {
+                        HashAlgorithm::Sha256 => sha2::Sha256::digest(&input).to_vec(),
+                        HashAlgorithm::Sha512 => sha2::Sha512::digest(&input).to_vec(),
+                    };
+                    assert_eq!(
+                        kdf_s2k_hash(algorithm, count, b"12345678", pin).as_slice(),
+                        expected,
+                        "{algorithm:?}, count={count}, pin={pin:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_kdf_initial_hashes_include_full_default_pins() {
+        for algorithm in [HashAlgorithm::Sha256, HashAlgorithm::Sha512] {
+            let kdf = Kdf::create_iter_salted_s2k(algorithm, 8).unwrap();
+            let Kdf::IterSaltedS2k {
+                salt_user,
+                salt_admin: Some(salt_admin),
+                initial_hash_user: Some(initial_user),
+                initial_hash_admin: Some(initial_admin),
+                ..
+            } = &kdf
+            else {
+                panic!("Missing initial KDF hashes");
+            };
+            for (pw, salt, pin, initial) in [
+                (Pw::User, salt_user, DEFAULT_USER_PIN, initial_user),
+                (Pw::Admin, salt_admin, DEFAULT_ADMIN_PIN, initial_admin),
+            ] {
+                let input = [salt.as_slice(), pin.as_bytes()].concat();
+                let expected = match algorithm {
+                    HashAlgorithm::Sha256 => sha2::Sha256::digest(&input).to_vec(),
+                    HashAlgorithm::Sha512 => sha2::Sha512::digest(&input).to_vec(),
+                };
+                assert_eq!(*initial, expected);
+                assert_eq!(kdf.process(pw, pin).as_slice(), expected);
+            }
+        }
     }
 
     #[test]

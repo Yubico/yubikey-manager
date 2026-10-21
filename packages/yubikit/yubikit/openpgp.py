@@ -737,6 +737,11 @@ class HASH_ALGORITHM(IntEnum):
 
 @dataclass
 class KdfIterSaltedS2k(Kdf):
+    """Iterated-salted S2K, hashing at least one complete salt-and-PIN sequence.
+
+    The iteration count specifies bytes to hash, not the number of repetitions.
+    """
+
     algorithm = 3
 
     hash_algorithm: HASH_ALGORITHM
@@ -749,10 +754,8 @@ class KdfIterSaltedS2k(Kdf):
 
     @staticmethod
     def _do_process(hash_algorithm, iteration_count, data):
-        # Although the field is called "iteration count", it's actually
-        # the number of bytes to be passed to the hash function, which
-        # is called only once. Go figure!
-        data_count, trailing_bytes = divmod(iteration_count, len(data))
+        # RFC 4880, section 3.7.1.3 requires at least one full input sequence.
+        data_count, trailing_bytes = divmod(max(iteration_count, len(data)), len(data))
         digest = hash_algorithm.create_digest()
         for _ in range(data_count):
             digest.update(data)
