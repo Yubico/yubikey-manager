@@ -450,7 +450,7 @@ pub fn run_keys_import(
                     Some(p) => p.to_string(),
                     None => crate::util::prompt_secret("Enter password to decrypt key")?,
                 };
-                // Try to parse the encrypted key using EC key types
+                // Decrypt the private key before checking its curve.
                 private_key = try_decrypt_sd_private_key(&pem_data, &pw)?;
             }
 
@@ -483,35 +483,23 @@ pub fn run_keys_import(
                 // Extract raw EC scalar from PKCS#8 or SEC1 DER encoding
                 use elliptic_curve::SecretKey;
                 use elliptic_curve::pkcs8::DecodePrivateKey;
-                let (scalar_bytes, curve) = if let Ok(sk) =
-                    SecretKey::<p256::NistP256>::from_pkcs8_der(pk_der)
-                {
-                    (
-                        sk.to_bytes().as_slice().to_vec(),
-                        yubikit::securitydomain::Curve::Secp256r1,
-                    )
-                } else if let Ok(sk) = SecretKey::<p256::NistP256>::from_sec1_der(pk_der) {
-                    (
-                        sk.to_bytes().as_slice().to_vec(),
-                        yubikit::securitydomain::Curve::Secp256r1,
-                    )
-                } else if let Ok(sk) = SecretKey::<p384::NistP384>::from_pkcs8_der(pk_der) {
-                    (
-                        sk.to_bytes().as_slice().to_vec(),
-                        yubikit::securitydomain::Curve::Secp384r1,
-                    )
-                } else if let Ok(sk) = SecretKey::<p384::NistP384>::from_sec1_der(pk_der) {
-                    (
-                        sk.to_bytes().as_slice().to_vec(),
-                        yubikit::securitydomain::Curve::Secp384r1,
-                    )
-                } else {
-                    return Err(anyhow!(
-                        "Failed to parse EC private key (expected P-256 or P-384 PKCS#8/SEC1 DER)"
-                    ));
-                };
+                let scalar_bytes =
+                    if let Ok(sk) = SecretKey::<p256::NistP256>::from_pkcs8_der(pk_der) {
+                        sk.to_bytes().as_slice().to_vec()
+                    } else if let Ok(sk) = SecretKey::<p256::NistP256>::from_sec1_der(pk_der) {
+                        sk.to_bytes().as_slice().to_vec()
+                    } else {
+                        return Err(anyhow!(
+                            "Failed to parse EC private key (expected P-256 PKCS#8/SEC1 DER)"
+                        ));
+                    };
                 session
-                    .put_key_ec_private(key_ref, &scalar_bytes, curve, replace_kvn.unwrap_or(0))
+                    .put_key_ec_private(
+                        key_ref,
+                        &scalar_bytes,
+                        yubikit::securitydomain::Curve::Secp256r1,
+                        replace_kvn.unwrap_or(0),
+                    )
                     .map_err(|e| anyhow!("Failed to import EC private key: {e}"))?;
                 eprintln!("EC private key imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
             }
@@ -559,7 +547,7 @@ pub fn run_keys_set_allowlist(
     Ok(())
 }
 
-/// Extract EC public key bytes and curve from a DER-encoded X.509 certificate.
+/// Extract a P-256 public key and its curve from a DER-encoded X.509 certificate.
 fn extract_ec_pubkey_and_curve(
     cert_der: &[u8],
 ) -> Result<(Vec<u8>, yubikit::securitydomain::Curve)> {
@@ -576,9 +564,7 @@ fn extract_ec_pubkey_and_curve(
         .ok_or_else(|| anyhow!("Public key has unused bits"))?;
 
     // Determine curve from the algorithm parameters
-    // P-256 OID: 1.2.840.10045.3.1.7, P-384 OID: 1.3.132.0.34
     const P256_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
-    const P384_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34");
 
     let params = spki
         .algorithm
@@ -594,10 +580,10 @@ fn extract_ec_pubkey_and_curve(
 
     let curve = if curve_oid == P256_OID {
         yubikit::securitydomain::Curve::Secp256r1
-    } else if curve_oid == P384_OID {
-        yubikit::securitydomain::Curve::Secp384r1
     } else {
-        return Err(anyhow!("Unsupported EC curve OID: {curve_oid}"));
+        return Err(anyhow!(
+            "Only P-256 EC keys are supported (curve OID: {curve_oid})"
+        ));
     };
 
     Ok((pk_bits.to_vec(), curve))
@@ -641,14 +627,6 @@ fn try_decrypt_sd_private_key(pem_data: &str, password: &str) -> Result<Option<V
             .map_err(|e| anyhow!("Failed to re-encode key: {e}"))?;
         return Ok(Some(doc.as_bytes().to_vec()));
     }
-    if let Ok(sk) = SecretKey::<p384::NistP384>::from_pkcs8_pem(pem_data) {
-        use elliptic_curve::pkcs8::EncodePrivateKey;
-        let doc = sk
-            .to_pkcs8_der()
-            .map_err(|e| anyhow!("Failed to re-encode key: {e}"))?;
-        return Ok(Some(doc.as_bytes().to_vec()));
-    }
-
     let Some(block) = pem_data
         .split("-----BEGIN ENCRYPTED PRIVATE KEY-----")
         .nth(1)

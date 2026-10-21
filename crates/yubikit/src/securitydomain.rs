@@ -158,6 +158,8 @@ impl KeyType {
 // ---------------------------------------------------------------------------
 
 /// Elliptic curve identifiers for SCP11.
+///
+/// Only [`Curve::Secp256r1`] is supported for key generation and import.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 #[repr(u8)]
@@ -177,6 +179,15 @@ pub enum Curve {
 }
 
 impl Curve {
+    fn require_supported(self) -> Result<(), SecurityDomainError> {
+        if self != Self::Secp256r1 {
+            return Err(SecurityDomainError::NotSupported(
+                "Only P-256 EC keys are supported".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Convert a raw byte to the corresponding [`Curve`], if recognized.
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
@@ -767,6 +778,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     /// Generate a new SCP11 EC key pair.
     ///
     /// Requires OCE verification. Use `replace_kvn` to replace an existing key.
+    /// Only P-256 is supported.
     /// Returns the public key as SEC1 uncompressed point bytes.
     pub fn generate_ec_key(
         &mut self,
@@ -774,6 +786,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         curve: Curve,
         replace_kvn: u8,
     ) -> Result<Vec<u8>, SecurityDomainError> {
+        curve.require_supported()?;
         log::debug!("Generating EC key");
         let mut data = vec![key.kvn];
         data.extend_from_slice(&tlv_encode(KeyType::EccKeyParams as u32, &[curve as u8]));
@@ -839,7 +852,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     /// Import an EC private key.
     ///
     /// Requires OCE verification and an active SCP session with a DEK key.
-    /// `private_key` is the raw scalar bytes (big-endian).
+    /// Only P-256 is supported. `private_key` is the 32-byte raw scalar (big-endian).
     /// Use `replace_kvn` to replace an existing key.
     pub fn put_key_ec_private(
         &mut self,
@@ -848,7 +861,13 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         curve: Curve,
         replace_kvn: u8,
     ) -> Result<(), SecurityDomainError> {
+        curve.require_supported()?;
         log::debug!("Importing EC private key");
+        if private_key.len() != 32 {
+            return Err(SecurityDomainError::InvalidData(
+                "P-256 private key must be 32 bytes".into(),
+            ));
+        }
         let dek: &[u8] = self
             .dek
             .as_ref()
@@ -879,6 +898,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
     /// Import an EC public key.
     ///
     /// Requires OCE verification.
+    /// Only P-256 is supported.
     /// `public_key` is the SEC1 uncompressed point bytes (0x04 || x || y).
     /// Use `replace_kvn` to replace an existing key.
     pub fn put_key_ec_public(
@@ -888,6 +908,7 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
         curve: Curve,
         replace_kvn: u8,
     ) -> Result<(), SecurityDomainError> {
+        curve.require_supported()?;
         log::debug!("Importing EC public key");
         let mut data = vec![key.kvn];
         data.extend_from_slice(&tlv_encode(KeyType::EccPublicKey as u32, public_key));
@@ -915,6 +936,80 @@ impl<C: SmartCardConnection> SecurityDomainSession<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct NoApduConnection;
+
+    impl crate::core::Connection for NoApduConnection {
+        type Error = SmartCardError;
+
+        fn close(&mut self) {}
+    }
+
+    impl SmartCardConnection for NoApduConnection {
+        fn transport(&self) -> crate::core::Transport {
+            crate::core::Transport::Usb
+        }
+
+        fn send_and_receive(&mut self, _: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+            panic!("Unsupported or invalid EC input must not send APDUs");
+        }
+    }
+
+    #[test]
+    fn test_ec_private_key_import_validates_scalar_width_before_dek_or_apdus() {
+        let mut session = SecurityDomainSession {
+            protocol: SmartCardProtocol::new(NoApduConnection),
+            version: Version(5, 7, 2),
+            dek: None,
+        };
+        for len in [0, 1, 16, 31, 32, 33, 48, 64, 66, 80] {
+            let result = session.put_key_ec_private(
+                KeyRef::new(0x13, 2),
+                &vec![1; len],
+                Curve::Secp256r1,
+                0,
+            );
+            let expected = if len == 32 {
+                "No DEK available (SCP session required)"
+            } else {
+                "P-256 private key must be 32 bytes"
+            };
+            assert!(matches!(
+                result,
+                Err(SecurityDomainError::InvalidData(message)) if message == expected
+            ));
+        }
+    }
+
+    #[test]
+    fn test_ec_operations_reject_other_curves_before_dek_or_apdus() {
+        let mut session = SecurityDomainSession {
+            protocol: SmartCardProtocol::new(NoApduConnection),
+            version: Version(5, 7, 2),
+            dek: None,
+        };
+        let key = KeyRef::new(0x13, 2);
+        for curve in [
+            Curve::Secp384r1,
+            Curve::Secp521r1,
+            Curve::BrainpoolP256r1,
+            Curve::BrainpoolP384r1,
+            Curve::BrainpoolP512r1,
+        ] {
+            assert!(matches!(
+                session.generate_ec_key(key, curve, 0),
+                Err(SecurityDomainError::NotSupported(_))
+            ));
+            assert!(matches!(
+                session.put_key_ec_private(key, &[1; 32], curve, 0),
+                Err(SecurityDomainError::NotSupported(_))
+            ));
+            assert!(matches!(
+                session.put_key_ec_public(key, &[0; 65], curve, 0),
+                Err(SecurityDomainError::NotSupported(_))
+            ));
+        }
+    }
 
     #[test]
     fn test_key_ref_creation() {
@@ -1056,6 +1151,7 @@ mod tests {
         // Result should be deterministic
         let result2 = encrypt_cbc_zero_iv(&key, &data);
         assert_eq!(result, result2);
+        assert_eq!(encrypt_cbc_zero_iv(&key, &[1; 32]).len(), 32);
     }
 
     #[test]

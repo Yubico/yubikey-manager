@@ -1037,7 +1037,8 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
     // -------------------------------------------------------------------
 
     /// Perform the SCP03 handshake and establish a secure channel.
-    /// Returns the static DEK if provided in key params.
+    /// Returns the static DEK if provided in key params; it must be 16 bytes.
+    /// An invalid DEK is rejected before any APDUs or session state changes.
     /// Failed establishment or secure messaging blocks ordinary APDUs until
     /// an application is selected or SCP is reinitialized.
     pub fn init_scp03(
@@ -1047,6 +1048,13 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         key_mac: &[u8],
         key_dek: Option<&[u8]>,
     ) -> Result<Option<Dek>, SmartCardError> {
+        let dek = key_dek
+            .map(|key| {
+                <[u8; 16]>::try_from(key)
+                    .map(Dek)
+                    .map_err(|_| SmartCardError::InvalidData("SCP03 DEK must be 16 bytes".into()))
+            })
+            .transpose()?;
         self.scp_state = None;
         self.scp_failed = true;
         // 1. Generate host challenge
@@ -1117,11 +1125,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         }
         log::info!("SCP secure channel established");
 
-        Ok(key_dek.map(|d| {
-            let mut arr = [0u8; 16];
-            arr.copy_from_slice(d);
-            Dek(arr)
-        }))
+        Ok(dek)
     }
 
     // -------------------------------------------------------------------
@@ -1236,9 +1240,10 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
             SmartCardError::InvalidData("Missing ephemeral public key (5F49) in response".into())
         })?;
         let (tlv_start, tlv_end) = epk_sd_ecka_tlv_range.unwrap();
-        let receipt = receipt_bytes
+        let receipt: [u8; 16] = receipt_bytes
             .ok_or_else(|| SmartCardError::InvalidData("Missing receipt (86) in response".into()))?
-            .to_vec();
+            .try_into()
+            .map_err(|_| SmartCardError::InvalidData("SCP11 receipt must be 16 bytes".into()))?;
 
         // key_agreement_data = request data + card's ephemeral public key TLV
         key_agreement_data.extend_from_slice(&resp[tlv_start..tlv_end]);
@@ -1286,7 +1291,7 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         // Verify receipt: CMAC(keys[0], key_agreement_data) == receipt
         let receipt_key = &keybytes[0..16];
         let expected_receipt = aes_cmac(receipt_key, &key_agreement_data)?;
-        if !bool::from(expected_receipt[..receipt.len()].ct_eq(&receipt)) {
+        if !bool::from(expected_receipt.ct_eq(&receipt)) {
             return Err(SmartCardError::InvalidState(
                 "SCP11 receipt verification failed".into(),
             ));
@@ -1299,7 +1304,13 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         let key_dek: [u8; 16] = keybytes[64..80].try_into().unwrap();
 
         // For SCP11 the MAC chain starts with the receipt
-        let state = ScpState::new(*key_senc, *key_smac, *key_srmac, Some(receipt), Some(1))?;
+        let state = ScpState::new(
+            *key_senc,
+            *key_smac,
+            *key_srmac,
+            Some(receipt.to_vec()),
+            Some(1),
+        )?;
         self.set_scp_state(state);
 
         Ok(Some(Dek(key_dek)))
@@ -1462,6 +1473,7 @@ mod tests {
         external_response: (Vec<u8>, u16),
         fail_external_transport: bool,
         corrupt_handshake: bool,
+        receipt_len: usize,
         response: TestScpResponse,
     }
 
@@ -1473,6 +1485,7 @@ mod tests {
                 external_response: (Vec::new(), SW_OK),
                 fail_external_transport: false,
                 corrupt_handshake: false,
+                receipt_len: 16,
                 response: TestScpResponse::Protected(Vec::new(), SW_OK),
             }
         }
@@ -1549,7 +1562,9 @@ mod tests {
                 )
                 .unwrap(),
             );
-            [card_key, tlv_encode(0x86, &receipt)].concat()
+            let mut returned_receipt = receipt.to_vec();
+            returned_receipt.resize(self.receipt_len, 0);
+            [card_key, tlv_encode(0x86, &returned_receipt)].concat()
         }
 
         fn protected_response(state: &ScpState, ciphertext: &[u8], sw: u16) -> (Vec<u8>, u16) {
@@ -1588,9 +1603,11 @@ mod tests {
             }
 
             let state = self.state.as_mut().expect("Unexpected unprotected command");
-            let mac_offset = apdu.len() - 9;
+            let le_size = if apdu[4] == 0 { 2 } else { 1 };
+            let mac_end = apdu.len() - le_size;
+            let mac_offset = mac_end - 8;
             let mac = state.mac(&apdu[..mac_offset]).unwrap();
-            assert_eq!(mac, apdu[mac_offset..apdu.len() - 1]);
+            assert_eq!(mac, apdu[mac_offset..mac_end]);
             if apdu[..4] == [0x84, 0x82, 0x33, 0x00] {
                 if self.fail_external_transport {
                     return Err(SmartCardError::Transport(Box::new(std::io::Error::other(
@@ -1663,6 +1680,123 @@ mod tests {
             Err(SmartCardError::InvalidState(_))
         ));
         assert_eq!(protocol.connection.sent.len(), sent);
+    }
+
+    #[test]
+    fn test_scp03_rejects_invalid_dek_before_apdus_or_state_changes() {
+        for established in [false, true] {
+            let mut protocol = if established {
+                established_scp(false)
+            } else {
+                SmartCardProtocol::new(ScpTestConnection::new())
+            };
+            let sent = protocol.connection.sent.len();
+            for len in [0, 1, 15, 17, 24, 32] {
+                assert!(matches!(
+                    protocol.init_scp03(0, &TEST_KEY_ENC, &TEST_KEY_MAC, Some(&vec![0; len])),
+                    Err(SmartCardError::InvalidData(message))
+                        if message == "SCP03 DEK must be 16 bytes"
+                ));
+                assert_eq!(protocol.connection.sent.len(), sent);
+                assert_eq!(protocol.has_scp(), established);
+                assert!(!protocol.scp_failed);
+            }
+            if established {
+                assert!(protocol.send_apdu(0, 0xda, 0, 0, b"secret").is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn test_scp03_returns_valid_dek() {
+        let mut protocol = SmartCardProtocol::new(ScpTestConnection::new());
+        let key = [0x44; 16];
+        let dek = protocol
+            .init_scp03(0, &TEST_KEY_ENC, &TEST_KEY_MAC, Some(&key))
+            .unwrap()
+            .unwrap();
+        assert_eq!(dek.as_bytes(), &key);
+        assert!(protocol.has_scp());
+        assert!(protocol.send_apdu(0, 0xda, 0, 0, b"secret").is_ok());
+    }
+
+    #[test]
+    fn test_ec_private_key_import_validation_preserves_secure_session() {
+        use crate::securitydomain::{Curve, KeyRef, SecurityDomainError, SecurityDomainSession};
+
+        let params = ScpKeyParams::Scp03 {
+            kvn: 0,
+            key_enc: TEST_KEY_ENC,
+            key_mac: TEST_KEY_MAC,
+            key_dek: Some([0x44; 16]),
+        };
+        let mut session = SecurityDomainSession::new_with_scp(ScpTestConnection::new(), &params)
+            .unwrap_or_else(|(error, _)| panic!("{error}"));
+        let sent = session.protocol().connection.sent.len();
+        let key = KeyRef::new(0x13, 2);
+        for (curve, len) in [
+            (Curve::Secp256r1, 31),
+            (Curve::BrainpoolP256r1, 32),
+            (Curve::Secp384r1, 32),
+            (Curve::BrainpoolP384r1, 48),
+            (Curve::BrainpoolP512r1, 63),
+            (Curve::Secp521r1, 66),
+        ] {
+            assert!(matches!(
+                session.put_key_ec_private(key, &vec![1; len], curve, 0),
+                Err(SecurityDomainError::InvalidData(_) | SecurityDomainError::NotSupported(_))
+            ));
+            assert_eq!(session.protocol().connection.sent.len(), sent);
+            assert!(session.protocol().has_scp());
+        }
+        session.protocol_mut().connection.response =
+            TestScpResponse::Protected(vec![key.kvn], SW_OK);
+        session
+            .put_key_ec_private(key, &[1; 32], Curve::Secp256r1, 0)
+            .unwrap();
+        assert!(session.protocol().has_scp());
+    }
+
+    #[test]
+    fn test_scp11_rejects_invalid_receipt_lengths() {
+        use p256::elliptic_curve::sec1::ToEncodedPoint;
+
+        let static_key = p256::SecretKey::from_slice(&[2; 32]).unwrap();
+        for established in [false, true] {
+            for len in [0, 1, 8, 15, 17, 32, 255, 256] {
+                let mut protocol = if established {
+                    established_scp(true)
+                } else {
+                    SmartCardProtocol::new(ScpTestConnection::new())
+                };
+                protocol.connection.receipt_len = len;
+                assert!(matches!(
+                    protocol.init_scp11(
+                        0x13,
+                        1,
+                        static_key.public_key().to_encoded_point(false).as_bytes(),
+                        None,
+                        &[],
+                        None,
+                    ),
+                    Err(SmartCardError::InvalidData(message))
+                        if message == "SCP11 receipt must be 16 bytes"
+                ));
+                assert_scp_failed(&mut protocol);
+                protocol.connection.receipt_len = 16;
+                protocol
+                    .init_scp11(
+                        0x13,
+                        1,
+                        static_key.public_key().to_encoded_point(false).as_bytes(),
+                        None,
+                        &[],
+                        None,
+                    )
+                    .unwrap();
+                assert!(protocol.send_apdu(0, 0xda, 0, 0, b"secret").is_ok());
+            }
+        }
     }
 
     #[test]

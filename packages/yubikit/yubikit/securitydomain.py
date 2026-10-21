@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 @unique
 class Curve(IntEnum):
+    """Curve identifiers; only SECP256R1 is supported for generation and import."""
+
     SECP256R1 = 0x00
     SECP384R1 = 0x01
     SECP521R1 = 0x02
@@ -47,11 +49,9 @@ class Curve(IntEnum):
     def _from_key(
         cls, key: ec.EllipticCurvePrivateKey | ec.EllipticCurvePublicKey
     ) -> Curve:
-        name = key.curve.name.lower()
-        for curve in cls:
-            if curve.name.lower() == name:
-                return curve
-        raise ValueError("Unsupported private key")
+        if not isinstance(key.curve, ec.SECP256R1):
+            raise NotSupportedError("Only P-256 EC keys are supported")
+        return cls.SECP256R1
 
     @property
     def _curve(self) -> ec.EllipticCurve:
@@ -193,6 +193,7 @@ class SecurityDomainSession(Session):
         """Generate a new SCP11 key.
 
         Requires OCE verification.
+        Only P-256 is supported.
 
         Use replace_kvn to replace an existing key.
         """
@@ -216,6 +217,7 @@ class SecurityDomainSession(Session):
         Requires OCE verification.
 
         The value of the sk argument should match the SCP type as defined by the KID.
+        Only P-256 EC keys are supported.
         Use replace_kvn to replace an existing key.
         """
         logger.debug(f"Importing key into {key} of type {type(sk)}")
@@ -232,18 +234,18 @@ class SecurityDomainSession(Session):
                 replace_kvn,
             )
         elif isinstance(sk, ec.EllipticCurvePrivateKey):
+            curve_val = Curve._from_key(sk)
             n = (sk.key_size + 7) // 8
             s = int2bytes(sk.private_numbers().private_value, n)
-            curve_val = Curve._from_key(sk)
             self._native.put_key_ec_private(
                 key.kid, key.kvn, s, int(curve_val), replace_kvn
             )
         elif isinstance(sk, ec.EllipticCurvePublicKey):
+            curve_val = Curve._from_key(sk)
             pk_bytes = sk.public_bytes(
                 serialization.Encoding.X962,
                 serialization.PublicFormat.UncompressedPoint,
             )
-            curve_val = Curve._from_key(sk)
             self._native.put_key_ec_public(
                 key.kid, key.kvn, pk_bytes, int(curve_val), replace_kvn
             )
