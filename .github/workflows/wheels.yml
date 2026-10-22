@@ -8,6 +8,8 @@ jobs:
   wheels:
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.package }} wheels - ${{ matrix.os }} ${{ matrix.target }}
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "2"
 
     strategy:
       fail-fast: false
@@ -56,9 +58,13 @@ jobs:
 
       - name: Install Rust toolchain
         if: matrix.package == 'ykman' && !matrix.container
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           toolchain: stable
+          build-warnings: ""
+          rustflags: ""
+          cache: true
+          cache-save-if: ${{ github.event_name == 'push' }}
 
       - name: Install cargo-about
         if: matrix.package == 'ykman' && !matrix.container

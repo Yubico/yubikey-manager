@@ -134,8 +134,16 @@ To run all checks manually:
 
 === CI build and signing inputs
 
-Rust toolchain actions are pinned to reviewed commit SHAs. The explicit
-`toolchain: stable` input still selects the current stable compiler.
+Rust setup uses `actions-rust-lang/setup-rust-toolchain`, pinned to a reviewed
+release commit SHA. The explicit `toolchain: stable` input selects the current
+stable compiler. Rust caching is enabled for host builds: push runs can save
+caches, while pull requests can restore caches but cannot save them. Linux wheel
+builds inside Maturin containers are not covered by this host cache.
+
+The setup action's additional warning policy and `RUSTFLAGS` overrides are
+disabled, preserving the existing Clippy policy and target-specific linker
+flags in `.cargo/config.toml`. Rust build jobs explicitly retain Cargo's default
+dev-profile debug level of 2 rather than the action's default of 0.
 
 Windows signing uses a digest-pinned Scribe container. When updating it, review
 the image release and resolve its registry digest, then update all four signing
