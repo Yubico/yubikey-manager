@@ -261,7 +261,10 @@ pub enum PivKeysAction {
         /// Output format
         #[arg(short = 'F', long, default_value = "pem")]
         format: CliFormat,
-        /// Verify public key against slot certificate
+        /// Verify that the public key matches the slot's private key
+        ///
+        /// Uses a signing challenge for certificate-derived keys on firmware before
+        /// 5.3. Later firmware exports authoritative public-key metadata.
         #[arg(short = 'v', long)]
         verify: bool,
         /// PIN for verification
@@ -340,7 +343,10 @@ pub enum PivCertAction {
         /// Password for decrypting the certificate file
         #[arg(short = 'p', long)]
         password: Option<String>,
-        /// Verify certificate against slot key
+        /// Verify that the certificate's public key matches the slot key
+        ///
+        /// Uses public-key metadata on firmware 5.3 and later, otherwise a signing
+        /// challenge. Does not check certificate signatures, validity, or trust.
         #[arg(short = 'v', long)]
         verify: bool,
         /// Don't update CHUID after importing certificate
@@ -2380,51 +2386,42 @@ fn extract_certificate_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8
 }
 
 /// Verify that a public key (as SPKI DER) matches the private key in a PIV slot
-/// by signing test data and verifying the signature.
+/// using metadata, or a signing challenge on firmware before 5.3.
+/// Does not check certificate signatures, validity periods, or trust.
 fn check_key_match<C: yubikit::smartcard::SmartCardConnection>(
     session: &mut PivSession<C>,
     slot: Slot,
     spki_der: &[u8],
     pin: Option<&str>,
 ) -> Result<()> {
-    // Determine key type from the metadata or SPKI
-    let meta = session
-        .get_slot_metadata(slot)
-        .map_err(|_| anyhow!("No private key in slot {slot}."))?;
-
-    let key_type = meta.key_type;
-
-    // Sign test data
-    let test_message = b"ykman-verify-key-match";
-    let hash = {
-        use sha2::Digest;
-        let mut hasher = sha2::Sha256::new();
-        hasher.update(test_message);
-        hasher.finalize().to_vec()
+    let public_key = PublicKey::from_spki(spki_der)?;
+    let verified = match session.get_slot_metadata(slot) {
+        Ok(metadata) => metadata.public_key == public_key,
+        Err(PivError::NotSupported(_)) => {
+            let key_type = KeyType::try_from(&public_key.algorithm())?;
+            if !matches!(
+                key_type,
+                KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::EccP256 | KeyType::EccP384
+            ) {
+                return Err(anyhow!(
+                    "Key verification is not supported for {key_type} on this firmware."
+                ));
+            }
+            let test_message = b"ykman-verify-key-match";
+            let to_sign = padding::prepare_signature(
+                key_type,
+                test_message,
+                Some(HashAlgorithm::Sha256),
+                false,
+                None,
+            )?;
+            let signature =
+                verify_pin_if_needed(session, pin, |s| s.sign(slot, key_type, &to_sign))?;
+            verify_signature(key_type, spki_der, test_message, &signature)
+                .map_err(|e| anyhow!("Failed to verify public key for slot {slot}: {e}"))?
+        }
+        Err(e) => return Err(anyhow!("Failed to read key metadata for slot {slot}: {e}")),
     };
-
-    let to_sign = match key_type {
-        KeyType::EccP256 | KeyType::EccP384 => hash.clone(),
-        KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
-            padding::prepare_signature(key_type, &hash, Some(HashAlgorithm::Sha256), true, None)?
-        }
-        KeyType::Ed25519 => test_message.to_vec(),
-        KeyType::X25519 => {
-            return Err(anyhow!("X25519 keys cannot be used for signing."));
-        }
-        KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => test_message.to_vec(),
-        KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
-            return Err(anyhow!("ML-KEM keys cannot be used for signing."));
-        }
-        _ => {
-            return Err(anyhow!("Unsupported key type: {key_type:?}"));
-        }
-    };
-
-    let signature = verify_pin_if_needed(session, pin, |s| s.sign(slot, key_type, &to_sign))?;
-
-    // Verify signature with the public key
-    let verified = verify_signature(key_type, spki_der, test_message, &signature);
     if !verified {
         return Err(anyhow!(
             "Public key does not match the private key in slot {slot}."
@@ -2433,48 +2430,55 @@ fn check_key_match<C: yubikit::smartcard::SmartCardConnection>(
     Ok(())
 }
 
-/// Verify a signature using the public key from SPKI DER.
-fn verify_signature(key_type: KeyType, spki_der: &[u8], message: &[u8], signature: &[u8]) -> bool {
-    match key_type {
+/// Verify a legacy RSA/ECDSA challenge signature using the supplied public key.
+fn verify_signature(
+    key_type: KeyType,
+    spki_der: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> Result<bool> {
+    use elliptic_curve::pkcs8::DecodePublicKey;
+    use p256::ecdsa::signature::hazmat::PrehashVerifier;
+    use sha2::{Digest, Sha256};
+
+    if !matches!(
+        key_type,
+        KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::EccP256 | KeyType::EccP384
+    ) {
+        return Err(anyhow!(
+            "Signature verification is not supported for {key_type}."
+        ));
+    }
+    let public_key = PublicKey::from_spki(spki_der)?;
+    if KeyType::try_from(&public_key.algorithm())? != key_type {
+        return Ok(false);
+    }
+
+    let verified = match key_type {
         KeyType::EccP256 => {
-            use p256::ecdsa::{VerifyingKey, signature::Verifier};
-            let vk =
-                match VerifyingKey::from_sec1_bytes(&extract_ec_pubkey_bytes_from_spki(spki_der)) {
-                    Ok(vk) => vk,
-                    Err(_) => return false,
-                };
-            let sig = match p256::ecdsa::DerSignature::try_from(signature) {
-                Ok(s) => s,
-                Err(_) => return false,
-            };
-            vk.verify(message, &sig).is_ok()
+            let key = p256::ecdsa::VerifyingKey::from_public_key_der(spki_der)?;
+            let signature = p256::ecdsa::Signature::from_der(signature)?;
+            key.verify_prehash(&Sha256::digest(message), &signature)
+                .is_ok()
         }
         KeyType::EccP384 => {
-            use p384::ecdsa::{VerifyingKey, signature::Verifier};
-            let vk =
-                match VerifyingKey::from_sec1_bytes(&extract_ec_pubkey_bytes_from_spki(spki_der)) {
-                    Ok(vk) => vk,
-                    Err(_) => return false,
-                };
-            let sig = match p384::ecdsa::DerSignature::try_from(signature) {
-                Ok(s) => s,
-                Err(_) => return false,
-            };
-            vk.verify(message, &sig).is_ok()
+            let key = p384::ecdsa::VerifyingKey::from_public_key_der(spki_der)?;
+            let signature = p384::ecdsa::Signature::from_der(signature)?;
+            key.verify_prehash(&Sha256::digest(message), &signature)
+                .is_ok()
         }
-        // For RSA and Ed25519, we don't have verification crates readily available,
-        // so assume match if signing succeeded without error.
-        _ => true,
-    }
-}
-
-/// Extract raw EC public key bytes from an SPKI DER structure.
-fn extract_ec_pubkey_bytes_from_spki(spki_der: &[u8]) -> Vec<u8> {
-    // Parse SPKI to get the BIT STRING containing the public key
-    if let Ok(spki) = SubjectPublicKeyInfoOwned::from_der(spki_der) {
-        return spki.subject_public_key.raw_bytes().to_vec();
-    }
-    Vec::new()
+        KeyType::Rsa1024 | KeyType::Rsa2048 => {
+            let key = rsa::RsaPublicKey::from_public_key_der(spki_der)?;
+            key.verify(
+                rsa::Pkcs1v15Sign::new::<Sha256>(),
+                &Sha256::digest(message),
+                signature,
+            )
+            .is_ok()
+        }
+        _ => unreachable!(),
+    };
+    Ok(verified)
 }
 
 // ---------------------------------------------------------------------------
@@ -2518,6 +2522,336 @@ mod tests {
         format_management_key_auth_error, format_piv_credential_error,
         management_key_type_prompt_name, slot_heading,
     };
+
+    #[derive(Debug)]
+    struct KeyMatchConnection {
+        version: [u8; 3],
+        metadata: Vec<u8>,
+        metadata_status: u16,
+        signature: Vec<u8>,
+        expected_challenge: Option<Vec<u8>>,
+        command_data: Vec<u8>,
+    }
+
+    impl yubikit::core::Connection for KeyMatchConnection {
+        type Error = SmartCardError;
+
+        fn close(&mut self) {}
+    }
+
+    impl yubikit::smartcard::SmartCardConnection for KeyMatchConnection {
+        fn transport(&self) -> yubikit::core::Transport {
+            yubikit::core::Transport::Usb
+        }
+
+        fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+            use yubikit::__internal::tlv::tlv_encode;
+            match apdu[1] {
+                0xa4 => Ok((vec![], 0x9000)),
+                0xfd => Ok((self.version.to_vec(), 0x9000)),
+                0xf7 => {
+                    assert!(
+                        self.version >= [5, 3, 0],
+                        "Legacy verification queried metadata"
+                    );
+                    if apdu[3] == 0x9b {
+                        Ok((vec![0x02, 0x02, 0, 0], 0x9000))
+                    } else {
+                        Ok((self.metadata.clone(), self.metadata_status))
+                    }
+                }
+                0x87 => {
+                    assert!(
+                        self.version < [5, 3, 0],
+                        "Metadata verification attempted signing"
+                    );
+                    let (offset, length) = if apdu[4] == 0 {
+                        (7, u16::from_be_bytes([apdu[5], apdu[6]]) as usize)
+                    } else {
+                        (5, apdu[4] as usize)
+                    };
+                    self.command_data
+                        .extend_from_slice(&apdu[offset..offset + length]);
+                    if apdu[0] & 0x10 != 0 {
+                        return Ok((vec![], 0x9000));
+                    }
+                    let expected = self
+                        .expected_challenge
+                        .as_ref()
+                        .expect("Unsupported legacy signing");
+                    let mut inner = tlv_encode(0x82, &[]);
+                    inner.extend(tlv_encode(0x81, expected));
+                    assert_eq!(self.command_data, tlv_encode(0x7c, &inner));
+                    self.command_data.clear();
+                    Ok((tlv_encode(0x7c, &tlv_encode(0x82, &self.signature)), 0x9000))
+                }
+                _ => panic!("Unexpected key verification APDU: {apdu:?}"),
+            }
+        }
+    }
+
+    fn key_match_session(
+        version: [u8; 3],
+        key: &[u8],
+        signature: &[u8],
+    ) -> yubikit::piv::PivSession<KeyMatchConnection> {
+        use yubikit::__internal::tlv::tlv_encode;
+        use yubikit::keys::PublicKey;
+        let public = PublicKey::from_spki(key).unwrap();
+        let key_type = KeyType::try_from(&public.algorithm()).unwrap();
+        let expected_challenge = if version < [5, 3, 0] && !signature.is_empty() {
+            use sha2::{Digest, Sha256};
+            Some(match &public {
+                PublicKey::Rsa(key) => {
+                    // Recover the PKCS#1 block independently from the known signature.
+                    let n = rsa::BigUint::from_bytes_be(&key.n);
+                    let e = rsa::BigUint::from_bytes_be(&key.e);
+                    let encoded = rsa::BigUint::from_bytes_be(signature)
+                        .modpow(&e, &n)
+                        .to_bytes_be();
+                    let mut block = vec![0; key.n.len()];
+                    let offset = block.len() - encoded.len();
+                    block[offset..].copy_from_slice(&encoded);
+                    block
+                }
+                PublicKey::Ec(_) => Sha256::digest(b"ykman-verify-key-match").to_vec(),
+                _ => panic!("Unsupported test signing key"),
+            })
+        } else {
+            None
+        };
+        let device_key = match public {
+            PublicKey::Rsa(key) => [tlv_encode(0x81, &key.n), tlv_encode(0x82, &key.e)].concat(),
+            PublicKey::Ec(key) => tlv_encode(0x86, &key.point),
+            PublicKey::Ed25519(key) => tlv_encode(0x86, &key.key),
+            PublicKey::X25519(key) => tlv_encode(0x86, &key.key),
+            PublicKey::MlDsa(key) => tlv_encode(0x87, &key.key),
+            PublicKey::MlKem(key) => tlv_encode(0x88, &key.key),
+            _ => panic!("Unsupported test public key"),
+        };
+        let mut metadata = vec![1, 1, key_type as u8, 2, 2, 0, 0, 3, 1, 1];
+        metadata.extend(tlv_encode(4, &device_key));
+        yubikit::piv::PivSession::new(KeyMatchConnection {
+            version,
+            metadata,
+            metadata_status: 0x9000,
+            signature: signature.to_vec(),
+            expected_challenge,
+            command_data: vec![],
+        })
+        .unwrap()
+    }
+
+    fn assert_challenge_verification(
+        key_type: KeyType,
+        public_key: &[u8],
+        other_key: &[u8],
+        signature: &[u8],
+    ) {
+        let message = b"ykman-verify-key-match";
+        assert!(super::verify_signature(key_type, public_key, message, signature).unwrap());
+        assert!(!super::verify_signature(key_type, other_key, message, signature).unwrap());
+        assert!(
+            !super::verify_signature(key_type, public_key, b"wrong message", signature).unwrap()
+        );
+        let mut corrupt = signature.to_vec();
+        corrupt[0] ^= 1;
+        assert!(!matches!(
+            super::verify_signature(key_type, public_key, message, &corrupt),
+            Ok(true)
+        ));
+        assert!(!matches!(
+            super::verify_signature(key_type, public_key, message, &signature[1..]),
+            Ok(true)
+        ));
+        assert!(super::verify_signature(key_type, b"invalid SPKI", message, signature).is_err());
+        for other_type in [
+            KeyType::Rsa1024,
+            KeyType::Rsa2048,
+            KeyType::EccP256,
+            KeyType::EccP384,
+        ] {
+            if other_type != key_type {
+                assert!(
+                    !super::verify_signature(other_type, public_key, message, signature).unwrap()
+                );
+            }
+        }
+        let mut legacy = key_match_session([5, 2, 0], public_key, signature);
+        super::check_key_match(&mut legacy, Slot::Authentication, public_key, None).unwrap();
+        assert!(
+            super::check_key_match(&mut legacy, Slot::Authentication, other_key, None).is_err()
+        );
+        let mut modern = key_match_session([5, 3, 0], public_key, &[]);
+        super::check_key_match(&mut modern, Slot::Authentication, public_key, None).unwrap();
+        assert!(
+            super::check_key_match(&mut modern, Slot::Authentication, other_key, None).is_err()
+        );
+    }
+
+    #[test]
+    fn modern_key_match_uses_metadata_for_new_algorithms() {
+        use yubikit::keys::{
+            Ed25519PublicKey, MlDsaParameterSet, MlDsaPublicKey, MlKemParameterSet, MlKemPublicKey,
+            PublicKey, X25519PublicKey,
+        };
+        let mut public_keys: Vec<PublicKey> = vec![
+            Ed25519PublicKey::new(vec![1; 32]).unwrap().into(),
+            X25519PublicKey::new(vec![2; 32]).unwrap().into(),
+        ];
+        for (parameters, length) in [
+            (MlDsaParameterSet::MlDsa44, 1312),
+            (MlDsaParameterSet::MlDsa65, 1952),
+            (MlDsaParameterSet::MlDsa87, 2592),
+        ] {
+            public_keys.push(
+                MlDsaPublicKey::new(parameters, vec![1; length])
+                    .unwrap()
+                    .into(),
+            );
+        }
+        for (parameters, length) in [
+            (MlKemParameterSet::MlKem512, 800),
+            (MlKemParameterSet::MlKem768, 1184),
+            (MlKemParameterSet::MlKem1024, 1568),
+        ] {
+            public_keys.push(
+                MlKemPublicKey::new(parameters, vec![1; length])
+                    .unwrap()
+                    .into(),
+            );
+        }
+        let other = Ed25519PublicKey::new(vec![3; 32])
+            .unwrap()
+            .to_spki()
+            .unwrap();
+        for key in public_keys {
+            let key = key.to_spki().unwrap();
+            let mut session = key_match_session([6, 0, 0], &key, &[]);
+            super::check_key_match(&mut session, Slot::Authentication, &key, None).unwrap();
+            assert!(
+                super::check_key_match(&mut session, Slot::Authentication, &other, None).is_err()
+            );
+
+            let mut legacy = key_match_session([5, 2, 0], &key, &[]);
+            let error =
+                super::check_key_match(&mut legacy, Slot::Authentication, &key, None).unwrap_err();
+            assert!(error.to_string().contains("not supported"));
+        }
+    }
+
+    #[test]
+    fn metadata_errors_do_not_fall_back_to_signing() {
+        use elliptic_curve::pkcs8::EncodePublicKey;
+        let key = p256::SecretKey::from_slice(&[1; 32])
+            .unwrap()
+            .public_key()
+            .to_public_key_der()
+            .unwrap();
+        for status in [0x6a88, 0x6982, 0x9000] {
+            let mut session = key_match_session([5, 3, 0], key.as_bytes(), &[]);
+            let mut connection = session.into_connection();
+            connection.metadata_status = status;
+            connection.metadata.clear();
+            session = yubikit::piv::PivSession::new(connection).unwrap();
+            let error =
+                super::check_key_match(&mut session, Slot::Authentication, key.as_bytes(), None)
+                    .unwrap_err();
+            assert!(error.to_string().contains("Failed to read key metadata"));
+        }
+    }
+
+    #[test]
+    fn rsa_challenge_signatures_are_verified() {
+        use rsa::pkcs1::DecodeRsaPrivateKey;
+        use rsa::pkcs8::{DecodePrivateKey, EncodePublicKey};
+        use rsa::traits::PublicKeyParts;
+        use sha2::{Digest, Sha256};
+
+        for (key_type, pem) in [
+            (
+                KeyType::Rsa1024,
+                include_str!("../../../tests/files/rsa_1024_key.pem"),
+            ),
+            (
+                KeyType::Rsa2048,
+                include_str!("../../../tests/files/rsa_2048_key.pem"),
+            ),
+        ] {
+            let key = rsa::RsaPrivateKey::from_pkcs1_pem(pem)
+                .or_else(|_| rsa::RsaPrivateKey::from_pkcs8_pem(pem))
+                .unwrap();
+            let public = key.to_public_key();
+            let other = rsa::RsaPublicKey::new(public.n().clone(), 65539u32.into()).unwrap();
+            let signature = key
+                .sign(
+                    rsa::Pkcs1v15Sign::new::<Sha256>(),
+                    &Sha256::digest(b"ykman-verify-key-match"),
+                )
+                .unwrap();
+            assert_challenge_verification(
+                key_type,
+                public.to_public_key_der().unwrap().as_bytes(),
+                other.to_public_key_der().unwrap().as_bytes(),
+                &signature,
+            );
+        }
+    }
+
+    #[test]
+    fn ec_challenge_signatures_use_sha256_for_both_curves() {
+        use elliptic_curve::pkcs8::EncodePublicKey;
+        use p256::ecdsa::signature::hazmat::PrehashSigner;
+        use sha2::{Digest, Sha256};
+
+        let digest = Sha256::digest(b"ykman-verify-key-match");
+        let key = p256::ecdsa::SigningKey::from_slice(&[1; 32]).unwrap();
+        let other = p256::ecdsa::SigningKey::from_slice(&[2; 32]).unwrap();
+        let signature: p256::ecdsa::Signature = key.sign_prehash(&digest).unwrap();
+        assert_challenge_verification(
+            KeyType::EccP256,
+            key.verifying_key().to_public_key_der().unwrap().as_bytes(),
+            other
+                .verifying_key()
+                .to_public_key_der()
+                .unwrap()
+                .as_bytes(),
+            signature.to_der().as_bytes(),
+        );
+
+        let key = p384::ecdsa::SigningKey::from_slice(&[1; 48]).unwrap();
+        let other = p384::ecdsa::SigningKey::from_slice(&[2; 48]).unwrap();
+        let signature: p384::ecdsa::Signature = key.sign_prehash(&digest).unwrap();
+        assert_challenge_verification(
+            KeyType::EccP384,
+            key.verifying_key().to_public_key_der().unwrap().as_bytes(),
+            other
+                .verifying_key()
+                .to_public_key_der()
+                .unwrap()
+                .as_bytes(),
+            signature.to_der().as_bytes(),
+        );
+    }
+
+    #[test]
+    fn unsupported_challenge_verification_fails_explicitly() {
+        for key_type in [
+            KeyType::Rsa3072,
+            KeyType::Rsa4096,
+            KeyType::Ed25519,
+            KeyType::MlDsa44,
+            KeyType::MlDsa65,
+            KeyType::MlDsa87,
+            KeyType::X25519,
+            KeyType::MlKem512,
+            KeyType::MlKem768,
+            KeyType::MlKem1024,
+        ] {
+            let error = super::verify_signature(key_type, &[], &[], &[]).unwrap_err();
+            assert!(error.to_string().contains("not supported"));
+        }
+    }
 
     #[test]
     fn padding_option_names() {

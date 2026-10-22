@@ -1,4 +1,4 @@
-//! OpenSSL interoperability tests. Overwrites the key in retired slot 95.
+//! OpenSSL interoperability tests. Overwrites the key and certificate in retired slot 95.
 
 use super::common::{piv_management_key, piv_pin, skip_before_version, ykman_dev};
 use predicates::prelude::*;
@@ -37,7 +37,9 @@ fn openssl_supports(algorithm: &str) -> bool {
         .contains(algorithm)
 }
 
-struct KeySlotGuard;
+struct KeySlotGuard {
+    clear_certificate: bool,
+}
 
 impl KeySlotGuard {
     fn generate(dir: &Path, algorithm: &str) -> Self {
@@ -45,7 +47,9 @@ impl KeySlotGuard {
     }
 
     fn generate_with_pin_policy(dir: &Path, algorithm: &str, pin_policy: &str) -> Self {
-        let guard = Self;
+        let guard = Self {
+            clear_certificate: false,
+        };
         ykman_dev()
             .current_dir(dir)
             .args([
@@ -185,6 +189,29 @@ fn test_piv_crypto_pin_prompt() {
 
 impl Drop for KeySlotGuard {
     fn drop(&mut self) {
+        if self.clear_certificate {
+            let output = ykman_dev()
+                .args([
+                    "piv",
+                    "certificates",
+                    "delete",
+                    "95",
+                    "--no-update-chuid",
+                    "-m",
+                    piv_management_key(),
+                    "-P",
+                    piv_pin(),
+                ])
+                .output()
+                .expect("delete test certificate");
+            if !output.status.success() {
+                assert!(
+                    std::thread::panicking(),
+                    "Failed to delete test certificate: {output:?}"
+                );
+                eprintln!("Failed to delete test certificate during unwinding: {output:?}");
+            }
+        }
         let output = ykman_dev()
             .args([
                 "piv",
@@ -205,6 +232,157 @@ impl Drop for KeySlotGuard {
             );
             eprintln!("Failed to delete test key during unwinding: {output:?}");
         }
+    }
+}
+
+fn openssl_certificate(dir: &Path, name: &str, algorithm: &str) {
+    let (openssl_algorithm, parameter) = match algorithm {
+        "rsa2048" => ("RSA", Some("rsa_keygen_bits:2048")),
+        "rsa3072" => ("RSA", Some("rsa_keygen_bits:3072")),
+        "rsa4096" => ("RSA", Some("rsa_keygen_bits:4096")),
+        "eccp256" => ("EC", Some("ec_paramgen_curve:P-256")),
+        "eccp384" => ("EC", Some("ec_paramgen_curve:P-384")),
+        "ed25519" => ("ED25519", None),
+        "ml-dsa-44" => ("ML-DSA-44", None),
+        "ml-dsa-65" => ("ML-DSA-65", None),
+        "ml-dsa-87" => ("ML-DSA-87", None),
+        _ => panic!("Unsupported test algorithm: {algorithm}"),
+    };
+    let key = format!("{name}.key");
+    let cert = format!("{name}.pem");
+    let mut args = vec!["genpkey", "-algorithm", openssl_algorithm, "-out", &key];
+    if let Some(parameter) = parameter {
+        args.extend(["-pkeyopt", parameter]);
+    }
+    openssl(dir, &args);
+    openssl(
+        dir,
+        &[
+            "req",
+            "-new",
+            "-x509",
+            "-key",
+            &key,
+            "-out",
+            &cert,
+            "-subj",
+            "/CN=unrelated-key",
+            "-days",
+            "1",
+        ],
+    );
+}
+
+#[rstest]
+#[case::rsa2048("rsa2048", "rsa", (5, 3, 0))]
+#[case::rsa3072("rsa3072", "rsa", (5, 7, 0))]
+#[case::rsa4096("rsa4096", "rsa", (5, 7, 0))]
+#[case::p256("eccp256", "ec", (5, 3, 0))]
+#[case::p384("eccp384", "ec", (5, 3, 0))]
+#[case::ed25519("ed25519", "ed25519", (5, 7, 0))]
+#[case::mldsa44("ml-dsa-44", "ml-dsa-44", (6, 0, 0))]
+#[case::mldsa65("ml-dsa-65", "ml-dsa-65", (6, 0, 0))]
+#[case::mldsa87("ml-dsa-87", "ml-dsa-87", (6, 0, 0))]
+fn test_piv_certificate_import_verify(
+    #[case] algorithm: &str,
+    #[case] openssl_algorithm: &str,
+    #[case] version: (u8, u8, u8),
+) {
+    require_capability!("PIV");
+    if skip_before_version(version, algorithm) {
+        return;
+    }
+    if !openssl_supports(openssl_algorithm) || !openssl_supports("ec") {
+        skip!("OpenSSL with {openssl_algorithm} and EC is required");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut guard = KeySlotGuard::generate(dir.path(), algorithm);
+    guard.clear_certificate = true;
+    ykman_dev()
+        .args([
+            "piv",
+            "certificates",
+            "generate",
+            "95",
+            "-s",
+            "CN=matching-key",
+            "--no-update-chuid",
+            "-m",
+            piv_management_key(),
+            "-P",
+            piv_pin(),
+        ])
+        .assert()
+        .success();
+    let export = || {
+        ykman_dev()
+            .args([
+                "piv",
+                "certificates",
+                "export",
+                "95",
+                "-",
+                "--format",
+                "der",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone()
+    };
+    let original = export();
+    fs::write(dir.path().join("matching.der"), &original).unwrap();
+    ykman_dev()
+        .current_dir(dir.path())
+        .args([
+            "piv",
+            "certificates",
+            "import",
+            "95",
+            "matching.der",
+            "--verify",
+            "--no-update-chuid",
+            "-m",
+            piv_management_key(),
+            "-P",
+            piv_pin(),
+        ])
+        .assert()
+        .success();
+    assert_eq!(export(), original);
+
+    let other_algorithm = if algorithm == "eccp256" {
+        "eccp384"
+    } else {
+        "eccp256"
+    };
+    for (name, certificate_algorithm) in [("same-type", algorithm), ("other-type", other_algorithm)]
+    {
+        openssl_certificate(dir.path(), name, certificate_algorithm);
+        ykman_dev()
+            .current_dir(dir.path())
+            .args([
+                "piv",
+                "certificates",
+                "import",
+                "95",
+                &format!("{name}.pem"),
+                "--verify",
+                "--no-update-chuid",
+                "-m",
+                piv_management_key(),
+                "-P",
+                piv_pin(),
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Public key does not match"));
+        assert_eq!(
+            export(),
+            original,
+            "Rejected import changed the stored certificate"
+        );
     }
 }
 
