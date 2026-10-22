@@ -53,7 +53,7 @@ jobs:
       - name: Build Rust CLI
         run: |
           target="${{ matrix.target }}"
-          cargo zigbuild --release --target "$target" -p ykman-cli
+          cargo zigbuild --locked --release --target "$target" -p ykman-cli
           target_dir="target/${target%%.*}/release"
           mkdir -p dist
           cp "$target_dir/ykman" dist/
@@ -93,7 +93,7 @@ jobs:
           tool: cargo-about
 
       - name: Run non-hardware tests
-        run: cargo test --workspace --all-features --lib --bins
+        run: cargo test --locked --workspace --all-features --lib --bins -- --test-threads="$(nproc)"
 
       - name: Compile hardware integration tests
-        run: cargo test -p yubikit --tests --no-run
+        run: cargo test --locked -p yubikit --tests --no-run

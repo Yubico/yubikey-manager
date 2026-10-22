@@ -31,8 +31,8 @@ jobs:
 
       - name: Build Rust CLI (universal)
         run: |
-          cargo build --release -p ykman-cli --target aarch64-apple-darwin
-          cargo build --release -p ykman-cli --target x86_64-apple-darwin
+          cargo build --locked --release -p ykman-cli --target aarch64-apple-darwin
+          cargo build --locked --release -p ykman-cli --target x86_64-apple-darwin
           mkdir -p dist/ykman
           lipo -create \
             target/aarch64-apple-darwin/release/ykman \

@@ -40,7 +40,7 @@ jobs:
       - name: Build Rust CLI
         shell: bash
         run: |
-          cargo build --release -p ykman-cli -p ykman-svc
+          cargo build --locked --release -p ykman-cli -p ykman-svc
           mkdir -p dist/ykman
           cp target/release/ykman.exe dist/ykman/
           cp target/release/ykman-svc.exe dist/ykman/

@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_DEV_DEBUG: "2"
+      MATURIN_PEP517_ARGS: "--locked"
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,13 +53,14 @@ jobs:
           pre-commit run --all-files --verbose
 
       - name: Run unit tests
-        run: uv run pytest
+        run: uv run --locked pytest
 
       - name: Create source packages
         run: |
           export SOURCE_DATE_EPOCH=$(git show --no-patch --format=%ct)
           uv build --package yubikit --sdist
           uv build --package yubikey-manager --sdist
+          git diff --exit-code -- Cargo.lock uv.lock
           mkdir artifacts
           mv dist/yubikit-*.tar.gz artifacts/
           mv dist/yubikey_manager-*.tar.gz artifacts/
@@ -70,7 +72,7 @@ jobs:
           path: artifacts
 
       - name: Build sphinx documentation
-        run: uv run make -C docs/ html
+        run: uv run --locked make -C docs/ html
 
       - name: Upload documentation
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

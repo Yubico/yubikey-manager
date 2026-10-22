@@ -35,7 +35,7 @@ repos:
   - id: cargo-clippy
     name: cargo clippy
     language: system
-    entry: cargo clippy --workspace --all-targets -- -D warnings
+    entry: cargo clippy --locked --workspace --all-targets -- -D warnings
     pass_filenames: false
     types: [rust]
   - id: cargo-deny

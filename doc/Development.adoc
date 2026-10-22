@@ -145,6 +145,15 @@ disabled, preserving the existing Clippy policy and target-specific linker
 flags in `.cargo/config.toml`. Rust build jobs explicitly retain Cargo's default
 dev-profile debug level of 2 rather than the action's default of 0.
 
+CI Cargo builds, tests, Clippy checks and Maturin wheel builds use `--locked`.
+The source-package job also passes `--locked` to Maturin's PEP 517 native
+builds, uses locked uv project commands, and checks that source packaging did
+not modify either lockfile. Dependency changes must include updated lockfiles.
+
+The non-hardware Rust unit-test step overrides the serial test default with
+`--test-threads="$(nproc)"` to use the runner's available CPUs. The serial
+default in `.cargo/config.toml` remains in place for device tests.
+
 Windows signing uses a digest-pinned Scribe container. When updating it, review
 the image release and resolve its registry digest, then update all four signing
 jobs for the x64 and ARM64 executables and installers.
