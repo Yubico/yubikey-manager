@@ -22,7 +22,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
 
       - name: Install cargo-about
         uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
@@ -115,8 +117,12 @@ jobs:
           docker run
           --user $(id -u):$(id -g)
           --volume $(pwd):/scribe
-          --env-file <(env)
-          ghcr.io/yubico/scribe-ci:v1
+          --env GOOGLE_APPLICATION_CREDENTIALS
+          --env CI
+          --env GITHUB_EVENT_NAME
+          --env GITHUB_REF
+          --env GITHUB_REPOSITORY
+          ghcr.io/yubico/scribe-ci:v1.6.0@sha256:459bbfb9a267d60072ebbc5fdfa8e5bfd32637177188470eafc3fadd6218c730
           --project-id scribe-prod-987134
           --bucket scribe-u-pub-ykman-fqj0hy
           --config /scribe/.github/scribe-sign-exe-dll.yml
@@ -193,8 +199,12 @@ jobs:
         docker run
         --user $(id -u):$(id -g)
         --volume $(pwd):/scribe
-        --env-file <(env)
-        ghcr.io/yubico/scribe-ci:v1
+        --env GOOGLE_APPLICATION_CREDENTIALS
+        --env CI
+        --env GITHUB_EVENT_NAME
+        --env GITHUB_REF
+        --env GITHUB_REPOSITORY
+        ghcr.io/yubico/scribe-ci:v1.6.0@sha256:459bbfb9a267d60072ebbc5fdfa8e5bfd32637177188470eafc3fadd6218c730
         --project-id scribe-prod-987134
         --bucket scribe-u-pub-ykman-fqj0hy
         --config /scribe/.github/scribe-sign-msi.yml
@@ -256,8 +266,12 @@ jobs:
           docker run
           --user $(id -u):$(id -g)
           --volume $(pwd):/scribe
-          --env-file <(env)
-          ghcr.io/yubico/scribe-ci:v1
+          --env GOOGLE_APPLICATION_CREDENTIALS
+          --env CI
+          --env GITHUB_EVENT_NAME
+          --env GITHUB_REF
+          --env GITHUB_REPOSITORY
+          ghcr.io/yubico/scribe-ci:v1.6.0@sha256:459bbfb9a267d60072ebbc5fdfa8e5bfd32637177188470eafc3fadd6218c730
           --project-id scribe-prod-987134
           --bucket scribe-u-pub-ykman-fqj0hy
           --config /scribe/.github/scribe-sign-exe-dll-arm64.yml
@@ -347,8 +361,12 @@ jobs:
           docker run
           --user $(id -u):$(id -g)
           --volume $(pwd):/scribe
-          --env-file <(env)
-          ghcr.io/yubico/scribe-ci:v1
+          --env GOOGLE_APPLICATION_CREDENTIALS
+          --env CI
+          --env GITHUB_EVENT_NAME
+          --env GITHUB_REF
+          --env GITHUB_REPOSITORY
+          ghcr.io/yubico/scribe-ci:v1.6.0@sha256:459bbfb9a267d60072ebbc5fdfa8e5bfd32637177188470eafc3fadd6218c730
           --project-id scribe-prod-987134
           --bucket scribe-u-pub-ykman-fqj0hy
           --config /scribe/.github/scribe-sign-msi-arm64.yml

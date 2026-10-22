@@ -56,7 +56,9 @@ jobs:
 
       - name: Install Rust toolchain
         if: matrix.package == 'ykman' && !matrix.container
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
 
       - name: Install cargo-about
         if: matrix.package == 'ykman' && !matrix.container

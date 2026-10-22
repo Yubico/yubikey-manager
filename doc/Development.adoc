@@ -132,6 +132,20 @@ To run all checks manually:
 
     $ pre-commit run --all
 
+=== CI build and signing inputs
+
+Rust toolchain actions are pinned to reviewed commit SHAs. The explicit
+`toolchain: stable` input still selects the current stable compiler.
+
+Windows signing uses a digest-pinned Scribe container. When updating it, review
+the image release and resolve its registry digest, then update all four signing
+jobs for the x64 and ARM64 executables and installers.
+
+Signing containers receive only `GOOGLE_APPLICATION_CREDENTIALS`, `CI`,
+`GITHUB_EVENT_NAME`, `GITHUB_REF`, and `GITHUB_REPOSITORY` from the runner.
+Scribe needs the CI metadata to construct the release reference; keep these
+named inputs rather than forwarding the full runner environment.
+
 === Unit tests
 
 These tests do not require a YubiKey to be connected.

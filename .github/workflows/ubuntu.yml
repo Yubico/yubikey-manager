@@ -31,8 +31,9 @@ jobs:
           sudo apt-get install -qq libpcsclite-dev libudev-dev libdbus-1-dev
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.rust-target }}
 
       - name: Install Zig
@@ -70,7 +71,9 @@ jobs:
           sudo apt-get install -qq libpcsclite-dev libudev-dev libdbus-1-dev
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
 
       - name: Install cargo-about
         uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
