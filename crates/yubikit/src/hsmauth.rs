@@ -153,7 +153,7 @@ impl fmt::Debug for HsmAuthManagementKey {
 /// use yubikit::hsmauth::CredentialPassword;
 ///
 /// let pw = CredentialPassword::new(&[0u8; 16]).unwrap();
-/// let pw_from_str = CredentialPassword::from_password("my-password");
+/// let pw_from_str = CredentialPassword::from_password("my-password").unwrap();
 /// ```
 #[derive(Clone)]
 pub struct CredentialPassword(crate::__internal::SecretValue<[u8; CREDENTIAL_PASSWORD_LEN]>);
@@ -171,14 +171,19 @@ impl CredentialPassword {
         Ok(Self(crate::__internal::SecretValue::new(arr)))
     }
 
-    /// Create a credential password from a string, padding with zeros or
-    /// truncating to 16 bytes as needed.
-    pub fn from_password(password: &str) -> Self {
-        let mut pw = [0u8; CREDENTIAL_PASSWORD_LEN];
+    /// Create a credential password from a UTF-8 string, padding with zeros.
+    ///
+    /// Returns an error if the encoded password exceeds 16 bytes.
+    pub fn from_password(password: &str) -> Result<Self, HsmAuthError> {
         let bytes = password.as_bytes();
-        let len = bytes.len().min(CREDENTIAL_PASSWORD_LEN);
-        pw[..len].copy_from_slice(&bytes[..len]);
-        Self(crate::__internal::SecretValue::new(pw))
+        if bytes.len() > CREDENTIAL_PASSWORD_LEN {
+            return Err(HsmAuthError::InvalidData(format!(
+                "Credential password must be at most {CREDENTIAL_PASSWORD_LEN} UTF-8 bytes"
+            )));
+        }
+        let mut pw = [0u8; CREDENTIAL_PASSWORD_LEN];
+        pw[..bytes.len()].copy_from_slice(bytes);
+        Ok(Self(crate::__internal::SecretValue::new(pw)))
     }
 
     /// Access the raw password bytes.
@@ -993,11 +998,38 @@ mod tests {
 
     #[test]
     fn test_credential_password_from_str() {
-        let pw = CredentialPassword::from_password("hello");
+        let pw = CredentialPassword::from_password("hello").unwrap();
         let bytes = pw.expose_secret();
         assert_eq!(bytes.len(), 16);
         assert_eq!(&bytes[..5], b"hello");
         assert_eq!(&bytes[5..], &[0u8; 11]);
+    }
+
+    #[test]
+    fn test_credential_password_string_byte_limits() {
+        for password in [
+            "",
+            "a\0b",
+            "123456789012345",
+            "1234567890123456",
+            "\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}",
+            "\u{1f511}\u{1f511}\u{1f511}\u{1f511}",
+        ] {
+            let pw = CredentialPassword::from_password(password).unwrap();
+            assert_eq!(&pw.expose_secret()[..password.len()], password.as_bytes());
+            assert!(pw.expose_secret()[password.len()..].iter().all(|&b| b == 0));
+        }
+        for password in [
+            "12345678901234567",
+            "123456789012345\u{e9}",
+            "\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}a",
+            "\u{1f511}\u{1f511}\u{1f511}\u{1f511}a",
+        ] {
+            assert!(matches!(
+                CredentialPassword::from_password(password),
+                Err(HsmAuthError::InvalidData(_))
+            ));
+        }
     }
 
     #[test]

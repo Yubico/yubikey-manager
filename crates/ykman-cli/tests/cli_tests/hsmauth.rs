@@ -1,9 +1,41 @@
 use super::common::{DEFAULT_HSMAUTH_MANAGEMENT_KEY, fixture_path, hsmauth_reset, ykman_dev};
 use predicates::prelude::*;
+use rstest::rstest;
 
 const NON_DEFAULT_HSMAUTH_MANAGEMENT_KEY: &str = "Ru7!vN2$qL9#zX5%";
 const HSMAUTH_CREDENTIAL_PASSWORD: &str = "T8#qZ2!mV7$rB4n%";
 const HSMAUTH_DERIVATION_PASSWORD: &str = "K9$wQ3#nR6!tM2x%";
+
+#[rstest]
+#[case::generate(&["generate", "invalid-password"], "-c")]
+#[case::symmetric(&["symmetric", "invalid-password", "--generate"], "-c")]
+#[case::derive(&["derive", "invalid-password", "derivation-password"], "-c")]
+#[case::import(&["import", "invalid-password", "missing.pem"], "-c")]
+#[case::current_password(&["change-password", "invalid-password", "-n", "new"], "-c")]
+#[case::new_password(&["change-password", "invalid-password", "-c", "current"], "-n")]
+fn test_hsmauth_reject_long_credential_password(
+    #[case] arguments: &[&str],
+    #[case] option: &str,
+    #[values("12345678901234567", "123456789012345\u{e9}")] password: &str,
+) {
+    require_capability!("YubiHSM Auth");
+    let mut command = ykman_dev();
+    command
+        .args(["hsmauth", "credentials"])
+        .args(arguments)
+        .args([option, password]);
+    if arguments[0] != "change-password" {
+        command.args(["-m", DEFAULT_HSMAUTH_MANAGEMENT_KEY]);
+    }
+    command
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(predicate::str::contains(
+            "Credential password must be at most 16 UTF-8 bytes",
+        ))
+        .stderr(predicate::str::contains(password).not());
+}
 
 fn prepare_hsmauth_for_credentials() -> &'static str {
     hsmauth_reset();

@@ -100,6 +100,45 @@ def generate_key_asymmetric(
 
 
 class TestCredentialManagement:
+    @condition.min_version(5, 8)
+    @pytest.mark.parametrize("password", ["a" * 16, "\u00e9" * 8])
+    def test_credential_password_byte_limits(self, session, management_key, password):
+        credential = import_key_derived(session, management_key, password)
+        try:
+            context = bytes(16)
+            initial = session.list_credentials()
+            with pytest.raises(ValueError, match="at most 16 UTF-8 bytes"):
+                import_key_symmetric(
+                    session, management_key, bytes(16), bytes(16), password + "a"
+                )
+            with pytest.raises(ValueError, match="at most 16 UTF-8 bytes"):
+                session.calculate_session_keys_symmetric(
+                    credential.label, context, password + "a"
+                )
+            with pytest.raises(TypeError, match="bytes or str"):
+                session.calculate_session_keys_symmetric(credential.label, context, 16)
+            with pytest.raises(ValueError, match="at most 16 UTF-8 bytes"):
+                session.change_credential_password(
+                    credential.label, password + "a", "new"
+                )
+            with pytest.raises(ValueError, match="at most 16 UTF-8 bytes"):
+                session.change_credential_password(
+                    credential.label, password, password + "a"
+                )
+            remaining = session.list_credentials()
+            assert len(remaining) == len(initial) == 1
+            assert remaining[0].counter == initial[0].counter == INITIAL_RETRY_COUNTER
+            session.calculate_session_keys_symmetric(
+                credential.label, context, password
+            )
+            new_password = "12342345"
+            session.change_credential_password(credential.label, password, new_password)
+            session.calculate_session_keys_symmetric(
+                credential.label, context, new_password
+            )
+        finally:
+            session.delete_credential(management_key, credential.label)
+
     def check_credential_in_list(self, session, credential: Credential):
         credentials = session.list_credentials()
 

@@ -59,7 +59,7 @@ fn test_hsmauth_credential_lifecycle(#[case] tc: TestConnection) {
     reset_hsmauth(&mut session);
 
     let mgmt_key = effective_hsmauth_mgmt_key();
-    let cred_pw = CredentialPassword::from_password("test-password");
+    let cred_pw = CredentialPassword::from_password("test-password").unwrap();
 
     // Put symmetric credential with explicit keys
     let key_enc = [0x11u8; 16];
@@ -136,7 +136,7 @@ fn test_hsmauth_management_key(#[case] tc: TestConnection) {
         .put_management_key(&old_key, &new_key)
         .expect("put_management_key");
     // Verify new key works by using it for a put
-    let cred_pw = CredentialPassword::from_password("12345679");
+    let cred_pw = CredentialPassword::from_password("12345679").unwrap();
     session
         .put_credential_derived(&new_key, "key-test", "pw123", &cred_pw, false)
         .expect("put with new key");
@@ -159,14 +159,14 @@ fn test_hsmauth_wrong_credential_password(#[case] tc: TestConnection) {
     reset_hsmauth(&mut session);
 
     let mgmt_key = effective_hsmauth_mgmt_key();
-    let cred_pw = CredentialPassword::from_password("correct-password");
+    let cred_pw = CredentialPassword::from_password("correct-password").unwrap();
 
     session
         .put_credential_derived(&mgmt_key, "pw-test", "derivation-secret", &cred_pw, false)
         .expect("put_credential_derived");
 
     // Try calculating session keys with wrong password
-    let wrong_pw = CredentialPassword::from_password("wrong-password");
+    let wrong_pw = CredentialPassword::from_password("wrong-password").unwrap();
     let context = [0u8; 16];
     let result = session.calculate_session_keys_symmetric("pw-test", &context, &wrong_pw, None);
     assert!(result.is_err(), "Wrong password should fail");
@@ -186,7 +186,7 @@ fn test_hsmauth_wrong_management_key(#[case] tc: TestConnection) {
 
     // Try using wrong management key to store a credential
     let wrong_key = HsmAuthManagementKey::new(&[0xFFu8; 16]).expect("wrong key");
-    let cred_pw = CredentialPassword::from_password("test");
+    let cred_pw = CredentialPassword::from_password("test").unwrap();
     let result = session.put_credential_derived(&wrong_key, "fail-test", "pw", &cred_pw, false);
     assert!(result.is_err(), "Wrong management key should fail");
 
@@ -209,7 +209,7 @@ fn test_hsmauth_asymmetric_credential(#[case] tc: TestConnection) {
     reset_hsmauth(&mut session);
 
     let mgmt_key = effective_hsmauth_mgmt_key();
-    let cred_pw = CredentialPassword::from_password("asym-password");
+    let cred_pw = CredentialPassword::from_password("asym-password").unwrap();
 
     // Generate an asymmetric credential on-device
     let cred = session

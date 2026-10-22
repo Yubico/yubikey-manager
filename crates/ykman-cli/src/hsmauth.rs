@@ -36,7 +36,7 @@ pub enum HsmauthCredAction {
     Generate {
         /// Credential label
         label: String,
-        /// Password to protect the credential
+        /// Password to protect the credential (at most 16 UTF-8 bytes)
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// Management password
@@ -59,7 +59,7 @@ pub enum HsmauthCredAction {
         /// Generate random encryption and MAC keys
         #[arg(short = 'g', long)]
         generate: bool,
-        /// Password to protect the credential
+        /// Password to protect the credential (at most 16 UTF-8 bytes)
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// Management password
@@ -75,7 +75,7 @@ pub enum HsmauthCredAction {
         label: String,
         /// Derivation password
         derivation_password: String,
-        /// Password to protect the credential
+        /// Password to protect the credential (at most 16 UTF-8 bytes)
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// Management password
@@ -100,10 +100,10 @@ pub enum HsmauthCredAction {
     ChangePassword {
         /// Credential label
         label: String,
-        /// Current credential password
+        /// Current credential password (at most 16 UTF-8 bytes)
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
-        /// New credential password
+        /// New credential password (at most 16 UTF-8 bytes)
         #[arg(short = 'n', long)]
         new_credential_password: Option<String>,
     },
@@ -117,7 +117,7 @@ pub enum HsmauthCredAction {
         /// Password to decrypt the private key
         #[arg(short = 'p', long)]
         password: Option<String>,
-        /// Password to protect credential
+        /// Password to protect credential (at most 16 UTF-8 bytes)
         #[arg(short = 'c', long)]
         credential_password: Option<String>,
         /// Management password
@@ -320,14 +320,14 @@ fn require_management_password(management_password: Option<&str>) -> Result<HsmA
 /// Get the credential password: from CLI arg, or prompt (with confirmation).
 fn require_credential_password(credential_password: Option<&str>) -> Result<CredentialPassword> {
     match credential_password {
-        Some(p) => Ok(CredentialPassword::from_password(p)),
+        Some(p) => Ok(CredentialPassword::from_password(p)?),
         None => {
             let p1 = crate::util::prompt_secret("Enter credential password")?;
             let p2 = crate::util::prompt_secret("Confirm credential password")?;
             if p1 != p2 {
                 return Err(anyhow!("Passwords do not match."));
             }
-            Ok(CredentialPassword::from_password(&p1))
+            Ok(CredentialPassword::from_password(&p1)?)
         }
     }
 }
@@ -518,21 +518,21 @@ pub fn run_credentials_change_password(
     new_credential_password: Option<&str>,
 ) -> Result<()> {
     let old_pw = match credential_password {
-        Some(p) => CredentialPassword::from_password(p),
+        Some(p) => CredentialPassword::from_password(p)?,
         None => {
             let p = crate::util::prompt_secret("Enter current credential password")?;
-            CredentialPassword::from_password(&p)
+            CredentialPassword::from_password(&p)?
         }
     };
     let new_pw = match new_credential_password {
-        Some(p) => CredentialPassword::from_password(p),
+        Some(p) => CredentialPassword::from_password(p)?,
         None => {
             let p1 = crate::util::prompt_secret("Enter new credential password")?;
             let p2 = crate::util::prompt_secret("Confirm new credential password")?;
             if p1 != p2 {
                 return Err(anyhow!("Passwords do not match."));
             }
-            CredentialPassword::from_password(&p1)
+            CredentialPassword::from_password(&p1)?
         }
     };
 
@@ -746,4 +746,24 @@ pub fn run_access_change_management_key(
         eprintln!("Management password changed.");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::require_credential_password;
+
+    #[test]
+    fn credential_password_byte_limits() {
+        for password in [
+            "",
+            "1234567890123456",
+            "\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}",
+        ] {
+            require_credential_password(Some(password)).unwrap();
+        }
+        for password in ["12345678901234567", "123456789012345\u{e9}"] {
+            let error = require_credential_password(Some(password)).unwrap_err();
+            assert!(error.to_string().contains("at most 16 UTF-8 bytes"));
+        }
+    }
 }

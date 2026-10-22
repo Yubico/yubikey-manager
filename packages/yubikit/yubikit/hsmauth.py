@@ -89,9 +89,20 @@ class ALGORITHM(IntEnum):
 
 def _parse_credential_password(credential_password: bytes | str) -> bytes:
     if isinstance(credential_password, str):
-        return credential_password.encode().ljust(CREDENTIAL_PASSWORD_LEN, b"\0")
-    else:
-        return bytes(credential_password)
+        encoded = credential_password.encode()
+        if len(encoded) > CREDENTIAL_PASSWORD_LEN:
+            raise ValueError(
+                f"Credential password must be at most {CREDENTIAL_PASSWORD_LEN}"
+                " UTF-8 bytes"
+            )
+        return encoded.ljust(CREDENTIAL_PASSWORD_LEN, b"\0")
+    if not isinstance(credential_password, bytes):
+        raise TypeError("Credential password must be bytes or str")
+    if len(credential_password) != CREDENTIAL_PASSWORD_LEN:
+        raise ValueError(
+            f"Credential password must be exactly {CREDENTIAL_PASSWORD_LEN} bytes"
+        )
+    return credential_password
 
 
 @total_ordering
@@ -125,7 +136,13 @@ class SessionKeys(NamedTuple):
 
 
 class HsmAuthSession(Session):
-    """A session with the YubiHSM Auth application."""
+    """A session with the YubiHSM Auth application.
+
+    Credential passwords must be strings of at most 16 UTF-8 bytes, padded with
+    zeros, or bytes objects of exactly 16 bytes. Other types raise TypeError and
+    invalid lengths raise ValueError, including when authenticating with an
+    existing credential. Passwords are never truncated.
+    """
 
     def __init__(
         self,
