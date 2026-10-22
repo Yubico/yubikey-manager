@@ -2211,6 +2211,10 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     }
 
     /// Set the algorithm attributes for a key slot.
+    ///
+    /// # Warning
+    ///
+    /// Changing the algorithm attributes deletes any key already stored in the slot.
     pub fn set_algorithm_attributes(
         &mut self,
         key_ref: KeyRef,
