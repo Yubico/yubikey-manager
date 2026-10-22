@@ -163,6 +163,19 @@ Signing containers receive only `GOOGLE_APPLICATION_CREDENTIALS`, `CI`,
 Scribe needs the CI metadata to construct the release reference; keep these
 named inputs rather than forwarding the full runner environment.
 
+=== Dependency updates
+
+Dependabot checks GitHub Actions, the Cargo and uv workspaces, and remote
+pre-commit hook revisions monthly. Cargo, uv and pre-commit each group patch
+updates and allow up to five open version-update PRs; minor and major updates
+remain separate. Rust `0.x` minor updates can contain breaking changes.
+The existing GitHub Actions group includes all update types.
+
+Review dependency changes and CI results before merging; auto-merge is not
+enabled by this configuration. Keep manifest and lockfile changes together.
+Local pre-commit hooks and tool versions embedded in CI commands are not
+covered by these update entries.
+
 === Unit tests
 
 These tests do not require a YubiKey to be connected.
