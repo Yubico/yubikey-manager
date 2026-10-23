@@ -17,7 +17,7 @@ fn assert_help(path: &[&str]) {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Usage:"), "missing Usage for {path:?}");
+    assert!(stdout.contains("USAGE\n"), "missing USAGE for {path:?}");
     assert!(stdout.contains("--help"), "missing --help for {path:?}");
     assert_no_missing_arg_descriptions(path, &stdout);
 }
@@ -28,8 +28,24 @@ fn assert_no_missing_arg_descriptions(path: &[&str], help: &str) {
 
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-        if line.ends_with(':') && !line.starts_with(' ') {
-            in_arg_section = matches!(trimmed, "Arguments:" | "Options:");
+        if !line.starts_with(' ')
+            && matches!(
+                trimmed,
+                "USAGE"
+                    | "COMMANDS"
+                    | "ADDITIONAL COMMANDS"
+                    | "OPTIONS"
+                    | "GLOBAL OPTIONS"
+                    | "SECURE CHANNEL OPTIONS"
+                    | "ARGUMENTS"
+                    | "EXAMPLES"
+                    | "LEARN MORE"
+            )
+        {
+            in_arg_section = matches!(
+                trimmed,
+                "ARGUMENTS" | "OPTIONS" | "GLOBAL OPTIONS" | "SECURE CHANNEL OPTIONS"
+            );
             continue;
         }
 
@@ -85,6 +101,19 @@ fn test_help_colour_controls() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("cannot be used"));
+    for (choice, coloured) in [
+        ("--color=always", true),
+        ("--color=never", false),
+        ("--no-color", false),
+    ] {
+        let output = ykman()
+            .args([choice, "info", "--not-an-option"])
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("failed to run invalid command");
+        assert!(!output.status.success());
+        assert_eq!(output.stderr.contains(&0x1b), coloured);
+    }
 }
 
 #[test]
@@ -219,10 +248,114 @@ fn test_all_command_help_pages() {
         &["sd", "keys", "import"],
         &["sd", "keys", "set-allowlist"],
         &["apdu"],
+        &["diagnose"],
+        &["licenses"],
+        &["version"],
+        &["completion"],
     ];
 
     for path in command_paths {
         assert_help(path);
+    }
+}
+
+fn plain_help(args: &[&str]) -> String {
+    let output = ykman()
+        .args(args)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("failed to run help command");
+    assert!(output.status.success(), "{args:?}");
+    String::from_utf8(output.stdout).expect("help should be UTF-8")
+}
+
+#[test]
+fn test_help_layout_and_entry_points() {
+    let root = plain_help(&["--help"]);
+    assert_eq!(root, plain_help(&["-h"]));
+    assert_eq!(root.trim_end(), plain_help(&[]).trim_end());
+    assert!(include_str!("../../../../README.adoc").contains(root.trim_end()));
+    for heading in [
+        "USAGE",
+        "COMMANDS",
+        "ADDITIONAL COMMANDS",
+        "SECURE CHANNEL OPTIONS",
+        "GLOBAL OPTIONS",
+        "EXAMPLES",
+        "LEARN MORE",
+    ] {
+        assert_eq!(root.lines().filter(|line| *line == heading).count(), 1);
+    }
+    assert!(root.contains("ykman [options] [command]"));
+    let additional = root
+        .split("ADDITIONAL COMMANDS\n")
+        .nth(1)
+        .unwrap()
+        .split("\n\n")
+        .next()
+        .unwrap();
+    assert_eq!(
+        additional
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .collect::<Vec<_>>(),
+        ["apdu", "diagnose", "version", "licenses"]
+    );
+    for hidden in [
+        "--diagnose",
+        "--version",
+        "--licenses",
+        "--completion",
+        "--no-color",
+    ] {
+        assert!(!root.contains(hidden), "{hidden}");
+    }
+    assert!(!root.lines().any(|line| line.starts_with("  help ")));
+    let nested = plain_help(&["piv", "keys", "export", "--help"]);
+    assert_eq!(nested, plain_help(&["help", "piv", "keys", "export"]));
+    assert_eq!(nested, plain_help(&["piv", "keys", "export", "-h"]));
+    assert!(nested.contains("ykman piv keys export [options] <slot> <output>"));
+    assert!(nested.contains("firmware before"));
+    assert!(nested.contains("authoritative public-key metadata"));
+    assert!(!nested.contains("\nCOMMANDS\n"));
+    assert!(!nested.contains("\nARGUMENTS\n\n"));
+    assert!(!nested.contains("see more with '--help'"));
+    assert!(!nested.contains("see a summary with '-h'"));
+    let scp = nested.split("SECURE CHANNEL OPTIONS\n").nth(1).unwrap();
+    assert!(scp.contains("alone, requests SCP11b"));
+    let lock = plain_help(&["config", "set-lock-code", "--help"]);
+    assert!(lock.contains("32 hexadecimal characters, representing 16 bytes."));
+    let mode = plain_help(&["config", "mode", "--help"]);
+    assert!(mode.contains("OTP+FIDO+CCID"));
+}
+
+#[test]
+fn test_missing_subcommand_shows_grouped_help() {
+    ykman()
+        .args(["piv", "keys"])
+        .env("NO_COLOR", "1")
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("USAGE\n")
+                .and(predicate::str::contains("COMMANDS\n"))
+                .and(predicate::str::contains("GLOBAL OPTIONS\n")),
+        );
+}
+
+#[test]
+fn test_utility_command_aliases() {
+    for (flag, command) in [
+        (vec!["--version"], vec!["version"]),
+        (vec!["-V"], vec!["version"]),
+        (vec!["--licenses"], vec!["licenses"]),
+    ] {
+        assert_eq!(plain_help(&flag), plain_help(&command));
+    }
+    for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+        let completion = plain_help(&["completion", shell]);
+        assert_eq!(completion, plain_help(&["--completion", shell]));
+        assert!(!completion.contains('\x1b'));
     }
 }
 

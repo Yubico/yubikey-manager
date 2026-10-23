@@ -13,9 +13,10 @@ For more usage information and examples, see the https://docs.yubico.com/softwar
 ....
 Configure your YubiKey via the command line.
 
-Usage: ykman [OPTIONS] [COMMAND]
+USAGE
+  ykman [options] [command]
 
-Commands:
+COMMANDS
   list     List connected YubiKeys
   info     Show general information
   config   Enable or disable applications and settings
@@ -26,29 +27,37 @@ Commands:
   openpgp  Manage the OpenPGP application
   hsmauth  Manage the YubiHSM Auth application
   sd       Manage the Security Domain
-  apdu     Send raw APDUs to the YubiKey
-  help     Print this message or the help of the given subcommand(s)
 
-Options:
-  -d, --device <DEVICE>              Specify which YubiKey to interact with by serial number
-      --scp <SCP_CRED>               SCP credentials: private key and cert files, or SCP03 keys as K-ENC:K-MAC[:K-DEK] hex
-      --scp-ca <SCP_CA>              CA certificate for SCP11 card key verification (PEM/DER file)
-      --scp-sd <KID> <KVN>           Card key reference for SCP (KID KVN, hex)
-      --scp-oce <KID> <KVN>          OCE key reference for SCP (KID KVN, hex)
-      --scp-password <SCP_PASSWORD>  Password for SCP credential file
-      --diagnose                     Show diagnostic information
-  -l, --log-level <LOG_LEVEL>        Enable logging at given verbosity level [possible values: error, warning, info, debug, traffic]
-      --log-file <FILE>              Write log to FILE instead of printing to stderr (requires --log-level)
-  -h, --help                         Print help
-  -V, --version                      Print version
+ADDITIONAL COMMANDS
+  apdu      Send raw APDUs to the YubiKey
+  diagnose  Show diagnostic information
+  version   Show the version
+  licenses  Show third-party licenses
 
-Examples:
+SECURE CHANNEL OPTIONS
+      --scp <CRED>               SCP key/cert files, or SCP03 K-ENC:K-MAC[:K-DEK] hex
+      --scp-ca <FILE>            SCP11 CA file (PEM/DER); alone, requests SCP11b
+      --scp-sd <KID> <KVN>       SCP card key reference (hex)
+      --scp-oce <KID> <KVN>      SCP OCE key reference (hex)
+      --scp-password <PASSWORD>  Password for SCP credential file
 
+GLOBAL OPTIONS
+  -d, --device <SERIAL>    Use the YubiKey with this serial number
+  -l, --log-level <LEVEL>  Log level: error, warning, info, debug, traffic
+      --log-file <FILE>    Write log to FILE (requires --log-level)
+      --color <WHEN>       Colour output: always, auto, never
+  -h, --help               Print help
+
+EXAMPLES
   List connected YubiKeys, only output serial number:
   $ ykman list --serials
 
   Show information about YubiKey with serial number 123456:
   $ ykman --device 123456 info
+
+LEARN MORE
+  Run `ykman <command> --help` for details about a command.
+  Read the manual at https://docs.yubico.com/ykman
 ....
 
 The `--help` argument can also be used to get detailed information about specific

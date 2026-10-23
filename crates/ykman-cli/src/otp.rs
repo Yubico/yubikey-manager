@@ -176,8 +176,8 @@ pub enum OtpAction {
         /// Length of generated password
         #[arg(short = 'L', long, default_value_t = 38)]
         length: usize,
-        /// Keyboard layout as 'layout' or 'layout:variant' (see --list-layouts)
-        #[arg(short = 'k', long, default_value = "modhex")]
+        /// Keyboard layout, 'layout' or 'layout:variant' (see --list-layouts)
+        #[arg(short = 'k', long, value_name = "LAYOUT", default_value = "modhex")]
         keyboard_layout: LayoutSelection,
         /// List the available keyboard layouts (and variants) and exit
         #[arg(long, conflicts_with_all = ["password", "generate"])]

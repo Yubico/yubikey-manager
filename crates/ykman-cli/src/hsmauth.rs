@@ -36,8 +36,8 @@ pub enum HsmauthCredAction {
     Generate {
         /// Credential label
         label: String,
-        /// Password to protect the credential (at most 16 UTF-8 bytes)
-        #[arg(short = 'c', long)]
+        /// Credential password (at most 16 UTF-8 bytes)
+        #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
         #[arg(short = 'm', long)]
@@ -59,8 +59,8 @@ pub enum HsmauthCredAction {
         /// Generate random encryption and MAC keys
         #[arg(short = 'g', long)]
         generate: bool,
-        /// Password to protect the credential (at most 16 UTF-8 bytes)
-        #[arg(short = 'c', long)]
+        /// Credential password (at most 16 UTF-8 bytes)
+        #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
         #[arg(short = 'm', long)]
@@ -75,8 +75,8 @@ pub enum HsmauthCredAction {
         label: String,
         /// Derivation password
         derivation_password: String,
-        /// Password to protect the credential (at most 16 UTF-8 bytes)
-        #[arg(short = 'c', long)]
+        /// Credential password (at most 16 UTF-8 bytes)
+        #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
         #[arg(short = 'm', long)]
@@ -101,10 +101,10 @@ pub enum HsmauthCredAction {
         /// Credential label
         label: String,
         /// Current credential password (at most 16 UTF-8 bytes)
-        #[arg(short = 'c', long)]
+        #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// New credential password (at most 16 UTF-8 bytes)
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PASSWORD")]
         new_credential_password: Option<String>,
     },
     /// Import an asymmetric credential
@@ -117,8 +117,8 @@ pub enum HsmauthCredAction {
         /// Password to decrypt the private key
         #[arg(short = 'p', long)]
         password: Option<String>,
-        /// Password to protect credential (at most 16 UTF-8 bytes)
-        #[arg(short = 'c', long)]
+        /// Credential password (at most 16 UTF-8 bytes)
+        #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
         #[arg(short = 'm', long)]
@@ -133,8 +133,8 @@ pub enum HsmauthCredAction {
         label: String,
         /// Output file (- for stdout)
         output: String,
-        /// Output format
-        #[arg(short = 'F', long, default_value = "pem")]
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
 }
@@ -148,7 +148,7 @@ pub enum HsmauthAccessAction {
         #[arg(short = 'm', long)]
         management_password: Option<String>,
         /// New management password
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PASSWORD")]
         new_management_password: Option<String>,
         /// Generate a random management password
         #[arg(short = 'g', long)]

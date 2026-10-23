@@ -15,6 +15,7 @@ mod config;
 mod context;
 mod diagnose;
 mod fido;
+mod help;
 mod hsmauth;
 mod info;
 mod list;
@@ -40,6 +41,12 @@ use scp::{ScpInputs, ScpParams};
     name = "ykman",
     about = "Configure your YubiKey via the command line.",
     version,
+    disable_version_flag = true,
+    arg(clap::Arg::new("version")
+        .short('V')
+        .long("version")
+        .action(clap::ArgAction::Version)
+        .hide(true)),
     after_help = "Examples:\n\
       \n  List connected YubiKeys, only output serial number:\
       \n  $ ykman list --serials\
@@ -48,52 +55,66 @@ use scp::{ScpInputs, ScpParams};
       \n  $ ykman --device 123456 info"
 )]
 struct Cli {
-    /// Specify which YubiKey to interact with by serial number
-    #[arg(short = 'd', long, global = true)]
+    /// Use the YubiKey with this serial number
+    #[arg(short = 'd', long, global = true, value_name = "SERIAL")]
     device: Option<u32>,
 
-    /// SCP credentials: private key and cert files, or SCP03 keys as K-ENC:K-MAC[:K-DEK] hex
-    #[arg(long = "scp", global = true)]
+    /// SCP key/cert files, or SCP03 K-ENC:K-MAC[:K-DEK] hex
+    #[arg(long = "scp", global = true, value_name = "CRED")]
     scp_cred: Vec<String>,
 
-    /// CA certificate for SCP11 card key verification; alone, requests SCP11b (PEM/DER file)
-    #[arg(long, global = true)]
+    /// SCP11 CA file (PEM/DER); alone, requests SCP11b
+    #[arg(long, global = true, value_name = "FILE")]
     scp_ca: Option<String>,
 
-    /// Card key reference for SCP (KID KVN, hex)
+    /// SCP card key reference (hex)
     #[arg(long, global = true, num_args = 2, value_names = ["KID", "KVN"])]
     scp_sd: Option<Vec<String>>,
 
-    /// OCE key reference for SCP (KID KVN, hex)
+    /// SCP OCE key reference (hex)
     #[arg(long, global = true, num_args = 2, value_names = ["KID", "KVN"])]
     scp_oce: Option<Vec<String>>,
 
     /// Password for SCP credential file
-    #[arg(long, global = true)]
+    #[arg(long, global = true, value_name = "PASSWORD")]
     scp_password: Option<String>,
 
     /// Show diagnostic information
-    #[arg(long)]
+    #[arg(long, hide = true)]
     diagnose: bool,
 
     /// Show third-party license information
-    #[arg(long)]
+    #[arg(long, hide = true)]
     licenses: bool,
 
     /// Generate shell completion
-    #[arg(long)]
+    #[arg(long, value_name = "SHELL", hide = true)]
     completion: Option<Shell>,
 
-    /// Enable logging at given verbosity level
-    #[arg(short = 'l', long, global = true)]
+    /// Log level: error, warning, info, debug, traffic
+    #[arg(
+        short = 'l',
+        long,
+        global = true,
+        value_name = "LEVEL",
+        hide_possible_values = true
+    )]
     log_level: Option<logging::LogLevel>,
 
-    /// Write log to FILE instead of printing to stderr (requires --log-level)
+    /// Write log to FILE (requires --log-level)
     #[arg(long, value_name = "FILE", global = true)]
     log_file: Option<String>,
 
-    /// Control coloured output (auto honours NO_COLOR and terminal detection)
-    #[arg(long, global = true, value_enum, default_value = "auto")]
+    /// Colour output: always, auto, never
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        value_name = "WHEN",
+        default_value = "auto",
+        hide_default_value = true,
+        hide_possible_values = true
+    )]
     color: color::ColorChoice,
 
     /// Disable coloured output (same as --color=never)
@@ -133,7 +154,9 @@ fn print_licenses() {
 }
 
 fn cli_command() -> clap::Command {
-    Cli::command().color(color::help_choice(std::env::args_os().skip(1)))
+    Cli::command()
+        .styles(help::STYLES)
+        .color(color::help_choice(std::env::args_os().skip(1)))
 }
 
 fn print_completion(shell: Shell) {
@@ -147,7 +170,7 @@ fn command_or_help(command: Option<Commands>) -> Commands {
     match command {
         Some(command) => command,
         None => {
-            let mut cmd = cli_command();
+            let mut cmd = help::configure(cli_command());
             cmd.print_help().ok();
             println!();
             std::process::exit(0);
@@ -294,28 +317,63 @@ enum Commands {
         #[command(flatten)]
         args: apdu::ApduArgs,
     },
+    /// Show diagnostic information
+    Diagnose,
+    /// Show the version
+    Version,
+    /// Show third-party licenses
+    Licenses,
+    /// Generate shell completion
+    #[command(hide = true)]
+    Completion {
+        /// Shell to generate completion for
+        shell: Shell,
+    },
 }
 
 fn run() -> Result<()> {
-    let mut matches = cli_command().get_matches();
+    let mut matches = match cli_command().try_get_matches() {
+        Ok(matches) => matches,
+        Err(error)
+            if matches!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp
+                    | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+            ) =>
+        {
+            help::configure(cli_command()).get_matches()
+        }
+        Err(error) => error.exit(),
+    };
     let cli = Cli::from_arg_matches_mut(&mut matches).unwrap_or_else(|error| error.exit());
     color::init(cli.no_color, cli.color);
 
     init_logging(&cli)?;
 
-    if cli.diagnose {
-        diagnose::run_diagnose()?;
-        return Ok(());
-    }
-
-    if cli.licenses {
-        print_licenses();
-        return Ok(());
-    }
-
-    if let Some(shell) = cli.completion {
-        print_completion(shell);
-        return Ok(());
+    let command = if cli.diagnose {
+        Some(Commands::Diagnose)
+    } else if cli.licenses {
+        Some(Commands::Licenses)
+    } else if let Some(shell) = cli.completion {
+        Some(Commands::Completion { shell })
+    } else {
+        cli.command
+    };
+    match command {
+        Some(Commands::Diagnose) => return diagnose::run_diagnose(),
+        Some(Commands::Licenses) => {
+            print_licenses();
+            return Ok(());
+        }
+        Some(Commands::Version) => {
+            print!("{}", cli_command().render_version());
+            return Ok(());
+        }
+        Some(Commands::Completion { shell }) => {
+            print_completion(shell);
+            return Ok(());
+        }
+        _ => {}
     }
 
     let scp_params = scp::parse_scp_params(ScpInputs {
@@ -327,7 +385,7 @@ fn run() -> Result<()> {
     })?;
     let ctx = CommandContext::new(cli.device, scp_params.clone());
 
-    let command = command_or_help(cli.command);
+    let command = command_or_help(command);
 
     run_command(command, cli.device, &ctx, &scp_params)?;
     Ok(())
@@ -340,6 +398,12 @@ fn run_command(
     scp_params: &ScpParams,
 ) -> Result<()> {
     match command {
+        Commands::Diagnose
+        | Commands::Licenses
+        | Commands::Version
+        | Commands::Completion { .. } => {
+            unreachable!("handled in run()")
+        }
         Commands::List { serials, readers } => {
             if device_filter.is_some() {
                 return Err(anyhow!("--device can't be used with 'list'."));

@@ -107,10 +107,10 @@ pub enum PivAccessAction {
         pin_retries: u8,
         /// PUK retry count
         puk_retries: u8,
-        /// Current management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Current management key (hex, 16/24/32 bytes)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// Confirm changing retry counters without prompting
@@ -119,14 +119,14 @@ pub enum PivAccessAction {
     },
     /// Change the management key
     ChangeManagementKey {
-        /// Current management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Current management key (hex, 16/24/32 bytes)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// New management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'n', long)]
+        /// New management key (hex, 16/24/32 bytes)
+        #[arg(short = 'n', long, value_name = "KEY")]
         new_management_key: Option<String>,
         /// Algorithm for the new management key
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "ALGORITHM")]
         algorithm: Option<CliMgmtKeyType>,
         /// Require touch when using the new management key
         #[arg(short = 't', long)]
@@ -160,14 +160,14 @@ pub enum PivKeysAction {
         /// Touch policy for the generated key
         #[arg(long, default_value = "default")]
         touch_policy: CliTouchPolicy,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex, 16/24/32 bytes)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
-        /// Output format
-        #[arg(short = 'F', long, default_value = "pem")]
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
     /// Import a private key
@@ -182,10 +182,10 @@ pub enum PivKeysAction {
         /// Touch policy for the imported key
         #[arg(long, default_value = "default")]
         touch_policy: CliTouchPolicy,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex, 16/24/32 bytes)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// Password for decrypting password-protected key files
@@ -196,23 +196,22 @@ pub enum PivKeysAction {
     Sign {
         #[command(flatten)]
         operation: KeyOperation,
-        /// Hash for RSA/ECDSA (default: sha256); not used with Ed25519 or ML-DSA
-        #[arg(short = 'a', long)]
+        /// RSA/ECDSA hash (default: sha256); unused for Ed25519/ML-DSA
+        #[arg(short = 'a', long, value_name = "HASH")]
         hash_algorithm: Option<CliHashAlgorithm>,
         /// Input is already a digest (RSA/ECDSA only)
         #[arg(long)]
         prehashed: bool,
-        /// RSA signature padding (default: pkcs1v15); PSS uses a digest-length salt
+        /// RSA padding (default: pkcs1v15; PSS salt is digest length)
         #[arg(long)]
         padding: Option<CliSignaturePadding>,
         /// ML-DSA context string (at most 255 bytes)
         #[arg(long, conflicts_with = "mu")]
         context: Option<String>,
-        /// Input is a precomputed 64-byte ML-DSA message representative (external mu)
+        /// Input is a precomputed 64-byte ML-DSA mu (external mu)
         #[arg(long, conflicts_with = "compute_mu")]
         mu: bool,
-        /// Compute the ML-DSA mu on the host and sign it as external mu, allowing
-        /// messages of any size
+        /// Compute external ML-DSA mu on the host (any message size)
         #[arg(long)]
         compute_mu: bool,
     },
@@ -223,8 +222,8 @@ pub enum PivKeysAction {
         /// RSA encryption padding
         #[arg(long, default_value = "oaep")]
         padding: CliDecryptionPadding,
-        /// OAEP hash and MGF1 hash (default: sha256); the OAEP label is empty
-        #[arg(short = 'a', long)]
+        /// OAEP and MGF1 hash (default: sha256; empty label)
+        #[arg(short = 'a', long, value_name = "HASH")]
         hash_algorithm: Option<CliHashAlgorithm>,
     },
     /// Decapsulate ML-KEM ciphertext and output the raw shared secret
@@ -248,8 +247,8 @@ pub enum PivKeysAction {
         slot: String,
         /// Output certificate file
         output: String,
-        /// Output format
-        #[arg(short = 'F', long, default_value = "pem")]
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
     /// Export public key
@@ -258,8 +257,8 @@ pub enum PivKeysAction {
         slot: String,
         /// Output file
         output: String,
-        /// Output format
-        #[arg(short = 'F', long, default_value = "pem")]
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
         /// Verify that the public key matches the slot's private key
         ///
@@ -277,10 +276,10 @@ pub enum PivKeysAction {
         source: String,
         /// Destination slot
         dest: String,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex, 16/24/32 bytes)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -288,10 +287,10 @@ pub enum PivKeysAction {
     Delete {
         /// PIV slot
         slot: String,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex, 16/24/32 bytes)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -305,7 +304,7 @@ pub struct KeyOperation {
     input: String,
     /// Output file, or - for binary stdout
     output: String,
-    /// PIN (prompted for only when required by the slot policy)
+    /// PIN (prompted for only if the slot policy requires it)
     #[arg(short = 'P', long)]
     pin: Option<String>,
     /// Key algorithm for devices without slot metadata
@@ -321,8 +320,8 @@ pub enum PivCertAction {
         slot: String,
         /// Output file
         output: String,
-        /// Output format
-        #[arg(short = 'F', long, default_value = "pem")]
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
     /// Import certificate to slot
@@ -331,10 +330,10 @@ pub enum PivCertAction {
         slot: String,
         /// Certificate file
         cert_file: String,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex, 16/24/32 bytes)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// Compress certificate before importing
@@ -357,10 +356,10 @@ pub enum PivCertAction {
     Delete {
         /// PIV slot
         slot: String,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex, 16/24/32 bytes)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// Don't update CHUID after deleting certificate
@@ -378,15 +377,15 @@ pub enum PivCertAction {
         #[arg(short = 's', long)]
         subject: String,
         /// Validity period in days
-        #[arg(long, default_value_t = 365)]
+        #[arg(long, value_name = "DAYS", default_value_t = 365)]
         valid_days: u32,
         /// Hash algorithm
-        #[arg(short = 'a', long, default_value = "sha256")]
+        #[arg(short = 'a', long, value_name = "HASH", default_value = "sha256")]
         hash_algorithm: CliHashAlgorithm,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex, 16/24/32 bytes)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// Don't update CHUID after generating certificate
@@ -406,7 +405,7 @@ pub enum PivCertAction {
         #[arg(short = 's', long)]
         subject: String,
         /// Hash algorithm
-        #[arg(short = 'a', long, default_value = "sha256")]
+        #[arg(short = 'a', long, value_name = "HASH", default_value = "sha256")]
         hash_algorithm: CliHashAlgorithm,
         /// PIN for signing the CSR
         #[arg(short = 'P', long)]
@@ -432,10 +431,10 @@ pub enum PivObjectAction {
         object: String,
         /// Data file
         data: String,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex, 16/24/32 bytes)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -443,10 +442,10 @@ pub enum PivObjectAction {
     Generate {
         /// Object type: CHUID or CCC
         object: String,
-        /// Management key (hex, 16, 24, or 32 bytes)
-        #[arg(short = 'm', long)]
+        /// Management key (hex, 16/24/32 bytes)
+        #[arg(short = 'm', long, value_name = "KEY")]
         management_key: Option<String>,
-        /// PIN used to authorize with a PIN-protected management key
+        /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
