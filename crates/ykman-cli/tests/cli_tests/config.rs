@@ -71,15 +71,61 @@ fn fresh_info() -> String {
 }
 
 fn app_is_enabled(info: &str, app: &str, transport: &str) -> Option<bool> {
-    let header = info.lines().find(|l| l.starts_with("Applications"))?;
+    let header = info
+        .lines()
+        .find(|line| line.starts_with("APPLICATIONS "))
+        .expect("ykman info is missing the applications table");
     let col = header.find(transport)?;
     let app_line = info.lines().find(|l| l.starts_with(app))?;
     let field = app_line.get(col..)?.split_whitespace().next()?;
     Some(field == "Enabled")
 }
 
+fn enable_piv_over_nfc() {
+    if app_is_enabled(&fresh_info(), "PIV", "NFC") != Some(true) {
+        ykman_dev()
+            .args(["config", "nfc", "--enable", "piv", "-f"])
+            .assert()
+            .success();
+    }
+}
+
 fn has_nfc() -> bool {
     device_info().contains("NFC transport")
+}
+
+#[test]
+fn test_config_application_state_uses_the_transport_column() {
+    let info = format!(
+        "{:<24}{:<14}{:<14}FIPS APPROVED\n\
+         {:<24}{:<14}{:<14}Yes\n\
+         {:<24}{:<14}{:<14}No\n",
+        "APPLICATIONS",
+        "USB",
+        "NFC",
+        "PIV",
+        "Enabled",
+        "Disabled",
+        "OpenPGP",
+        "Disabled",
+        "Enabled",
+    );
+    assert_eq!(app_is_enabled(&info, "PIV", "USB"), Some(true));
+    assert_eq!(app_is_enabled(&info, "PIV", "NFC"), Some(false));
+    assert_eq!(app_is_enabled(&info, "OpenPGP", "USB"), Some(false));
+    assert_eq!(app_is_enabled(&info, "OpenPGP", "NFC"), Some(true));
+    let usb_only = format!(
+        "{:<24}{:<14}FIPS APPROVED\n{:<24}{:<14}No\n",
+        "APPLICATIONS", "USB", "PIV", "Enabled",
+    );
+    assert_eq!(app_is_enabled(&usb_only, "PIV", "USB"), Some(true));
+    assert_eq!(app_is_enabled(&usb_only, "PIV", "NFC"), None);
+}
+
+#[test]
+#[should_panic(expected = "ykman info is missing the applications table")]
+fn test_config_application_state_rejects_a_missing_table() {
+    app_is_enabled("Device type: YubiKey\n", "PIV", "USB");
 }
 
 #[test]
@@ -168,10 +214,7 @@ fn test_config_nfc_enable_disable() {
         skip!("NFC is not supported on this YubiKey");
     }
 
-    // Ensure PIV is enabled over NFC first
-    let _ = ykman_dev()
-        .args(["config", "nfc", "--enable", "piv", "-f"])
-        .ok();
+    enable_piv_over_nfc();
 
     // Disable PIV over NFC
     ykman_dev()
@@ -378,6 +421,7 @@ fn test_config_nfc_lock_code_prompt_and_explicit_code() {
         skip!("NFC is not supported on this YubiKey");
     }
 
+    enable_piv_over_nfc();
     let guard = LockCodeGuard::set(TEST_LOCK_CODE);
     let output = ykman_dev_tty(
         &["config", "nfc", "--disable", "piv", "-f"],
