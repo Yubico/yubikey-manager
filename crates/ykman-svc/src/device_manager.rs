@@ -7,6 +7,8 @@
 //! seconds after the last client disconnects. While running, it pushes device
 //! Added/Changed/Removed events that keep an in-memory inventory up to date;
 //! `update_devices()` simply projects that inventory into the RPC device map.
+//! Devices released after application use are refreshed before subsequent get
+//! requests, since configuration writes need not generate monitor events.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -64,16 +66,17 @@ struct ManagerState {
     /// Cached device objects for fast re-open without re-enumeration.
     device_objects: BTreeMap<String, LocalYubiKeyDevice>,
     device_revisions: BTreeMap<String, u64>,
+    stale_devices: HashMap<String, u64>,
     /// Devices that are currently opened by a client session.
     locked_devices: HashMap<String, u64>,
 }
 
-pub(crate) struct FidoSelectionGuard {
+pub(crate) struct DeviceReservation {
     manager: Arc<DeviceManager>,
     reserved: Vec<(String, u64)>,
 }
 
-impl Drop for FidoSelectionGuard {
+impl Drop for DeviceReservation {
     fn drop(&mut self) {
         for (name, revision) in &self.reserved {
             self.manager.release_device(name, *revision);
@@ -88,6 +91,7 @@ impl DeviceManager {
                 devices: BTreeMap::new(),
                 device_objects: BTreeMap::new(),
                 device_revisions: BTreeMap::new(),
+                stale_devices: HashMap::new(),
                 locked_devices: HashMap::new(),
             }),
             client_count: AtomicUsize::new(0),
@@ -222,6 +226,7 @@ impl DeviceManager {
                 state.devices.clear();
                 state.device_objects.clear();
                 state.device_revisions.clear();
+                state.stale_devices.clear();
                 log::info!("Device monitor stopped after linger");
             }
         });
@@ -230,14 +235,13 @@ impl DeviceManager {
     /// Project the live monitored inventory into the RPC device map.
     /// Returns the current device map.
     pub fn update_devices(&self) -> BTreeMap<String, Value> {
-        // Snapshot the monitored devices, ordered by stable id for
-        // deterministic duplicate-naming.
-        let mut devices: Vec<(YubiKeyId, LocalYubiKeyDevice, u64)> = {
-            let inv = recover_lock(self.monitored.lock(), "monitored inventory");
-            inv.iter()
-                .map(|(id, (dev, revision))| (*id, dev.clone(), *revision))
-                .collect()
-        };
+        // Keep revisions stable through projection so concurrent listings cannot
+        // reinstate an older snapshot or discard a newer reservation.
+        let inventory = recover_lock(self.monitored.lock(), "monitored inventory");
+        let mut devices: Vec<(YubiKeyId, LocalYubiKeyDevice, u64)> = inventory
+            .iter()
+            .map(|(id, (dev, revision))| (*id, dev.clone(), *revision))
+            .collect();
         devices.sort_by_key(|(id, _, _)| *id);
 
         let mut new_devices = BTreeMap::new();
@@ -306,6 +310,9 @@ impl DeviceManager {
         state
             .locked_devices
             .retain(|name, revision| new_revisions.get(name) == Some(revision));
+        state
+            .stale_devices
+            .retain(|name, revision| new_revisions.get(name) == Some(revision));
 
         state.devices = new_devices.clone();
         state.device_objects = new_device_objects;
@@ -318,6 +325,65 @@ impl DeviceManager {
         self.update_devices();
         let state = self.lock_state();
         state.device_revisions.get(name).copied()
+    }
+
+    pub(crate) fn invalidate_metadata(&self, name: &str, revision: u64) {
+        let mut state = self.lock_state();
+        if state.locked_devices.get(name) == Some(&revision) {
+            state.stale_devices.insert(name.to_string(), revision);
+        }
+    }
+
+    /// Refresh released devices under exclusive reservations before listing them.
+    pub(crate) fn refresh_metadata(self: &Arc<Self>) -> Result<(), RpcError> {
+        self.update_devices();
+        let devices = {
+            let mut state = self.lock_state();
+            let devices = state
+                .stale_devices
+                .iter()
+                .filter(|(name, _)| !state.locked_devices.contains_key(*name))
+                .map(|(name, revision)| {
+                    state
+                        .device_objects
+                        .get(name)
+                        .cloned()
+                        .map(|device| (name.clone(), *revision, device))
+                        .ok_or_else(|| RpcError::no_such_node(name))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            for (name, revision, _) in &devices {
+                state.locked_devices.insert(name.clone(), *revision);
+            }
+            devices
+        };
+        let _reservation = DeviceReservation {
+            manager: Arc::clone(self),
+            reserved: devices
+                .iter()
+                .map(|(name, revision, _)| (name.clone(), *revision))
+                .collect(),
+        };
+        for (name, revision, mut device) in devices {
+            device.refresh_info().map_err(|error| {
+                RpcError::new(
+                    "device-error",
+                    format!("Failed to refresh device '{name}': {error}"),
+                )
+            })?;
+            let mut inventory = recover_lock(self.monitored.lock(), "monitored inventory");
+            if let Some(entry) = inventory.values_mut().find(|(_, rev)| *rev == revision) {
+                let next_revision = self.next_revision.fetch_add(1, Ordering::Relaxed) + 1;
+                *entry = (device, next_revision);
+            }
+            drop(inventory);
+            let mut state = self.lock_state();
+            if state.stale_devices.get(&name) == Some(&revision) {
+                state.stale_devices.remove(&name);
+            }
+        }
+        self.update_devices();
+        Ok(())
     }
 
     /// Construct a device node without acquiring its exclusive lock.
@@ -359,7 +425,7 @@ impl DeviceManager {
     }
 
     /// Reserve monitored FIDO devices while touch selection opens their connections.
-    pub(crate) fn reserve_fido_devices(self: &Arc<Self>) -> Result<FidoSelectionGuard, RpcError> {
+    pub(crate) fn reserve_fido_devices(self: &Arc<Self>) -> Result<DeviceReservation, RpcError> {
         self.update_devices();
         let mut state = self.lock_state();
         let reserved: Vec<(String, u64)> = state
@@ -389,7 +455,7 @@ impl DeviceManager {
         for (name, revision) in &reserved {
             state.locked_devices.insert(name.clone(), *revision);
         }
-        Ok(FidoSelectionGuard {
+        Ok(DeviceReservation {
             manager: Arc::clone(self),
             reserved,
         })
@@ -452,7 +518,36 @@ fn device_name(dev: &LocalYubiKeyDevice, counts: &mut HashMap<String, usize>) ->
 
 #[cfg(test)]
 mod tests {
-    use super::DeviceManager;
+    use super::{DeviceManager, DeviceReservation};
+    use std::sync::Arc;
+
+    #[test]
+    fn metadata_invalidation_and_reservation_release_are_revision_scoped() {
+        let manager = DeviceManager::new();
+        manager
+            .lock_state()
+            .device_revisions
+            .insert("123".into(), 1);
+        manager.lock_device("123", 1).unwrap();
+        manager.invalidate_metadata("123", 2);
+        assert!(manager.lock_state().stale_devices.is_empty());
+        manager.invalidate_metadata("123", 1);
+        assert_eq!(manager.lock_state().stale_devices.get("123"), Some(&1));
+        let reservation = DeviceReservation {
+            manager: Arc::clone(&manager),
+            reserved: vec![("123".into(), 1)],
+        };
+        {
+            let mut state = manager.lock_state();
+            state.device_revisions.insert("123".into(), 2);
+            state.locked_devices.insert("123".into(), 2);
+        }
+        drop(reservation);
+        assert_eq!(
+            manager.lock_device("123", 2).unwrap_err().status,
+            "device-busy"
+        );
+    }
 
     #[test]
     fn device_locks_are_exclusive_and_revision_scoped() {

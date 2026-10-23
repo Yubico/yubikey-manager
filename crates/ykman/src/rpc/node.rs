@@ -10,6 +10,11 @@ pub type SignalFn<'a> = &'a dyn Fn(&str, Value);
 
 /// Trait for an RPC node in the tree.
 pub trait RpcNode {
+    /// Prepare this node before handling or routing a get request.
+    fn prepare_get(&mut self) -> Result<(), RpcError> {
+        Ok(())
+    }
+
     /// Get node-specific data (returned in the `get` action).
     fn get_data(&self) -> Value {
         json!({})
@@ -79,6 +84,7 @@ pub struct NodeHost {
     child_name: Option<String>,
     /// Persistent children for nodes that retain children across switches.
     retained_children: BTreeMap<String, Box<NodeHost>>,
+    closed: bool,
 }
 
 impl NodeHost {
@@ -88,6 +94,7 @@ impl NodeHost {
             child: None,
             child_name: None,
             retained_children: BTreeMap::new(),
+            closed: false,
         }
     }
 
@@ -115,6 +122,10 @@ impl NodeHost {
     }
 
     fn close(&mut self) {
+        if self.closed {
+            return;
+        }
+        self.closed = true;
         self.close_child();
         let retained: Vec<String> = self.retained_children.keys().cloned().collect();
         for name in &retained {
@@ -187,6 +198,9 @@ impl NodeHost {
         cancel: &AtomicBool,
         traversed: &mut Vec<String>,
     ) -> Result<RpcResponse, RpcError> {
+        if action == "get" {
+            self.node.prepare_get()?;
+        }
         let result = if !target.is_empty() {
             traversed.push(target[0].clone());
             match self.get_or_create_child(&target[0]) {
@@ -258,10 +272,150 @@ impl NodeHost {
     }
 }
 
+impl Drop for NodeHost {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
 /// Convert a ChildResetException into an RpcError with status "child-reset"
 /// (internal marker, converted to "state-reset" by the parent).
 impl From<ChildResetException> for RpcError {
     fn from(e: ChildResetException) -> Self {
         RpcError::new("child-reset", e.message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
+
+    struct TestNode {
+        name: &'static str,
+        retains_children: bool,
+        fail_get: Arc<AtomicBool>,
+        events: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl RpcNode for TestNode {
+        fn prepare_get(&mut self) -> Result<(), RpcError> {
+            if self.fail_get.load(Ordering::Relaxed) {
+                Err(RpcError::new("device-error", "Metadata unavailable"))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
+            assert_eq!(name, "child");
+            self.events.lock().unwrap().push("open child".into());
+            Ok(Box::new(Self {
+                name: "child",
+                retains_children: false,
+                fail_get: Arc::clone(&self.fail_get),
+                events: Arc::clone(&self.events),
+            }))
+        }
+
+        fn retains_children(&self) -> bool {
+            self.retains_children
+        }
+
+        fn call_action(
+            &mut self,
+            action: &str,
+            _: &Value,
+            _: SignalFn,
+            _: &AtomicBool,
+        ) -> Result<RpcResponse, RpcError> {
+            Err(RpcError::no_such_action(action))
+        }
+
+        fn close(&mut self) {
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("close {}", self.name));
+        }
+
+        fn on_child_closed(&mut self, name: &str) {
+            self.events.lock().unwrap().push(format!("release {name}"));
+        }
+    }
+
+    #[test]
+    fn get_preparation_errors_are_retryable_and_prevent_child_access() {
+        let fail_get = Arc::new(AtomicBool::new(true));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut host = NodeHost::new(Box::new(TestNode {
+            name: "root",
+            retains_children: true,
+            fail_get: Arc::clone(&fail_get),
+            events: Arc::clone(&events),
+        }));
+        for target in [vec![], vec!["child".to_string()]] {
+            let error = host
+                .call(
+                    "get",
+                    &target,
+                    &json!({}),
+                    &|_, _| {},
+                    &AtomicBool::new(false),
+                )
+                .err()
+                .expect("get should fail when metadata preparation fails");
+            assert_eq!(error.status, "device-error");
+        }
+        assert!(events.lock().unwrap().is_empty());
+        fail_get.store(false, Ordering::Relaxed);
+        host.call(
+            "get",
+            &["child".into()],
+            &json!({}),
+            &|_, _| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(*events.lock().unwrap(), ["open child"]);
+    }
+
+    #[test]
+    fn teardown_closes_children_once_before_releasing_parent_resources() {
+        for (retains_children, explicit_close) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let mut host = NodeHost::new(Box::new(TestNode {
+                name: "root",
+                retains_children,
+                fail_get: Arc::new(AtomicBool::new(false)),
+                events: Arc::clone(&events),
+            }));
+            host.call(
+                "get",
+                &["child".into()],
+                &json!({}),
+                &|_, _| {},
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+            if explicit_close {
+                host.call(
+                    "close",
+                    &[],
+                    &json!({"child": "child"}),
+                    &|_, _| {},
+                    &AtomicBool::new(false),
+                )
+                .unwrap();
+            }
+            drop(host);
+            assert_eq!(
+                *events.lock().unwrap(),
+                ["open child", "close child", "release child", "close root"]
+            );
+        }
     }
 }

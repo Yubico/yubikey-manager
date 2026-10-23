@@ -75,6 +75,11 @@ it but cannot open a connection until the client's last connection is closed
 or the session ends. FIDO touch selection reserves candidate devices while it
 runs.
 
+After the last connection closes or the session ends, device information is
+refreshed before subsequent metadata requests. Refreshes use exclusive
+reservations; devices still in use are listed from cache without probing them.
+Refresh failures are reported to the requesting client.
+
 ## License
 
 Apache-2.0

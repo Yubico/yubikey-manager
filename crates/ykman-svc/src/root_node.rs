@@ -36,6 +36,10 @@ impl ServiceRootNode {
 }
 
 impl RpcNode for ServiceRootNode {
+    fn prepare_get(&mut self) -> Result<(), RpcError> {
+        self.manager.refresh_metadata()
+    }
+
     fn get_data(&self) -> Value {
         json!({
             "version": VERSION,

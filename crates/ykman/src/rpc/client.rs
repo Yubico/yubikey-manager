@@ -33,24 +33,17 @@ pub struct RpcClient {
     open_connections: HashMap<Vec<String>, usize>,
 }
 
-/// Thread-safe writer handle for sending cancel signals from the Ctrl+C handler.
-#[cfg(not(target_os = "windows"))]
-struct CancelWriter(Arc<Mutex<Box<dyn Write + Send>>>);
-
-#[cfg(not(target_os = "windows"))]
-impl CancelWriter {
-    fn send_cancel(&self, data: &[u8]) {
-        if let Ok(mut w) = self.0.lock() {
-            let _ = w.write_all(data);
-            let _ = w.write_all(b"\n");
-            let _ = w.flush();
-        }
-    }
+struct CallCancellation<'a> {
+    cancelled: &'a dyn Fn() -> bool,
+    sent: bool,
 }
 
 impl RpcClient {
     #[cfg(all(test, not(target_os = "windows")))]
     pub(crate) fn from_test_stream(stream: std::os::unix::net::UnixStream) -> Self {
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_millis(10)))
+            .expect("set test socket read timeout");
         let reader = stream.try_clone().expect("clone test socket");
         Self {
             transport: Transport::Stream {
@@ -121,6 +114,11 @@ impl RpcClient {
             let stream = UnixStream::connect(&socket_path).map_err(|e| {
                 RpcCallError::Transport(format!("Failed to connect to ykman-svc socket: {e}"))
             })?;
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_millis(10)))
+                .map_err(|e| {
+                    RpcCallError::Transport(format!("Failed to set socket read timeout: {e}"))
+                })?;
 
             let reader: Box<dyn Read + Send> =
                 Box::new(stream.try_clone().map_err(|e| {
@@ -217,12 +215,6 @@ impl RpcClient {
         Ok(())
     }
 
-    #[cfg(not(target_os = "windows"))]
-    fn cancel_writer(&self) -> CancelWriter {
-        let Transport::Stream { writer, .. } = &self.transport;
-        CancelWriter(writer.clone())
-    }
-
     /// Send a command and return the response body. Signals are dispatched via
     /// the callback. Returns `Err` for RPC errors.
     ///
@@ -236,43 +228,41 @@ impl RpcClient {
         signal_handler: Option<&dyn Fn(&str, &Value)>,
         cancellable: bool,
     ) -> Result<RpcResult, RpcCallError> {
+        if cancellable {
+            cancel::clear();
+        }
+        self.call_with_cancel(
+            action,
+            target,
+            body,
+            signal_handler,
+            cancellable.then_some(&cancel::is_cancelled as &dyn Fn() -> bool),
+        )
+    }
+
+    /// Send a command while polling the caller's cancellation callback.
+    /// Cancellation is forwarded once; the response is still consumed so the
+    /// connection remains usable for the next command.
+    pub fn call_with_cancel(
+        &mut self,
+        action: &str,
+        target: &[impl AsRef<str>],
+        body: Value,
+        signal_handler: Option<&dyn Fn(&str, &Value)>,
+        cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<RpcResult, RpcCallError> {
         let request =
             ClientMessage::Command(CommandMessage::new(action, target, body).map_err(|e| {
                 RpcCallError::Transport(format!("Failed to build RPC request: {e}"))
             })?);
         self.write_message(&request)?;
 
-        if cancellable {
-            cancel::clear();
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        let _guard = if cancellable {
-            let writer = self.cancel_writer();
-            Some(cancel::on_cancel(move || {
-                if let Ok(json_str) =
-                    serde_json::to_string(&ClientMessage::Signal(SignalMessage::cancel()))
-                {
-                    let json_str = SecretValue::new(json_str);
-                    writer.send_cancel(json_str.expose_secret().as_bytes());
-                }
-            }))
-        } else {
-            None
-        };
-
-        #[cfg(target_os = "windows")]
-        let mut cancel_sent = false;
+        let mut cancellation = cancelled.map(|cancelled| CallCancellation {
+            cancelled,
+            sent: false,
+        });
         loop {
-            #[cfg(target_os = "windows")]
-            {
-                if cancellable && !cancel_sent && cancel::is_cancelled() {
-                    self.write_message(&ClientMessage::Signal(SignalMessage::cancel()))?;
-                    cancel_sent = true;
-                }
-            }
-
-            match self.read_server_message(signal_handler, cancellable)? {
+            match self.read_server_message(signal_handler, &mut cancellation)? {
                 ServerMessage::Success(success) => {
                     let body = success.body.to_value().map_err(|e| {
                         RpcCallError::Transport(format!("Malformed RPC success body: {e}"))
@@ -307,28 +297,10 @@ impl RpcClient {
     fn read_server_message(
         &mut self,
         signal_handler: Option<&dyn Fn(&str, &Value)>,
-        cancellable: bool,
+        cancellation: &mut Option<CallCancellation<'_>>,
     ) -> Result<ServerMessage, RpcCallError> {
-        #[cfg(not(target_os = "windows"))]
-        let _ = cancellable;
         loop {
-            #[cfg(target_os = "windows")]
-            if cancellable {
-                match self.windows_read_state()? {
-                    PipeReadState::NoData => {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                        continue;
-                    }
-                    PipeReadState::Disconnected => {
-                        return Err(RpcCallError::Transport(
-                            "RPC subprocess closed unexpectedly".into(),
-                        ));
-                    }
-                    PipeReadState::DataAvailable => {}
-                }
-            }
-
-            let line = self.read_rpc_line()?;
+            let line = self.read_rpc_line_with_cancel(cancellation)?;
             if line.is_empty() {
                 continue;
             }
@@ -387,34 +359,85 @@ impl RpcClient {
         Ok(())
     }
 
-    fn read_line(&mut self, buf: &mut String) -> std::io::Result<usize> {
+    fn read_line(&mut self, buf: &mut Vec<u8>) -> std::io::Result<usize> {
         let Transport::Stream { reader, .. } = &mut self.transport;
-        reader.read_line(buf)
+        reader.read_until(b'\n', buf)
     }
 
     fn read_rpc_line(&mut self) -> Result<String, RpcCallError> {
-        let mut buf = SecretValue::new(String::new());
-        let n = match self.read_line(buf.expose_secret_mut()) {
-            Ok(n) => n,
-            Err(e) => {
-                return Err(RpcCallError::Transport(format!(
-                    "Failed to read from RPC: {e}"
-                )));
+        self.read_rpc_line_with_cancel(&mut None)
+    }
+
+    fn read_rpc_line_with_cancel(
+        &mut self,
+        cancellation: &mut Option<CallCancellation<'_>>,
+    ) -> Result<String, RpcCallError> {
+        let mut buf = SecretValue::new(Vec::new());
+        loop {
+            if let Some(cancel) = cancellation
+                && !cancel.sent
+                && (cancel.cancelled)()
+            {
+                self.write_message(&ClientMessage::Signal(SignalMessage::cancel()))?;
+                cancel.sent = true;
             }
-        };
-        if n == 0 {
-            return Err(RpcCallError::Transport(
-                "RPC subprocess closed unexpectedly".into(),
-            ));
+
+            #[cfg(target_os = "windows")]
+            if cancellation.is_some() {
+                match self.windows_read_state()? {
+                    PipeReadState::NoData => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    PipeReadState::Disconnected => {
+                        return Err(RpcCallError::Transport(
+                            "RPC subprocess closed unexpectedly".into(),
+                        ));
+                    }
+                    PipeReadState::DataAvailable => {}
+                }
+            }
+
+            match self.read_line(buf.expose_secret_mut()) {
+                Ok(0) => {
+                    return Err(RpcCallError::Transport(
+                        "RPC subprocess closed unexpectedly".into(),
+                    ));
+                }
+                Ok(_) if buf.expose_secret().last() == Some(&b'\n') => {
+                    return std::str::from_utf8(buf.expose_secret())
+                        .map(|line| line.trim().to_string())
+                        .map_err(|e| {
+                            RpcCallError::Transport(format!("Invalid UTF-8 from RPC: {e}"))
+                        });
+                }
+                Ok(_) => {}
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
+                Err(e) => {
+                    return Err(RpcCallError::Transport(format!(
+                        "Failed to read from RPC: {e}"
+                    )));
+                }
+            }
         }
-        Ok(buf.expose_secret().trim().to_string())
     }
 
     #[cfg(target_os = "windows")]
     fn windows_read_state(&self) -> Result<PipeReadState, RpcCallError> {
         use windows_sys::Win32::System::Pipes::PeekNamedPipe;
 
-        let Transport::Stream { reader_handle, .. } = &self.transport;
+        let Transport::Stream {
+            reader,
+            reader_handle,
+            ..
+        } = &self.transport;
+        if !reader.buffer().is_empty() {
+            return Ok(PipeReadState::DataAvailable);
+        }
         let mut available = 0u32;
         let ok = unsafe {
             PeekNamedPipe(
@@ -450,6 +473,56 @@ impl Drop for RpcClient {
     }
 }
 
+#[cfg(all(test, target_os = "windows"))]
+mod windows_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::io::Cursor;
+
+    #[test]
+    fn buffered_pipe_response_does_not_wait_for_more_pipe_data() {
+        let signal =
+            ServerMessage::Signal(SignalMessage::new("keepalive", json!({"status": 1})).unwrap());
+        let response = ServerMessage::success(json!({"ready": true}), vec![]).unwrap();
+        let data = format!(
+            "{}\n{}\n",
+            serde_json::to_string(&signal).unwrap(),
+            serde_json::to_string(&response).unwrap()
+        );
+        let mut reader: BufReader<Box<dyn Read + Send>> =
+            BufReader::new(Box::new(Cursor::new(data.into_bytes())));
+        reader.fill_buf().unwrap();
+        let mut client = RpcClient {
+            transport: Transport::Stream {
+                reader,
+                writer: Arc::new(Mutex::new(Box::new(Vec::<u8>::new()))),
+                reader_handle: 0,
+            },
+            open_connections: HashMap::new(),
+        };
+        assert!(matches!(
+            client.windows_read_state().unwrap(),
+            PipeReadState::DataAvailable
+        ));
+        let signals = Cell::new(0);
+        let on_signal = |status: &str, _: &Value| {
+            assert_eq!(status, "keepalive");
+            signals.set(signals.get() + 1);
+        };
+        let result = client
+            .call_with_cancel(
+                "get",
+                &[] as &[&str],
+                json!({}),
+                Some(&on_signal),
+                Some(&|| false),
+            )
+            .unwrap();
+        assert_eq!(result.body, json!({"ready": true}));
+        assert_eq!(signals.get(), 1);
+    }
+}
+
 /// Successful RPC response.
 pub struct RpcResult {
     pub body: Value,
@@ -478,4 +551,35 @@ pub enum RpcCallError {
     /// Structured error response from the RPC server.
     #[error("RPC error ({}): {}", .0.status, .0.message)]
     Rpc(#[source] RpcClientError),
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+    use std::time::Duration;
+
+    #[test]
+    fn socket_timeouts_preserve_fragmented_response_lines() {
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let worker = std::thread::spawn(move || {
+            let mut reader = BufReader::new(server.try_clone().unwrap());
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            let response = serde_json::to_vec(
+                &ServerMessage::success(json!({"ready": true}), vec![]).unwrap(),
+            )
+            .unwrap();
+            server.write_all(&response[..12]).unwrap();
+            std::thread::sleep(Duration::from_millis(50));
+            server.write_all(&response[12..]).unwrap();
+            server.write_all(b"\n").unwrap();
+        });
+        let mut client = RpcClient::from_test_stream(client);
+        assert_eq!(
+            client.get(&[] as &[&str]).unwrap().body,
+            json!({"ready": true})
+        );
+        worker.join().unwrap();
+    }
 }

@@ -60,6 +60,7 @@ fn device_open_error(error: RpcCallError) -> DeviceError {
 fn smartcard_device_error(error: RpcCallError) -> DeviceError {
     match error {
         RpcCallError::Rpc(ref rpc) if rpc.status == "device-busy" => DeviceError::InUse,
+        RpcCallError::Rpc(ref rpc) if rpc.status == "cancelled" => DeviceError::Cancelled,
         other => DeviceError::SmartCard(SmartCardError::Transport(Box::new(other))),
     }
 }
@@ -298,7 +299,7 @@ impl FidoConnection for RpcFidoConnection {
         cmd: u8,
         data: &[u8],
         on_keepalive: Option<&mut dyn FnMut(u8)>,
-        _cancel: Option<&dyn Fn() -> bool>,
+        cancel: Option<&dyn Fn() -> bool>,
     ) -> Result<Vec<u8>, FidoError> {
         if self.lease.is_none() {
             return Err(FidoError::Other("RPC connection is closed".into()));
@@ -317,18 +318,22 @@ impl FidoConnection for RpcFidoConnection {
             });
 
         let data_hex = SecretValue::new(data.encode_hex::<String>());
+        if cancel.is_none() {
+            crate::cancel::clear();
+        }
+        let cancelled = cancel.unwrap_or(&crate::cancel::is_cancelled);
         let result = self
             .client
             .lock()
             .map_err(|_| FidoError::Other("RPC client lock poisoned".into()))?
-            .call(
+            .call_with_cancel(
                 "call",
                 &target(&self.device_prefix, &["ctap"]),
                 json!({"cmd": cmd, "data": data_hex.expose_secret()}),
                 signal_handler
                     .as_ref()
                     .map(|h| h.as_ref() as &dyn Fn(&str, &Value)),
-                true, // cancellable
+                Some(cancelled),
             )
             .map_err(|e| FidoError::Other(format!("{e}")))?;
 
@@ -784,7 +789,7 @@ impl YubiKeyDevice for RpcDevice {
     fn reinsert(
         &mut self,
         status_cb: &dyn Fn(ReinsertStatus),
-        _cancelled: &dyn Fn() -> bool,
+        cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DeviceError> {
         log::debug!("Requesting reinsert via RPC");
         let signal_handler = |status: &str, body: &Value| {
@@ -804,12 +809,12 @@ impl YubiKeyDevice for RpcDevice {
                     "RPC client lock poisoned".into(),
                 ))))
             })?
-            .call(
+            .call_with_cancel(
                 "reinsert",
                 &self.prefix,
                 json!({}),
                 Some(&signal_handler),
-                true,
+                Some(cancelled),
             )
             .map_err(smartcard_device_error)?;
 
@@ -840,6 +845,127 @@ struct RpcTransportError(String);
 mod tests {
     use super::super::client::RpcClientError;
     use super::*;
+
+    #[cfg(not(target_os = "windows"))]
+    fn cancelling_service(
+        action: &'static str,
+    ) -> (
+        SharedClient,
+        Arc<std::sync::atomic::AtomicBool>,
+        std::thread::JoinHandle<()>,
+    ) {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::Duration;
+
+        let (client, mut server) = UnixStream::pair().unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancel = cancelled.clone();
+        let worker = std::thread::spawn(move || {
+            let mut reader = BufReader::new(server.try_clone().unwrap());
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&request).unwrap()["action"],
+                action
+            );
+            // No keepalive/status signal: cancellation must also work while the server is silent.
+            cancel.store(true, Ordering::Relaxed);
+            request.clear();
+            reader.read_line(&mut request).unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&request).unwrap()["status"],
+                "cancel"
+            );
+            server
+                .write_all(b"{\"kind\":\"error\",\"status\":\"cancelled\",\"message\":\"Operation cancelled\",\"body\":{}}\n")
+                .unwrap();
+            request.clear();
+            reader.read_line(&mut request).unwrap();
+            // There must be no duplicate cancel or unread response before the next command.
+            assert_eq!(
+                serde_json::from_str::<Value>(&request).unwrap()["action"],
+                "get"
+            );
+            server
+                .write_all(b"{\"kind\":\"success\",\"body\":{}}\n")
+                .unwrap();
+            if action == "call" {
+                request.clear();
+                reader.read_line(&mut request).unwrap();
+                assert_eq!(
+                    serde_json::from_str::<Value>(&request).unwrap()["action"],
+                    "close"
+                );
+                server
+                    .write_all(b"{\"kind\":\"success\",\"body\":{}}\n")
+                    .unwrap();
+            }
+        });
+        (
+            Arc::new(Mutex::new(RpcClient::from_test_stream(client))),
+            cancelled,
+            worker,
+        )
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn reinsert_forwards_cancellation_and_keeps_rpc_usable() {
+        use std::sync::atomic::Ordering;
+        let (client, cancelled, worker) = cancelling_service("reinsert");
+        let mut device = RpcDevice::from_inventory(
+            client.clone(),
+            "123",
+            &json!({
+                "name": "YubiKey", "version": [5, 7, 0], "serial": 123,
+                "form_factor": 3, "transport": "usb", "usb_interfaces": 7,
+            }),
+        )
+        .unwrap();
+        assert!(matches!(
+            device.reinsert(&|_| {}, &|| cancelled.load(Ordering::Relaxed)),
+            Err(DeviceError::Cancelled)
+        ));
+        client.lock().unwrap().get(&[] as &[&str]).unwrap();
+        worker.join().unwrap();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn fido_forwards_cancellation_and_keeps_rpc_usable() {
+        use std::sync::atomic::Ordering;
+        let (client, cancelled, worker) = cancelling_service("call");
+        let path = vec!["123".to_string(), "ctap".to_string()];
+        client.lock().unwrap().track_connection(&path);
+        let mut connection = RpcFidoConnection {
+            client: client.clone(),
+            device_version: yubikit::core::Version(5, 7, 0),
+            capabilities: CtapHidCapability::from_raw(0),
+            device_prefix: vec!["123".into()],
+            lease: Some(RpcConnectionLease {
+                client: client.clone(),
+                target: path,
+            }),
+        };
+        assert!(
+            connection
+                .call(
+                    0x10,
+                    &[0x07],
+                    None,
+                    Some(&|| cancelled.load(Ordering::Relaxed))
+                )
+                .is_err()
+        );
+        client.lock().unwrap().get(&[] as &[&str]).unwrap();
+        connection.close();
+        worker.join().unwrap();
+    }
 
     #[test]
     fn unavailable_ccid_rpc_error_preserves_device_reason() {

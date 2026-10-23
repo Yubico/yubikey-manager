@@ -210,7 +210,10 @@ impl RpcNode for DeviceNode {
                 if locked_here && self.active_connections.is_empty() {
                     self.release_lock();
                 }
-                result.map_err(|e| RpcError::new("device-error", format!("{e}")))?;
+                result.map_err(|e| match e {
+                    DeviceError::Cancelled => RpcError::new("cancelled", "Operation cancelled"),
+                    other => RpcError::new("device-error", format!("{other}")),
+                })?;
                 // Invalidate all cached children since connections are stale.
                 self.generation += 1;
                 log::info!("Device reinserted, generation {}", self.generation);
@@ -269,6 +272,7 @@ impl RpcNode for DeviceNode {
     fn on_child_closed(&mut self, name: &str) {
         self.active_connections.remove(name);
         if self.active_connections.is_empty() {
+            self.manager.invalidate_metadata(&self.id, self.revision);
             self.release_lock();
         }
     }

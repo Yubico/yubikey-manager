@@ -83,6 +83,50 @@ impl LocalYubiKeyDevice {
         &self.info
     }
 
+    /// Read current device information using an available transport.
+    ///
+    /// Call only when no application connections to this device are active.
+    pub fn refresh_info(&mut self) -> Result<(), DeviceError> {
+        self.refresh_info_with_reader(|device| {
+            #[cfg(feature = "pcsc")]
+            if device.reader_name.is_some() {
+                return read_info_ccid(device.open_smartcard()?, device.pid).map(|(info, _)| info);
+            }
+            #[cfg(feature = "hid")]
+            if device.hid_path.is_some() {
+                return read_info_otp(
+                    device.open_otp()?,
+                    device.pid.ok_or(DeviceError::NoDeviceFound)?,
+                )
+                .map(|(info, _)| info)
+                .map_err(|(error, _)| error);
+            }
+            #[cfg(feature = "hid")]
+            if device.fido_path.is_some() {
+                return read_info_fido(
+                    device.open_fido()?,
+                    device.pid.ok_or(DeviceError::NoDeviceFound)?,
+                )
+                .map(|(info, _)| info)
+                .map_err(|(error, _)| error);
+            }
+            let _ = device;
+            Err(DeviceError::NoDeviceFound)
+        })
+    }
+
+    fn refresh_info_with_reader(
+        &mut self,
+        read: impl FnOnce(&Self) -> Result<DeviceInfo, DeviceError>,
+    ) -> Result<(), DeviceError> {
+        let info = read(self)?;
+        if info.serial != self.info.serial || info.version != self.info.version {
+            return Err(DeviceError::WrongDevice);
+        }
+        self.info = info;
+        Ok(())
+    }
+
     /// Returns the USB Product ID, if available.
     pub fn pid(&self) -> Option<u16> {
         self.pid
@@ -272,6 +316,23 @@ impl LocalYubiKeyDevice {
         status_cb: &dyn Fn(ReinsertStatus),
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DeviceError> {
+        self.reinsert_usb_with_discovery(
+            status_cb,
+            cancelled,
+            scan_usb_devices,
+            list_devices,
+            || thread::sleep(Duration::from_millis(250)),
+        )
+    }
+
+    fn reinsert_usb_with_discovery(
+        &mut self,
+        status_cb: &dyn Fn(ReinsertStatus),
+        cancelled: &dyn Fn() -> bool,
+        mut scan: impl FnMut() -> (HashMap<u16, usize>, u64),
+        mut discover: impl FnMut(UsbInterface) -> Result<Vec<Self>, DeviceError>,
+        wait: impl Fn(),
+    ) -> Result<(), DeviceError> {
         // Build interface set based on which transports this device was found on.
         let mut interfaces = UsbInterface(0);
         if self.reader_name.is_some() {
@@ -284,7 +345,7 @@ impl LocalYubiKeyDevice {
             interfaces = interfaces | UsbInterface::FIDO;
         }
 
-        let (pids, mut state) = scan_usb_devices();
+        let (pids, mut state) = scan();
         let n_devs: usize = pids.values().sum();
         let my_serial = self.info.serial;
         let my_version = self.info.version;
@@ -293,19 +354,20 @@ impl LocalYubiKeyDevice {
         log::debug!("Waiting for removal of device serial={my_serial:?}");
         status_cb(ReinsertStatus::Remove);
 
-        loop {
-            thread::sleep(Duration::from_millis(250));
+        'reinsert: loop {
+            wait();
             if cancelled() {
                 return Err(DeviceError::Cancelled);
             }
 
-            let (new_pids, new_state) = scan_usb_devices();
-            if new_state == state {
+            let (new_pids, new_state) = scan();
+            // Interface probes can recover without a topology change.
+            if new_state == state && (!removed || new_pids.values().sum::<usize>() != n_devs) {
                 continue;
             }
             state = new_state;
 
-            let devs = match list_devices(interfaces) {
+            let devs = match discover(interfaces) {
                 Ok(devs) => devs,
                 Err(e) if is_transient_reinsert_error(&e) => {
                     log::debug!("Ignoring transient reinsert enumeration error: {e}");
@@ -336,10 +398,14 @@ impl LocalYubiKeyDevice {
                 }
                 // The device may not be fully ready yet (interfaces still
                 // initializing), so we may fail to read info. Only match
-                // once we can confirm serial; keep waiting otherwise.
+                // once we can confirm serial and recover every previously
+                // available interface; HID can appear before the PC/SC reader.
                 let mut found_different = false;
                 for d in &devs {
                     if d.info.serial == my_serial && d.info.version == my_version {
+                        if !d.has_usb_paths(interfaces) {
+                            continue 'reinsert;
+                        }
                         log::debug!("Device reinserted");
                         let found = d;
                         self.reader_name = found.reader_name.clone();
@@ -349,7 +415,9 @@ impl LocalYubiKeyDevice {
                         self.info = found.info.clone();
                         return Ok(());
                     }
-                    if d.info.serial.is_some() {
+                    if d.info.serial.is_some()
+                        && (d.info.serial != my_serial || d.info.version != my_version)
+                    {
                         found_different = true;
                     }
                 }
@@ -360,6 +428,12 @@ impl LocalYubiKeyDevice {
                 }
             }
         }
+    }
+
+    fn has_usb_paths(&self, interfaces: UsbInterface) -> bool {
+        (!interfaces.contains(UsbInterface::CCID) || self.reader_name.is_some())
+            && (!interfaces.contains(UsbInterface::OTP) || self.hid_path.is_some())
+            && (!interfaces.contains(UsbInterface::FIDO) || self.fido_path.is_some())
     }
 
     fn reinsert_nfc(
@@ -1261,6 +1335,175 @@ mod tests {
             pid,
             transport: Transport::Usb,
             info,
+        }
+    }
+
+    #[test]
+    fn refresh_updates_configuration_without_losing_transport_paths() {
+        let mut device = make_device(
+            Some("reader"),
+            Some("OTP"),
+            Some("FIDO"),
+            Some(0x0407),
+            Version(5, 7, 0),
+            Some(12345),
+        );
+        let mut info = device.info().clone();
+        info.is_locked = true;
+        info.config
+            .enabled_capabilities
+            .insert(Transport::Nfc, Capability::PIV);
+        device.refresh_info_with_reader(|_| Ok(info)).unwrap();
+        assert!(device.info().is_locked);
+        assert_eq!(
+            device.info().config.enabled_capabilities[&Transport::Nfc],
+            Capability::PIV
+        );
+        assert_eq!(device.reader_name.as_deref(), Some("reader"));
+        assert_eq!(device.hid_path.as_deref(), Some("OTP"));
+        assert_eq!(device.fido_path.as_deref(), Some("FIDO"));
+    }
+
+    #[test]
+    fn failed_refresh_preserves_the_original_snapshot() {
+        let mut device = make_device(
+            None,
+            Some("OTP"),
+            None,
+            Some(0x0407),
+            Version(5, 7, 0),
+            Some(12345),
+        );
+        let error = device
+            .refresh_info_with_reader(|_| Err(DeviceError::CcidUnavailable))
+            .unwrap_err();
+        assert!(matches!(error, DeviceError::CcidUnavailable));
+        for change_serial in [true, false] {
+            let mut wrong = device.info().clone();
+            wrong.is_locked = true;
+            if change_serial {
+                wrong.serial = Some(54321);
+            } else {
+                wrong.version = Version(5, 7, 1);
+            }
+            assert!(matches!(
+                device.refresh_info_with_reader(|_| Ok(wrong)),
+                Err(DeviceError::WrongDevice)
+            ));
+            assert_eq!(device.info().serial, Some(12345));
+            assert_eq!(device.info().version, Version(5, 7, 0));
+            assert!(!device.info().is_locked);
+        }
+    }
+
+    #[test]
+    fn reinsert_retries_partial_discovery_without_a_topology_change() {
+        let mut device = make_device(
+            Some("old reader"),
+            Some("old OTP"),
+            Some("old FIDO"),
+            Some(0x0407),
+            Version(5, 7, 0),
+            Some(12345),
+        );
+        let ready = make_device(
+            Some("new reader"),
+            Some("new OTP"),
+            Some("new FIDO"),
+            Some(0x0407),
+            Version(5, 7, 0),
+            Some(12345),
+        );
+        let mut partial = ready.clone();
+        partial.reader_name = None;
+        let mut other = ready.clone();
+        other.info.serial = Some(54321);
+        let all = HashMap::from([(0x0407, 2)]);
+        let removed = HashMap::from([(0x0407, 1)]);
+        let mut scans = [
+            (all.clone(), 0),
+            (removed.clone(), 1),
+            (removed, 1),
+            (all.clone(), 2),
+            (all, 2),
+        ]
+        .into_iter();
+        let mut discoveries = [
+            vec![other.clone()],
+            vec![other.clone(), partial],
+            vec![other, ready.clone()],
+        ]
+        .into_iter();
+        device
+            .reinsert_usb_with_discovery(
+                &|_| {},
+                &|| false,
+                || scans.next().expect("reinsertion did not finish"),
+                |interfaces| {
+                    assert_eq!(
+                        interfaces,
+                        UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO,
+                    );
+                    Ok(discoveries.next().expect("unexpected discovery"))
+                },
+                || {},
+            )
+            .unwrap();
+        assert!(discoveries.next().is_none());
+        assert_eq!(device.reader_name, ready.reader_name);
+        assert_eq!(device.hid_path, ready.hid_path);
+        assert_eq!(device.fido_path, ready.fido_path);
+    }
+
+    #[test]
+    fn reinsert_rejects_a_different_device() {
+        let mut device = make_device(
+            None,
+            Some("old OTP"),
+            None,
+            Some(0x0407),
+            Version(5, 7, 0),
+            Some(12345),
+        );
+        let mut other = device.clone();
+        other.info.serial = Some(54321);
+        let present = HashMap::from([(0x0407, 1)]);
+        let mut scans = [(present.clone(), 0), (HashMap::new(), 1), (present, 2)].into_iter();
+        let mut discoveries = [vec![], vec![other]].into_iter();
+        let result = device.reinsert_usb_with_discovery(
+            &|_| {},
+            &|| false,
+            || scans.next().expect("wrong device was not rejected"),
+            |_| Ok(discoveries.next().expect("unexpected discovery")),
+            || {},
+        );
+        assert!(matches!(result, Err(DeviceError::WrongDevice)));
+    }
+
+    #[test]
+    fn reinsert_requires_paths_not_just_advertised_interfaces() {
+        let full = make_device(
+            Some("Yubico YubiKey OTP+FIDO+CCID 00 00"),
+            Some("/dev/hidraw0"),
+            Some("/dev/hidraw1"),
+            Some(0x0407),
+            Version(5, 7, 0),
+            Some(12345),
+        );
+        let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
+        assert!(full.has_usb_paths(all));
+        for missing in [UsbInterface::CCID, UsbInterface::OTP, UsbInterface::FIDO] {
+            let mut partial = full.clone();
+            if missing == UsbInterface::CCID {
+                partial.reader_name = None;
+            } else if missing == UsbInterface::OTP {
+                partial.hid_path = None;
+            } else {
+                partial.fido_path = None;
+            }
+            assert!(partial.usb_interfaces().contains(all));
+            assert!(!partial.has_usb_paths(all));
+            assert!(partial.has_usb_paths(UsbInterface(all.0 & !missing.0)));
         }
     }
 
