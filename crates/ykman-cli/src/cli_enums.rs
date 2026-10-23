@@ -3,6 +3,7 @@
 /// These wrap yubikit types so that clap can display valid values in `--help`
 /// output, matching the Python CLI behavior.
 use clap::ValueEnum;
+use clap::builder::{EnumValueParser, PossibleValue, TypedValueParser};
 
 // ── PIV ──────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,39 @@ pub enum CliKeyType {
     MlKem768,
     #[value(alias = "ml-kem-1024")]
     MlKem1024,
+}
+
+/// Advertise legacy fallback algorithms without restricting accepted key types.
+#[derive(Clone, Debug)]
+pub struct CliLegacyKeyTypeParser;
+
+impl TypedValueParser for CliLegacyKeyTypeParser {
+    type Value = CliKeyType;
+
+    fn parse_ref(
+        &self,
+        cmd: &clap::Command,
+        arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        EnumValueParser::<CliKeyType>::new().parse_ref(cmd, arg, value)
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        Some(Box::new(CliKeyType::value_variants().iter().filter_map(
+            |key_type| {
+                key_type.to_possible_value().map(|value| {
+                    value.hide(!matches!(
+                        key_type,
+                        CliKeyType::Rsa1024
+                            | CliKeyType::Rsa2048
+                            | CliKeyType::Eccp256
+                            | CliKeyType::Eccp384
+                    ))
+                })
+            },
+        )))
+    }
 }
 
 impl From<CliKeyType> for yubikit::piv::KeyType {

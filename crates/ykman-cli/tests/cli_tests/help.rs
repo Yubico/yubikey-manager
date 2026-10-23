@@ -344,6 +344,33 @@ fn test_missing_subcommand_shows_grouped_help() {
 }
 
 #[test]
+fn test_piv_sign_algorithm_choices() {
+    let help = plain_help(&["piv", "keys", "sign", "--help"]);
+    let algorithm = help
+        .lines()
+        .find(|line| line.contains("--algorithm"))
+        .unwrap();
+    assert!(algorithm.contains("Key algorithm for firmware before 5.3"));
+    assert!(algorithm.contains("[possible values: rsa1024, rsa2048, eccp256, eccp384]"));
+    for modern in [
+        "rsa3072", "rsa4096", "ed25519", "x25519", "ml-dsa", "ml-kem",
+    ] {
+        assert!(!algorithm.contains(modern), "{modern}");
+    }
+    let generation = plain_help(&["piv", "keys", "generate", "--help"]);
+    for modern in [
+        "rsa3072",
+        "rsa4096",
+        "ed25519",
+        "x25519",
+        "ml-dsa44",
+        "ml-kem768",
+    ] {
+        assert!(generation.contains(modern), "{modern}");
+    }
+}
+
+#[test]
 fn test_utility_command_aliases() {
     for (flag, command) in [
         (vec!["--version"], vec!["version"]),

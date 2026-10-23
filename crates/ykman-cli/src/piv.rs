@@ -26,8 +26,8 @@ use ykman::piv::{
 use yubikit::smartcard::{SmartCardConnection, SmartCardError, Sw};
 
 use crate::cli_enums::{
-    CliDecryptionPadding, CliFormat, CliHashAlgorithm, CliKeyType, CliMgmtKeyType, CliPinPolicy,
-    CliSignaturePadding, CliTouchPolicy,
+    CliDecryptionPadding, CliFormat, CliHashAlgorithm, CliKeyType, CliLegacyKeyTypeParser,
+    CliMgmtKeyType, CliPinPolicy, CliSignaturePadding, CliTouchPolicy,
 };
 use crate::scp::ScpParams;
 use crate::util::{
@@ -193,6 +193,9 @@ pub enum PivKeysAction {
         password: Option<String>,
     },
     /// Sign a message (ECDSA signatures use DER encoding)
+    #[command(mut_arg("algorithm", |arg| arg
+        .value_parser(CliLegacyKeyTypeParser)
+        .help("Key algorithm for firmware before 5.3")))]
     Sign {
         #[command(flatten)]
         operation: KeyOperation,
@@ -2511,16 +2514,125 @@ fn write_cert_file(output: &str, cert_der: &[u8], format: CliFormat) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    use clap::{CommandFactory, ValueEnum};
+    use clap_complete::{Shell, generate};
     use yubikit::core::Version;
     use yubikit::keys::PrivateKey;
     use yubikit::piv::{KeyType, ManagementKeyType, PivError, Slot};
     use yubikit::smartcard::SmartCardError;
+
+    use crate::cli_enums::CliKeyType;
 
     use super::{
         check_management_key_type_supported, decrypt_private_key_data,
         format_management_key_auth_error, format_piv_credential_error,
         management_key_type_prompt_name, slot_heading,
     };
+
+    fn key_command(name: &str) -> clap::Command {
+        let mut command = crate::Cli::command();
+        command.build();
+        command
+            .find_subcommand("piv")
+            .unwrap()
+            .find_subcommand("keys")
+            .unwrap()
+            .find_subcommand(name)
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn sign_algorithm_accepts_every_key_type_and_alias() {
+        for key_type in CliKeyType::value_variants() {
+            for name in key_type.to_possible_value().unwrap().get_name_and_aliases() {
+                let matches = key_command("sign")
+                    .try_get_matches_from(["sign", "9a", "-", "-", "--algorithm", name])
+                    .unwrap();
+                assert_eq!(
+                    KeyType::from(*matches.get_one::<CliKeyType>("algorithm").unwrap()),
+                    KeyType::from(*key_type),
+                    "{name}"
+                );
+            }
+        }
+        assert!(
+            key_command("sign")
+                .try_get_matches_from(["sign", "9a", "-", "-", "--algorithm", "not-a-key-type"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn sign_algorithm_only_advertises_legacy_types() {
+        let sign = key_command("sign");
+        let algorithm = sign
+            .get_arguments()
+            .find(|arg| arg.get_id() == "algorithm")
+            .unwrap();
+        let visible: Vec<_> = algorithm
+            .get_possible_values()
+            .into_iter()
+            .filter(|value| !value.is_hide_set())
+            .map(|value| value.get_name().to_string())
+            .collect();
+        assert_eq!(visible, ["rsa1024", "rsa2048", "eccp256", "eccp384"]);
+
+        for name in ["generate", "decrypt", "derive", "decapsulate"] {
+            let command = key_command(name);
+            let algorithm = command
+                .get_arguments()
+                .find(|arg| arg.get_id() == "algorithm")
+                .unwrap();
+            assert_eq!(
+                algorithm
+                    .get_possible_values()
+                    .iter()
+                    .filter(|value| !value.is_hide_set())
+                    .count(),
+                CliKeyType::value_variants().len(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn sign_algorithm_completions_only_offer_legacy_types() {
+        for shell in [
+            Shell::Bash,
+            Shell::Zsh,
+            Shell::Fish,
+            Shell::PowerShell,
+            Shell::Elvish,
+        ] {
+            let mut output = Vec::new();
+            generate(shell, &mut key_command("sign"), "ykman-sign", &mut output);
+            let completion = String::from_utf8(output).unwrap();
+            let mut output = Vec::new();
+            generate(
+                shell,
+                &mut key_command("generate"),
+                "ykman-generate",
+                &mut output,
+            );
+            let generation = String::from_utf8(output).unwrap();
+            for key_type in CliKeyType::value_variants() {
+                let value = key_type.to_possible_value().unwrap();
+                assert_eq!(
+                    completion.contains(value.get_name()),
+                    matches!(
+                        key_type,
+                        CliKeyType::Rsa1024
+                            | CliKeyType::Rsa2048
+                            | CliKeyType::Eccp256
+                            | CliKeyType::Eccp384
+                    ) && generation.contains(value.get_name()),
+                    "{shell}: {}",
+                    value.get_name()
+                );
+            }
+        }
+    }
 
     #[derive(Debug)]
     struct KeyMatchConnection {
