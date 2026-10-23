@@ -226,6 +226,9 @@ environment variable as the Rust device tests:
 As with the Rust device tests, append a test name filter (e.g. "piv") to only
 run a subset.
 
+FIDO command tests require the FIDO2 application, not just the USB FIDO
+interface, which can also be present on U2F-only devices.
+
 === Python device tests
 
 WARNING: ONLY run these on dedicated developer keys, as it will permanently

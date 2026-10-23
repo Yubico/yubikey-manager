@@ -580,12 +580,14 @@ pub fn skip_before_version(required: (u8, u8, u8), feature: &str) -> bool {
 
 /// Returns true if the selected test device has the given capability enabled.
 pub fn has_capability(name: &str) -> bool {
-    let stdout = device_info();
-    if stdout
-        .lines()
-        .any(|line| line.starts_with("Enabled USB interfaces:") && line.contains(name))
-    {
-        return true;
+    info_has_capability(device_info(), name)
+}
+
+fn info_has_capability(stdout: &str, name: &str) -> bool {
+    if name == "CCID" {
+        return stdout
+            .lines()
+            .any(|line| line.starts_with("Enabled USB interfaces:") && line.contains(name));
     }
 
     let app_name = match name {
@@ -598,6 +600,24 @@ pub fn has_capability(name: &str) -> bool {
         .lines()
         .filter(|line| line.starts_with(app_name))
         .any(|line| line.split_whitespace().any(|field| field == "Enabled"))
+}
+
+#[test]
+fn test_fido_capability_requires_fido2() {
+    let info = "Enabled USB interfaces: OTP, FIDO, CCID\n\
+                Yubico OTP Enabled Enabled\n\
+                FIDO U2F Enabled Enabled\n";
+    assert!(info_has_capability(info, "OTP"));
+    assert!(info_has_capability(info, "CCID"));
+    assert!(!info_has_capability(info, "FIDO"));
+    assert!(!info_has_capability(
+        &format!("{info}FIDO2 Disabled Disabled\n"),
+        "FIDO"
+    ));
+    assert!(info_has_capability(
+        &format!("{info}FIDO2 Enabled Enabled\n"),
+        "FIDO"
+    ));
 }
 
 /// Skip the current test with a formatted message.
