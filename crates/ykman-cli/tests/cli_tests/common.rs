@@ -422,15 +422,46 @@ pub fn device_version() -> Option<(u8, u8, u8)> {
 }
 
 pub fn is_fips() -> bool {
-    device_info().contains("FIPS")
+    info_is_fips(device_info())
 }
 
 pub fn app_is_fips_capable(app: &str) -> bool {
-    let marker = format!("  {app}:");
-    device_info()
+    info_fips_capabilities(device_info()).any(|(name, capable)| name == app && capable)
+}
+
+fn info_is_fips(info: &str) -> bool {
+    info.lines()
+        .find_map(|line| line.strip_prefix("Device type:"))
+        .expect("ykman info is missing the device type")
+        .contains("FIPS")
+        || info_fips_capabilities(info).any(|(_, capable)| capable)
+}
+
+fn info_fips_capabilities(info: &str) -> impl Iterator<Item = (&str, bool)> {
+    let mut lines = info
         .lines()
-        .skip_while(|line| *line != "FIPS approved applications")
-        .any(|line| line.starts_with(&marker))
+        .skip_while(|line| !line.starts_with("APPLICATIONS "));
+    let header = lines.next().expect("ykman info is missing applications");
+    let name_end = header.find("USB").expect("missing USB column");
+    let fips_start = header
+        .find("FIPS APPROVED")
+        .expect("missing FIPS APPROVED column");
+    lines.take_while(|line| !line.is_empty()).map(move |line| {
+        let name = line
+            .get(..name_end)
+            .expect("missing application name")
+            .trim();
+        let approved = line
+            .get(fips_start..)
+            .expect("missing FIPS approval")
+            .trim();
+        let capable = match approved {
+            "Yes" | "No" => true,
+            "N/A" => false,
+            other => panic!("unexpected FIPS approval: {other:?}"),
+        };
+        (name, capable)
+    })
 }
 
 pub fn piv_has_puk() -> bool {
@@ -600,6 +631,40 @@ fn info_has_capability(stdout: &str, name: &str) -> bool {
         .lines()
         .filter(|line| line.starts_with(app_name))
         .any(|line| line.split_whitespace().any(|field| field == "Enabled"))
+}
+
+#[test]
+fn test_fips_capabilities_use_the_application_column() {
+    for has_nfc in [false, true] {
+        let transports = if has_nfc {
+            format!("{:<14}{:<14}", "USB", "NFC")
+        } else {
+            format!("{:<14}", "USB")
+        };
+        let statuses = if has_nfc {
+            format!("{:<14}{:<14}", "Enabled", "Not available")
+        } else {
+            format!("{:<14}", "Enabled")
+        };
+        let mut info = format!(
+            "Device type: YubiKey 5\n\n{:<24}{transports}FIPS APPROVED\n",
+            "APPLICATIONS",
+        );
+        for (name, value) in [("Yubico OTP", "N/A"), ("PIV", "N/A")] {
+            info.push_str(&format!("{name:<24}{statuses}{value}\n"));
+        }
+        assert!(!info_is_fips(&info));
+        assert!(info_fips_capabilities(&info).all(|(_, capable)| !capable));
+        assert!(info_is_fips(&info.replace("YubiKey 5", "YubiKey 5 FIPS")));
+        for approval in ["Yes", "No"] {
+            let info = format!("{info}{:<24}{statuses}{approval}\n\nSTORAGE\n", "OpenPGP");
+            assert!(info_is_fips(&info));
+            assert_eq!(
+                info_fips_capabilities(&info).collect::<Vec<_>>(),
+                [("Yubico OTP", false), ("PIV", false), ("OpenPGP", true)],
+            );
+        }
+    }
 }
 
 #[test]

@@ -303,29 +303,64 @@ pub(crate) fn print_table<R>(rows: impl IntoIterator<Item = R>)
 where
     R: TableRow,
 {
-    let rows: Vec<Vec<String>> = rows.into_iter().map(TableRow::into_table_row).collect();
-    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
-    let mut widths = vec![0; columns];
-    for row in &rows {
-        for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.len());
+    print!("{}", Table::new(rows).render(0, false));
+}
+
+pub(crate) struct Table {
+    rows: Vec<Vec<String>>,
+    widths: Vec<usize>,
+}
+
+impl Table {
+    pub(crate) fn new<R>(rows: impl IntoIterator<Item = R>) -> Self
+    where
+        R: TableRow,
+    {
+        let rows: Vec<Vec<String>> = rows.into_iter().map(TableRow::into_table_row).collect();
+        let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+        let mut widths = vec![0; columns];
+        for row in &rows {
+            for (i, cell) in row.iter().enumerate() {
+                widths[i] = widths[i].max(cell.len());
+            }
         }
+        Self { rows, widths }
     }
 
-    for row in rows {
-        print_table_row(&row, &widths);
+    pub(crate) fn label_width(&self) -> usize {
+        self.widths.first().copied().unwrap_or(0)
+    }
+
+    /// Share a minimum first-column width without widening subsequent columns.
+    pub(crate) fn render(&self, min_label_width: usize, bold_header: bool) -> String {
+        let mut widths = self.widths.clone();
+        if let Some(width) = widths.first_mut() {
+            *width = (*width).max(min_label_width);
+        }
+        let mut output = String::new();
+        for (index, row) in self.rows.iter().enumerate() {
+            let line = format_table_row(row, &widths);
+            if bold_header && index == 0 {
+                output.push_str(&crate::color::bold(&line));
+            } else {
+                output.push_str(&line);
+            }
+            output.push('\n');
+        }
+        output
     }
 }
 
-fn print_table_row(row: &[String], widths: &[usize]) {
+fn format_table_row(row: &[String], widths: &[usize]) -> String {
+    let mut line = String::new();
     for (i, width) in widths.iter().enumerate() {
         if i > 0 {
-            print!(" ");
+            line.push(' ');
         }
         let cell = row.get(i).map(String::as_str).unwrap_or("");
-        print!("{cell:<width$}");
+        line.push_str(&format!("{cell:<width$}"));
     }
-    println!();
+    line
 }
 
 /// Write to a file, or to stdout if path is "-".
@@ -379,6 +414,38 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tables_share_label_width_without_widening_other_columns() {
+        let table = Table::new([
+            vec!["Name", "State", "Channel"],
+            vec!["Long label", "Ready", "USB"],
+            vec!["Unspecified"],
+        ]);
+        let normal = table.render(0, false);
+        let shared_width = Table::new([("A label in another section", "value")]).label_width();
+        let shared = table.render(shared_width, false);
+        let normal_header = normal.lines().next().unwrap();
+        let shared_header = shared.lines().next().unwrap();
+        let shared_row = shared.lines().nth(1).unwrap();
+        assert_eq!(
+            shared_header.find("State").unwrap() - normal_header.find("State").unwrap(),
+            shared_width - table.label_width(),
+        );
+        assert_eq!(shared_header.find("State"), shared_row.find("Ready"));
+        assert_eq!(shared_header.find("Channel"), shared_row.find("USB"));
+        assert_eq!(
+            shared_header.find("Channel").unwrap() - shared_header.find("State").unwrap(),
+            normal_header.find("Channel").unwrap() - normal_header.find("State").unwrap(),
+        );
+        assert_eq!(shared.lines().nth(2).unwrap().trim(), "Unspecified");
+        assert_eq!(table.render(table.label_width() - 1, false), normal);
+        assert!(
+            Table::new(Vec::<Vec<String>>::new())
+                .render(shared_width, false)
+                .is_empty()
+        );
+    }
 
     #[test]
     fn missing_reader_does_not_claim_the_yubikey_is_absent() {

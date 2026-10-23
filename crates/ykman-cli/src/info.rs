@@ -7,7 +7,7 @@ use yubikit::management::{
 use yubikit::smartcard::{SmartCardError, Sw};
 
 use crate::color::{self, Tone};
-use crate::util::print_table;
+use crate::util::Table;
 
 pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
     let info = dev.info();
@@ -36,7 +36,40 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
             rows.push(("Enabled USB interfaces", usb_ifaces.to_string()));
         }
     }
-    print_table(rows);
+    let device_table = Table::new(rows);
+    let applications = app_status_table(
+        &info.supported_capabilities,
+        &info.config.enabled_capabilities,
+        info.fips_capable,
+        info.fips_approved,
+    );
+    let all_approved = Capability::ALL
+        .iter()
+        .all(|&cap| !info.fips_capable.contains(cap) || info.fips_approved.contains(cap));
+    let fips_mode = Table::new(check_fips.then_some((
+        "FIPS approved mode",
+        if info.fips_capable.is_empty() {
+            "Not applicable (device is not FIPS capable)"
+        } else if all_approved {
+            "Yes"
+        } else {
+            "No"
+        },
+    )));
+    // Preserve device details in the output when storage reporting fails.
+    let storage = read_storage_info(dev).and_then(|storage| {
+        storage
+            .map(|storage| storage_summary(&storage).context("Invalid storage information"))
+            .transpose()
+    });
+    let label_width = info_label_width(
+        &[&device_table, &applications, &fips_mode],
+        match &storage {
+            Ok(summary) => summary.as_ref(),
+            Err(_) => None,
+        },
+    );
+    print!("{}", device_table.render(label_width, false));
 
     // NFC status
     if info.supported_capabilities.contains_key(&Transport::Nfc) {
@@ -65,54 +98,29 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
     }
 
     println!();
-    print_app_status_table(
-        &info.supported_capabilities,
-        &info.config.enabled_capabilities,
-    );
+    print!("{}", applications.render(label_width, true));
 
-    if !info.fips_capable.is_empty() {
-        println!();
-        println!("FIPS approved applications");
-        let mut rows = Vec::new();
-        for &cap in Capability::ALL {
-            if info.fips_capable.contains(cap) {
-                let approved = info.fips_approved.contains(cap);
-                rows.push((
-                    format!("  {}", cap.display_name()),
-                    if approved {
-                        "Yes".to_string()
-                    } else {
-                        "No".to_string()
-                    },
-                ));
-            }
-        }
-        print_table(rows);
-    }
-
-    if let Some(storage) = read_storage_info(dev)? {
+    if let Some(storage) = storage? {
         let width = terminal_size::terminal_size().map(|(width, _)| width.0);
-        let output = storage_output(&storage, width, use_unicode())
-            .context("Invalid storage information")?;
+        let output = storage_output(&storage, width, use_unicode(), label_width);
         print!("\n{output}");
     }
 
     if check_fips {
         println!();
-        if info.fips_capable.is_empty() {
-            println!("FIPS approved mode: Not applicable (device is not FIPS capable)");
-        } else {
-            let all_approved = Capability::ALL
-                .iter()
-                .all(|&cap| !info.fips_capable.contains(cap) || info.fips_approved.contains(cap));
-            print_table([(
-                "FIPS approved mode",
-                if all_approved { "Yes" } else { "No" }.to_string(),
-            )]);
-        }
+        print!("{}", fips_mode.render(label_width, false));
     }
 
     Ok(())
+}
+
+fn info_label_width(tables: &[&Table], storage: Option<&StorageSummary>) -> usize {
+    tables
+        .iter()
+        .map(|table| table.label_width())
+        .chain(storage.map(StorageSummary::label_width))
+        .max()
+        .unwrap_or(0)
 }
 
 fn read_storage_info(dev: &dyn YubiKeyDevice) -> Result<Option<StorageInfo>> {
@@ -210,6 +218,16 @@ fn storage_summary(info: &StorageInfo) -> Result<StorageSummary> {
 }
 
 impl StorageSummary {
+    fn label_width(&self) -> usize {
+        self.rows()
+            .iter()
+            .enumerate()
+            .map(|(index, (label, _))| label.len() + if index < 3 { 1 } else { 2 })
+            .chain(std::iter::once("Free".len() + 2))
+            .max()
+            .unwrap_or(0)
+    }
+
     fn rows(&self) -> Vec<(&'static str, String)> {
         let free = &self.free;
         let apps = &self.apps;
@@ -338,16 +356,17 @@ fn usage_tone(used: u64, total: u64, critical_percent: u64) -> Option<Tone> {
 fn usage_colour(text: &str, used: u64, total: u64, critical_percent: u64) -> String {
     match usage_tone(used, total, critical_percent) {
         Some(tone) => color::paint(text, tone),
-        None => color::bold(text),
+        None => text.to_string(),
     }
 }
 
 fn storage_output(
-    info: &StorageInfo,
+    summary: &StorageSummary,
     terminal_width: Option<u16>,
     unicode: bool,
-) -> Result<String> {
-    let summary = storage_summary(info)?;
+    label_width: usize,
+) -> String {
+    let label_width = label_width.max(summary.label_width());
     let rows = summary.rows();
     let mut pages: Vec<u64> = summary.apps.iter().map(|(_, usage)| usage.pages).collect();
     pages.push(summary.free.pages);
@@ -355,7 +374,7 @@ fn storage_output(
     let used_pages = total_pages - summary.free.pages;
     let used_objects: u64 = summary.apps.iter().map(|(_, usage)| usage.objects).sum();
     let total_objects = used_objects + summary.free.objects;
-    let mut output = format!("{}\n", color::bold("Storage"));
+    let mut output = format!("{}\n", color::bold("STORAGE"));
     for (index, (label, value)) in rows[..3].iter().enumerate() {
         let value = match index {
             0 => usage_colour(
@@ -374,9 +393,9 @@ fn storage_output(
                 total_objects,
                 100,
             ),
-            _ => color::bold(value),
+            _ => value.clone(),
         };
-        output.push_str(&format!("{:<24}{value}\n", format!("{label}:")));
+        output.push_str(&format!("{:<label_width$} {value}\n", format!("{label}:")));
     }
     output.push('\n');
     const TONES: [Tone; 5] = [Tone::Red, Tone::Yellow, Tone::Blue, Tone::Cyan, Tone::Muted];
@@ -409,26 +428,29 @@ fn storage_output(
         .filter(|(_, (_, usage))| usage.pages > 0 || usage.objects > 0);
     for ((index, _), (name, value)) in visible_apps.zip(&rows[3..]) {
         output.push_str(&format!(
-            "{} {name:<12}{} {:>5}\n",
+            "{} {name:<name_width$} {value:<30} {:>5}\n",
             color::paint(used_char, TONES[index]),
-            color::bold(&format!("{value:<30}")),
             percentage(index),
+            name_width = label_width - 2,
         ));
     }
     output.push_str(&format!(
-        "{} {:<12}{} {:>5}\n",
+        "{} {:<name_width$} {:<30} {:>5}\n",
         color::paint(free_char, Tone::Muted),
         "Free",
-        color::bold(&format!("{:<30}", format_storage_size(summary.free.pages))),
+        format_storage_size(summary.free.pages),
         percentage(4),
+        name_width = label_width - 2,
     ));
-    Ok(output)
+    output
 }
 
-fn print_app_status_table(
+fn app_status_table(
     supported: &std::collections::HashMap<Transport, Capability>,
     enabled: &std::collections::HashMap<Transport, Capability>,
-) {
+    fips_capable: Capability,
+    fips_approved: Capability,
+) -> Table {
     let usb_supported = supported
         .get(&Transport::Usb)
         .copied()
@@ -446,12 +468,12 @@ fn print_app_status_table(
     let has_nfc = nfc_supported.is_some();
     let nfc_supported = nfc_supported.unwrap_or(Capability::NONE);
 
-    let mut rows = Vec::new();
+    let mut header = vec!["APPLICATIONS", "USB"];
     if has_nfc {
-        rows.push(vec!["Applications", "USB", "NFC"]);
-    } else {
-        rows.push(vec!["Applications", "USB"]);
+        header.push("NFC");
     }
+    header.push("FIPS APPROVED");
+    let mut rows = vec![header];
     for &cap in Capability::ALL {
         let usb_status = if usb_supported.contains(cap) {
             if usb_enabled.contains(cap) {
@@ -481,15 +503,22 @@ fn print_app_status_table(
         };
         // Only show capabilities that are supported on at least one transport
         if usb_supported.contains(cap) || (has_nfc && nfc_supported.contains(cap)) {
+            let mut row = vec![cap.display_name(), usb_status];
             if has_nfc {
-                rows.push(vec![cap.display_name(), usb_status, nfc_status]);
-            } else {
-                rows.push(vec![cap.display_name(), usb_status]);
+                row.push(nfc_status);
             }
+            row.push(if !fips_capable.contains(cap) {
+                "N/A"
+            } else if fips_approved.contains(cap) {
+                "Yes"
+            } else {
+                "No"
+            });
+            rows.push(row);
         }
     }
 
-    print_table(rows);
+    Table::new(rows)
 }
 
 #[cfg(test)]
@@ -513,6 +542,113 @@ mod tests {
                 .iter()
                 .map(|&(id, objects, pages)| StorageStatsEntry { id, objects, pages })
                 .collect(),
+        }
+    }
+
+    #[test]
+    fn application_fips_column_preserves_transport_statuses() {
+        for has_nfc in [false, true] {
+            let mut supported = std::collections::HashMap::from([(
+                Transport::Usb,
+                Capability::OTP | Capability::PIV | Capability::FIDO2 | Capability::FIDOCCID,
+            )]);
+            let mut enabled = std::collections::HashMap::from([(
+                Transport::Usb,
+                Capability::OTP | Capability::FIDOCCID,
+            )]);
+            let mut expected = vec![
+                (Capability::OTP, "Enabled", "Not available", "N/A"),
+                (Capability::PIV, "Disabled", "Not available", "Yes"),
+                (Capability::FIDO2, "Disabled", "Not available", "No"),
+                (Capability::FIDOCCID, "Inactive", "N/A", "N/A"),
+            ];
+            if has_nfc {
+                supported.insert(Transport::Nfc, Capability::OPENPGP);
+                enabled.insert(Transport::Nfc, Capability::OPENPGP);
+                expected.push((Capability::OPENPGP, "Not available", "Enabled", "No"));
+            }
+            let output = app_status_table(
+                &supported,
+                &enabled,
+                Capability::PIV | Capability::FIDO2 | Capability::OPENPGP,
+                Capability::PIV | Capability::OTP,
+            )
+            .render(0, false);
+            let mut lines = output.lines();
+            let header = lines.next().unwrap();
+            let usb_start = header.find("USB").unwrap();
+            let fips_start = header.find("FIPS APPROVED").unwrap();
+            let nfc_start = header.find("NFC");
+            assert_eq!(nfc_start.is_some(), has_nfc);
+            let rows: Vec<_> = lines.collect();
+            for (cap, usb_status, nfc_status, fips_status) in expected {
+                let row = rows
+                    .iter()
+                    .find(|row| row[..usb_start].trim() == cap.display_name())
+                    .unwrap();
+                assert_eq!(
+                    row[usb_start..nfc_start.unwrap_or(fips_start)].trim(),
+                    usb_status,
+                );
+                if let Some(nfc_start) = nfc_start {
+                    assert_eq!(row[nfc_start..fips_start].trim(), nfc_status);
+                }
+                assert_eq!(row[fips_start..].trim(), fips_status);
+            }
+        }
+    }
+
+    #[test]
+    fn info_sections_share_label_alignment() {
+        let summary = storage_summary(&storage_info(&[
+            (0, 10, 40),
+            (1, 1, 4),
+            (3, 1, 4),
+            (4, 1, 4),
+        ]))
+        .unwrap();
+        let device = Table::new([("Enabled USB interfaces", "x".repeat(100))]);
+        let supported = std::collections::HashMap::from([
+            (Transport::Usb, Capability::FIDO2),
+            (Transport::Nfc, Capability::OPENPGP),
+        ]);
+        let applications =
+            app_status_table(&supported, &supported, Capability::NONE, Capability::NONE);
+        let mode = Table::new([("FIPS approved mode", "Yes")]);
+        let label_width = info_label_width(&[&device, &applications, &mode], Some(&summary));
+        let device_output = device.render(label_width, false);
+        let value_column = device_output.find("xxxxxxxx").unwrap();
+        for (table, value) in [(&applications, "USB"), (&mode, "Yes")] {
+            let output = table.render(label_width, false);
+            assert_eq!(
+                output.lines().next().unwrap().find(value),
+                Some(value_column)
+            );
+        }
+        let short_device = Table::new([("Enabled USB interfaces", "CCID")]);
+        let short_width = info_label_width(&[&short_device, &applications, &mode], Some(&summary));
+        let short_output = applications.render(short_width, false);
+        let output = applications.render(label_width, false);
+        assert_eq!(
+            output.lines().next().unwrap().find("NFC"),
+            short_output.lines().next().unwrap().find("NFC"),
+        );
+        for unicode in [false, true] {
+            let output = storage_output(&summary, Some(80), unicode, label_width);
+            for (label, value) in [
+                ("Used:", "3.0 KiB"),
+                ("Free:", "10.0 KiB"),
+                ("Objects:", "3 of 13"),
+                ("OpenPGP ", "1.0 KiB"),
+                ("Free ", "10.0 KiB"),
+            ] {
+                let line = output.lines().find(|line| line.contains(label)).unwrap();
+                assert_eq!(
+                    line[..line.find(value).unwrap()].chars().count(),
+                    value_column,
+                    "{line:?}",
+                );
+            }
         }
     }
 
@@ -648,8 +784,9 @@ mod tests {
             (4, 6, 12),
             (5, 2, 4),
         ]);
+        let summary = storage_summary(&info).unwrap();
         for unicode in [false, true] {
-            let output = storage_output(&info, Some(80), unicode).unwrap();
+            let output = storage_output(&summary, Some(80), unicode, 23);
             let (full, free) = if unicode {
                 ('\u{2588}', '\u{2591}')
             } else {
@@ -680,7 +817,7 @@ mod tests {
             assert!(!output.contains("certificates"));
             assert!(!output.contains("passkeys"));
         }
-        let narrow = storage_output(&info, Some(40), false).unwrap();
+        let narrow = storage_output(&summary, Some(40), false, 23);
         assert!(
             !narrow
                 .lines()
@@ -692,11 +829,11 @@ mod tests {
     #[test]
     fn storage_presentation_handles_zero_pages_and_unknown_apps() {
         let output = storage_output(
-            &storage_info(&[(0, 0, 0), (1, 1, 0), (255, 2, 0)]),
+            &storage_summary(&storage_info(&[(0, 0, 0), (1, 1, 0), (255, 2, 0)])).unwrap(),
             Some(80),
             false,
-        )
-        .unwrap();
+            0,
+        );
         assert!(output.contains("0 B of 0 B (0%)"));
         assert!(output.contains("# PIV"));
         assert!(output.contains("# Other"));
