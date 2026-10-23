@@ -1599,7 +1599,8 @@ pub enum SignHashAlgorithm {
     Sha384,
     /// SHA-512 hash (512-bit digest).
     Sha512,
-    /// Data is already hashed; the wrapped algorithm selects the DigestInfo header for RSA.
+    /// Data is already hashed. RSA and ECDSA require the exact digest length
+    /// of the wrapped algorithm, which also selects the DigestInfo header for RSA.
     Prehashed(PrehashAlgorithm),
     /// EdDSA: no hashing, pass message directly.
     None,
@@ -1645,7 +1646,16 @@ fn pad_message(
         SignHashAlgorithm::None => None,
     };
     let hashed = match (hash_algorithm, hash) {
-        (SignHashAlgorithm::Prehashed(_), _) | (_, None) => message.to_vec(),
+        (SignHashAlgorithm::Prehashed(_), Some(hash)) => {
+            if message.len() != hash.output_len() {
+                return Err(OpenPgpError::InvalidData(format!(
+                    "Prehashed input must contain exactly {} bytes.",
+                    hash.output_len()
+                )));
+            }
+            message.to_vec()
+        }
+        (_, None) => message.to_vec(),
         (_, Some(hash)) => hash.digest(message).to_vec(),
     };
 
@@ -2975,6 +2985,75 @@ mod tests {
         let padded = pad_message(&attrs, msg, SignHashAlgorithm::Sha256).unwrap();
         // EC just returns the hash, SHA256 = 32 bytes
         assert_eq!(padded.len(), 32);
+    }
+
+    #[test]
+    fn test_pad_message_prehashed_digest_lengths() {
+        let attributes = [
+            AlgorithmAttributes::Rsa(RsaAttributes::create(
+                RsaKeySize::Rsa2048,
+                RsaImportFormat::Standard,
+            )),
+            AlgorithmAttributes::Ec(
+                EcAttributes::create(KeyRef::Sig, &OpenPgpCurve::P256).unwrap(),
+            ),
+        ];
+        for attributes in attributes {
+            for (algorithm, length) in [
+                (PrehashAlgorithm::Sha1, 20),
+                (PrehashAlgorithm::Sha256, 32),
+                (PrehashAlgorithm::Sha384, 48),
+                (PrehashAlgorithm::Sha512, 64),
+            ] {
+                for size in [0, length - 1, length, length + 1] {
+                    let digest = vec![0x11; size];
+                    let result = pad_message(
+                        &attributes,
+                        &digest,
+                        SignHashAlgorithm::Prehashed(algorithm),
+                    );
+                    if size == length {
+                        let padded = result.unwrap();
+                        assert!(padded.ends_with(&digest));
+                        if matches!(attributes, AlgorithmAttributes::Ec(_)) {
+                            assert_eq!(padded, digest);
+                        }
+                    } else {
+                        assert!(matches!(
+                            result,
+                            Err(OpenPgpError::InvalidData(message))
+                                if message == format!(
+                                    "Prehashed input must contain exactly {length} bytes."
+                                )
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_pad_message_preserves_raw_ec_and_eddsa_input() {
+        let message = b"not a digest";
+        for curve in [OpenPgpCurve::P256, OpenPgpCurve::Ed25519] {
+            let attributes =
+                AlgorithmAttributes::Ec(EcAttributes::create(KeyRef::Sig, &curve).unwrap());
+            assert_eq!(
+                pad_message(&attributes, message, SignHashAlgorithm::None).unwrap(),
+                message
+            );
+            if matches!(curve, OpenPgpCurve::Ed25519) {
+                assert_eq!(
+                    pad_message(
+                        &attributes,
+                        message,
+                        SignHashAlgorithm::Prehashed(PrehashAlgorithm::Sha256)
+                    )
+                    .unwrap(),
+                    message
+                );
+            }
+        }
     }
 
     #[test]

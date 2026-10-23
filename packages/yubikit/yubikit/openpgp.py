@@ -1339,6 +1339,8 @@ class OpenPgpSession(Session):
 
         :param message: The message to sign.
         :param hash_algorithm: The pre-signature hash algorithm.
+            With ``Prehashed``, RSA and ECDSA require a message of exactly
+            the declared hash's digest length.
         """
         ha_int, prehash = _hash_algorithm_to_int(hash_algorithm)
         response = self._native.sign(message, ha_int, prehash)
@@ -1382,6 +1384,8 @@ class OpenPgpSession(Session):
 
         :param message: The message to authenticate.
         :param hash_algorithm: The pre-authentication hash algorithm.
+            With ``Prehashed``, RSA and ECDSA require a message of exactly
+            the declared hash's digest length.
         """
         ha_int, prehash = _hash_algorithm_to_int(hash_algorithm)
         response = self._native.authenticate(message, ha_int, prehash)
