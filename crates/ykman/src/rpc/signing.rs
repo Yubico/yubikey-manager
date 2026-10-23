@@ -310,9 +310,29 @@ fn get_signing_cert(path: &Path) -> Result<Vec<u8>, SigningError> {
 
     use windows_sys::Win32::Security::Cryptography::{
         CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED, CERT_QUERY_FORMAT_FLAG_BINARY,
-        CERT_QUERY_OBJECT_FILE, CertEnumCertificatesInStore, CertFreeCertificateContext,
-        CryptQueryObject,
+        CERT_QUERY_OBJECT_FILE, CertCloseStore, CertEnumCertificatesInStore,
+        CertFreeCertificateContext, CryptMsgClose, CryptQueryObject, HCERTSTORE,
     };
+
+    struct CertStore(HCERTSTORE);
+
+    impl Drop for CertStore {
+        fn drop(&mut self) {
+            if !self.0.is_null() && unsafe { CertCloseStore(self.0, 0) } == 0 {
+                log::warn!("CertCloseStore failed: {}", std::io::Error::last_os_error());
+            }
+        }
+    }
+
+    struct CryptMessage(*mut core::ffi::c_void);
+
+    impl Drop for CryptMessage {
+        fn drop(&mut self) {
+            if !self.0.is_null() && unsafe { CryptMsgClose(self.0) } == 0 {
+                log::warn!("CryptMsgClose failed: {}", std::io::Error::last_os_error());
+            }
+        }
+    }
 
     let path_w: Vec<u16> = path
         .as_os_str()
@@ -322,7 +342,6 @@ fn get_signing_cert(path: &Path) -> Result<Vec<u8>, SigningError> {
 
     let mut cert_store = std::ptr::null_mut();
     let mut msg = std::ptr::null_mut();
-    let mut context: *mut core::ffi::c_void = std::ptr::null_mut();
 
     let ok = unsafe {
         CryptQueryObject(
@@ -336,7 +355,7 @@ fn get_signing_cert(path: &Path) -> Result<Vec<u8>, SigningError> {
             std::ptr::null_mut(),
             &mut cert_store,
             &mut msg,
-            &mut context,
+            std::ptr::null_mut(),
         )
     };
 
@@ -348,7 +367,10 @@ fn get_signing_cert(path: &Path) -> Result<Vec<u8>, SigningError> {
         )));
     }
 
-    let cert_ctx = unsafe { CertEnumCertificatesInStore(cert_store, std::ptr::null()) };
+    let cert_store = CertStore(cert_store);
+    let _msg = CryptMessage(msg);
+
+    let cert_ctx = unsafe { CertEnumCertificatesInStore(cert_store.0, std::ptr::null()) };
     if cert_ctx.is_null() {
         return Err(SigningError("No certificate in signed file".into()));
     }
