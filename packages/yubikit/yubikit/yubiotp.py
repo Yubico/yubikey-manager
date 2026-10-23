@@ -32,7 +32,7 @@ import struct
 from enum import IntEnum, IntFlag, unique
 from hashlib import sha1
 from threading import Event
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Self, TypeVar
 
 from _yubikit_native.sessions import (
     YubiOtpSessionCcid as _NativeYubiOtpSessionCcid,
@@ -310,9 +310,6 @@ def _shorten_hmac_key(key: bytes) -> bytes:
     return key
 
 
-Cfg = TypeVar("Cfg", bound="SlotConfiguration")
-
-
 class SlotConfiguration:
     def __init__(self):
         self._fixed = b""
@@ -342,27 +339,27 @@ class SlotConfiguration:
             acc_code,
         )
 
-    def serial_api_visible(self: Cfg, value: bool) -> Cfg:
+    def serial_api_visible(self, value: bool) -> Self:
         self._update_flags(EXTFLAG.SERIAL_API_VISIBLE, value)
         return self
 
-    def serial_usb_visible(self: Cfg, value: bool) -> Cfg:
+    def serial_usb_visible(self, value: bool) -> Self:
         self._update_flags(EXTFLAG.SERIAL_USB_VISIBLE, value)
         return self
 
-    def allow_update(self: Cfg, value: bool) -> Cfg:
+    def allow_update(self, value: bool) -> Self:
         self._update_flags(EXTFLAG.ALLOW_UPDATE, value)
         return self
 
-    def dormant(self: Cfg, value: bool) -> Cfg:
+    def dormant(self, value: bool) -> Self:
         self._update_flags(EXTFLAG.DORMANT, value)
         return self
 
-    def invert_led(self: Cfg, value: bool) -> Cfg:
+    def invert_led(self, value: bool) -> Self:
         self._update_flags(EXTFLAG.LED_INV, value)
         return self
 
-    def protect_slot2(self: Cfg, value: bool) -> Cfg:
+    def protect_slot2(self, value: bool) -> Self:
         self._update_flags(TKTFLAG.PROTECT_CFG2, value)
         return self
 
@@ -384,11 +381,11 @@ class HmacSha1SlotConfiguration(SlotConfiguration):
     def is_supported_by(self, version):
         return version >= (2, 2, 0)
 
-    def require_touch(self: Cfg, value: bool) -> Cfg:
+    def require_touch(self, value: bool) -> Self:
         self._update_flags(CFGFLAG.CHAL_BTN_TRIG, value)
         return self
 
-    def lt64(self: Cfg, value: bool) -> Cfg:
+    def lt64(self, value: bool) -> Self:
         self._update_flags(CFGFLAG.HMAC_LT64, value)
         return self
 
@@ -399,20 +396,20 @@ class KeyboardSlotConfiguration(SlotConfiguration):
         self._update_flags(TKTFLAG.APPEND_CR, True)
         self._update_flags(EXTFLAG.FAST_TRIG, True)
 
-    def append_cr(self: Cfg, value: bool) -> Cfg:
+    def append_cr(self, value: bool) -> Self:
         self._update_flags(TKTFLAG.APPEND_CR, value)
         return self
 
-    def fast_trigger(self: Cfg, value: bool) -> Cfg:
+    def fast_trigger(self, value: bool) -> Self:
         self._update_flags(EXTFLAG.FAST_TRIG, value)
         return self
 
-    def pacing(self: Cfg, pacing_10ms: bool = False, pacing_20ms: bool = False) -> Cfg:
+    def pacing(self, pacing_10ms: bool = False, pacing_20ms: bool = False) -> Self:
         self._update_flags(CFGFLAG.PACING_10MS, pacing_10ms)
         self._update_flags(CFGFLAG.PACING_20MS, pacing_20ms)
         return self
 
-    def use_numeric(self: Cfg, value: bool) -> Cfg:
+    def use_numeric(self, value: bool) -> Self:
         self._update_flags(EXTFLAG.USE_NUMERIC_KEYPAD, value)
         return self
 
@@ -433,16 +430,16 @@ class HotpSlotConfiguration(KeyboardSlotConfiguration):
     def is_supported_by(self, version):
         return version >= (2, 2, 0)
 
-    def digits8(self: Cfg, value: bool) -> Cfg:
+    def digits8(self, value: bool) -> Self:
         self._update_flags(CFGFLAG.OATH_HOTP8, value)
         return self
 
     def token_id(
-        self: Cfg,
+        self,
         token_id: bytes,
         fixed_modhex1: bool = False,
         fixed_modhex2: bool = True,
-    ) -> Cfg:
+    ) -> Self:
         if len(token_id) > FIXED_SIZE:
             raise ValueError(f"token_id must be <= {FIXED_SIZE} bytes")
 
@@ -451,7 +448,7 @@ class HotpSlotConfiguration(KeyboardSlotConfiguration):
         self._update_flags(CFGFLAG.OATH_FIXED_MODHEX2, fixed_modhex2)
         return self
 
-    def imf(self: Cfg, imf: int) -> Cfg:
+    def imf(self, imf: int) -> Self:
         if not (imf % 16 == 0 and 0 <= imf <= 0xFFFF0):
             raise ValueError(
                 f"imf should be between {0} and {1048560}, evenly dividable by 16"
@@ -497,22 +494,22 @@ class YubiOtpSlotConfiguration(KeyboardSlotConfiguration):
         self._key = key
 
     def tabs(
-        self: Cfg,
+        self,
         before: bool = False,
         after_first: bool = False,
         after_second: bool = False,
-    ) -> Cfg:
+    ) -> Self:
         self._update_flags(TKTFLAG.TAB_FIRST, before)
         self._update_flags(TKTFLAG.APPEND_TAB1, after_first)
         self._update_flags(TKTFLAG.APPEND_TAB2, after_second)
         return self
 
-    def delay(self: Cfg, after_first: bool = False, after_second: bool = False) -> Cfg:
+    def delay(self, after_first: bool = False, after_second: bool = False) -> Self:
         self._update_flags(TKTFLAG.APPEND_DELAY1, after_first)
         self._update_flags(TKTFLAG.APPEND_DELAY2, after_second)
         return self
 
-    def send_reference(self: Cfg, value: bool) -> Cfg:
+    def send_reference(self, value: bool) -> Self:
         self._update_flags(CFGFLAG.SEND_REF, value)
         return self
 
@@ -536,19 +533,19 @@ class StaticTicketSlotConfiguration(KeyboardSlotConfiguration):
 
         self._update_flags(CFGFLAG.STATIC_TICKET, True)
 
-    def short_ticket(self: Cfg, value: bool) -> Cfg:
+    def short_ticket(self, value: bool) -> Self:
         self._update_flags(CFGFLAG.SHORT_TICKET, value)
         return self
 
     def strong_password(
-        self: Cfg, upper_case: bool = False, digit: bool = False, special: bool = False
-    ) -> Cfg:
+        self, upper_case: bool = False, digit: bool = False, special: bool = False
+    ) -> Self:
         self._update_flags(CFGFLAG.STRONG_PW1, upper_case)
         self._update_flags(CFGFLAG.STRONG_PW2, digit or special)
         self._update_flags(CFGFLAG.SEND_REF, special)
         return self
 
-    def manual_update(self: Cfg, value: bool) -> Cfg:
+    def manual_update(self, value: bool) -> Self:
         self._update_flags(CFGFLAG.MAN_UPDATE, value)
         return self
 
@@ -578,17 +575,17 @@ class UpdateConfiguration(KeyboardSlotConfiguration):
         raise ValueError("protect_slot2 cannot be applied to UpdateConfiguration")
 
     def tabs(
-        self: Cfg,
+        self,
         before: bool = False,
         after_first: bool = False,
         after_second: bool = False,
-    ) -> Cfg:
+    ) -> Self:
         self._update_flags(TKTFLAG.TAB_FIRST, before)
         self._update_flags(TKTFLAG.APPEND_TAB1, after_first)
         self._update_flags(TKTFLAG.APPEND_TAB2, after_second)
         return self
 
-    def delay(self: Cfg, after_first: bool = False, after_second: bool = False) -> Cfg:
+    def delay(self, after_first: bool = False, after_second: bool = False) -> Self:
         self._update_flags(TKTFLAG.APPEND_DELAY1, after_first)
         self._update_flags(TKTFLAG.APPEND_DELAY2, after_second)
         return self

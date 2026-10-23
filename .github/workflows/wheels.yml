@@ -32,10 +32,10 @@ jobs:
           # yubikit needs explicit Python versions on non-Linux platforms
           - package: yubikit
             os: macos-latest
-            python-versions: "3.10\n3.11\n3.12\n3.13\n3.14"
+            python-versions: "3.11\n3.12\n3.13\n3.14"
           - package: yubikit
             os: windows-latest
-            python-versions: "3.10\n3.11\n3.12\n3.13\n3.14"
+            python-versions: "3.11\n3.12\n3.13\n3.14"
           - package: yubikit
             os: windows-11-arm
             python-versions: "3.11\n3.12\n3.13\n3.14"

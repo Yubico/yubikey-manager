@@ -2,7 +2,7 @@
 name = "yubikey-manager-workspace"
 version = "6.0.0-dev.0"
 description = "Workspace for yubikit and yubikey-manager."
-requires-python = ">=3.10, <4"
+requires-python = ">=3.11, <4"
 
 [dependency-groups]
 dev = [
@@ -30,6 +30,7 @@ testpaths = ["tests"]
 
 [tool.mypy]
 mypy_path = "typings"
+python_version = "3.11"
 
 [tool.ruff.lint]
 extend-select = ["E", "I", "S"]
@@ -38,6 +39,7 @@ extend-select = ["E", "I", "S"]
 known-first-party = ["_yubikit_native"]
 
 [tool.pyright]
+pythonVersion = "3.11"
 venvPath = "."
 venv = ".venv"
 exclude = ["tests/", "docs/"]
@@ -47,6 +49,7 @@ reportAttributeAccessIssue = "warning"
 
 [tool.ty.environment]
 extra-paths = ["typings"]
+python-version = "3.11"
 
 [tool.ty.src]
 exclude = ["docs"]

@@ -34,7 +34,7 @@ from contextlib import contextmanager
 from enum import Enum, IntEnum, IntFlag, unique
 from threading import Timer
 from types import TracebackType
-from typing import ClassVar, NamedTuple, TypeVar
+from typing import ClassVar, NamedTuple, Self
 
 from _yubikit_native.core import (  # noqa: F401
     bytes2int,
@@ -134,9 +134,6 @@ class Connection(abc.ABC):
         self.close()
 
 
-Self = TypeVar("Self", bound="Closable")
-
-
 class Closable(abc.ABC):
     """Base class providing context-manager support around an abstract ``close()``."""
 
@@ -144,7 +141,7 @@ class Closable(abc.ABC):
     def close(self) -> None:
         """Release resources held by this object."""
 
-    def __enter__(self: Self) -> Self:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(

@@ -4,7 +4,7 @@ image:https://github.com/Yubico/yubikey-manager/actions/workflows/windows.yml/ba
 image:https://github.com/Yubico/yubikey-manager/actions/workflows/macOS.yml/badge.svg["MacOS build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/macOS.yml"]
 image:https://github.com/Yubico/yubikey-manager/actions/workflows/ubuntu.yml/badge.svg["Ubuntu build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/ubuntu.yml"]
 
-Python 3.10 (or later) library and command line tool for configuring a YubiKey.
+Python 3.11 (or later) library and command line tool for configuring a YubiKey.
 If you're looking for a graphical application, check out  https://developers.yubico.com/yubioath-flutter/[Yubico Authenticator].
 
 === Usage
@@ -131,9 +131,9 @@ that it's **NOT** maintained by Yubico.
 
 To install the binary package, use `pkg install pyXY-yubikey-manager`, with `pyXY`
 specifying the version of Python the package was built for, so in order to install
-YubiKey Manager for Python 3.10, use:
+YubiKey Manager for Python 3.11, use:
 
-  # pkg install py310-yubikey-manager
+  # pkg install py311-yubikey-manager
 
 For more information about how to install packages or ports on FreeBSD, please refer
 to its official documentation: https://docs.freebsd.org/en/books/handbook/ports[FreeBSD Handbook].
@@ -170,4 +170,3 @@ so that the key will still function as a USB keyboard:
 ==== From source (for development)
 To install from source, see the link:doc/Development.adoc[development]
 instructions.
-
