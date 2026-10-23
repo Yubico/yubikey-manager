@@ -237,6 +237,18 @@ impl ManagementSessionCcid {
             .device_reset()
             .map_err(management_ccid_err)
     }
+
+    fn read_storage_info(&mut self) -> PyResult<Vec<(u8, u16, u16)>> {
+        let info = self
+            .session_mut()?
+            .read_storage_info()
+            .map_err(management_ccid_err)?;
+        Ok(info
+            .entries
+            .into_iter()
+            .map(|entry| (entry.id, entry.objects, entry.pages))
+            .collect())
+    }
 }
 
 #[pyclass(name = "ManagementSessionOtp", unsendable)]

@@ -43,7 +43,7 @@ use std::fmt;
 
 use thiserror::Error;
 
-use crate::__internal::tlv::{parse_tlv_dict, tlv_encode};
+use crate::__internal::tlv::{parse_tlv_dict, parse_tlv_list, tlv_encode};
 use crate::core::{Connection, Transport, Version, bytes2int, int2bytes};
 use crate::fido::FidoConnection;
 use crate::fido::FidoError;
@@ -61,6 +61,7 @@ const INS_SET_MODE: u8 = 0x16;
 const INS_READ_CONFIG: u8 = 0x1D;
 const INS_WRITE_CONFIG: u8 = 0x1C;
 const INS_DEVICE_RESET: u8 = 0x1F;
+const INS_READ_STORAGE_INFO: u8 = 0x30;
 const P1_DEVICE_CONFIG: u8 = 0x11;
 
 // OTP slot constant for NEO mode set
@@ -835,6 +836,76 @@ impl DeviceInfo {
 }
 
 // ---------------------------------------------------------------------------
+// StorageInfo
+// ---------------------------------------------------------------------------
+
+/// Storage usage for one object-type identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StorageStatsEntry {
+    /// Object-type identifier. Zero denotes free space. Unknown identifiers
+    /// are preserved so callers can handle newer firmware.
+    pub id: u8,
+    /// Number of objects, or free object slots for identifier zero.
+    pub objects: u16,
+    /// Number of storage pages, or free pages for identifier zero.
+    ///
+    /// Objects stored inline can occupy an object slot without using pages.
+    pub pages: u16,
+}
+
+/// Shared-storage statistics from YubiKey 6.
+///
+/// Read using [`ManagementSession::read_storage_info`] over SmartCard (CCID).
+/// Object slots and storage pages are independent resources.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StorageInfo {
+    /// Entries in the order reported by the device.
+    pub entries: Vec<StorageStatsEntry>,
+}
+
+impl StorageInfo {
+    /// Parse a storage response containing exactly one tag-0x01 TLV with
+    /// five-byte records (`id | objects (u16 BE) | pages (u16 BE)`).
+    ///
+    /// Additional well-formed TLVs with unknown tags are ignored.
+    pub fn parse(encoded: &[u8]) -> Result<Self, SmartCardError> {
+        let tlvs =
+            parse_tlv_list(encoded).map_err(|e| SmartCardError::InvalidData(e.to_string()))?;
+        let mut storage_tlvs = tlvs.iter().filter(|(tag, _)| *tag == 0x01);
+        let Some((_, payload)) = storage_tlvs.next() else {
+            return Err(SmartCardError::InvalidData(
+                "Missing storage info TLV with tag 0x01".into(),
+            ));
+        };
+        if storage_tlvs.next().is_some() {
+            return Err(SmartCardError::InvalidData(
+                "Duplicate storage info TLV with tag 0x01".into(),
+            ));
+        }
+        let (records, remainder) = payload.as_chunks::<5>();
+        if !remainder.is_empty() {
+            return Err(SmartCardError::InvalidData(
+                "Incomplete storage info entry".into(),
+            ));
+        }
+        let entries = records
+            .iter()
+            .map(|record| StorageStatsEntry {
+                id: record[0],
+                objects: u16::from_be_bytes([record[1], record[2]]),
+                pages: u16::from_be_bytes([record[3], record[4]]),
+            })
+            .collect();
+        Ok(Self { entries })
+    }
+
+    /// Return the first entry for an identifier, or `None` if not reported.
+    pub fn entry(&self, id: u8) -> Option<StorageStatsEntry> {
+        self.entries.iter().copied().find(|entry| entry.id == id)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ManagementError
 // ---------------------------------------------------------------------------
 
@@ -1017,6 +1088,11 @@ trait ManagementOps<E: std::error::Error + Send + Sync + 'static> {
             "device_reset is only supported over SmartCard (CCID)".into(),
         ))
     }
+    fn read_storage_info(&mut self) -> Result<Vec<u8>, ManagementError<E>> {
+        Err(ManagementError::NotSupported(
+            "read_storage_info is only supported over SmartCard (CCID)".into(),
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1135,6 +1211,21 @@ impl<C: SmartCardConnection + 'static> ManagementSession<C> {
         self.inner.device_reset()?;
         log::info!("Device reset complete");
         Ok(())
+    }
+
+    /// Read shared-storage statistics (YubiKey 6.0.0+, SmartCard/CCID only).
+    ///
+    /// Unsupported firmware is rejected before sending the storage command.
+    /// Device errors and malformed responses are returned to the caller.
+    pub fn read_storage_info(&mut self) -> Result<StorageInfo, ManagementError<SmartCardError>> {
+        log::debug!("Reading storage info");
+        if self.version() < Version(6, 0, 0) {
+            return Err(ManagementError::NotSupported(
+                "read_storage_info requires YubiKey 6.0.0 or later".into(),
+            ));
+        }
+        let encoded = self.inner.read_storage_info()?;
+        StorageInfo::parse(&encoded).map_err(ManagementError::from_parse)
     }
 }
 
@@ -1307,6 +1398,12 @@ impl<C: SmartCardConnection + 'static> ManagementOps<SmartCardError> for CcidMan
             .send_apdu(0, INS_DEVICE_RESET, 0, 0, &[])
             .map_err(ManagementError::Connection)?;
         Ok(())
+    }
+
+    fn read_storage_info(&mut self) -> Result<Vec<u8>, ManagementError<SmartCardError>> {
+        self.protocol
+            .send_apdu(0, INS_READ_STORAGE_INFO, 0, 0, &[])
+            .map_err(ManagementError::Connection)
     }
 }
 
@@ -1528,6 +1625,209 @@ impl<C: FidoConnection + 'static> ManagementOps<FidoError> for FidoManagement<C>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const STORAGE_RESPONSE: &[u8] = &[
+        0x01, 0x1e, 0x00, 0x00, 0x91, 0x01, 0x95, 0x01, 0x00, 0x02, 0x00, 0x07, 0x02, 0x00, 0x03,
+        0x00, 0x18, 0x03, 0x00, 0x04, 0x00, 0x20, 0x04, 0x00, 0x06, 0x00, 0x0c, 0x05, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+
+    #[test]
+    fn test_storage_info_parse() {
+        let info = StorageInfo::parse(STORAGE_RESPONSE).unwrap();
+        let expected = [
+            (0, 145, 405),
+            (1, 2, 7),
+            (2, 3, 24),
+            (3, 4, 32),
+            (4, 6, 12),
+            (5, 0, 0),
+        ];
+        assert_eq!(
+            info.entries,
+            expected.map(|(id, objects, pages)| StorageStatsEntry { id, objects, pages })
+        );
+        assert_eq!(info.entry(0), Some(info.entries[0]));
+        assert_eq!(info.entry(5), Some(info.entries[5]));
+        assert_eq!(info.entry(99), None);
+    }
+
+    #[test]
+    fn test_storage_info_preserves_unknown_ids_and_inline_objects() {
+        let info = StorageInfo::parse(&tlv_encode(
+            1,
+            &[0xff, 0xff, 0xff, 0xff, 0xff, 1, 0, 1, 0, 0],
+        ))
+        .unwrap();
+        assert_eq!(
+            info.entries,
+            [
+                StorageStatsEntry {
+                    id: 0xff,
+                    objects: u16::MAX,
+                    pages: u16::MAX,
+                },
+                StorageStatsEntry {
+                    id: 1,
+                    objects: 1,
+                    pages: 0
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_storage_info_empty_and_long_form_payloads() {
+        assert_eq!(StorageInfo::parse(&[1, 0]).unwrap(), StorageInfo::default());
+        let payload: Vec<u8> = (0..26).flat_map(|id| [id, 0, id, 0, 1]).collect();
+        let encoded = tlv_encode(1, &payload);
+        assert_eq!(&encoded[..3], &[1, 0x81, 130]);
+        let info = StorageInfo::parse(&encoded).unwrap();
+        assert_eq!(info.entries.len(), 26);
+        assert_eq!(info.entry(25).unwrap().objects, 25);
+    }
+
+    #[test]
+    fn test_storage_info_rejects_incomplete_records() {
+        for complete_records in [0, 1] {
+            for extra_bytes in 1..5 {
+                let encoded = tlv_encode(1, &vec![0; complete_records * 5 + extra_bytes]);
+                assert!(matches!(
+                    StorageInfo::parse(&encoded),
+                    Err(SmartCardError::InvalidData(_))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn test_storage_info_ignores_unknown_tlvs() {
+        let extra = tlv_encode(0x7f49, &[0xff; 128]);
+        let expected = StorageInfo::parse(STORAGE_RESPONSE).unwrap();
+        for encoded in [
+            [extra.as_slice(), STORAGE_RESPONSE].concat(),
+            [STORAGE_RESPONSE, extra.as_slice()].concat(),
+            [extra.as_slice(), STORAGE_RESPONSE, extra.as_slice()].concat(),
+        ] {
+            assert_eq!(StorageInfo::parse(&encoded).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_storage_info_rejects_invalid_tlv() {
+        for encoded in [
+            &[][..],
+            &[2, 0],
+            &[1],
+            &[1, 5, 0],
+            &[1, 0, 1, 0],
+            &[1, 0, 0xff],
+            &[2, 0, 3, 0],
+            &[1, 0, 2, 0, 1, 0],
+            &[1, 0, 2, 1],
+            &[2, 1],
+        ] {
+            assert!(matches!(
+                StorageInfo::parse(encoded),
+                Err(SmartCardError::InvalidData(_))
+            ));
+        }
+    }
+
+    #[derive(Debug)]
+    struct StorageConnection {
+        version: &'static str,
+        response: Vec<u8>,
+        sw: u16,
+        sent: Vec<Vec<u8>>,
+    }
+
+    impl Default for StorageConnection {
+        fn default() -> Self {
+            Self {
+                version: "6.0.0",
+                response: STORAGE_RESPONSE.to_vec(),
+                sw: 0x9000,
+                sent: Vec::new(),
+            }
+        }
+    }
+
+    impl Connection for StorageConnection {
+        type Error = SmartCardError;
+
+        fn close(&mut self) {}
+    }
+
+    impl SmartCardConnection for StorageConnection {
+        fn transport(&self) -> Transport {
+            Transport::Usb
+        }
+
+        fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+            self.sent.push(apdu.to_vec());
+            match apdu[1] {
+                0xa4 => Ok((self.version.as_bytes().to_vec(), 0x9000)),
+                INS_READ_STORAGE_INFO => {
+                    assert_eq!(apdu, &[0, 0x30, 0, 0, 0, 0, 0]);
+                    Ok((self.response.clone(), self.sw))
+                }
+                _ => panic!("Unexpected APDU: {apdu:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_storage_info_command() {
+        let mut session = ManagementSession::new(StorageConnection::default()).unwrap();
+        assert_eq!(
+            session.read_storage_info().unwrap(),
+            StorageInfo::parse(STORAGE_RESPONSE).unwrap()
+        );
+        assert_eq!(session.into_connection().sent.len(), 2);
+    }
+
+    #[test]
+    fn test_read_storage_info_rejects_older_firmware_before_command() {
+        for version in ["4.4.5", "5.7.2"] {
+            let connection = StorageConnection {
+                version,
+                ..Default::default()
+            };
+            let mut session = ManagementSession::new(connection).unwrap();
+            assert!(matches!(
+                session.read_storage_info(),
+                Err(ManagementError::NotSupported(_))
+            ));
+            assert_eq!(session.into_connection().sent.len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_read_storage_info_propagates_errors() {
+        let connection = StorageConnection {
+            sw: 0x6d00,
+            ..Default::default()
+        };
+        let mut session = ManagementSession::new(connection).unwrap();
+        assert!(matches!(
+            session.read_storage_info(),
+            Err(ManagementError::Connection(SmartCardError::Apdu {
+                sw: 0x6d00,
+                ..
+            }))
+        ));
+
+        let connection = StorageConnection {
+            response: vec![1, 1, 0],
+            ..Default::default()
+        };
+        let mut session = ManagementSession::new(connection).unwrap();
+        assert!(matches!(
+            session.read_storage_info(),
+            Err(ManagementError::InvalidData(_))
+        ));
+    }
 
     #[test]
     fn test_capability_bitflags() {

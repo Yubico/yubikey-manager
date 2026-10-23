@@ -260,6 +260,34 @@ class DeviceInfo:
         )
 
 
+@dataclass(frozen=True)
+class StorageStatsEntry:
+    """Storage usage for an object-type identifier.
+
+    Identifier zero reports free object slots and pages. Unknown identifiers
+    are preserved. Objects stored inline can occupy a slot without using pages.
+    """
+
+    id: int
+    objects: int
+    pages: int
+
+
+@dataclass
+class StorageInfo:
+    """YubiKey 6 shared-storage statistics.
+
+    Object slots and storage pages are independent resources. Entries retain
+    the order reported by the device.
+    """
+
+    entries: list[StorageStatsEntry] = field(default_factory=list)
+
+    def entry(self, id: int) -> StorageStatsEntry | None:
+        """Return the first entry for an identifier, or None if not reported."""
+        return next((entry for entry in self.entries if entry.id == id), None)
+
+
 _MODES = [
     USB_INTERFACE.OTP,  # 0x00
     USB_INTERFACE.CCID,  # 0x01
@@ -422,6 +450,23 @@ class ManagementSession(Session):
     def _do_read_device_info(self) -> DeviceInfo:
         d = self._native.read_device_info()
         return _device_info_from_native(d)
+
+    def read_storage_info(self) -> StorageInfo:
+        """Read shared-storage statistics (YubiKey 6.0.0+, SmartCard/CCID only).
+
+        Additional well-formed response TLVs with unknown tags are ignored.
+
+        :return: Reported object counts and storage-page counts, including free
+            slots and pages under identifier zero.
+        :raises NotImplementedError: If the connection is not SmartCard/CCID.
+        :raises NotSupportedError: If the firmware predates YubiKey 6.0.0.
+        :raises BadResponseError: If the storage response is malformed.
+        """
+        if not isinstance(self._native, _NativeManagementSessionCcid):
+            raise NotImplementedError("Storage info is only supported over CCID")
+        return StorageInfo(
+            [StorageStatsEntry(*entry) for entry in self._native.read_storage_info()]
+        )
 
     def write_device_config(
         self,
