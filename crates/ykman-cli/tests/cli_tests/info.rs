@@ -42,8 +42,7 @@ fn test_info() {
         .arg("info")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Firmware version:"))
-        .stdout(predicate::str::contains("FIPS APPROVED"));
+        .stdout(predicate::str::contains("Firmware version:"));
     if device_serial().is_some() {
         assert.stdout(predicate::str::contains("Serial number:"));
     }

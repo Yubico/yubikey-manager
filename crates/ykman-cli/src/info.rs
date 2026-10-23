@@ -466,13 +466,16 @@ fn app_status_table(
         .unwrap_or(Capability::NONE);
 
     let has_nfc = nfc_supported.is_some();
+    let has_fips = !fips_capable.is_empty();
     let nfc_supported = nfc_supported.unwrap_or(Capability::NONE);
 
     let mut header = vec!["APPLICATIONS", "USB"];
     if has_nfc {
         header.push("NFC");
     }
-    header.push("FIPS APPROVED");
+    if has_fips {
+        header.push("FIPS APPROVED");
+    }
     let mut rows = vec![header];
     for &cap in Capability::ALL {
         let usb_status = if usb_supported.contains(cap) {
@@ -507,13 +510,15 @@ fn app_status_table(
             if has_nfc {
                 row.push(nfc_status);
             }
-            row.push(if !fips_capable.contains(cap) {
-                "N/A"
-            } else if fips_approved.contains(cap) {
-                "Yes"
-            } else {
-                "No"
-            });
+            if has_fips {
+                row.push(if !fips_capable.contains(cap) {
+                    "N/A"
+                } else if fips_approved.contains(cap) {
+                    "Yes"
+                } else {
+                    "No"
+                });
+            }
             rows.push(row);
         }
     }
@@ -542,6 +547,29 @@ mod tests {
                 .iter()
                 .map(|&(id, objects, pages)| StorageStatsEntry { id, objects, pages })
                 .collect(),
+        }
+    }
+
+    #[test]
+    fn non_fips_applications_only_show_transport_columns() {
+        for has_nfc in [false, true] {
+            let mut supported =
+                std::collections::HashMap::from([(Transport::Usb, Capability::PIV)]);
+            let mut columns = vec!["APPLICATIONS", "USB"];
+            let mut statuses = vec!["PIV", "Enabled"];
+            if has_nfc {
+                supported.insert(Transport::Nfc, Capability::PIV);
+                columns.push("NFC");
+                statuses.push("Enabled");
+            }
+            let output =
+                app_status_table(&supported, &supported, Capability::NONE, Capability::PIV)
+                    .render(0, false);
+            let rows: Vec<Vec<_>> = output
+                .lines()
+                .map(|line| line.split_whitespace().collect())
+                .collect();
+            assert_eq!(rows, [columns, statuses]);
         }
     }
 

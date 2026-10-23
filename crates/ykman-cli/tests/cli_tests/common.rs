@@ -443,22 +443,24 @@ fn info_fips_capabilities(info: &str) -> impl Iterator<Item = (&str, bool)> {
         .skip_while(|line| !line.starts_with("APPLICATIONS "));
     let header = lines.next().expect("ykman info is missing applications");
     let name_end = header.find("USB").expect("missing USB column");
-    let fips_start = header
-        .find("FIPS APPROVED")
-        .expect("missing FIPS APPROVED column");
+    let fips_start = header.find("FIPS APPROVED");
     lines.take_while(|line| !line.is_empty()).map(move |line| {
         let name = line
             .get(..name_end)
             .expect("missing application name")
             .trim();
-        let approved = line
-            .get(fips_start..)
-            .expect("missing FIPS approval")
-            .trim();
-        let capable = match approved {
-            "Yes" | "No" => true,
-            "N/A" => false,
-            other => panic!("unexpected FIPS approval: {other:?}"),
+        let capable = if let Some(fips_start) = fips_start {
+            let approved = line
+                .get(fips_start..)
+                .expect("missing FIPS approval")
+                .trim();
+            match approved {
+                "Yes" | "No" => true,
+                "N/A" => false,
+                other => panic!("unexpected FIPS approval: {other:?}"),
+            }
+        } else {
+            false
         };
         (name, capable)
     })
@@ -631,6 +633,26 @@ fn info_has_capability(stdout: &str, name: &str) -> bool {
         .lines()
         .filter(|line| line.starts_with(app_name))
         .any(|line| line.split_whitespace().any(|field| field == "Enabled"))
+}
+
+#[test]
+fn test_fips_capabilities_without_an_approval_column() {
+    for has_nfc in [false, true] {
+        let nfc_header = if has_nfc { "NFC" } else { "" };
+        let nfc_status = if has_nfc { "Enabled" } else { "" };
+        let info = format!(
+            "Device type: YubiKey 5\n\n{:<24}{:<14}{nfc_header}\n{:<24}{:<14}{nfc_status}\n\nSTORAGE\n",
+            "APPLICATIONS", "USB", "PIV", "Enabled",
+        );
+        assert!(!info_is_fips(&info));
+        assert_eq!(
+            info_fips_capabilities(&info).collect::<Vec<_>>(),
+            [("PIV", false)],
+        );
+        assert!(info_is_fips(
+            &info.replace("YubiKey 5", "YubiKey FIPS (4 Series)")
+        ));
+    }
 }
 
 #[test]
