@@ -2,7 +2,7 @@
 use anyhow::{Result, anyhow};
 use std::process;
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 
 use yubikit::core::Version;
@@ -10,6 +10,7 @@ use yubikit::management::Capability;
 
 mod apdu;
 mod cli_enums;
+mod color;
 mod config;
 mod context;
 mod diagnose;
@@ -91,6 +92,14 @@ struct Cli {
     #[arg(long, value_name = "FILE", global = true)]
     log_file: Option<String>,
 
+    /// Control coloured output (auto honours NO_COLOR and terminal detection)
+    #[arg(long, global = true, value_enum, default_value = "auto")]
+    color: color::ColorChoice,
+
+    /// Disable coloured output (same as --color=never)
+    #[arg(long, global = true, conflicts_with = "color", hide = true)]
+    no_color: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -123,9 +132,13 @@ fn print_licenses() {
     print!("{text}");
 }
 
+fn cli_command() -> clap::Command {
+    Cli::command().color(color::help_choice(std::env::args_os().skip(1)))
+}
+
 fn print_completion(shell: Shell) {
     use std::io;
-    let mut cmd = Cli::command();
+    let mut cmd = cli_command();
     let bin_name = cmd.get_name().to_string();
     generate(shell, &mut cmd, bin_name, &mut io::stdout());
 }
@@ -134,7 +147,7 @@ fn command_or_help(command: Option<Commands>) -> Commands {
     match command {
         Some(command) => command,
         None => {
-            let mut cmd = Cli::command();
+            let mut cmd = cli_command();
             cmd.print_help().ok();
             println!();
             std::process::exit(0);
@@ -284,7 +297,9 @@ enum Commands {
 }
 
 fn run() -> Result<()> {
-    let cli = Cli::parse();
+    let mut matches = cli_command().get_matches();
+    let cli = Cli::from_arg_matches_mut(&mut matches).unwrap_or_else(|error| error.exit());
+    color::init(cli.no_color, cli.color);
 
     init_logging(&cli)?;
 

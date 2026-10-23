@@ -6,6 +6,7 @@ use yubikit::management::{
 };
 use yubikit::smartcard::{SmartCardError, Sw};
 
+use crate::color::{self, Tone};
 use crate::util::print_table;
 
 pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
@@ -90,9 +91,10 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
     }
 
     if let Some(storage) = read_storage_info(dev)? {
-        let rows = storage_rows(&storage).context("Invalid storage information")?;
-        println!("\nStorage");
-        print_table(rows);
+        let width = terminal_size::terminal_size().map(|(width, _)| width.0);
+        let output = storage_output(&storage, width, use_unicode())
+            .context("Invalid storage information")?;
+        print!("\n{output}");
     }
 
     if check_fips {
@@ -167,6 +169,11 @@ struct StorageUsage {
     objects: u64,
 }
 
+struct StorageSummary {
+    free: StorageUsage,
+    apps: [(&'static str, StorageUsage); 4],
+}
+
 fn format_storage_size(pages: u64) -> String {
     let bytes = pages * STORAGE_PAGE_SIZE;
     if bytes < 1024 {
@@ -176,7 +183,7 @@ fn format_storage_size(pages: u64) -> String {
     }
 }
 
-fn storage_rows(info: &StorageInfo) -> Result<Vec<(&'static str, String)>> {
+fn storage_summary(info: &StorageInfo) -> Result<StorageSummary> {
     ensure!(
         info.entries.iter().any(|entry| entry.id == 0),
         "Storage response is missing free-space statistics"
@@ -199,47 +206,223 @@ fn storage_rows(info: &StorageInfo) -> Result<Vec<(&'static str, String)>> {
         usage.pages += u64::from(entry.pages);
         usage.objects += u64::from(entry.objects);
     }
-    let used_pages: u64 = apps.iter().map(|(_, usage)| usage.pages).sum();
-    let used_objects: u64 = apps.iter().map(|(_, usage)| usage.objects).sum();
-    let mut rows = vec![
-        (
-            "Used",
-            format!(
-                "{} of {}",
-                format_storage_size(used_pages),
-                format_storage_size(used_pages + free.pages)
+    Ok(StorageSummary { free, apps })
+}
+
+impl StorageSummary {
+    fn rows(&self) -> Vec<(&'static str, String)> {
+        let free = &self.free;
+        let apps = &self.apps;
+        let used_pages: u64 = apps.iter().map(|(_, usage)| usage.pages).sum();
+        let used_objects: u64 = apps.iter().map(|(_, usage)| usage.objects).sum();
+        let mut rows = vec![
+            (
+                "Used",
+                format!(
+                    "{} of {}",
+                    format_storage_size(used_pages),
+                    format_storage_size(used_pages + free.pages)
+                ),
             ),
-        ),
-        ("Free", format_storage_size(free.pages)),
-        (
-            "Objects",
-            format!(
-                "{used_objects} of {} used ({} free)",
-                used_objects + free.objects,
-                free.objects
+            ("Free", format_storage_size(free.pages)),
+            (
+                "Objects",
+                format!(
+                    "{used_objects} of {} used ({} free)",
+                    used_objects + free.objects,
+                    free.objects
+                ),
             ),
-        ),
-    ];
-    rows.extend(
-        apps.into_iter()
-            .filter(|(_, usage)| usage.pages > 0 || usage.objects > 0)
-            .map(|(name, usage)| {
-                (
-                    name,
-                    format!(
-                        "{} ({} {})",
-                        format_storage_size(usage.pages),
-                        usage.objects,
-                        if usage.objects == 1 {
-                            "object"
-                        } else {
-                            "objects"
-                        }
-                    ),
-                )
-            }),
-    );
-    Ok(rows)
+        ];
+        rows.extend(
+            apps.iter()
+                .filter(|(_, usage)| usage.pages > 0 || usage.objects > 0)
+                .map(|(name, usage)| {
+                    (
+                        *name,
+                        format!(
+                            "{} ({} {})",
+                            format_storage_size(usage.pages),
+                            usage.objects,
+                            if usage.objects == 1 {
+                                "object"
+                            } else {
+                                "objects"
+                            }
+                        ),
+                    )
+                }),
+        );
+        rows
+    }
+}
+
+fn use_unicode() -> bool {
+    for name in ["LC_ALL", "LC_CTYPE", "LANG"] {
+        if let Ok(locale) = std::env::var(name)
+            && !locale.is_empty()
+        {
+            let locale = locale.to_ascii_uppercase();
+            return locale.contains("UTF-8") || locale.contains("UTF8");
+        }
+    }
+    cfg!(windows)
+}
+
+fn allocate_units(values: &[u64], units: usize) -> Vec<usize> {
+    let total: u128 = values.iter().map(|&value| u128::from(value)).sum();
+    if total == 0 {
+        return vec![0; values.len()];
+    }
+    let weighted: Vec<u128> = values
+        .iter()
+        .map(|&value| u128::from(value) * units as u128)
+        .collect();
+    let mut allocation: Vec<usize> = weighted
+        .iter()
+        .map(|value| (value / total) as usize)
+        .collect();
+    let mut indices: Vec<usize> = (0..values.len()).collect();
+    indices.sort_by_key(|&index| std::cmp::Reverse(weighted[index] % total));
+    let remaining = units - allocation.iter().sum::<usize>();
+    for &index in indices.iter().take(remaining) {
+        allocation[index] += 1;
+    }
+    allocation
+}
+
+fn bar_cells(values: &[u64], width: usize) -> Vec<usize> {
+    let mut cells = allocate_units(values, width);
+    if width >= values.iter().filter(|&&value| value > 0).count() {
+        // Keep small nonempty segments visible without exceeding the bar width.
+        for (index, &value) in values.iter().enumerate() {
+            if value > 0
+                && cells[index] == 0
+                && let Some(donor) = (0..cells.len())
+                    .filter(|&index| cells[index] > 1)
+                    .max_by_key(|&index| cells[index])
+            {
+                cells[donor] -= 1;
+                cells[index] = 1;
+            }
+        }
+    }
+    cells
+}
+
+fn format_percent(used: u64, total: u64) -> String {
+    if total == 0 || used == 0 {
+        "0%".into()
+    } else if u128::from(used) * 200 < u128::from(total) {
+        "<1%".into()
+    } else {
+        format!(
+            "{}%",
+            (u128::from(used) * 100 + u128::from(total) / 2) / u128::from(total)
+        )
+    }
+}
+
+fn usage_tone(used: u64, total: u64, critical_percent: u64) -> Option<Tone> {
+    let used = u128::from(used) * 100;
+    let total = u128::from(total);
+    if total > 0 && used >= total * u128::from(critical_percent) {
+        Some(Tone::Red)
+    } else if total > 0 && used >= total * 80 {
+        Some(Tone::Yellow)
+    } else {
+        None
+    }
+}
+
+fn usage_colour(text: &str, used: u64, total: u64, critical_percent: u64) -> String {
+    match usage_tone(used, total, critical_percent) {
+        Some(tone) => color::paint(text, tone),
+        None => color::bold(text),
+    }
+}
+
+fn storage_output(
+    info: &StorageInfo,
+    terminal_width: Option<u16>,
+    unicode: bool,
+) -> Result<String> {
+    let summary = storage_summary(info)?;
+    let rows = summary.rows();
+    let mut pages: Vec<u64> = summary.apps.iter().map(|(_, usage)| usage.pages).collect();
+    pages.push(summary.free.pages);
+    let total_pages: u64 = pages.iter().sum();
+    let used_pages = total_pages - summary.free.pages;
+    let used_objects: u64 = summary.apps.iter().map(|(_, usage)| usage.objects).sum();
+    let total_objects = used_objects + summary.free.objects;
+    let mut output = format!("{}\n", color::bold("Storage"));
+    for (index, (label, value)) in rows[..3].iter().enumerate() {
+        let value = match index {
+            0 => usage_colour(
+                &format!("{value} ({})", format_percent(used_pages, total_pages)),
+                used_pages,
+                total_pages,
+                95,
+            ),
+            2 => usage_colour(
+                &format!(
+                    "{used_objects} of {total_objects} used ({}, {} free)",
+                    format_percent(used_objects, total_objects),
+                    summary.free.objects,
+                ),
+                used_objects,
+                total_objects,
+                100,
+            ),
+            _ => color::bold(value),
+        };
+        output.push_str(&format!("{:<24}{value}\n", format!("{label}:")));
+    }
+    output.push('\n');
+    const TONES: [Tone; 5] = [Tone::Red, Tone::Yellow, Tone::Blue, Tone::Cyan, Tone::Muted];
+    let (used_char, free_char) = if unicode {
+        ("\u{2588}", "\u{2591}")
+    } else {
+        ("#", "-")
+    };
+    if terminal_width.is_none_or(|width| width >= 60) && total_pages > 0 {
+        for (index, cells) in bar_cells(&pages, 52).into_iter().enumerate() {
+            if cells > 0 {
+                let character = if index == 4 { free_char } else { used_char };
+                output.push_str(&color::paint(&character.repeat(cells), TONES[index]));
+            }
+        }
+        output.push_str("\n\n");
+    }
+    let percentages = allocate_units(&pages, 100);
+    let percentage = |index: usize| {
+        if pages[index] > 0 && percentages[index] == 0 {
+            "<1%".into()
+        } else {
+            format!("{}%", percentages[index])
+        }
+    };
+    let visible_apps = summary
+        .apps
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, usage))| usage.pages > 0 || usage.objects > 0);
+    for ((index, _), (name, value)) in visible_apps.zip(&rows[3..]) {
+        output.push_str(&format!(
+            "{} {name:<12}{} {:>5}\n",
+            color::paint(used_char, TONES[index]),
+            color::bold(&format!("{value:<30}")),
+            percentage(index),
+        ));
+    }
+    output.push_str(&format!(
+        "{} {:<12}{} {:>5}\n",
+        color::paint(free_char, Tone::Muted),
+        "Free",
+        color::bold(&format!("{:<30}", format_storage_size(summary.free.pages))),
+        percentage(4),
+    ));
+    Ok(output)
 }
 
 fn print_app_status_table(
@@ -319,6 +502,10 @@ mod tests {
     use yubikit::management::{DeviceInfo, StorageStatsEntry};
     use yubikit::otp::OtpConnection;
     use yubikit::smartcard::SmartCardConnection;
+
+    fn storage_rows(info: &StorageInfo) -> Result<Vec<(&'static str, String)>> {
+        Ok(storage_summary(info)?.rows())
+    }
 
     fn storage_info(entries: &[(u8, u16, u16)]) -> StorageInfo {
         StorageInfo {
@@ -401,6 +588,124 @@ mod tests {
         );
         assert_eq!(rows[3], ("PIV", "32767.5 KiB (131070 objects)".into()));
         assert_eq!(format_storage_size(1), "256 B");
+    }
+
+    #[test]
+    fn storage_allocations_are_exact_and_keep_small_segments_visible() {
+        for values in [
+            [0, 0, 0, 0, 0],
+            [1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 10000],
+            [10000, 0, 0, 0, 1],
+            [0, 0, 1, 0, 0],
+            [u64::MAX; 5],
+        ] {
+            let nonempty = values.iter().filter(|&&value| value > 0).count();
+            for width in [0, 1, 3, 5, 52, 100] {
+                let cells = bar_cells(&values, width);
+                assert_eq!(
+                    cells.iter().sum::<usize>(),
+                    if nonempty > 0 { width } else { 0 }
+                );
+                for (&value, &cells) in values.iter().zip(&cells) {
+                    if value == 0 {
+                        assert_eq!(cells, 0);
+                    } else if width >= nonempty {
+                        assert!(cells > 0);
+                    }
+                }
+            }
+            assert_eq!(
+                allocate_units(&values, 100).iter().sum::<usize>(),
+                if nonempty > 0 { 100 } else { 0 }
+            );
+        }
+        assert_eq!(format_percent(0, 0), "0%");
+        assert_eq!(format_percent(1, 10000), "<1%");
+        assert_eq!(format_percent(1, 2), "50%");
+    }
+
+    #[test]
+    fn storage_warning_thresholds_are_independent_for_pages_and_objects() {
+        assert_eq!(usage_tone(79, 100, 95), None);
+        assert_eq!(usage_tone(80, 100, 95), Some(Tone::Yellow));
+        assert_eq!(usage_tone(94, 100, 95), Some(Tone::Yellow));
+        assert_eq!(usage_tone(95, 100, 95), Some(Tone::Red));
+        assert_eq!(usage_tone(99, 100, 100), Some(Tone::Yellow));
+        assert_eq!(usage_tone(100, 100, 100), Some(Tone::Red));
+        assert_eq!(usage_tone(0, 0, 95), None);
+        assert_eq!(usage_tone(0, 0, 100), None);
+        assert_eq!(usage_tone(u64::MAX, u64::MAX, 100), Some(Tone::Red));
+    }
+
+    #[test]
+    fn storage_bar_and_legend_keep_per_application_aggregation() {
+        let info = storage_info(&[
+            (0, 143, 400),
+            (1, 2, 8),
+            (2, 3, 24),
+            (3, 4, 32),
+            (4, 6, 12),
+            (5, 2, 4),
+        ]);
+        for unicode in [false, true] {
+            let output = storage_output(&info, Some(80), unicode).unwrap();
+            let (full, free) = if unicode {
+                ('\u{2588}', '\u{2591}')
+            } else {
+                ('#', '-')
+            };
+            let bar = output
+                .lines()
+                .find(|line| {
+                    !line.is_empty()
+                        && line
+                            .chars()
+                            .all(|character| character == full || character == free)
+                })
+                .unwrap();
+            assert_eq!(bar.chars().count(), 52);
+            for name in ["PIV", "FIDO2", "OpenPGP"] {
+                assert_eq!(
+                    output
+                        .lines()
+                        .filter(|line| line.starts_with(&format!("{full} {name} ")))
+                        .count(),
+                    1
+                );
+            }
+            assert!(output.contains("20.0 KiB of 120.0 KiB (17%)"));
+            assert!(output.contains("4.0 KiB (8 objects)"));
+            assert!(output.contains("8.0 KiB (5 objects)"));
+            assert!(!output.contains("certificates"));
+            assert!(!output.contains("passkeys"));
+        }
+        let narrow = storage_output(&info, Some(40), false).unwrap();
+        assert!(
+            !narrow
+                .lines()
+                .any(|line| line.len() == 52 && line.chars().all(|ch| ch == '#' || ch == '-'))
+        );
+        assert!(narrow.contains("4.0 KiB (8 objects)"));
+    }
+
+    #[test]
+    fn storage_presentation_handles_zero_pages_and_unknown_apps() {
+        let output = storage_output(
+            &storage_info(&[(0, 0, 0), (1, 1, 0), (255, 2, 0)]),
+            Some(80),
+            false,
+        )
+        .unwrap();
+        assert!(output.contains("0 B of 0 B (0%)"));
+        assert!(output.contains("# PIV"));
+        assert!(output.contains("# Other"));
+        assert!(!output.contains("NaN"));
+        assert!(
+            !output
+                .lines()
+                .any(|line| line.chars().all(|ch| ch == '#' || ch == '-') && !line.is_empty())
+        );
     }
 
     #[derive(Clone)]

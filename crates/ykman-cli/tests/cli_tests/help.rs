@@ -61,6 +61,33 @@ fn assert_no_missing_arg_descriptions(path: &[&str], help: &str) {
 }
 
 #[test]
+fn test_help_colour_controls() {
+    let cases: &[(&[&str], bool)] = &[
+        (&["--color=always", "--help"], true),
+        (&["info", "--color", "always", "--help"], true),
+        (&["--color=never", "--help"], false),
+        (&["info", "--no-color", "--help"], false),
+        (&["--color=auto", "--help"], false),
+    ];
+    for &(args, coloured) in cases {
+        let output = ykman()
+            .args(args)
+            .env("NO_COLOR", "1")
+            .env_remove("CLICOLOR_FORCE")
+            .env_remove("FORCE_COLOR")
+            .output()
+            .expect("failed to run help command");
+        assert!(output.status.success());
+        assert_eq!(output.stdout.contains(&0x1b), coloured, "{args:?}");
+    }
+    ykman()
+        .args(["--color=always", "--no-color", "--licenses"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used"));
+}
+
+#[test]
 fn test_all_command_help_pages() {
     let command_paths: &[&[&str]] = &[
         &[],
