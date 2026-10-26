@@ -143,11 +143,34 @@ pub fn list_readers() -> Result<Vec<String>, PcscError> {
     }
 }
 
+/// Snapshot of a PC/SC reader's state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReaderStatus {
+    /// Reader name.
+    pub name: String,
+    /// Whether a card is currently present.
+    pub card_present: bool,
+    /// Counts card insertions/removals on the reader, so a card swapped
+    /// between two snapshots can be told apart from the same card.
+    pub event_count: u32,
+}
+
 /// List PC/SC readers together with their current card-present state.
 ///
 /// Each entry is `(reader_name, card_is_present)`. Uses `get_status_change`
 /// with a zero timeout so it returns the current snapshot immediately.
 pub fn list_readers_with_state() -> Result<Vec<(String, bool)>, PcscError> {
+    list_reader_statuses().map(|readers| {
+        readers
+            .into_iter()
+            .map(|r| (r.name, r.card_present))
+            .collect()
+    })
+}
+
+/// Like [`list_readers_with_state`], but also reports the event counter used
+/// to detect a card being replaced between two snapshots.
+pub fn list_reader_statuses() -> Result<Vec<ReaderStatus>, PcscError> {
     let result = guard_pcsc(|| {
         let ctx = Context::establish(Scope::User)?;
         let len = ctx.list_readers_len()?;
@@ -173,9 +196,10 @@ pub fn list_readers_with_state() -> Result<Vec<(String, bool)>, PcscError> {
         Ok(names
             .into_iter()
             .zip(reader_states.iter())
-            .map(|(name, rs)| {
-                let present = rs.event_state().contains(::pcsc::State::PRESENT);
-                (name, present)
+            .map(|(name, rs)| ReaderStatus {
+                name,
+                card_present: rs.event_state().contains(::pcsc::State::PRESENT),
+                event_count: rs.event_count(),
             })
             .collect())
     });
@@ -256,6 +280,8 @@ fn kill_pcsc_blockers() -> bool {
 
 /// Name of the env var that disables exclusive PC/SC access attempts.
 const YKMAN_NO_EXCLUSIVE: &str = "YKMAN_NO_EXLUSIVE"; // Intentional typo for compat
+const EXCLUSIVE_ATTEMPTS: u32 = 10;
+const EXCLUSIVE_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// PC/SC reader name prefix for USB-connected YubiKeys.
 const YUBICO_READER_PREFIX: &str = "yubico yubikey";
@@ -342,15 +368,28 @@ impl PcscSmartCardConnection {
     }
 
     fn open_inner(reader_name: &str, retry: bool) -> Result<Self, PcscError> {
-        // Try exclusive unless disabled
+        // Try exclusive unless disabled. Other processes (e.g. Windows smart
+        // card services) often hold the card briefly right after insertion, so
+        // retry on sharing violations before falling back to shared access.
         if std::env::var_os(YKMAN_NO_EXCLUSIVE).is_none() {
-            match Self::new(reader_name, true) {
-                Ok(conn) => {
-                    log::debug!("Using exclusive CCID connection");
-                    return Ok(conn);
-                }
-                Err(e) => {
-                    log::info!("Failed to get exclusive CCID access: {e}");
+            for attempt in 0..EXCLUSIVE_ATTEMPTS {
+                match Self::new(reader_name, true) {
+                    Ok(conn) => {
+                        log::debug!("Using exclusive CCID connection");
+                        return Ok(conn);
+                    }
+                    Err(e) if e.is_sharing_violation() && attempt + 1 < EXCLUSIVE_ATTEMPTS => {
+                        log::debug!(
+                            "Card busy (attempt {}), retrying exclusive access in {:?}",
+                            attempt + 1,
+                            EXCLUSIVE_RETRY_DELAY
+                        );
+                        thread::sleep(EXCLUSIVE_RETRY_DELAY);
+                    }
+                    Err(e) => {
+                        log::info!("Failed to get exclusive CCID access: {e}");
+                        break;
+                    }
                 }
             }
         }

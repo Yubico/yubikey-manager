@@ -63,7 +63,7 @@ use super::hidapi::{
     FidoDeviceInfo, HidFidoConnection, HidOtpConnection, list_fido_devices, list_otp_devices,
 };
 #[cfg(feature = "pcsc")]
-use super::pcsc::{PcscSmartCardConnection, is_reader_usb, list_readers_with_state};
+use super::pcsc::{PcscSmartCardConnection, is_reader_usb, list_reader_statuses};
 #[cfg(feature = "pcsc")]
 use crate::device::read_info_ccid;
 #[cfg(feature = "hid")]
@@ -543,6 +543,9 @@ struct MonitorState {
     /// Card nodes, keyed by reader name.
     #[cfg(feature = "pcsc")]
     cards: HashMap<String, DeviceNode>,
+    /// Event counter of each tracked card, to detect replacement.
+    #[cfg(feature = "pcsc")]
+    card_events: HashMap<String, u32>,
     /// OTP HID nodes, keyed by HID path.
     #[cfg(feature = "hid")]
     hid_otp: HashMap<String, DeviceNode>,
@@ -559,14 +562,17 @@ impl MonitorState {
         on_event: &mut impl FnMut(NodeEvent),
         verified: &[LocalYubiKeyDevice],
     ) {
-        let readers = match list_readers_with_state() {
+        let readers = match list_reader_statuses() {
             Ok(readers) => readers,
             Err(e) => {
                 log::debug!("PC/SC enumeration failed: {e}");
                 return;
             }
         };
-        let present: HashMap<&str, bool> = readers.iter().map(|(n, p)| (n.as_str(), *p)).collect();
+        let present: HashMap<&str, bool> = readers
+            .iter()
+            .map(|r| (r.name.as_str(), r.card_present))
+            .collect();
 
         // --- Handle readers that have disappeared entirely (USB unplug) ---
         let gone: Vec<String> = self
@@ -598,8 +604,20 @@ impl MonitorState {
         }
 
         // --- Process each currently-connected reader ---
-        for (name, card_present) in &readers {
+        for status in &readers {
+            let name = &status.name;
+            let card_present = &status.card_present;
             let usb = is_reader_usb(name);
+
+            // A card swapped faster than the polling interval never shows as
+            // absent; the changed event counter reveals the replacement.
+            if *card_present
+                && self.cards.contains_key(name)
+                && self.card_events.get(name) != Some(&status.event_count)
+                && let Some(node) = self.cards.remove(name)
+            {
+                on_event(NodeEvent::Removed(node));
+            }
 
             // USB reader node.
             if usb
@@ -631,6 +649,7 @@ impl MonitorState {
                                 device_info: info,
                             };
                             self.cards.insert(name.clone(), node.clone());
+                            self.card_events.insert(name.clone(), status.event_count);
                             on_event(NodeEvent::Added(node));
                         }
                         Err(e) => {
