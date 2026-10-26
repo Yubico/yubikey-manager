@@ -19,13 +19,14 @@ fn test_hsmauth_reject_long_credential_password(
     #[values("12345678901234567", "123456789012345\u{e9}")] password: &str,
 ) {
     require_capability!("YubiHSM Auth");
+    let management_key = prepare_hsmauth_for_credentials();
     let mut command = ykman_dev();
     command
         .args(["hsmauth", "credentials"])
         .args(arguments)
         .args([option, password]);
     if arguments[0] != "change-password" {
-        command.args(["-m", DEFAULT_HSMAUTH_MANAGEMENT_KEY]);
+        command.args(["-m", management_key]);
     }
     command
         .assert()

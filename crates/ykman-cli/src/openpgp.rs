@@ -314,6 +314,11 @@ fn format_openpgp_credential_error(
             anyhow!("{action}: Wrong {credential}, {attempts} attempt(s) remaining.")
         }
         OpenPgpError::PinBlocked => anyhow!("{action}: {credential} is blocked."),
+        OpenPgpError::Connection(yubikit::smartcard::SmartCardError::Apdu { sw, .. })
+            if sw == yubikit::smartcard::Sw::ConditionsNotSatisfied as u16 =>
+        {
+            anyhow!("{action}: {credential} does not meet complexity requirement.")
+        }
         e => anyhow!("{action}: {e}"),
     }
 }
@@ -553,9 +558,9 @@ pub fn run_change_reset_code(
     session.verify_admin(&ap).map_err(|e| {
         format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
     })?;
-    session
-        .set_reset_code(&rc)
-        .map_err(|e| anyhow!("Failed to set reset code: {e}"))?;
+    session.set_reset_code(&rc).map_err(|e| {
+        format_openpgp_credential_error(e, "Reset Code", "Failed to set reset code")
+    })?;
     eprintln!("Reset code set.");
     Ok(())
 }
@@ -580,6 +585,13 @@ pub fn run_unblock_pin(
     }
     let reset_code = reset_code.map(OpenPgpPin::new);
     session.reset_pin(&new, reset_code.as_ref()).map_err(|e| {
+        if matches!(
+            &e,
+            OpenPgpError::Connection(yubikit::smartcard::SmartCardError::Apdu { sw, .. })
+                if *sw == yubikit::smartcard::Sw::ConditionsNotSatisfied as u16
+        ) {
+            return anyhow!("New PIN does not meet complexity requirement.");
+        }
         let credential = if reset_code.is_some() {
             "reset code"
         } else {
@@ -897,6 +909,20 @@ mod tests {
     use yubikit::openpgp::OpenPgpError;
 
     use super::format_openpgp_credential_error;
+
+    #[test]
+    fn openpgp_complexity_errors_identify_the_credential() {
+        for credential in ["PIN", "Admin PIN", "Reset Code"] {
+            let error = OpenPgpError::Connection(yubikit::smartcard::SmartCardError::Apdu {
+                sw: 0x6985,
+                data: vec![],
+            });
+            assert_eq!(
+                format_openpgp_credential_error(error, credential, "Failed").to_string(),
+                format!("Failed: {credential} does not meet complexity requirement.")
+            );
+        }
+    }
 
     #[test]
     fn openpgp_credential_errors_name_the_credential() {

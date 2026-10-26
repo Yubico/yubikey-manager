@@ -23,6 +23,8 @@ mod apdu;
 mod config;
 #[path = "cli_tests/fido.rs"]
 mod fido;
+#[path = "cli_tests/fips.rs"]
+mod fips;
 #[path = "cli_tests/help.rs"]
 mod help;
 #[path = "cli_tests/hsmauth.rs"]

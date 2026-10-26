@@ -3,12 +3,25 @@ use std::fmt;
 use std::io::{self, Read, Write};
 
 use yubikit::device::{DeviceError, YubiKeyDevice};
-use yubikit::management::Capability;
+use yubikit::management::{Capability, DeviceInfo};
 use yubikit::oath::parse_b32_key;
 use yubikit::otp::modhex_decode;
 use yubikit::smartcard::{ScpKeyParams, SmartCardConnection, SmartCardError, Sw};
 
 use crate::scp::{self, ScpParams};
+
+pub fn require_fips_approved(
+    info: &DeviceInfo,
+    capability: Capability,
+    operation: &str,
+) -> Result<()> {
+    if info.fips_capable.contains(capability) && !info.fips_approved.contains(capability) {
+        return Err(anyhow!(
+            "YubiKey FIPS must be in FIPS approved mode {operation}."
+        ));
+    }
+    Ok(())
+}
 
 /// Format a failed CCID connection in a way that points at the selected application.
 pub fn format_smartcard_connection_error(app: &str, e: DeviceError) -> Error {
@@ -414,6 +427,26 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fips_approval_is_scoped_to_the_capable_application() {
+        let mut info = DeviceInfo::parse(&[0], yubikit::core::Version(5, 7, 4)).unwrap();
+        for capability in [Capability::OATH, Capability::PIV, Capability::HSMAUTH] {
+            info.fips_capable = Capability(0);
+            info.fips_approved = Capability(0);
+            require_fips_approved(&info, capability, "prior to testing").unwrap();
+            info.fips_capable = capability;
+            info.fips_approved = Capability::FIDO2;
+            assert_eq!(
+                require_fips_approved(&info, capability, "prior to testing")
+                    .unwrap_err()
+                    .to_string(),
+                "YubiKey FIPS must be in FIPS approved mode prior to testing."
+            );
+            info.fips_approved = capability;
+            require_fips_approved(&info, capability, "prior to testing").unwrap();
+        }
+    }
 
     #[test]
     fn tables_share_label_width_without_widening_other_columns() {

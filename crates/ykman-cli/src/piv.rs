@@ -13,7 +13,7 @@ use x509_cert::time::Validity;
 use yubikit::core::Version;
 use yubikit::device::YubiKeyDevice;
 use yubikit::keys::{PrivateKey, PublicKey};
-use yubikit::management::Capability;
+use yubikit::management::{Capability, DeviceInfo};
 use yubikit::piv::{
     DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, ManagementKey, ManagementKeyType, ObjectId,
     PinPolicy, PivError, PivPin, PivSession, PivSignature, PivSigner, Slot, TouchPolicy,
@@ -32,7 +32,7 @@ use crate::cli_enums::{
 use crate::scp::ScpParams;
 use crate::util::{
     ByteFormat, ByteLen, confirm, open_smartcard_session, print_table, prompt_bytes,
-    read_file_or_stdin, write_file_or_stdout,
+    read_file_or_stdin, require_fips_approved, write_file_or_stdout,
 };
 
 use yubikit::__internal::{padding, piv_secret};
@@ -931,6 +931,11 @@ fn format_piv_credential_error(e: PivError, credential: &str, action: &str) -> a
         PivError::InvalidPin(attempts) => {
             anyhow!("{action}: Wrong {credential}, {attempts} attempt(s) remaining.")
         }
+        PivError::Connection(SmartCardError::Apdu { sw, .. })
+            if sw == Sw::ConditionsNotSatisfied as u16 =>
+        {
+            anyhow!("{action}: {credential} does not meet complexity requirement.")
+        }
         e => anyhow!("{action}: {e}"),
     }
 }
@@ -1187,18 +1192,17 @@ pub fn run_change_pin(
     new_pin: Option<&str>,
 ) -> Result<()> {
     let old = match pin {
-        Some(p) => to_piv_pin(p, "PIN")?,
-        None => crate::util::prompt_secret("Enter the current PIN")
-            .and_then(|p| to_piv_pin(&p, "PIN"))?,
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter the current PIN")?,
     };
+    validate_pin_length(dev.info(), &old, "Current PIN", 6)?;
+    let old = to_piv_pin(&old, "PIN")?;
     let new = match new_pin {
         Some(p) => p.to_string(),
         None => crate::util::prompt_new_secret("New PIN")?,
     };
 
-    if new.len() < 6 || new.len() > 8 {
-        return Err(anyhow!("PIN must be 6-8 characters."));
-    }
+    validate_new_pin(dev.info(), &new, "New PIN")?;
     let new = to_piv_pin(&new, "PIN")?;
 
     let mut session = open_session(dev, scp_params)?;
@@ -1216,18 +1220,17 @@ pub fn run_change_puk(
     new_puk: Option<&str>,
 ) -> Result<()> {
     let old = match puk {
-        Some(p) => to_piv_pin(p, "PUK")?,
-        None => crate::util::prompt_secret("Enter the current PUK")
-            .and_then(|p| to_piv_pin(&p, "PUK"))?,
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_secret("Enter the current PUK")?,
     };
+    validate_pin_length(dev.info(), &old, "Current PUK", 6)?;
+    let old = to_piv_pin(&old, "PUK")?;
     let new = match new_puk {
         Some(p) => p.to_string(),
         None => crate::util::prompt_new_secret("New PUK")?,
     };
 
-    if new.len() < 6 || new.len() > 8 {
-        return Err(anyhow!("PUK must be 6-8 characters."));
-    }
+    validate_new_pin(dev.info(), &new, "New PUK")?;
     let new = to_piv_pin(&new, "PUK")?;
 
     let mut session = open_session(dev, scp_params)?;
@@ -1253,15 +1256,18 @@ pub fn run_unblock_pin(
         None => crate::util::prompt_new_secret("New PIN")?,
     };
 
-    if new.len() < 6 || new.len() > 8 {
-        return Err(anyhow!("New PIN must be 6-8 characters."));
-    }
+    validate_new_pin(dev.info(), &new, "New PIN")?;
     let new = to_piv_pin(&new, "PIN")?;
 
     let mut session = open_session(dev, scp_params)?;
-    session
-        .unblock_pin(&puk, &new)
-        .map_err(|e| format_piv_credential_error(e, "PUK", "Failed to unblock PIN"))?;
+    session.unblock_pin(&puk, &new).map_err(|e| match e {
+        PivError::Connection(SmartCardError::Apdu { sw, .. })
+            if sw == Sw::ConditionsNotSatisfied as u16 =>
+        {
+            anyhow!("PIN does not meet complexity requirement.")
+        }
+        e => format_piv_credential_error(e, "PUK", "Failed to unblock PIN"),
+    })?;
     eprintln!("PIN unblocked.");
     Ok(())
 }
@@ -1275,6 +1281,16 @@ pub fn run_set_retries(
     pin: Option<&str>,
     force: bool,
 ) -> Result<()> {
+    let mut session = open_session(dev, scp_params)?;
+    if dev.info().fips_capable.contains(Capability::PIV) {
+        let pin = session
+            .get_pin_metadata()
+            .map_err(|e| anyhow!("Failed to read PIN metadata: {e}"))?;
+        let puk = session
+            .get_puk_metadata()
+            .map_err(|e| anyhow!("Failed to read PUK metadata: {e}"))?;
+        check_fips_retry_change(dev.info(), pin.default_value, puk.default_value)?;
+    }
     if !force
         && !confirm(&format!(
             "Set PIN retries to {pin_retries} and PUK retries to {puk_retries}? This will reset PIN and PUK to defaults."
@@ -1283,7 +1299,6 @@ pub fn run_set_retries(
         return Err(anyhow!("Aborted."));
     }
 
-    let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
     if !pin_verified {
         ensure_pin(&mut session, pin)?;
@@ -1306,12 +1321,19 @@ pub fn run_change_management_key(
     pin: Option<&str>,
     protect: bool,
 ) -> Result<()> {
+    if protect {
+        require_fips_approved(dev.info(), Capability::PIV, "prior to using --protect")?;
+    }
     let mut session = open_session(dev, scp_params)?;
     let key_type: ManagementKeyType = algorithm
         .map(Into::into)
         .unwrap_or_else(|| session.management_key_type());
-    check_management_key_type_supported(session.version(), dev.info().is_fips, key_type)
-        .map_err(|e| anyhow!("{e}"))?;
+    check_management_key_type_supported(
+        session.version(),
+        dev.info().fips_capable.contains(Capability::PIV),
+        key_type,
+    )
+    .map_err(|e| anyhow!("{e}"))?;
 
     let key_len = key_type.key_len();
 
@@ -1371,13 +1393,14 @@ fn management_key_type_prompt_name(key_type: ManagementKeyType) -> &'static str 
 
 fn check_management_key_type_supported(
     version: Version,
-    is_fips: bool,
+    fips_capable: bool,
     key_type: ManagementKeyType,
 ) -> std::result::Result<(), String> {
     match key_type {
-        ManagementKeyType::Tdes
-            if (is_fips && version >= Version(5, 7, 0)) || version >= Version(6, 0, 0) =>
-        {
+        ManagementKeyType::Tdes if fips_capable => {
+            Err("TDES not supported on YubiKey FIPS.".to_string())
+        }
+        ManagementKeyType::Tdes if version >= Version(6, 0, 0) => {
             Err("TDES management keys are not supported by this YubiKey".to_string())
         }
         ManagementKeyType::Aes128 | ManagementKeyType::Aes192 | ManagementKeyType::Aes256
@@ -1389,6 +1412,58 @@ fn check_management_key_type_supported(
         }
         _ => Ok(()),
     }
+}
+
+fn validate_pin_length(info: &DeviceInfo, pin: &str, name: &str, min_len: usize) -> Result<()> {
+    let (length, unit) = if info.pin_complexity {
+        (pin.chars().count(), "characters")
+    } else {
+        (pin.len(), "bytes")
+    };
+    if !(min_len..=8).contains(&length) {
+        return Err(if min_len == 8 {
+            anyhow!("{name} must be exactly 8 {unit} long.")
+        } else {
+            anyhow!("{name} must be between {min_len} and 8 {unit} long.")
+        });
+    }
+    Ok(())
+}
+
+fn validate_new_pin(info: &DeviceInfo, pin: &str, name: &str) -> Result<()> {
+    let min_len = if info.fips_capable.contains(Capability::PIV) {
+        8
+    } else {
+        6
+    };
+    validate_pin_length(info, pin, name, min_len)
+}
+
+fn check_fips_retry_change(info: &DeviceInfo, pin_default: bool, puk_default: bool) -> Result<()> {
+    if info.fips_capable.contains(Capability::PIV) && !(pin_default && puk_default) {
+        return Err(anyhow!(
+            "Retry attempts must be set before PIN/PUK have been changed."
+        ));
+    }
+    Ok(())
+}
+
+fn check_key_support_fips(
+    info: &DeviceInfo,
+    key_type: KeyType,
+    pin_policy: PinPolicy,
+) -> Result<()> {
+    if info.fips_capable.contains(Capability::PIV) {
+        if matches!(key_type, KeyType::Rsa1024 | KeyType::X25519) {
+            return Err(anyhow!(
+                "Key type {key_type} not supported on YubiKey FIPS."
+            ));
+        }
+        if pin_policy == PinPolicy::Never {
+            return Err(anyhow!("PIN policy NEVER not supported on YubiKey FIPS."));
+        }
+    }
+    Ok(())
 }
 
 pub fn run_keys_generate(
@@ -1403,10 +1478,12 @@ pub fn run_keys_generate(
     pin: Option<&str>,
     format: CliFormat,
 ) -> Result<()> {
+    require_fips_approved(dev.info(), Capability::PIV, "prior to key generation")?;
     let slot = parse_slot(slot)?;
     let key_type: KeyType = algorithm.into();
     let pp: PinPolicy = pin_policy.into();
     let tp: TouchPolicy = touch_policy.into();
+    check_key_support_fips(dev.info(), key_type, pp)?;
 
     let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
@@ -1451,6 +1528,7 @@ pub fn run_keys_import(
     pin: Option<&str>,
     password: Option<&str>,
 ) -> Result<()> {
+    require_fips_approved(dev.info(), Capability::PIV, "prior to key import")?;
     let slot = parse_slot(slot)?;
     let pp: PinPolicy = pin_policy.into();
     let tp: TouchPolicy = touch_policy.into();
@@ -1462,6 +1540,7 @@ pub fn run_keys_import(
     // Parse the private key (auto-detects algorithm from PKCS#8)
     let private_key = PrivateKey::from_pkcs8(&der)
         .map_err(|_| anyhow!("Could not parse private key from file."))?;
+    check_key_support_fips(dev.info(), KeyType::try_from(&private_key.algorithm())?, pp)?;
 
     let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
@@ -1984,6 +2063,17 @@ pub fn run_objects_export(
     pin: Option<&str>,
 ) -> Result<()> {
     let obj_id = parse_object_id(object)?;
+    if [
+        ObjectId::Printed,
+        ObjectId::Fingerprints,
+        ObjectId::Facial,
+        ObjectId::Iris,
+    ]
+    .iter()
+    .any(|object| *object as u32 == obj_id)
+    {
+        require_fips_approved(dev.info(), Capability::PIV, "to export this object")?;
+    }
     let mut session = open_session(dev, scp_params)?;
     let data = verify_pin_if_needed(&mut session, pin, |s| s.get_object_raw(obj_id))?;
 
@@ -2528,6 +2618,96 @@ mod tests {
         format_management_key_auth_error, format_piv_credential_error,
         management_key_type_prompt_name, slot_heading,
     };
+
+    fn device_info(fips: bool) -> yubikit::management::DeviceInfo {
+        let mut info = yubikit::management::DeviceInfo::parse(&[0], Version(5, 7, 4)).unwrap();
+        if fips {
+            info.fips_capable = yubikit::management::Capability::PIV;
+        }
+        info
+    }
+
+    #[test]
+    fn fips_key_restrictions_apply_before_and_after_approval() {
+        use yubikit::piv::PinPolicy;
+        for approved in [false, true] {
+            let mut info = device_info(true);
+            if approved {
+                info.fips_approved = info.fips_capable;
+            }
+            for key_type in [KeyType::Rsa1024, KeyType::X25519] {
+                assert_eq!(
+                    super::check_key_support_fips(&info, key_type, PinPolicy::Default)
+                        .unwrap_err()
+                        .to_string(),
+                    format!("Key type {key_type} not supported on YubiKey FIPS.")
+                );
+            }
+            assert_eq!(
+                super::check_key_support_fips(&info, KeyType::EccP256, PinPolicy::Never)
+                    .unwrap_err()
+                    .to_string(),
+                "PIN policy NEVER not supported on YubiKey FIPS."
+            );
+            super::check_key_support_fips(&info, KeyType::EccP256, PinPolicy::Once).unwrap();
+        }
+        for key_type in [KeyType::Rsa1024, KeyType::X25519, KeyType::EccP256] {
+            super::check_key_support_fips(&device_info(false), key_type, PinPolicy::Never).unwrap();
+        }
+    }
+
+    #[test]
+    fn fips_pin_lengths_use_the_correct_units() {
+        let mut info = device_info(true);
+        for complexity in [false, true] {
+            info.pin_complexity = complexity;
+            let unit = if complexity { "characters" } else { "bytes" };
+            for name in ["New PIN", "New PUK"] {
+                for invalid in ["", "123456", "1234567", "123456789"] {
+                    assert_eq!(
+                        super::validate_new_pin(&info, invalid, name)
+                            .unwrap_err()
+                            .to_string(),
+                        format!("{name} must be exactly 8 {unit} long.")
+                    );
+                }
+                super::validate_new_pin(&info, "80246397", name).unwrap();
+            }
+            super::validate_pin_length(&info, "123456", "Current PIN", 6).unwrap();
+        }
+        info.pin_complexity = true;
+        assert!(super::validate_new_pin(&info, "123456\u{e9}", "New PIN").is_err());
+        info.pin_complexity = false;
+        super::validate_new_pin(&info, "123456\u{e9}", "New PIN").unwrap();
+        super::validate_new_pin(&device_info(false), "123456", "New PIN").unwrap();
+    }
+
+    #[test]
+    fn fips_retry_changes_require_both_default_credentials() {
+        for pin in [false, true] {
+            for puk in [false, true] {
+                assert_eq!(
+                    super::check_fips_retry_change(&device_info(true), pin, puk).is_ok(),
+                    pin && puk
+                );
+                super::check_fips_retry_change(&device_info(false), pin, puk).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn piv_complexity_errors_identify_the_credential() {
+        for credential in ["PIN", "PUK"] {
+            let error = PivError::Connection(SmartCardError::Apdu {
+                sw: 0x6985,
+                data: vec![],
+            });
+            assert_eq!(
+                format_piv_credential_error(error, credential, "Failed").to_string(),
+                format!("Failed: {credential} does not meet complexity requirement.")
+            );
+        }
+    }
 
     fn key_command(name: &str) -> clap::Command {
         let mut command = crate::Cli::command();

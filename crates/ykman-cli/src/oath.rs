@@ -15,6 +15,7 @@ use crate::cli_enums::{CliOathAlgorithm, CliOathDigits, CliOathType};
 use crate::scp::{self, ScpParams};
 use crate::util::{
     b32_encode, confirm, format_session_error, format_smartcard_connection_error, print_table,
+    require_fips_approved,
 };
 
 #[derive(Subcommand)]
@@ -665,6 +666,7 @@ pub fn run_accounts_add(
     touch: bool,
     force: bool,
 ) -> Result<()> {
+    require_fips_approved(dev.info(), Capability::OATH, "prior to adding accounts")?;
     let oath_type: OathType = oath_type.into();
     let hash_algorithm: HashAlgorithm = algorithm.into();
     let digits = digits.as_u8();
@@ -838,6 +840,11 @@ pub fn run_access_change(
     clear: bool,
     remember: bool,
 ) -> Result<()> {
+    if clear && dev.info().fips_capable.contains(Capability::OATH) {
+        return Err(anyhow!(
+            "Removing the password is not allowed on YubiKey FIPS."
+        ));
+    }
     let mut session = open_session(dev, scp_params, password, false)?;
 
     if clear {
@@ -923,6 +930,7 @@ pub fn run_accounts_uri(
     touch: bool,
     force: bool,
 ) -> Result<()> {
+    require_fips_approved(dev.info(), Capability::OATH, "prior to adding accounts")?;
     // Parse otpauth:// URI
     let url = uri
         .strip_prefix("otpauth://")
@@ -1085,6 +1093,7 @@ pub fn run_accounts_import(
     touch: bool,
     force: bool,
 ) -> Result<()> {
+    require_fips_approved(dev.info(), Capability::OATH, "prior to adding accounts")?;
     let data = crate::util::read_file_or_stdin(file)?;
     let xml_str = String::from_utf8(data).map_err(|_| anyhow!("PSKC file is not valid UTF-8."))?;
 

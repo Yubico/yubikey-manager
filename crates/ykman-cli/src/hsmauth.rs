@@ -6,7 +6,9 @@ use yubikit::management::Capability;
 
 use crate::cli_enums::CliFormat;
 use crate::scp::ScpParams;
-use crate::util::{confirm, open_smartcard_session, print_table, write_file_or_stdout};
+use crate::util::{
+    confirm, open_smartcard_session, print_table, require_fips_approved, write_file_or_stdout,
+};
 
 const MANAGEMENT_KEY_LEN: usize = 16;
 
@@ -333,15 +335,23 @@ fn require_credential_password(credential_password: Option<&str>) -> Result<Cred
 }
 
 /// Map HsmAuthError to user-friendly messages, matching Python's handle_credential_error.
-fn format_credential_error(e: &yubikit::hsmauth::HsmAuthError, default_msg: &str) -> String {
+fn format_credential_error(
+    e: &yubikit::hsmauth::HsmAuthError,
+    default_msg: &str,
+    authentication: &str,
+    new_password: Option<&str>,
+) -> String {
     use yubikit::hsmauth::HsmAuthError;
     use yubikit::smartcard::SmartCardError;
     match e {
         HsmAuthError::InvalidPin(retries) => {
             if *retries > 0 {
-                format!("Wrong management password, {retries} attempt(s) remaining.")
+                format!(
+                    "Wrong {}, {retries} attempt(s) remaining.",
+                    authentication.to_ascii_lowercase()
+                )
             } else {
-                "Management password is blocked.".into()
+                format!("{authentication} is blocked.")
             }
         }
         HsmAuthError::Connection(SmartCardError::Apdu { sw, .. }) => match *sw {
@@ -349,7 +359,10 @@ fn format_credential_error(e: &yubikit::hsmauth::HsmAuthError, default_msg: &str
             0x6A84 => "No space left on the YubiKey for YubiHSM Auth credentials.".into(),
             0x6A82 => "Credential with the provided label was not found.".into(),
             0x6982 => "The device was not touched.".into(),
-            0x6985 => "Password does not meet complexity requirement.".into(),
+            0x6985 => match new_password {
+                Some(password) => format!("{password} does not meet complexity requirement."),
+                None => default_msg.into(),
+            },
             _ => default_msg.into(),
         },
         _ => default_msg.into(),
@@ -413,6 +426,11 @@ pub fn run_credentials_generate(
     management_key: Option<&str>,
     touch: bool,
 ) -> Result<()> {
+    require_fips_approved(
+        dev.info(),
+        Capability::HSMAUTH,
+        "prior to adding credentials",
+    )?;
     let mgmt = require_management_password(management_key)?;
     let pw = require_credential_password(credential_password)?;
 
@@ -423,6 +441,8 @@ pub fn run_credentials_generate(
             anyhow!(format_credential_error(
                 &e,
                 "Failed to generate credential.",
+                "Management password",
+                Some("Credential password"),
             ))
         })?;
     eprintln!("Asymmetric credential generated: {label}");
@@ -441,9 +461,14 @@ pub fn run_credentials_delete(
     }
     let mgmt = require_management_password(management_key)?;
     let mut session = open_session(dev, scp_params)?;
-    session
-        .delete_credential(&mgmt, label)
-        .map_err(|e| anyhow!(format_credential_error(&e, "Failed to delete credential.")))?;
+    session.delete_credential(&mgmt, label).map_err(|e| {
+        anyhow!(format_credential_error(
+            &e,
+            "Failed to delete credential.",
+            "Management password",
+            None
+        ))
+    })?;
     eprintln!("Credential deleted: {label}");
     Ok(())
 }
@@ -459,6 +484,11 @@ pub fn run_credentials_symmetric(
     management_key: Option<&str>,
     touch: bool,
 ) -> Result<()> {
+    require_fips_approved(
+        dev.info(),
+        Capability::HSMAUTH,
+        "prior to adding credentials",
+    )?;
     let mgmt = require_management_password(management_key)?;
     let pw = require_credential_password(credential_password)?;
 
@@ -481,7 +511,14 @@ pub fn run_credentials_symmetric(
     let mut session = open_session(dev, scp_params)?;
     session
         .put_credential_symmetric(&mgmt, label, &enc, &mac, &pw, touch)
-        .map_err(|e| anyhow!(format_credential_error(&e, "Failed to store credential.")))?;
+        .map_err(|e| {
+            anyhow!(format_credential_error(
+                &e,
+                "Failed to store credential.",
+                "Management password",
+                Some("Credential password")
+            ))
+        })?;
     eprintln!("Symmetric credential stored: {label}");
     if generate {
         println!("ENC key: {}", hex::encode(&enc));
@@ -499,13 +536,25 @@ pub fn run_credentials_derive(
     management_key: Option<&str>,
     touch: bool,
 ) -> Result<()> {
+    require_fips_approved(
+        dev.info(),
+        Capability::HSMAUTH,
+        "prior to adding credentials",
+    )?;
     let mgmt = require_management_password(management_key)?;
     let pw = require_credential_password(credential_password)?;
 
     let mut session = open_session(dev, scp_params)?;
     session
         .put_credential_derived(&mgmt, label, derivation_password, &pw, touch)
-        .map_err(|e| anyhow!(format_credential_error(&e, "Failed to derive credential.")))?;
+        .map_err(|e| {
+            anyhow!(format_credential_error(
+                &e,
+                "Failed to derive credential.",
+                "Management password",
+                Some("Credential password")
+            ))
+        })?;
     eprintln!("Derived credential stored: {label}");
     Ok(())
 }
@@ -539,7 +588,14 @@ pub fn run_credentials_change_password(
     let mut session = open_session(dev, scp_params)?;
     session
         .change_credential_password(label, &old_pw, &new_pw)
-        .map_err(|e| anyhow!(format_credential_error(&e, "Failed to change password.")))?;
+        .map_err(|e| {
+            anyhow!(format_credential_error(
+                &e,
+                "Failed to change password.",
+                "Credential password",
+                Some("Credential password")
+            ))
+        })?;
     eprintln!("Credential password changed for: {label}");
     Ok(())
 }
@@ -555,6 +611,11 @@ pub fn run_credentials_import(
     management_key: Option<&str>,
     touch: bool,
 ) -> Result<()> {
+    require_fips_approved(
+        dev.info(),
+        Capability::HSMAUTH,
+        "prior to adding credentials",
+    )?;
     let mgmt = require_management_password(management_key)?;
     let cred_pw = require_credential_password(credential_password)?;
 
@@ -570,6 +631,8 @@ pub fn run_credentials_import(
             anyhow!(format_credential_error(
                 &e,
                 "Failed to import asymmetric credential.",
+                "Management password",
+                Some("Credential password"),
             ))
         })?;
     eprintln!("Asymmetric credential imported.");
@@ -632,9 +695,14 @@ pub fn run_credentials_export(
     format: CliFormat,
 ) -> Result<()> {
     let mut session = open_session(dev, scp_params)?;
-    let public_key = session
-        .get_public_key(label)
-        .map_err(|e| anyhow!(format_credential_error(&e, "Failed to get public key.")))?;
+    let public_key = session.get_public_key(label).map_err(|e| {
+        anyhow!(format_credential_error(
+            &e,
+            "Failed to get public key.",
+            "Credential password",
+            None
+        ))
+    })?;
 
     // Export as SubjectPublicKeyInfo
     use base64::Engine;
@@ -735,6 +803,8 @@ pub fn run_access_change_management_key(
             anyhow!(format_credential_error(
                 &e,
                 "Failed to change management password.",
+                "Management password",
+                Some("Management password"),
             ))
         })?;
     if generate {
@@ -751,6 +821,52 @@ pub fn run_access_change_management_key(
 #[cfg(test)]
 mod tests {
     use super::require_credential_password;
+
+    #[test]
+    fn password_errors_distinguish_authentication_and_complexity() {
+        use yubikit::hsmauth::HsmAuthError;
+        use yubikit::smartcard::SmartCardError;
+        for authentication in ["Management password", "Credential password"] {
+            assert_eq!(
+                super::format_credential_error(
+                    &HsmAuthError::InvalidPin(2),
+                    "Failed",
+                    authentication,
+                    None,
+                ),
+                format!(
+                    "Wrong {}, 2 attempt(s) remaining.",
+                    authentication.to_ascii_lowercase()
+                )
+            );
+            assert_eq!(
+                super::format_credential_error(
+                    &HsmAuthError::InvalidPin(0),
+                    "Failed",
+                    authentication,
+                    None,
+                ),
+                format!("{authentication} is blocked.")
+            );
+            let error = HsmAuthError::Connection(SmartCardError::Apdu {
+                sw: 0x6985,
+                data: vec![],
+            });
+            assert_eq!(
+                super::format_credential_error(
+                    &error,
+                    "Failed",
+                    "Management password",
+                    Some(authentication)
+                ),
+                format!("{authentication} does not meet complexity requirement.")
+            );
+            assert_eq!(
+                super::format_credential_error(&error, "Failed", authentication, None),
+                "Failed"
+            );
+        }
+    }
 
     #[test]
     fn credential_password_byte_limits() {
