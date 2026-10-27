@@ -2,6 +2,7 @@
 name = "yubikit"
 version = "1.0.0a1"
 description = "Python library for managing YubiKey configuration."
+readme = "README.md"
 authors = [
   { name = "Dain Nilsson", email = "dain@yubico.com" }
 ]
