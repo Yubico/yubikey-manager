@@ -1,3 +1,10 @@
+* Version 6.0.0-alpha.0 (unreleased)
+ ** Initial alpha of the Rust rewrite, with a native CLI and Rust-backed Python bindings.
+ ** Rust libraries provided by the yubikit and ykman crates.
+ ** Python library distributed separately as yubikit; yubikey-manager provides the CLI.
+ ** Python 3.11 or later is now required.
+ ** Breaking Python API and CLI changes; see doc/Migration_5-6.adoc.
+
 * Version 5.9.0 (released 2026-01-22)
  ** OATH: Add support for importing credentials from PSKC files.
  ** OATH: Add --generate flag to "oath accounts add" command to generate random secrets.

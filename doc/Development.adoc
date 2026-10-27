@@ -201,6 +201,9 @@ Windows signing uses a digest-pinned Scribe container. When updating it, review
 the image release and resolve its registry digest, then update all four signing
 jobs for the x64 and ARM64 executables and installers.
 
+Signing accepts unprefixed `X.Y.Z-alpha.N`, `X.Y.Z-beta.N` and `X.Y.Z-rc.N`
+tags. Stable releases reuse the signed RC artifacts without rebuilding.
+
 Signing containers receive only `GOOGLE_APPLICATION_CREDENTIALS`, `CI`,
 `GITHUB_EVENT_NAME`, `GITHUB_REF`, and `GITHUB_REPOSITORY` from the runner.
 Scribe needs the CI metadata to construct the release reference; keep these
