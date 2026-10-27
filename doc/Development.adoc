@@ -141,6 +141,22 @@ force a rebuild of the yubikit package:
 
     $ uv sync --reinstall-package yubikit
 
+=== Building Python source distributions
+
+Build release source distributions for both Python packages using:
+
+    $ uv run --locked python build_source_packages.py
+
+The archives are written to `dist/`. Use this helper rather than publishing raw
+`uv build --sdist` output: Maturin trims the Cargo workspace without updating
+its lockfile. The helper normalizes the bundled lockfile offline, rejects any
+dependency version, source or checksum changes, and verifies that Cargo accepts
+the result with `--locked`. The repository lockfiles are not changed.
+
+CI rebuilds wheels from these archives with `--locked` on Python 3.11 and 3.14,
+then installs and tests the wheels outside the workspace. Release wheels for
+the full platform and architecture matrix are built by the Wheels workflow.
+
 === Code style & security
 
 https://docs.astral.sh/ruff/[ruff] handles Python style and security linting.

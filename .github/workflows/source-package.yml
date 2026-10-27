@@ -62,15 +62,27 @@ jobs:
         run: uv run --locked pytest
 
       - name: Create source packages
-        if: matrix.python-version == '3.14'
         run: |
           export SOURCE_DATE_EPOCH=$(git show --no-patch --format=%ct)
-          uv build --package yubikit --sdist
-          uv build --package yubikey-manager --sdist
+          uv run --locked python build_source_packages.py --out-dir artifacts
+
+      - name: Build wheels from source packages
+        run: |
+          for source in artifacts/*.tar.gz; do
+            uv build "$source" --wheel --out-dir "$RUNNER_TEMP/sdist-wheels"
+          done
           git diff --exit-code -- Cargo.lock uv.lock
-          mkdir artifacts
-          mv dist/yubikit-*.tar.gz artifacts/
-          mv dist/yubikey_manager-*.tar.gz artifacts/
+
+      - name: Test source-built wheels outside the workspace
+        run: |
+          uv venv "$RUNNER_TEMP/sdist-venv"
+          uv pip install --python "$RUNNER_TEMP/sdist-venv/bin/python" \
+            "$RUNNER_TEMP"/sdist-wheels/*.whl \
+            "pytest>=8,<10" "makefun>=1.9.5,<2"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/sdist-venv/bin/python" -m pytest \
+            "$GITHUB_WORKSPACE/tests" --ignore="$GITHUB_WORKSPACE/tests/device"
+          "$RUNNER_TEMP/sdist-venv/bin/python" -m ykman --version
 
       - name: Upload source packages
         if: matrix.python-version == '3.14'
