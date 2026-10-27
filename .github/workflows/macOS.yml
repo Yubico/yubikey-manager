@@ -24,11 +24,6 @@ jobs:
           cache: true
           cache-save-if: ${{ github.event_name == 'push' }}
 
-      - name: Install cargo-about
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
-        with:
-          tool: cargo-about
-
       - name: Build Rust CLI (universal)
         run: |
           cargo build --locked --release -p ykman-cli --target aarch64-apple-darwin

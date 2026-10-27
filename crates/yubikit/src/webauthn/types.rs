@@ -15,7 +15,7 @@
 //! WebAuthn types for credential creation and assertion ceremonies.
 //!
 //! These types correspond to the WebAuthn Level 3 specification and are used
-//! as the public API for [`WebAuthnClient`](crate::webauthn::WebAuthnClient). They are also used by
+//! as the public API for [`WebAuthnClient`]. They are also used by
 //! [`crate::ctap2`] for CBOR serialization to/from the authenticator.
 
 use serde::{Deserialize, Serialize};

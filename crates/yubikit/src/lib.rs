@@ -83,7 +83,7 @@
 //! - [`webauthn`] — High-level WebAuthn client with extension support (PRF, credProtect, largeBlob, etc.)
 //!
 //! ## Transport and protocol infrastructure
-//! - [`platform`] — USB HID (FIDO and OTP) and PC/SC transport implementations (requires `usb` feature)
+//! - [`platform`] — USB HID (FIDO and OTP) and PC/SC transport implementations (requires `pcsc` or `hid`)
 //! - [`smartcard`] — ISO 7816 SmartCard / CCID connection, APDU handling, and SCP03 secure channel
 //! - [`otp`] — OTP HID framing protocol
 //! - [`core`] — Shared types: [`core::Version`], [`core::Connection`] trait

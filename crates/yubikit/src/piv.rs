@@ -1457,7 +1457,7 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Open a PIV session on a card that is not (necessarily) a YubiKey.
     ///
-    /// Identical to [`new`] except that it never sends the Yubico-proprietary
+    /// Identical to [`Self::new`] except that it never sends the Yubico-proprietary
     /// `INS_GET_VERSION` (`0xFD`) or the YubiKey management-key metadata probe.
     /// Use this for standards-conformant PIV cards that share the PIV AID but
     /// don't implement Yubico's instructions.
@@ -1469,7 +1469,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     /// GET DATA / VERIFY returns `SW=0x6982` — even for PIN-free objects, and
     /// even after a re-SELECT. Avoiding the instruction entirely is the only
     /// reliable fix, so callers that may encounter non-YubiKey cards must use
-    /// this constructor rather than [`new`].
+    /// this constructor rather than [`Self::new`].
     ///
     /// The session reports [`Version`] `0.0.0`, so every `require_version` gate
     /// degrades to [`PivError::NotSupported`], and the management key type
@@ -1741,12 +1741,12 @@ impl<C: SmartCardConnection> PivSession<C> {
 
     /// Verify reference data at an arbitrary PIV key reference.
     ///
-    /// Same VERIFY command as [`verify_pin`], parameterised on the key
+    /// Same VERIFY command as [`Self::verify_pin`], parameterised on the key
     /// reference (P2) rather than hard-coded to the PIV Card Application
     /// PIN. Per SP 800-73-5 Pt 1 Table 4, useful references include:
     ///
     /// - `0x00` — Global PIN.
-    /// - `0x80` — PIV Card Application PIN (what [`verify_pin`] uses).
+    /// - `0x80` — PIV Card Application PIN (what [`Self::verify_pin`] uses).
     ///
     /// `pin` is padded to 8 bytes with `0xFF` before transmission. On
     /// failure, returns [`PivError::InvalidPin`] with the remaining attempts

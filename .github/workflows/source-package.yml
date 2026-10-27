@@ -45,10 +45,10 @@ jobs:
           cache: true
           cache-save-if: ${{ github.event_name == 'push' }}
 
-      - name: Install cargo plugins
+      - name: Install cargo-deny
         uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
         with:
-          tool: cargo-about,cargo-deny
+          tool: cargo-deny
 
       - name: Install the project
         run: uv sync --locked

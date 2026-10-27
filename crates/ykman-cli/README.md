@@ -20,11 +20,53 @@ ykman apdu      Send raw APDUs to the YubiKey
 
 ## Installation
 
-From crates.io:
+### Prerequisites
+
+Building requires Rust 1.88 or later and a native linker/toolchain.
+On Debian/Ubuntu:
 
 ```sh
-cargo install ykman-cli
+sudo apt install build-essential pkg-config libpcsclite-dev libudev-dev libdbus-1-dev pcscd
 ```
+
+On Fedora:
+
+```sh
+sudo dnf install gcc pkgconf-pkg-config pcsc-lite-devel systemd-devel dbus-devel pcsc-lite
+```
+
+On macOS, install the Xcode Command Line Tools (`xcode-select --install`).
+On Windows, use the Rust MSVC toolchain with Visual Studio Build Tools,
+including the Desktop development with C++ workload and Windows SDK.
+Neither platform requires separately installed PC/SC or HID development libraries.
+
+On Linux, ensure `pcscd` is running or socket-activated for smart-card and NFC
+commands. HID access requires appropriate udev permissions; install your
+distribution's YubiKey udev rules and reconnect the device after changing them.
+Saving credentials requires a session D-Bus and a Secret Service provider,
+such as GNOME Keyring.
+
+### Alpha release
+
+The crates.io installation command selects the alpha explicitly:
+
+```sh
+cargo install ykman-cli --version 6.0.0-alpha.0 --locked
+```
+
+To install from a repository checkout instead:
+
+```sh
+cargo install --path crates/ykman-cli --locked
+```
+
+The installed executable is named `ykman`. Ensure Cargo's binary directory
+(`$HOME/.cargo/bin` by default, or `%USERPROFILE%\.cargo\bin` on Windows) is on
+`PATH`. It can conflict with an existing Python installation of `ykman`; check
+which executable your shell resolves.
+
+Third-party licence notices are bundled with the crate and can be displayed
+with `ykman licenses`. Building does not require `cargo-about`.
 
 Pre-built binaries are also available from the
 [releases page](https://github.com/Yubico/yubikey-manager/releases).
@@ -44,4 +86,4 @@ the YubiKey so the reader can be discovered again.
 
 ## License
 
-Apache-2.0
+Apache-2.0; see the bundled `LICENSE` file.

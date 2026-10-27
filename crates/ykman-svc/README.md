@@ -10,6 +10,16 @@ This service allows Yubico client applications such as the ykman CLI to access
 the FIDO functionality of a YubiKey on Windows without requiring running them
 as administrator.
 
+## Installation
+
+For production, use the signed Windows installers provided by the client
+applications. Installing the crate with Cargo only builds an executable; it
+does not register the Windows service or sign it for client verification.
+
+Building requires Rust 1.88 or later and the Rust MSVC toolchain with Visual
+Studio Build Tools, including the Desktop development with C++ workload and
+Windows SDK. PC/SC and HID support use Windows system libraries.
+
 ## Usage
 
 The service is typically started automatically by system service manager rather
@@ -82,4 +92,4 @@ Refresh failures are reported to the requesting client.
 
 ## License
 
-Apache-2.0
+Apache-2.0; see the bundled `LICENSE` file.

@@ -66,12 +66,6 @@ jobs:
           cache: true
           cache-save-if: ${{ github.event_name == 'push' }}
 
-      - name: Install cargo-about
-        if: matrix.package == 'ykman' && !matrix.container
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
-        with:
-          tool: cargo-about
-
       - name: Build wheels
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
@@ -81,7 +75,7 @@ jobs:
           container: ${{ matrix.container }}
           before-script-linux: >-
             ${{ matrix.container && (matrix.package == 'ykman'
-              && 'dnf install -y pcsc-lite-devel systemd-devel dbus-devel && cargo install --root /usr/local cargo-about --locked --features cli'
+              && 'dnf install -y pcsc-lite-devel systemd-devel dbus-devel'
               || 'dnf install -y pcsc-lite-devel systemd-devel') || '' }}
           working-directory: packages/${{ matrix.package }}
 

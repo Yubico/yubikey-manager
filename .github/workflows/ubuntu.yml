@@ -48,7 +48,7 @@ jobs:
       - name: Install cargo plugins
         uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
         with:
-          tool: cargo-zigbuild,cargo-about
+          tool: cargo-zigbuild
 
       - name: Build Rust CLI
         run: |
@@ -90,10 +90,29 @@ jobs:
       - name: Install cargo-about
         uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
         with:
-          tool: cargo-about
+          tool: cargo-about@0.9.1
+
+      - name: Check bundled CLI licenses
+        run: |
+          cargo fetch --locked
+          cargo about generate --locked --offline --all-features --fail \
+            --manifest-path crates/ykman-cli/Cargo.toml \
+            --config crates/ykman-cli/about.toml \
+            --output-file "$RUNNER_TEMP/ykman-licenses.txt" \
+            crates/ykman-cli/about-cli.hbs
+          diff -u crates/ykman-cli/licenses.txt "$RUNNER_TEMP/ykman-licenses.txt"
 
       - name: Run non-hardware tests
         run: cargo test --locked --workspace --all-features --lib --bins -- --test-threads="$(nproc)"
+
+      - name: Verify crate packages without cargo-about
+        run: |
+          export PATH="$(dirname "$(rustup which rustc)"):/usr/bin:/bin"
+          if command -v cargo-about; then
+            echo "cargo-about must not be available for package verification" >&2
+            exit 1
+          fi
+          cargo package --locked --workspace --exclude yubikit-pyo3
 
       - name: Compile hardware integration tests
         run: cargo test --locked -p yubikit --tests --no-run

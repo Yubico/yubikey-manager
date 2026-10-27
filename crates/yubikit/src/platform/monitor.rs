@@ -14,7 +14,8 @@
 
 //! Event-based monitoring of connected YubiKey devices.
 //!
-//! [`monitor_device_events`] reports [`NodeEvent`]s as low-level device
+//! [`monitor_device_events`](crate::platform::monitor::monitor_device_events)
+//! reports [`NodeEvent`](crate::platform::monitor::NodeEvent)s as low-level device
 //! interfaces appear and disappear. It first emits `Added` events for every
 //! currently-connected interface, then blocks and reports changes as they
 //! happen.
@@ -22,12 +23,16 @@
 //! Two transports are monitored:
 //!
 //! - **PC/SC** — YubiKeys connected over USB report both a
-//!   [`DeviceNode::UsbReaderNode`] (the reader) and a
-//!   [`DeviceNode::CardNode`] (the card). YubiKeys placed on an NFC reader
-//!   report only a [`DeviceNode::CardNode`] — the reader itself is not
-//!   tracked.
+//!   [`DeviceNode::UsbReaderNode`](crate::platform::monitor::DeviceNode::UsbReaderNode)
+//!   (the reader) and a
+//!   [`DeviceNode::CardNode`](crate::platform::monitor::DeviceNode::CardNode)
+//!   (the card). YubiKeys placed on an NFC reader
+//!   report only a
+//!   [`DeviceNode::CardNode`](crate::platform::monitor::DeviceNode::CardNode).
+//!   The reader itself is not tracked.
 //! - **HID** — the OTP and FIDO interfaces are tracked separately as
-//!   [`DeviceNode::HidOtpNode`] and [`DeviceNode::HidFidoNode`].
+//!   [`DeviceNode::HidOtpNode`](crate::platform::monitor::DeviceNode::HidOtpNode)
+//!   and [`DeviceNode::HidFidoNode`](crate::platform::monitor::DeviceNode::HidFidoNode).
 //!
 //! PC/SC provides native change notifications. HID change detection is
 //! platform-specific: `udev` on Linux, `WM_DEVICECHANGE` window messages on
@@ -40,7 +45,8 @@
 //! transiently ejects and re-inserts the CCID card, which surfaces as a
 //! matching pair of card removal/insertion events.
 //!
-//! A [`LocalYubiKeyDevice::reinsert`] pauses in-process monitor probes and
+//! A local device's [`reinsert`](crate::device::YubiKeyDevice::reinsert) operation
+//! pauses in-process monitor probes and
 //! supplies its verified identity and paths for the ensuing reconciliation.
 //! Unannounced hotplugs still require DeviceInfo reads.
 

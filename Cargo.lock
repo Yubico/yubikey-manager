@@ -3342,7 +3342,7 @@ dependencies = [
 
 [[package]]
 name = "ykman"
-version = "0.1.0-dev.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.22.1",
@@ -3368,7 +3368,7 @@ dependencies = [
 
 [[package]]
 name = "ykman-cli"
-version = "6.0.0-dev.3"
+version = "6.0.0-alpha.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3411,7 +3411,7 @@ dependencies = [
 
 [[package]]
 name = "ykman-svc"
-version = "0.1.0-dev.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3430,7 +3430,7 @@ dependencies = [
 
 [[package]]
 name = "yubikit"
-version = "0.1.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -3479,7 +3479,7 @@ dependencies = [
 
 [[package]]
 name = "yubikit-pyo3"
-version = "0.1.0"
+version = "1.0.0-alpha.0"
 dependencies = [
  "elliptic-curve",
  "log",

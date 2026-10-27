@@ -33,26 +33,30 @@ This repository is a mixed Rust/Python workspace:
 
 === Install dependencies
 
-This project uses https://rustup.rs/[rustup] for the Rust toolchain. The
+This project requires Rust 1.88 or later and uses https://rustup.rs/[rustup]
+for the Rust toolchain. The
 Python parts use https://docs.astral.sh/uv/[uv], which can be skipped when
 only developing the Rust parts. Note that changes in the `yubikit` crate often
 require modifications to the Python wrapper as well.
 
 ==== Linux (Debian-based distributions)
 
-    $ sudo apt install pcscd libpcsclite-dev libudev-dev
+    $ sudo apt install build-essential pkg-config pcscd libpcsclite-dev libudev-dev libdbus-1-dev
 
 ==== Linux (RPM-based distributions)
 
-    $ sudo dnf install pcsc-lite-devel systemd-devel
+    $ sudo dnf install gcc pkgconf-pkg-config pcsc-lite pcsc-lite-devel systemd-devel dbus-devel
 
 ==== macOS
 
-No additional system packages required.
+Install the Xcode Command Line Tools:
+
+    $ xcode-select --install
 
 ==== Windows
 
-No additional system packages required.
+Use the Rust MSVC toolchain with Visual Studio Build Tools, including the
+Desktop development with C++ workload and Windows SDK.
 
 === Setting up the development environment
 
@@ -102,6 +106,29 @@ hidapi to communicate directly with connected devices. Build without it to
 produce a binary that can only communicate via the `ykman-svc` service:
 
     $ cargo build -p ykman-cli --no-default-features
+
+=== Updating third-party licence notices
+
+The CLI embeds `crates/ykman-cli/licenses.txt`. Normal builds, including
+builds from crates.io packages, do not require `cargo-about`.
+
+After changing dependencies, CLI features, the licence policy, or the report
+template, regenerate the notices using the same `cargo-about` version as CI:
+
+    $ cargo install cargo-about --version 0.9.1 --locked
+    $ cargo fetch --locked
+    $ cargo about generate --locked --offline --all-features --fail \
+        --manifest-path crates/ykman-cli/Cargo.toml \
+        --config crates/ykman-cli/about.toml \
+        --output-file crates/ykman-cli/licenses.txt \
+        crates/ykman-cli/about-cli.hbs
+
+The report covers the CLI's runtime dependencies across platforms, including
+all CLI features, as resolved by `Cargo.lock`. Use `--locked` for release
+builds so the dependencies match the bundled notices.
+CI checks that the checked-in report matches regeneration and verifies crate
+packages without `cargo-about` installed.
+Commit the updated report with the dependency or licence-policy changes.
 
 === Building the Python wrapper
 

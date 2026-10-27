@@ -371,6 +371,22 @@ fn test_piv_sign_algorithm_choices() {
 }
 
 #[test]
+fn test_licenses_match_bundled_notices() {
+    for arg in ["licenses", "--licenses"] {
+        let output = ykman().arg(arg).output().expect("failed to run ykman");
+        assert!(
+            output.status.success(),
+            "licence command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.stdout.as_slice() == include_bytes!("../../licenses.txt"),
+            "{arg} output differs from the bundled licence notices"
+        );
+    }
+}
+
+#[test]
 fn test_utility_command_aliases() {
     for (flag, command) in [
         (vec!["--version"], vec!["version"]),

@@ -2,13 +2,12 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::process::Command;
 
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
 
 fn main() {
-    generate_licenses();
+    embed_licenses();
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let mut res = winresource::WindowsResource::new();
@@ -28,48 +27,10 @@ fn compress(data: &[u8]) -> Vec<u8> {
     encoder.finish().expect("Failed to finish compression")
 }
 
-fn generate_licenses() {
+fn embed_licenses() {
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest = Path::new(&out_dir).join("licenses.deflate");
-    let report = Path::new(&out_dir).join("licenses.txt");
-
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let manifest_dir = Path::new(&manifest_dir);
-    let workspace_root = manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("cannot find workspace root");
-
-    let template = manifest_dir.join("about-cli.hbs");
-    let config = manifest_dir.join("about.toml");
-    let lockfile = workspace_root.join("Cargo.lock");
-
-    println!("cargo:rerun-if-changed={}", template.display());
-    println!("cargo:rerun-if-changed={}", config.display());
-    println!("cargo:rerun-if-changed={}", lockfile.display());
-
-    let output = Command::new("cargo")
-        .args(["about", "generate"])
-        .arg(&template)
-        .arg("--config")
-        .arg(&config)
-        .arg("--manifest-path")
-        .arg(workspace_root.join("Cargo.toml"))
-        .arg("--output-file")
-        .arg(&report)
-        .output();
-
-    let raw = match output {
-        Ok(result) if result.status.success() => {
-            fs::read(&report).expect("Failed to read generated licenses")
-        }
-        Ok(result) => {
-            let stderr = String::from_utf8_lossy(&result.stderr);
-            panic!("cargo-about failed: {stderr}");
-        }
-        Err(e) => panic!("cargo-about not found: {e}"),
-    };
-
-    fs::remove_file(&report).expect("Failed to remove generated licenses");
-    fs::write(&dest, compress(&raw)).expect("Failed to write licenses.deflate");
+    println!("cargo:rerun-if-changed=licenses.txt");
+    fs::write(&dest, compress(include_bytes!("licenses.txt")))
+        .expect("Failed to write licenses.deflate");
 }
