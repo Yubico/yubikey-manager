@@ -291,3 +291,36 @@ Generate HTML API documentation for the Python packages:
     $ uv run sphinx-build docs docs/_build/html
 
 Open `docs/_build/html/index.html` in a browser to view the result.
+
+=== Release checklist
+
+A release includes both the Rust crates on crates.io and the Python packages on
+PyPI. Python package versions use PEP 440 spelling: the initial alpha is
+`yubikit` `1.0.0a0` and `yubikey-manager` `6.0.0a0`, corresponding to Rust
+`1.0.0-alpha.0` and `6.0.0-alpha.0`. Keep the Python package metadata, the
+manager's minimum `yubikit` dependency, and both workspace lockfiles consistent
+with the release.
+
+. Verify the declared Rust minimum, all workspace targets and features, unit
+  tests, and relevant device tests. Require green Linux, macOS and Windows CI
+  for the final release commit.
+. Verify Rust API documentation, including docs.rs native-dependency handling,
+  and build the Python Sphinx documentation.
+. Build and verify all publishable Rust crate packages. Build both Python
+  source distributions and the wheel matrix for supported platforms,
+  architectures and Python versions. Test source builds from the source
+  distributions and clean wheel installations outside the workspace; check
+  installed metadata, Python imports and the `ykman` executable version.
+. Confirm publishing access and intended ownership for all four crates.io
+  projects and both PyPI projects, and configure publishing credentials or
+  trusted publishing.
+. Prepare release notes and tag the exact source commit used for the verified
+  artifacts.
+. Publish Rust crates in dependency order: `yubikit`, then `ykman`, then
+  `ykman-cli` and `ykman-svc`. Keep the `yubikit-pyo3` crate unpublished on
+  crates.io; its native extension is distributed inside the Python `yubikit`
+  wheels and source distribution.
+. Publish the verified Python wheels and source distributions to PyPI:
+  `yubikit` first, then `yubikey-manager`.
+. Smoke-test registry-only Rust installation and clean Python installation
+  from PyPI, explicitly selecting the prerelease versions for an alpha.

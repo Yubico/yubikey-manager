@@ -12,17 +12,11 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
+import importlib.metadata
 import os
-import re
 import sys
 
 sys.path.insert(0, os.path.abspath("../packages/yubikit"))
-
-
-def get_version():
-    with open("../packages/ykman/ykman/__init__.py", "r") as f:
-        match = re.search(r"(?m)^__version__\s*=\s*['\"](.+)['\"]$", f.read())
-        return match.group(1)
 
 
 # -- Project information -----------------------------------------------------
@@ -32,7 +26,7 @@ copyright = "2023, Yubico"
 author = "Yubico"
 
 # The full version, including alpha/beta/rc tags
-release = get_version()
+release = importlib.metadata.version("yubikit")
 
 # The short X.Y version
 version = ".".join(release.split(".")[:2])

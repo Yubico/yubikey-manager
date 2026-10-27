@@ -45,6 +45,29 @@ Python helpers from `ykman` have moved into `yubikit`:
 | Rust core + Python wrapper
 |===
 
+=== Package versions
+
+`ykman.__version__` has been removed. Use
+`importlib.metadata.version("yubikit")` to read the installed library version
+instead. The `yubikit` library is distributed separately from the
+`yubikey-manager` CLI and has its own version.
+
+.5.x
+[source,python]
+----
+from ykman import __version__
+
+print(__version__)
+----
+
+.6.x
+[source,python]
+----
+from importlib.metadata import version
+
+print(version("yubikit"))
+----
+
 == Device enumeration
 
 === `list_all_devices()`
