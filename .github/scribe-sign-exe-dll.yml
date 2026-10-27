@@ -8,5 +8,4 @@ jobs:
         action: windows
         description: YubiKey Manager
         files:
-          - ykman-builds-windows/ykman/ykman.exe
-          - ykman-builds-windows/ykman/ykman-svc.exe
+          - signing-input/files/*
