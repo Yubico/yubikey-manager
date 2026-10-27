@@ -2563,7 +2563,7 @@ fn verify_signature(
         KeyType::Rsa1024 | KeyType::Rsa2048 => {
             let key = rsa::RsaPublicKey::from_public_key_der(spki_der)?;
             key.verify(
-                rsa::Pkcs1v15Sign::new::<Sha256>(),
+                rsa::Pkcs1v15Sign::new::<sha2_legacy::Sha256>(),
                 &Sha256::digest(message),
                 signature,
             )
@@ -3077,7 +3077,7 @@ mod tests {
             let other = rsa::RsaPublicKey::new(public.n().clone(), 65539u32.into()).unwrap();
             let signature = key
                 .sign(
-                    rsa::Pkcs1v15Sign::new::<Sha256>(),
+                    rsa::Pkcs1v15Sign::new::<sha2_legacy::Sha256>(),
                     &Sha256::digest(b"ykman-verify-key-match"),
                 )
                 .unwrap();

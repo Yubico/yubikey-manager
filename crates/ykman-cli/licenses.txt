@@ -1,6 +1,6 @@
 Third-party licenses for ykman
 ================================
-Apache License 2.0 (234 crates)
+Apache License 2.0 (236 crates)
 MIT License (28 crates)
 BSD 3-Clause "New" or "Revised" License (4 crates)
 Mozilla Public License 2.0 (2 crates)
@@ -4512,7 +4512,7 @@ Used by:
   - hmac 0.13.0
   - hybrid-array 0.4.15
   - inout 0.1.4
-  - keccak 0.1.6
+  - keccak 0.2.2
   - opaque-debug 0.3.1
   - p256 0.14.0
   - p384 0.14.0
@@ -4533,11 +4533,13 @@ Used by:
   - sha1 0.10.7
   - sha2 0.10.9
   - sha2 0.11.1
-  - sha3 0.10.9
+  - sha3 0.12.0
+  - shake 0.1.0
   - signature 2.2.0
   - signature 3.0.0
   - spki 0.7.3
   - spki 0.8.1
+  - sponge-cursor 0.1.0
   - universal-hash 0.5.1
   - wnaf 0.14.1
   - x509-cert 0.2.5

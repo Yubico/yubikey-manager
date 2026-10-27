@@ -201,7 +201,7 @@ fn test_openpgp_generate_rsa_key_and_sign(#[case] tc: TestConnection) {
     // Verify the signature
     use rsa::pkcs1v15::{Signature, VerifyingKey};
     use rsa::signature::Verifier;
-    let vk = VerifyingKey::<sha2::Sha256>::new(rsa_pub);
+    let vk = VerifyingKey::<sha2_legacy::Sha256>::new(rsa_pub);
     let sig = Signature::try_from(signature.as_slice()).expect("parse RSA signature");
     vk.verify(message, &sig)
         .expect("RSA signature verification");

@@ -25,8 +25,8 @@ ed25519-dalek = "3"
 elliptic-curve = { version = "0.14.3", features = ["sec1"] }
 bp256 = { version = "0.6", features = ["ecdsa"] }
 bp384 = { version = "0.6", features = ["ecdsa"] }
-hkdf = "0.12"
-hmac = "0.12"
+hkdf = "0.13"
+hmac = "0.13"
 k256 = { version = "0.14", features = ["ecdsa"] }
 p256 = { version = "0.14", features = ["ecdh", "ecdsa"] }
 p384 = { version = "0.14", features = ["ecdh", "ecdsa"] }
@@ -35,8 +35,11 @@ pbkdf2 = { version = "0.12", features = ["hmac"] }
 pkcs8 = { version = "0.10.2", features = ["encryption", "pem"] }
 rsa = "0.9"
 sha1 = "0.10"
-sha2 = "0.10"
-sha3 = "0.10"
+sha2 = "0.11"
+# RSA 0.9 and PBKDF2 0.12 still require digest 0.10.
+sha2-legacy = { package = "sha2", version = "0.10", features = ["oid"] }
+sha3 = "0.12"
+shake = "0.1"
 signature = { version = "2.2", features = ["std"] }
 subtle = "2"
 x25519-dalek = { version = "3", features = ["static_secrets"] }

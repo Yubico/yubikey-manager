@@ -470,7 +470,7 @@ fn test_piv_self_signed_cert_rsa(#[case] tc: TestConnection) {
     use rsa::pkcs8::DecodePublicKey;
     use rsa::signature::Verifier;
     let rsa_pub = rsa::RsaPublicKey::from_public_key_der(&spki_der).expect("parse RSA public key");
-    let vk = VerifyingKey::<sha2::Sha256>::new(rsa_pub);
+    let vk = VerifyingKey::<sha2_legacy::Sha256>::new(rsa_pub);
     let tbs_der = parsed.tbs_certificate.to_der().expect("encode TBS");
     let sig = Signature::try_from(parsed.signature.raw_bytes()).expect("parse RSA signature");
     vk.verify(&tbs_der, &sig)

@@ -91,7 +91,7 @@ impl Hash {
             D::digest(data).to_vec()
         }
         Zeroizing::new(match self {
-            Self::Sha1 => run::<sha1::Sha1>(data),
+            Self::Sha1 => <sha1::Sha1 as sha1::Digest>::digest(data).to_vec(),
             Self::Sha224 => run::<sha2::Sha224>(data),
             Self::Sha256 => run::<sha2::Sha256>(data),
             Self::Sha384 => run::<sha2::Sha384>(data),
@@ -298,8 +298,7 @@ pub fn oaep_decrypt_unpad(
 ///
 /// μ = SHAKE256(SHAKE256(pk, 64) || 0x00 || len(ctx) || ctx || M, 64)
 pub fn ml_dsa_mu(public_key: &[u8], context: &[u8], message: &[u8]) -> Result<[u8; 64]> {
-    use sha3::Shake256;
-    use sha3::digest::{ExtendableOutput, Update, XofReader};
+    use shake::{ExtendableOutput, Shake256, Update, XofReader};
 
     ensure!(
         context.len() <= 255,
@@ -415,7 +414,7 @@ mod tests {
     use rsa::rand_core::OsRng;
     use rsa::traits::{PrivateKeyParts, PublicKeyParts};
     use rsa::{BigUint, Oaep, Pkcs1v15Encrypt, Pkcs1v15Sign, Pss, RsaPrivateKey, RsaPublicKey};
-    use sha2::{Sha256, Sha384, Sha512};
+    use sha2_legacy::{Sha256, Sha384, Sha512};
     use std::sync::OnceLock;
 
     const HASHES: [HashAlgorithm; 3] = [

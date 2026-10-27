@@ -352,7 +352,7 @@ fn parse_label(label: &str) -> Result<Vec<u8>, HsmAuthError> {
 
 fn password_to_key(password: &str) -> ([u8; 16], [u8; 16]) {
     let mut key = Zeroizing::new([0u8; 32]);
-    pbkdf2::pbkdf2_hmac::<sha2::Sha256>(password.as_bytes(), b"Yubico", 10000, &mut *key);
+    pbkdf2::pbkdf2_hmac::<sha2_legacy::Sha256>(password.as_bytes(), b"Yubico", 10000, &mut *key);
     let key_enc: [u8; 16] = key[..16].try_into().unwrap();
     let key_mac: [u8; 16] = key[16..].try_into().unwrap();
     (key_enc, key_mac)
@@ -1036,8 +1036,20 @@ mod tests {
     #[test]
     fn test_password_to_key() {
         let (enc, mac) = password_to_key("password");
-        assert_eq!(enc.len(), 16);
-        assert_eq!(mac.len(), 16);
+        assert_eq!(
+            enc,
+            [
+                0x09, 0x0b, 0x47, 0xdb, 0xed, 0x59, 0x56, 0x54, 0x90, 0x1d, 0xee, 0x1c, 0xc6, 0x55,
+                0xe4, 0x20,
+            ]
+        );
+        assert_eq!(
+            mac,
+            [
+                0x59, 0x2f, 0xd4, 0x83, 0xf7, 0x59, 0xe2, 0x99, 0x09, 0xa0, 0x4c, 0x45, 0x05, 0xd2,
+                0xce, 0x0a,
+            ]
+        );
     }
 
     #[test]

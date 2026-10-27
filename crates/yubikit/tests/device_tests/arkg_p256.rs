@@ -9,7 +9,7 @@ use elliptic_curve::NonZeroScalar;
 /// https://www.ietf.org/archive/id/draft-bradleylundberg-cfrg-arkg-10.html#ARKG-P256
 use elliptic_curve::sec1::{FromSec1Point, ToSec1Point};
 use hkdf::Hkdf;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use p256::hash2curve::{self, GroupDigest};
 use p256::{AffinePoint, ProjectivePoint, PublicKey, Scalar, Sec1Point, SecretKey};
 use sha2::Sha256;
@@ -166,7 +166,7 @@ fn kem_encaps(pk_kem: &PublicKey, ikm: &[u8], ctx: &[u8]) -> (Vec<u8>, Vec<u8>) 
     hk.expand(&mac_info, &mut mk).expect("HKDF expand for mk");
 
     // t = HMAC-SHA-256-128(K=mk, text=c')  (truncated to 16 bytes)
-    let mut hmac = <Hmac<Sha256> as Mac>::new_from_slice(&mk).unwrap();
+    let mut hmac = Hmac::<Sha256>::new_from_slice(&mk).unwrap();
     hmac.update(&c_prime);
     let t_full = hmac.finalize().into_bytes();
     let t = &t_full[..16];

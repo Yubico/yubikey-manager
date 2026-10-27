@@ -19,7 +19,7 @@ use cbc::{Decryptor as CbcDecryptor, Encryptor as CbcEncryptor};
 use cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use elliptic_curve::{Generate, sec1::FromSec1Point};
 use hkdf::Hkdf;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use p256::elliptic_curve::sec1::ToSec1Point;
 use p256::{PublicKey, Sec1Point, SecretKey};
 use sha2::{Digest, Sha256};
@@ -345,7 +345,13 @@ mod tests {
         let key = vec![0xAA; 32];
         let msg = b"hello";
         let mac = PinProtocol::V1.authenticate(&key, msg);
-        assert_eq!(mac.len(), 16); // V1 truncates to 16
+        assert_eq!(
+            mac,
+            [
+                0xb6, 0xe8, 0x13, 0x6a, 0x04, 0x0e, 0x71, 0x26, 0x6e, 0x36, 0x0e, 0x23, 0xc7, 0xd4,
+                0x8e, 0xac,
+            ]
+        );
     }
 
     #[test]
@@ -353,7 +359,38 @@ mod tests {
         let key = vec![0u8; 64]; // 32 HMAC + 32 AES
         let msg = b"hello";
         let mac = PinProtocol::V2.authenticate(&key, msg);
-        assert_eq!(mac.len(), 32); // V2 returns full 32 bytes
+        assert_eq!(
+            mac,
+            [
+                0x43, 0x52, 0xb2, 0x6e, 0x33, 0xfe, 0x0d, 0x76, 0x9a, 0x89, 0x22, 0xa6, 0xba, 0x29,
+                0x00, 0x41, 0x09, 0xf0, 0x16, 0x88, 0xe2, 0x6a, 0xcc, 0x9e, 0x6c, 0xb3, 0x47, 0xe5,
+                0xa5, 0xaf, 0xc4, 0xda,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_pin_protocol_kdf_vectors() {
+        for (protocol, expected) in [
+            (
+                PinProtocol::V1,
+                "425ed4e4a36b30ea21b90e21c712c649e8214c29b7eaf68089d1039c6e55384c",
+            ),
+            (
+                PinProtocol::V2,
+                concat!(
+                    "d5863ba7709d4f73fd1e262e8bf166dc879f322261adeee5bc9f312427662fbeb",
+                    "78d4fb41bf531372da915f6626fc41fbd255114d7c6ecd7663ff2aed8cb1dc0",
+                ),
+            ),
+        ] {
+            let actual: String = protocol
+                .kdf(&[0x42; 32])
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            assert_eq!(actual, expected, "{protocol:?}");
+        }
     }
 
     #[test]

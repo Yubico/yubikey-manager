@@ -357,9 +357,9 @@ fn verify_certificate_signature(cert: &Certificate, parent: &Certificate) -> Res
         _ => {
             let key = rsa::RsaPublicKey::from_public_key_der(&public_key)?;
             let padding = match algorithm.as_str() {
-                "1.2.840.113549.1.1.11" => rsa::Pkcs1v15Sign::new::<Sha256>(),
-                "1.2.840.113549.1.1.12" => rsa::Pkcs1v15Sign::new::<Sha384>(),
-                "1.2.840.113549.1.1.13" => rsa::Pkcs1v15Sign::new::<Sha512>(),
+                "1.2.840.113549.1.1.11" => rsa::Pkcs1v15Sign::new::<sha2_legacy::Sha256>(),
+                "1.2.840.113549.1.1.12" => rsa::Pkcs1v15Sign::new::<sha2_legacy::Sha384>(),
+                "1.2.840.113549.1.1.13" => rsa::Pkcs1v15Sign::new::<sha2_legacy::Sha512>(),
                 _ => unreachable!(),
             };
             key.verify(padding, &digest, signature)?;

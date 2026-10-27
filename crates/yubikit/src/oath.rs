@@ -37,8 +37,8 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-use hmac::{Hmac, Mac};
-use sha1::Sha1;
+use pbkdf2::hmac::{Hmac, Mac};
+use sha1::{Digest as _, Sha1};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
@@ -1079,17 +1079,27 @@ mod tests {
         let key = [0x0b; 20];
         let data = b"Hi There";
         let result = hmac_sha1(&key, data);
-        assert_eq!(result.len(), 20);
-        // RFC 2202 test vector 1: b617318655057264e28bc0b6fb378c8ef146be00
-        assert_eq!(result[0], 0xb6);
-        assert_eq!(result[1], 0x17);
+        // RFC 2202 test vector 1.
+        assert_eq!(
+            result,
+            [
+                0xb6, 0x17, 0x31, 0x86, 0x55, 0x05, 0x72, 0x64, 0xe2, 0x8b, 0xc0, 0xb6, 0xfb, 0x37,
+                0x8c, 0x8e, 0xf1, 0x46, 0xbe, 0x00,
+            ]
+        );
     }
 
     #[test]
     fn test_derive_key() {
         let salt = b"test_salt";
         let key = derive_key(salt, "password");
-        assert_eq!(key.expose_secret().len(), 16);
+        assert_eq!(
+            key.expose_secret(),
+            &[
+                0xe9, 0x82, 0x15, 0xa3, 0x2e, 0x1a, 0x3f, 0x06, 0x5e, 0xe5, 0x98, 0x32, 0x1a, 0x7f,
+                0xaf, 0x0b,
+            ]
+        );
     }
 
     #[test]

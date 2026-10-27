@@ -40,6 +40,7 @@ p384 = { workspace = true, features = ["pkcs8", "ecdsa"] }
 rsa.workspace = true
 ed25519-dalek = { workspace = true, features = ["alloc", "pkcs8"] }
 sha2 = { workspace = true, features = ["oid"] }
+sha2-legacy.workspace = true
 subtle.workspace = true
 zeroize.workspace = true
 quick-xml.workspace = true
