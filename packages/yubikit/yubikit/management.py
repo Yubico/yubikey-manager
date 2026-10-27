@@ -459,8 +459,8 @@ class ManagementSession(Session):
         :return: Reported object counts and storage-page counts, including free
             slots and pages under identifier zero.
         :raises NotImplementedError: If the connection is not SmartCard/CCID.
-        :raises NotSupportedError: If the firmware predates YubiKey 6.0.0.
-        :raises BadResponseError: If the storage response is malformed.
+        :raises yubikit.core.NotSupportedError: If the firmware predates YubiKey 6.0.0.
+        :raises yubikit.core.BadResponseError: If the storage response is malformed.
         """
         if not isinstance(self._native, _NativeManagementSessionCcid):
             raise NotImplementedError("Storage info is only supported over CCID")

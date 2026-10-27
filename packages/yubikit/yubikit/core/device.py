@@ -71,7 +71,7 @@ class YubiKeyDevice(abc.ABC):
         number does not match).
 
         :param reinsert_cb: Callback to indicate the the YubiKey has been removed,
-        and should be reinserted.
+            and should be reinserted.
         :param event: Optional event to cancel (throws CancelledException).
         """
 

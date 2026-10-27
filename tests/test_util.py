@@ -1,8 +1,13 @@
 #  vim: set fileencoding=utf-8 :
 
 import pytest
-from yubikit.core import Tlv, bytes2int
-from yubikit.core.otp import modhex_decode, modhex_encode
+from yubikit.core import Tlv, bytes2int, int2bytes
+from yubikit.core.otp import (
+    calculate_crc,
+    check_crc,
+    modhex_decode,
+    modhex_encode,
+)
 from yubikit.management import FORM_FACTOR
 
 
@@ -10,6 +15,39 @@ def test_bytes2int():
     assert bytes2int(b"\x57") == 0x57
     assert bytes2int(b"\x12\x34") == 0x1234
     assert bytes2int(b"\xca\xfe\xd0\x0d") == 0xCAFED00D
+
+
+@pytest.mark.parametrize(
+    ("value", "min_len", "expected"),
+    [
+        (0, 0, b""),
+        (0, 3, b"\x00\x00\x00"),
+        (0x1234, 4, b"\x00\x00\x12\x34"),
+        (1 << 128, 1, b"\x01" + b"\x00" * 16),
+    ],
+)
+def test_int2bytes_minimum_length(value, min_len, expected):
+    assert int2bytes(value=value, min_len=min_len) == expected
+    assert bytes2int(data=expected) == value
+
+
+@pytest.mark.parametrize(("value", "min_len"), [(-1, 1), (1, -1)])
+def test_int2bytes_rejects_negative_values(value, min_len):
+    with pytest.raises(OverflowError):
+        int2bytes(value, min_len)
+
+
+def test_otp_crc():
+    assert calculate_crc(data=b"") == 0xFFFF
+    assert calculate_crc(data=b"123456789") == 0x6F91
+    assert check_crc(data=b"123456789\x6e\x90")
+    assert not check_crc(data=b"123456789\x6e\x91")
+
+
+@pytest.mark.parametrize("value", ["c", "zz", "c!"])
+def test_modhex_decode_rejects_invalid_input(value):
+    with pytest.raises(ValueError):
+        modhex_decode(string=value)
 
 
 @pytest.mark.parametrize(

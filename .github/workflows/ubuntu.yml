@@ -131,6 +131,15 @@ jobs:
       - name: Run non-hardware tests
         run: cargo test --locked --workspace --all-features --lib --bins -- --test-threads="$(nproc)"
 
+      - name: Build Rust API documentation
+        env:
+          DOCS_RS: "1"
+          RUSTDOCFLAGS: "-D warnings"
+        run: |
+          for crate in yubikit ykman ykman-cli ykman-svc; do
+            cargo doc --locked --no-deps --all-features -p "$crate"
+          done
+
       - name: Verify crate packages without cargo-about
         run: |
           export PATH="$(dirname "$(rustup which rustc)"):/usr/bin:/bin"

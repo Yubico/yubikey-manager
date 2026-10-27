@@ -93,7 +93,7 @@ jobs:
 
       - name: Build sphinx documentation
         if: matrix.python-version == '3.14'
-        run: uv run --locked make -C docs/ html
+        run: uv run --locked make -C docs/ html SPHINXOPTS="-W --keep-going"
 
       - name: Upload documentation
         if: matrix.python-version == '3.14'

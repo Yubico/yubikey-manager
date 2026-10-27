@@ -300,11 +300,23 @@ To include documentation for all workspace crates:
 
 The generated HTML is written to `target/doc/`.
 
+The published crates configure docs.rs to build all features for
+`x86_64-unknown-linux-gnu`. Its Linux build environment provides
+`libpcsclite-dev`, `libudev-dev` and `libdbus-1-dev`; other targets require native
+cross-compilation dependencies that are not configured for documentation.
+CI checks each published crate separately with warnings treated as errors:
+
+    $ DOCS_RS=1 RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features -p yubikit
+
+Repeat with `-p ykman`, `-p ykman-cli` and `-p ykman-svc`. Build `ykman` and
+`ykman-cli` separately to avoid their library and binary documentation sharing
+the `ykman` output directory.
+
 ==== Python (Sphinx)
 
 Generate HTML API documentation for the Python packages:
 
-    $ uv run sphinx-build docs docs/_build/html
+    $ uv run --locked sphinx-build -W --keep-going docs docs/_build/html
 
 Open `docs/_build/html/index.html` in a browser to view the result.
 

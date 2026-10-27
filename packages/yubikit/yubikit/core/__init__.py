@@ -36,9 +36,11 @@ from threading import Timer
 from types import TracebackType
 from typing import ClassVar, NamedTuple, Self
 
-from _yubikit_native.core import (  # noqa: F401
-    bytes2int,
-    int2bytes,
+from _yubikit_native.core import (
+    bytes2int as _bytes2int,
+)
+from _yubikit_native.core import (
+    int2bytes as _int2bytes,
 )
 from _yubikit_native.core import (
     tlv_encode as _tlv_encode,
@@ -51,6 +53,20 @@ logger = logging.getLogger(__name__)
 
 
 _VERSION_STRING_PATTERN = re.compile(r"\b(?P<major>\d+).(?P<minor>\d).(?P<patch>\d)\b")
+
+
+def bytes2int(data: bytes) -> int:
+    """Interpret a byte string as an unsigned big-endian integer."""
+    return _bytes2int(data)
+
+
+def int2bytes(value: int, min_len: int = 1) -> bytes:
+    """Encode an unsigned integer as a big-endian byte string.
+
+    :param value: The non-negative integer to encode.
+    :param min_len: Minimum output length, padding with leading zero bytes.
+    """
+    return _int2bytes(value, min_len)
 
 
 class Version(NamedTuple):

@@ -33,10 +33,16 @@ from typing import Callable
 
 from _yubikit_native.core import OtpProtocol as _NativeOtpProtocol
 from _yubikit_native.core import (
-    calculate_crc,  # noqa: F401 - re-exported
-    check_crc,  # noqa: F401 - re-exported
-    modhex_decode,  # noqa: F401 - re-exported
-    modhex_encode,  # noqa: F401 - re-exported
+    calculate_crc as _calculate_crc,
+)
+from _yubikit_native.core import (
+    check_crc as _check_crc,
+)
+from _yubikit_native.core import (
+    modhex_decode as _modhex_decode,
+)
+from _yubikit_native.core import (
+    modhex_encode as _modhex_encode,
 )
 
 from . import USB_INTERFACE, Closable, CommandError, Connection, Version
@@ -45,6 +51,26 @@ logger = logging.getLogger(__name__)
 
 
 MODHEX_ALPHABET = "cbdefghijklnrtuv"
+
+
+def calculate_crc(data: bytes) -> int:
+    """Calculate the Yubico OTP CRC-16 checksum of a byte string."""
+    return _calculate_crc(data)
+
+
+def check_crc(data: bytes) -> bool:
+    """Check that data including its checksum has the expected CRC-16 residual."""
+    return _check_crc(data)
+
+
+def modhex_encode(data: bytes) -> str:
+    """Encode a byte string using the Yubico modhex alphabet."""
+    return _modhex_encode(data)
+
+
+def modhex_decode(string: str) -> bytes:
+    """Decode a modhex string, raising ValueError for invalid input."""
+    return _modhex_decode(string)
 
 
 class CommandRejectedError(CommandError):
