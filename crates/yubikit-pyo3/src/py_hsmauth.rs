@@ -232,12 +232,12 @@ impl HsmAuthSession {
     /// Get the public key for an asymmetric credential.
     /// Returns SEC1 uncompressed point bytes (65 bytes: 0x04 || x || y).
     fn get_public_key(&mut self, label: &str) -> PyResult<Vec<u8>> {
-        use elliptic_curve::sec1::ToEncodedPoint;
+        use elliptic_curve::sec1::ToSec1Point;
         let pk = self
             .session_mut()?
             .get_public_key(label)
             .map_err(hsmauth_err)?;
-        let encoded = pk.to_encoded_point(false);
+        let encoded = pk.to_sec1_point(false);
         Ok(encoded.as_bytes().to_vec())
     }
 
@@ -325,11 +325,11 @@ impl HsmAuthSession {
         credential_password: &[u8],
         card_crypto: &[u8],
     ) -> PyResult<(Vec<u8>, Vec<u8>, Vec<u8>)> {
-        use elliptic_curve::sec1::FromEncodedPoint;
+        use elliptic_curve::sec1::FromSec1Point;
         let credential_password = credential_password_from_py(credential_password)?;
-        let point = p256::EncodedPoint::from_bytes(peer_public_key)
+        let point = p256::Sec1Point::from_bytes(peer_public_key)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        let pk = Option::from(p256::PublicKey::from_encoded_point(&point))
+        let pk = Option::from(p256::PublicKey::from_sec1_point(&point))
             .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid P-256 public key"))?;
         let keys = self
             .session_mut()?

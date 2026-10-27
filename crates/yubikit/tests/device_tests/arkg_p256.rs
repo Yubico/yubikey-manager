@@ -7,11 +7,11 @@ use elliptic_curve::NonZeroScalar;
 /// Implements the ARKG (Asynchronous Remote Key Generation) algorithm for
 /// P-256 following the spec at:
 /// https://www.ietf.org/archive/id/draft-bradleylundberg-cfrg-arkg-10.html#ARKG-P256
-use elliptic_curve::hash2curve::ExpandMsgXmd;
-use elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
+use elliptic_curve::sec1::{FromSec1Point, ToSec1Point};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
-use p256::{AffinePoint, EncodedPoint, ProjectivePoint, PublicKey, Scalar, SecretKey};
+use p256::hash2curve::{self, GroupDigest};
+use p256::{AffinePoint, ProjectivePoint, PublicKey, Scalar, Sec1Point, SecretKey};
 use sha2::Sha256;
 use yubikit::cbor::{self, Value};
 
@@ -81,11 +81,12 @@ fn cose_key_to_p256(value: &Value) -> PublicKey {
         .and_then(|v| v.as_bytes())
         .expect("COSE key: missing y at key -3");
 
-    assert_eq!(x.len(), 32, "P-256 x-coordinate must be 32 bytes");
-    assert_eq!(y.len(), 32, "P-256 y-coordinate must be 32 bytes");
-
-    let ep = EncodedPoint::from_affine_coordinates(x.into(), y.into(), false);
-    let affine = AffinePoint::from_encoded_point(&ep).unwrap();
+    let ep = Sec1Point::from_affine_coordinates(
+        x.try_into().expect("P-256 x-coordinate must be 32 bytes"),
+        y.try_into().expect("P-256 y-coordinate must be 32 bytes"),
+        false,
+    );
+    let affine = AffinePoint::from_sec1_point(&ep).unwrap();
     PublicKey::from_affine(affine).unwrap()
 }
 
@@ -93,8 +94,8 @@ fn cose_key_to_p256(value: &Value) -> PublicKey {
 fn public_key_from_uncompressed(bytes: &[u8]) -> PublicKey {
     assert_eq!(bytes.len(), 65, "expected 65-byte uncompressed point");
     assert_eq!(bytes[0], 0x04, "expected uncompressed point prefix");
-    let ep = EncodedPoint::from_bytes(bytes).expect("valid encoded point");
-    let affine = AffinePoint::from_encoded_point(&ep).unwrap();
+    let ep = Sec1Point::from_bytes(bytes).expect("valid encoded point");
+    let affine = AffinePoint::from_sec1_point(&ep).unwrap();
     PublicKey::from_affine(affine).unwrap()
 }
 
@@ -204,7 +205,7 @@ fn sub_kem_encaps(pk: &PublicKey, ikm: &[u8], _ctx_sub: &[u8]) -> (Vec<u8>, Vec<
     let k = shared_secret.raw_secret_bytes().to_vec();
 
     // c = uncompressed point encoding of pk'
-    let c = pk_prime.to_encoded_point(false).as_bytes().to_vec();
+    let c = pk_prime.to_sec1_point(false).as_bytes().to_vec();
 
     (k, c)
 }
@@ -221,14 +222,12 @@ fn bl_prf(ikm_tau: &[u8], ctx_bl: &[u8]) -> Scalar {
 
 /// hash_to_field for P-256 scalars using expand_message_xmd(SHA-256).
 fn hash_to_scalar(msg: &[u8], dst: &[u8]) -> Scalar {
-    let mut out = [Scalar::ZERO];
-    elliptic_curve::hash2curve::hash_to_field::<ExpandMsgXmd<Sha256>, Scalar>(
-        &[msg],
-        &[dst],
-        &mut out,
-    )
-    .expect("hash_to_field");
-    out[0]
+    hash2curve::hash_to_scalar::<
+        p256::NistP256,
+        <p256::NistP256 as GroupDigest>::ExpandMsg,
+        elliptic_curve::consts::U48,
+    >(&[msg], &[dst])
+    .expect("hash_to_field")
 }
 
 /// Verify an ECDSA signature (in DER format) over a message using a P-256 key.
@@ -298,7 +297,7 @@ mod tests {
             let master = ArkgMasterKey::from_raw_keys(&pk_bl_bytes, &pk_kem_bytes);
             let (derived_pk, _args) = derive_public_key(&master, &ikm, tv.ctx);
 
-            let derived_bytes = derived_pk.to_encoded_point(false).as_bytes().to_vec();
+            let derived_bytes = derived_pk.to_sec1_point(false).as_bytes().to_vec();
             assert_eq!(
                 derived_bytes, expected_pk,
                 "test vector {i}: derived public key mismatch"

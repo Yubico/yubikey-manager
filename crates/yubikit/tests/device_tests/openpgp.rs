@@ -1,4 +1,5 @@
 use super::*;
+use elliptic_curve::Generate;
 use yubikit::keys::{EcCurve, EcPrivateKey, PrivateKey, RsaKeySize, RsaPrivateKey};
 use yubikit::openpgp::{KeyRef, OpenPgpPin, OpenPgpSession};
 
@@ -146,12 +147,12 @@ fn test_openpgp_generate_ec_key_and_sign(#[case] tc: TestConnection) {
     use p256::ecdsa::{Signature, VerifyingKey};
     let vk = VerifyingKey::from_sec1_bytes(ec_point).expect("parse verifying key");
     // OpenPGP sign() hashes the message internally with SHA-256 and returns raw r||s
-    // We need to verify against the pre-hashed digest using DigestVerifier
-    use ecdsa::signature::DigestVerifier;
+    // Verify against the pre-hashed digest.
+    use ecdsa::signature::hazmat::PrehashVerifier;
     use sha2::Digest;
     let digest = sha2::Sha256::new_with_prefix(message);
-    let sig = Signature::from_bytes((&signature[..]).into()).expect("parse signature");
-    vk.verify_digest(digest, &sig)
+    let sig = Signature::from_slice(&signature).expect("parse signature");
+    vk.verify_prehash(&digest.finalize(), &sig)
         .expect("EC signature verification");
 }
 
@@ -291,10 +292,10 @@ fn test_openpgp_ec_ecdh(#[case] tc: TestConnection) {
     // Generate ephemeral key on host
     use p256::PublicKey;
     use p256::ecdh::EphemeralSecret;
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
-    let host_secret = EphemeralSecret::random(&mut p256::elliptic_curve::rand_core::OsRng);
+    use p256::elliptic_curve::sec1::ToSec1Point;
+    let host_secret = EphemeralSecret::generate();
     let host_public = PublicKey::from(&host_secret);
-    let host_public_bytes = host_public.to_encoded_point(false);
+    let host_public_bytes = host_public.to_sec1_point(false);
 
     // Derive shared secret on YubiKey (OpenPGP decrypt with EC = ECDH)
     let device_shared = session
@@ -461,12 +462,11 @@ fn test_import_ec_p256(#[case] tc: TestConnection) {
         .expect("sign with imported EC P-256");
 
     // Verify signature
-    use ecdsa::signature::DigestVerifier;
+    use ecdsa::signature::hazmat::PrehashVerifier;
     use sha2::Digest;
     let digest = sha2::Sha256::new_with_prefix(message);
-    let ecdsa_sig =
-        p256::ecdsa::Signature::from_bytes((&sig[..]).into()).expect("parse P-256 signature");
-    vk.verify_digest(digest, &ecdsa_sig)
+    let ecdsa_sig = p256::ecdsa::Signature::from_slice(&sig).expect("parse P-256 signature");
+    vk.verify_prehash(&digest.finalize(), &ecdsa_sig)
         .expect("P-256 signature verification");
 }
 
@@ -491,12 +491,11 @@ fn test_import_ec_p384(#[case] tc: TestConnection) {
         .sign(message, yubikit::openpgp::SignHashAlgorithm::Sha384)
         .expect("sign with imported EC P-384");
 
-    use ecdsa::signature::DigestVerifier;
+    use ecdsa::signature::hazmat::PrehashVerifier;
     use sha2::Digest;
     let digest = sha2::Sha384::new_with_prefix(message);
-    let ecdsa_sig =
-        p384::ecdsa::Signature::from_bytes((&sig[..]).into()).expect("parse P-384 signature");
-    vk.verify_digest(digest, &ecdsa_sig)
+    let ecdsa_sig = p384::ecdsa::Signature::from_slice(&sig).expect("parse P-384 signature");
+    vk.verify_prehash(&digest.finalize(), &ecdsa_sig)
         .expect("P-384 signature verification");
 }
 
@@ -524,15 +523,14 @@ fn test_import_ec_secp256k1(#[case] tc: TestConnection) {
         .sign(message, yubikit::openpgp::SignHashAlgorithm::Sha256)
         .expect("sign with secp256k1");
 
-    use ecdsa::signature::DigestVerifier;
+    use ecdsa::signature::hazmat::PrehashVerifier;
     use sha2::Digest;
     let digest = sha2::Sha256::new_with_prefix(message);
-    let ecdsa_sig =
-        k256::ecdsa::Signature::from_bytes((&sig[..]).into()).expect("parse k256 signature");
+    let ecdsa_sig = k256::ecdsa::Signature::from_slice(&sig).expect("parse k256 signature");
     // The k256 crate only supports low-S signatures; normalize to low-S for verification.
-    let ecdsa_sig = ecdsa_sig.normalize_s().unwrap_or(ecdsa_sig);
+    let ecdsa_sig = ecdsa_sig.normalize_s();
 
-    vk.verify_digest(digest, &ecdsa_sig)
+    vk.verify_prehash(&digest.finalize(), &ecdsa_sig)
         .expect("secp256k1 signature verification");
 }
 
@@ -641,7 +639,7 @@ fn test_import_x25519(#[case] tc: TestConnection) {
     let mut session = setup_for_import(&tc);
 
     use x25519_dalek::StaticSecret;
-    let secret = StaticSecret::random_from_rng(rsa::rand_core::OsRng);
+    let secret = StaticSecret::random();
     let key = PrivateKey::X25519(
         yubikit::keys::X25519PrivateKey::new(secret.to_bytes().to_vec()).unwrap(),
     );
@@ -654,7 +652,7 @@ fn test_import_x25519(#[case] tc: TestConnection) {
         .expect("verify PIN for decrypt");
 
     use x25519_dalek::{EphemeralSecret, PublicKey as X25519PublicKey};
-    let host_secret = EphemeralSecret::random_from_rng(rsa::rand_core::OsRng);
+    let host_secret = EphemeralSecret::random();
     let host_public = X25519PublicKey::from(&host_secret);
 
     let device_shared = session
@@ -702,10 +700,10 @@ fn generate_rsa_private_key(bits: usize) -> PrivateKey {
 }
 
 fn generate_ec_private_key_p256() -> (PrivateKey, p256::ecdsa::VerifyingKey) {
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
-    let secret = p256::SecretKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+    use p256::elliptic_curve::sec1::ToSec1Point;
+    let secret = p256::SecretKey::generate();
     let scalar = secret.to_bytes().to_vec();
-    let public_point = secret.public_key().to_encoded_point(false);
+    let public_point = secret.public_key().to_sec1_point(false);
     let signing_key = p256::ecdsa::SigningKey::from(&secret);
     let vk = *signing_key.verifying_key();
     let key = EcPrivateKey::new(
@@ -719,10 +717,10 @@ fn generate_ec_private_key_p256() -> (PrivateKey, p256::ecdsa::VerifyingKey) {
 }
 
 fn generate_ec_private_key_p384() -> (PrivateKey, p384::ecdsa::VerifyingKey) {
-    use p384::elliptic_curve::sec1::ToEncodedPoint;
-    let secret = p384::SecretKey::random(&mut p384::elliptic_curve::rand_core::OsRng);
+    use p384::elliptic_curve::sec1::ToSec1Point;
+    let secret = p384::SecretKey::generate();
     let scalar = secret.to_bytes().to_vec();
-    let public_point = secret.public_key().to_encoded_point(false);
+    let public_point = secret.public_key().to_sec1_point(false);
     let signing_key = p384::ecdsa::SigningKey::from(&secret);
     let vk = *signing_key.verifying_key();
     let key = EcPrivateKey::new(
@@ -736,10 +734,10 @@ fn generate_ec_private_key_p384() -> (PrivateKey, p384::ecdsa::VerifyingKey) {
 }
 
 fn generate_ec_private_key_secp256k1() -> (PrivateKey, k256::ecdsa::VerifyingKey) {
-    use k256::elliptic_curve::sec1::ToEncodedPoint;
-    let secret = k256::SecretKey::random(&mut k256::elliptic_curve::rand_core::OsRng);
+    use k256::elliptic_curve::sec1::ToSec1Point;
+    let secret = k256::SecretKey::generate();
     let scalar = secret.to_bytes().to_vec();
-    let public_point = secret.public_key().to_encoded_point(false);
+    let public_point = secret.public_key().to_sec1_point(false);
     let signing_key = k256::ecdsa::SigningKey::from(&secret);
     let vk = *signing_key.verifying_key();
     let key = EcPrivateKey::new(

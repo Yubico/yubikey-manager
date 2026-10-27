@@ -706,9 +706,9 @@ pub fn run_credentials_export(
 
     // Export as SubjectPublicKeyInfo
     use base64::Engine;
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
+    use p256::elliptic_curve::sec1::ToSec1Point;
 
-    let pk_point = public_key.to_encoded_point(false);
+    let pk_point = public_key.to_sec1_point(false);
     let pk_bytes = pk_point.as_bytes();
 
     // EC P256 AlgorithmIdentifier OID: 1.2.840.10045.2.1 + 1.2.840.10045.3.1.7
@@ -821,6 +821,51 @@ pub fn run_access_change_management_key(
 #[cfg(test)]
 mod tests {
     use super::require_credential_password;
+
+    #[test]
+    fn parses_p256_private_key_formats() {
+        use elliptic_curve::sec1::ToSec1Point;
+        use x509_cert::der::DecodePem;
+
+        let pem = include_bytes!("../tests/fixtures/ec_p256_key.pem");
+        let der = include_bytes!("../tests/fixtures/ec_p256_key.der");
+        let key = super::parse_ec_private_key(der, None).unwrap();
+        let sec1_der = key.to_sec1_der().unwrap();
+        let sec1_pem = key.to_sec1_pem(Default::default()).unwrap();
+        let cert =
+            x509_cert::Certificate::from_pem(include_str!("../tests/fixtures/ec_p256_cert.pem"))
+                .unwrap();
+        let expected = cert
+            .tbs_certificate
+            .subject_public_key_info
+            .subject_public_key
+            .as_bytes()
+            .unwrap();
+
+        for data in [
+            pem.as_slice(),
+            der.as_slice(),
+            &sec1_der,
+            sec1_pem.as_bytes(),
+        ] {
+            let parsed = super::parse_ec_private_key(data, None).unwrap();
+            assert_eq!(
+                parsed.public_key().to_sec1_point(false).as_bytes(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_non_p256_private_keys() {
+        for data in [
+            include_bytes!("../tests/fixtures/ec_p384_key.der").as_slice(),
+            include_bytes!("../tests/fixtures/rsa_2048_key.der").as_slice(),
+            b"invalid key",
+        ] {
+            assert!(super::parse_ec_private_key(data, None).is_err());
+        }
+    }
 
     #[test]
     fn password_errors_distinguish_authentication_and_complexity() {

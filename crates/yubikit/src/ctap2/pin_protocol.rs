@@ -17,12 +17,11 @@
 use aes::Aes256;
 use cbc::{Decryptor as CbcDecryptor, Encryptor as CbcEncryptor};
 use cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
-use elliptic_curve::sec1::FromEncodedPoint;
+use elliptic_curve::{Generate, sec1::FromSec1Point};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
-use p256::elliptic_curve::rand_core::OsRng;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
-use p256::{EncodedPoint, PublicKey, SecretKey};
+use p256::elliptic_curve::sec1::ToSec1Point;
+use p256::{PublicKey, Sec1Point, SecretKey};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
@@ -86,16 +85,17 @@ impl PinProtocol {
         let mut uncompressed = vec![0x04];
         uncompressed.extend_from_slice(x);
         uncompressed.extend_from_slice(y);
-        let peer_point = EncodedPoint::from_bytes(&uncompressed)
-            .map_err(|e| format!("invalid SEC1 point: {e}"))?;
-        let peer_pk = PublicKey::from_encoded_point(&peer_point)
+        let peer_point =
+            Sec1Point::from_bytes(&uncompressed).map_err(|e| format!("invalid SEC1 point: {e}"))?;
+        let peer_pk = PublicKey::from_sec1_point(&peer_point)
             .into_option()
             .ok_or("invalid P-256 key")?;
 
         // Generate ephemeral key pair
-        let sk = SecretKey::random(&mut OsRng);
+        let sk = SecretKey::try_generate()
+            .map_err(|e| format!("failed to generate key agreement secret: {e}"))?;
         let pk = sk.public_key();
-        let pk_point = pk.to_encoded_point(false);
+        let pk_point = pk.to_sec1_point(false);
 
         // ECDH: raw x-coordinate of shared point
         let shared_point = p256::ecdh::diffie_hellman(sk.to_nonzero_scalar(), peer_pk.as_affine());
@@ -242,21 +242,22 @@ mod tests {
     use super::*;
     use sha2::{Digest, Sha256};
 
-    fn peer_key() -> CoseKey {
-        let key = SecretKey::random(&mut OsRng).public_key();
-        let point = key.to_encoded_point(false);
-        Value::Map(vec![
+    fn peer_key() -> (SecretKey, CoseKey) {
+        let secret = SecretKey::generate();
+        let point = secret.public_key().to_sec1_point(false);
+        let key = Value::Map(vec![
             (Value::Int(1), Value::Int(2)),
             (Value::Int(3), Value::Int(-25)),
             (Value::Int(-1), Value::Int(1)),
             (Value::Int(-2), Value::Bytes(point.x().unwrap().to_vec())),
             (Value::Int(-3), Value::Bytes(point.y().unwrap().to_vec())),
-        ])
+        ]);
+        (secret, key)
     }
 
     #[test]
     fn test_encapsulate_requires_integer_peer_profile_labels() {
-        let key = peer_key();
+        let (_, key) = peer_key();
         for protocol in [PinProtocol::V1, PinProtocol::V2] {
             for label in [1, 3, -1] {
                 for replacement in [
@@ -282,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_encapsulate_accepts_profile_and_validates_coordinates() {
-        let key = peer_key();
+        let (peer_secret, key) = peer_key();
         for protocol in [PinProtocol::V1, PinProtocol::V2] {
             let (platform, secret) = protocol.encapsulate(&key).unwrap();
             assert_eq!(platform.map_get_int(1).and_then(Value::as_int), Some(2));
@@ -292,6 +293,19 @@ mod tests {
                 secret.len(),
                 if protocol == PinProtocol::V1 { 32 } else { 64 }
             );
+            let mut platform_sec1 = vec![0x04];
+            for coordinate in [-2, -3] {
+                platform_sec1.extend_from_slice(
+                    platform
+                        .map_get_int(coordinate)
+                        .unwrap()
+                        .as_bytes()
+                        .unwrap(),
+                );
+            }
+            let platform_pk = PublicKey::from_sec1_bytes(&platform_sec1).unwrap();
+            let expected_shared = peer_secret.diffie_hellman(&platform_pk);
+            assert_eq!(secret, protocol.kdf(expected_shared.raw_secret_bytes()));
 
             for coordinate in [-2, -3] {
                 for value in [Value::Bytes(vec![0; 31]), Value::Bytes(vec![0; 32])] {

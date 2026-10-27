@@ -1155,10 +1155,10 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         self.scp_state = None;
         self.scp_failed = true;
         use crate::__internal::tlv::tlv_encode;
-        use elliptic_curve::sec1::FromEncodedPoint;
+        use elliptic_curve::sec1::FromSec1Point;
         use p256::{
-            EncodedPoint, PublicKey, SecretKey,
-            elliptic_curve::{rand_core::OsRng, sec1::ToEncodedPoint},
+            PublicKey, Sec1Point, SecretKey,
+            elliptic_curve::{Generate, sec1::ToSec1Point},
         };
 
         // SCP11 params byte
@@ -1188,9 +1188,11 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
 
         // Generate host ephemeral P-256 key pair.
         // Use SecretKey so the scalar remains available for a second ECDH in SCP11b.
-        let eph_sk = SecretKey::random(&mut OsRng);
+        let eph_sk = SecretKey::try_generate().map_err(|e| {
+            SmartCardError::InvalidState(format!("Failed to generate SCP11 ephemeral key: {e}"))
+        })?;
         let eph_pk = eph_sk.public_key();
-        let epk_bytes = eph_pk.to_encoded_point(false);
+        let epk_bytes = eph_pk.to_sec1_point(false);
 
         // Build key agreement TLV data
         let key_usage: u8 = 0x3C;
@@ -1249,18 +1251,17 @@ impl<C: SmartCardConnection> SmartCardProtocol<C> {
         key_agreement_data.extend_from_slice(&resp[tlv_start..tlv_end]);
 
         // Perform ECDH
-        let card_eph_point = EncodedPoint::from_bytes(epk_sd_ecka_bytes)
+        let card_eph_point = Sec1Point::from_bytes(epk_sd_ecka_bytes)
             .map_err(|e| SmartCardError::InvalidData(format!("Invalid card ephemeral key: {e}")))?;
-        let card_eph_pk = Option::<PublicKey>::from(PublicKey::from_encoded_point(&card_eph_point))
+        let card_eph_pk = Option::<PublicKey>::from(PublicKey::from_sec1_point(&card_eph_point))
             .ok_or_else(|| SmartCardError::InvalidData("Card ephemeral key not on curve".into()))?;
 
-        let card_static_point = EncodedPoint::from_bytes(pk_sd_ecka)
+        let card_static_point = Sec1Point::from_bytes(pk_sd_ecka)
             .map_err(|e| SmartCardError::InvalidData(format!("Invalid card static key: {e}")))?;
-        let card_static_pk =
-            Option::<PublicKey>::from(PublicKey::from_encoded_point(&card_static_point))
-                .ok_or_else(|| {
-                    SmartCardError::InvalidData("Card static key not on curve".into())
-                })?;
+        let card_static_pk = Option::<PublicKey>::from(PublicKey::from_sec1_point(
+            &card_static_point,
+        ))
+        .ok_or_else(|| SmartCardError::InvalidData("Card static key not on curve".into()))?;
 
         // shared1 = ECDH(eph_sk, card_eph_pk)
         let shared1 =
@@ -1516,7 +1517,7 @@ mod tests {
 
         fn initialize_scp11b(&mut self, request: &[u8]) -> Vec<u8> {
             use crate::__internal::tlv::{tlv_encode, tlv_parse};
-            use p256::elliptic_curve::sec1::ToEncodedPoint;
+            use p256::elliptic_curve::sec1::ToSec1Point;
 
             let mut offset = 0;
             let mut host_key = None;
@@ -1544,10 +1545,7 @@ mod tests {
             let keys = x963_kdf(&secret, &[0x3c, 0x88, 0x10], 80);
             let card_key = tlv_encode(
                 0x5f49,
-                ephemeral_key
-                    .public_key()
-                    .to_encoded_point(false)
-                    .as_bytes(),
+                ephemeral_key.public_key().to_sec1_point(false).as_bytes(),
             );
             let mut receipt = aes_cmac(&keys[..16], &[request, &card_key].concat()).unwrap();
             if self.corrupt_handshake {
@@ -1657,14 +1655,14 @@ mod tests {
     fn established_scp(scp11: bool) -> SmartCardProtocol<ScpTestConnection> {
         let mut protocol = SmartCardProtocol::new(ScpTestConnection::new());
         if scp11 {
-            use p256::elliptic_curve::sec1::ToEncodedPoint;
+            use p256::elliptic_curve::sec1::ToSec1Point;
 
             let static_key = p256::SecretKey::from_slice(&[2; 32]).unwrap();
             protocol
                 .init_scp11(
                     0x13,
                     1,
-                    static_key.public_key().to_encoded_point(false).as_bytes(),
+                    static_key.public_key().to_sec1_point(false).as_bytes(),
                     None,
                     &[],
                     None,
@@ -1767,7 +1765,7 @@ mod tests {
     #[test]
     fn test_oath_reset_returns_connection_without_post_reset_scp_downgrade() {
         use crate::oath::OathSession;
-        use p256::elliptic_curve::sec1::ToEncodedPoint;
+        use p256::elliptic_curve::sec1::ToSec1Point;
 
         for scp11 in [false, true] {
             for response in [
@@ -1781,7 +1779,7 @@ mod tests {
                     ScpKeyParams::Scp11b {
                         kid: 0x13,
                         kvn: 1,
-                        pk_sd_ecka: key.public_key().to_encoded_point(false).as_bytes().to_vec(),
+                        pk_sd_ecka: key.public_key().to_sec1_point(false).as_bytes().to_vec(),
                     }
                 } else {
                     ScpKeyParams::Scp03 {
@@ -1817,7 +1815,7 @@ mod tests {
 
     #[test]
     fn test_scp11_rejects_invalid_receipt_lengths() {
-        use p256::elliptic_curve::sec1::ToEncodedPoint;
+        use p256::elliptic_curve::sec1::ToSec1Point;
 
         let static_key = p256::SecretKey::from_slice(&[2; 32]).unwrap();
         for established in [false, true] {
@@ -1832,7 +1830,7 @@ mod tests {
                     protocol.init_scp11(
                         0x13,
                         1,
-                        static_key.public_key().to_encoded_point(false).as_bytes(),
+                        static_key.public_key().to_sec1_point(false).as_bytes(),
                         None,
                         &[],
                         None,
@@ -1846,7 +1844,7 @@ mod tests {
                     .init_scp11(
                         0x13,
                         1,
-                        static_key.public_key().to_encoded_point(false).as_bytes(),
+                        static_key.public_key().to_sec1_point(false).as_bytes(),
                         None,
                         &[],
                         None,
@@ -1967,7 +1965,7 @@ mod tests {
             let mut protocol = established_scp(scp11);
             protocol.connection.corrupt_handshake = true;
             if scp11 {
-                use p256::elliptic_curve::sec1::ToEncodedPoint;
+                use p256::elliptic_curve::sec1::ToSec1Point;
 
                 let static_key = p256::SecretKey::from_slice(&[2; 32]).unwrap();
                 assert!(
@@ -1975,7 +1973,7 @@ mod tests {
                         .init_scp11(
                             0x13,
                             1,
-                            static_key.public_key().to_encoded_point(false).as_bytes(),
+                            static_key.public_key().to_sec1_point(false).as_bytes(),
                             None,
                             &[],
                             None,

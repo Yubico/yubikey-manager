@@ -309,8 +309,10 @@ fn find_scp11_pk_with_kid(
 /// and inner/outer signature algorithm consistency. This does not check validity
 /// periods, revocation, or certificate extensions.
 fn verify_certificate_signature(cert: &Certificate, parent: &Certificate) -> Result<()> {
+    use ed25519_dalek::Verifier;
     use elliptic_curve::pkcs8::DecodePublicKey;
-    use p256::ecdsa::signature::{Verifier, hazmat::PrehashVerifier};
+    use p256::ecdsa::signature::hazmat::PrehashVerifier;
+    use pkcs8::DecodePublicKey as _;
     use sha2::{Digest, Sha256, Sha384, Sha512};
 
     let algorithm = cert.signature_algorithm.oid.to_string();
@@ -659,8 +661,8 @@ mod tests {
 
     #[test]
     fn verifies_ed25519_certificate_signatures() {
-        use elliptic_curve::pkcs8::EncodePublicKey;
-        use p256::ecdsa::signature::Signer;
+        use ed25519_dalek::Signer;
+        use ed25519_dalek::pkcs8::EncodePublicKey;
         use x509_cert::der::asn1::BitString;
         use x509_cert::spki::SubjectPublicKeyInfoOwned;
 

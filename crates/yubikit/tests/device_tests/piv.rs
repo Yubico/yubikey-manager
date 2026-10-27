@@ -1,4 +1,5 @@
 use super::*;
+use elliptic_curve::Generate;
 use x509_cert::der::{Decode, Encode};
 use yubikit::piv::{
     DEFAULT_MANAGEMENT_KEY, HashAlgorithm, KeyType, ManagementKey, PinPolicy, PivPin, PivSession,
@@ -554,10 +555,10 @@ fn test_piv_ecdh_p256(#[case] tc: TestConnection) {
     // Generate an ephemeral key pair on the host
     use p256::PublicKey;
     use p256::ecdh::EphemeralSecret;
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
-    let host_secret = EphemeralSecret::random(&mut p256::elliptic_curve::rand_core::OsRng);
+    use p256::elliptic_curve::sec1::ToSec1Point;
+    let host_secret = EphemeralSecret::generate();
     let host_public = p256::PublicKey::from(&host_secret);
-    let host_public_bytes = host_public.to_encoded_point(false);
+    let host_public_bytes = host_public.to_sec1_point(false);
 
     // Derive shared secret on the YubiKey using ECDH
     let device_shared = session
@@ -1218,7 +1219,7 @@ fn test_piv_x25519_key_agreement(#[case] tc: TestConnection) {
 
     // Generate an ephemeral client key and perform key agreement
     use x25519_dalek::{EphemeralSecret, PublicKey};
-    let client_secret = EphemeralSecret::random_from_rng(p256::elliptic_curve::rand_core::OsRng);
+    let client_secret = EphemeralSecret::random();
     let client_public = PublicKey::from(&client_secret);
 
     session

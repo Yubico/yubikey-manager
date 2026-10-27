@@ -1,5 +1,6 @@
 use super::*;
 use base64::prelude::*;
+use elliptic_curve::Generate;
 use yubikit::securitydomain::{Curve, KeyRef, ScpKid, SecurityDomainSession, StaticKeys};
 use yubikit::smartcard::ScpKeyParams;
 
@@ -387,7 +388,7 @@ fn test_scp11b_import(#[case] tc: TestConnection) {
     // Generate a new P-256 private key
     use elliptic_curve::SecretKey;
     use p256::NistP256;
-    let sk = SecretKey::<NistP256>::random(&mut p256::elliptic_curve::rand_core::OsRng);
+    let sk = SecretKey::<NistP256>::generate();
     let scalar_bytes = sk.to_bytes();
 
     let import_ref = KeyRef::new(0x13, 0x02);
@@ -397,8 +398,8 @@ fn test_scp11b_import(#[case] tc: TestConnection) {
 
     // Get the public key for authentication
     let pk = sk.public_key();
-    use elliptic_curve::sec1::ToEncodedPoint;
-    let pk_bytes = pk.to_encoded_point(false);
+    use elliptic_curve::sec1::ToSec1Point;
+    let pk_bytes = pk.to_sec1_point(false);
     let conn = session.into_connection();
 
     // Authenticate with the imported SCP11b key

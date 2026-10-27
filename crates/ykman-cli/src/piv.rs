@@ -2531,6 +2531,7 @@ fn verify_signature(
 ) -> Result<bool> {
     use elliptic_curve::pkcs8::DecodePublicKey;
     use p256::ecdsa::signature::hazmat::PrehashVerifier;
+    use rsa::pkcs8::DecodePublicKey as _;
     use sha2::{Digest, Sha256};
 
     if !matches!(

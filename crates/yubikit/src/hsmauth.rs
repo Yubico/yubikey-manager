@@ -900,7 +900,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
         )?;
 
         // Encode as SEC1 uncompressed point (0x04 || x || y)
-        let encoded = p256::EncodedPoint::from(peer_public_key);
+        let encoded = p256::Sec1Point::from(peer_public_key);
         let public_key_data = encoded.as_bytes().to_vec();
 
         let response = self.calculate_session_keys_inner(
@@ -939,7 +939,7 @@ impl<C: SmartCardConnection> HsmAuthSession<C> {
 }
 
 fn parse_p256_public_key(data: &[u8]) -> Result<p256::PublicKey, HsmAuthError> {
-    use elliptic_curve::sec1::FromEncodedPoint;
+    use elliptic_curve::sec1::FromSec1Point;
 
     // Try parsing as SEC1 (with 0x04 prefix) or raw 64-byte coordinates
     let encoded = if data.len() == 64 {
@@ -951,16 +951,17 @@ fn parse_p256_public_key(data: &[u8]) -> Result<p256::PublicKey, HsmAuthError> {
         data.to_vec()
     };
 
-    let point = p256::EncodedPoint::from_bytes(&encoded)
+    let point = p256::Sec1Point::from_bytes(&encoded)
         .map_err(|e| HsmAuthError::InvalidData(format!("Invalid EC point: {e}")))?;
 
-    Option::from(p256::PublicKey::from_encoded_point(&point))
+    Option::from(p256::PublicKey::from_sec1_point(&point))
         .ok_or_else(|| HsmAuthError::InvalidData("Invalid EC public key".into()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use elliptic_curve::Generate;
 
     #[test]
     fn test_algorithm_from_u8() {
@@ -1066,9 +1067,9 @@ mod tests {
     #[test]
     fn test_parse_p256_public_key_sec1() {
         // Generate a key and round-trip it
-        let secret = p256::SecretKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let secret = p256::SecretKey::generate();
         let public = secret.public_key();
-        let encoded = p256::EncodedPoint::from(public);
+        let encoded = p256::Sec1Point::from(public);
         let bytes = encoded.as_bytes();
 
         let parsed = parse_p256_public_key(bytes).unwrap();
@@ -1077,9 +1078,9 @@ mod tests {
 
     #[test]
     fn test_parse_p256_public_key_raw_64() {
-        let secret = p256::SecretKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let secret = p256::SecretKey::generate();
         let public = secret.public_key();
-        let encoded = p256::EncodedPoint::from(public);
+        let encoded = p256::Sec1Point::from(public);
         // Strip the 0x04 prefix
         let raw = &encoded.as_bytes()[1..];
         assert_eq!(raw.len(), 64);

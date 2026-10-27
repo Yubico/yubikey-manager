@@ -221,7 +221,7 @@ fn test_hsmauth_asymmetric_credential(#[case] tc: TestConnection) {
     let public_key = session.get_public_key("asym-test").expect("get_public_key");
 
     // Verify it's a valid P-256 point (uncompressed, 65 bytes encoded)
-    let encoded = p256::EncodedPoint::from(&public_key);
+    let encoded = p256::Sec1Point::from(&public_key);
     assert!(
         !encoded.is_identity(),
         "Public key should not be identity point"

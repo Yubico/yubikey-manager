@@ -38,7 +38,7 @@ elliptic-curve = { workspace = true, features = ["pkcs8", "sec1"] }
 p256 = { workspace = true, features = ["pkcs8", "ecdsa"] }
 p384 = { workspace = true, features = ["pkcs8", "ecdsa"] }
 rsa.workspace = true
-ed25519-dalek = { workspace = true, features = ["pkcs8"] }
+ed25519-dalek = { workspace = true, features = ["alloc", "pkcs8"] }
 sha2 = { workspace = true, features = ["oid"] }
 subtle.workspace = true
 zeroize.workspace = true

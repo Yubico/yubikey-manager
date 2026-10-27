@@ -317,7 +317,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         log::debug!("Changing PIN");
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
-        let pin_hash_full = Zeroizing::new(Sha256::digest(old_pin.as_bytes()));
+        let pin_hash_full = Zeroizing::<[u8; 32]>::new(Sha256::digest(old_pin.as_bytes()).into());
         let pin_hash_enc = self.protocol.encrypt(&shared_secret, &pin_hash_full[..16]);
         let new_pin_padded = pad_pin(new_pin);
         let new_pin_enc = self.protocol.encrypt(&shared_secret, &new_pin_padded);
@@ -356,7 +356,7 @@ impl<C: Connection + 'static> ClientPin<C> {
         log::debug!("Getting PIN token");
         let (key_agreement, shared_secret) = self.get_shared_secret()?;
 
-        let pin_hash_full = Zeroizing::new(Sha256::digest(pin.as_bytes()));
+        let pin_hash_full = Zeroizing::<[u8; 32]>::new(Sha256::digest(pin.as_bytes()).into());
         let pin_hash_enc = self.protocol.encrypt(&shared_secret, &pin_hash_full[..16]);
 
         let (sub_cmd, perms, rpid) =
