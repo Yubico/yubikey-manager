@@ -120,11 +120,16 @@ jobs:
             wheel-smoke/bin/python -m pip install \
               "$WHEEL_DIR"/yubikit-*-cp311-cp311-*.whl
             timeout 30s wheel-smoke/bin/python -I -c \
-              'from yubikit.device import list_all_devices; from _yubikit_native.pcsc import list_readers; print(list_readers())'
+              'from yubikit.device import list_all_devices; print(list_all_devices)'
+            # Headless runners can deny unprivileged PC/SC access via polkit.
+            sudo env "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}" \
+              timeout 30s wheel-smoke/bin/python -I -c \
+              'from _yubikit_native.pcsc import list_readers; print(list_readers())'
           else
             wheel-smoke/bin/python -m pip install --no-deps --no-index \
               --find-links "$WHEEL_DIR" yubikey-manager
-            timeout 30s wheel-smoke/bin/ykman list --readers
+            sudo env "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}" \
+              timeout 30s wheel-smoke/bin/ykman list --readers
           fi
 
       - name: Upload wheels
