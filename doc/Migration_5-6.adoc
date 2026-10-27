@@ -45,6 +45,37 @@ Python helpers from `ykman` have moved into `yubikit`:
 | Rust core + Python wrapper
 |===
 
+=== Upgrading an existing Python environment
+
+Prefer installing into a new virtual environment. When reusing an environment,
+uninstall both distributions before installing 6.x:
+
+[source,sh]
+----
+python -m pip uninstall yubikey-manager yubikit
+python -m pip install --pre "yubikey-manager>=6.0.0a0,<7"
+----
+
+For library-only use, replace the second command with
+`python -m pip install --pre "yubikit>=1.0.0a0,<2"`.
+
+The 5.x `yubikey-manager` distribution owns files that now belong to the separate
+`yubikit` distribution. An in-place upgrade can install the new library before
+uninstalling 5.x, which then deletes the shared files. This can leave apparently
+installed packages that fail with errors such as
+`cannot import name 'PID' from 'yubikit.core' (unknown location)`.
+
+If both new distributions are already installed, force-reinstall only `yubikit`
+to restore its files without changing other dependencies. Use your installed
+library version in the command below (shown for the first alpha):
+
+[source,sh]
+----
+python -m pip install --no-cache-dir --force-reinstall --no-deps "yubikit==1.0.0a0"
+----
+
+Restart any Python interpreter that was running during the repair.
+
 === Package versions
 
 `ykman.__version__` has been removed. Use

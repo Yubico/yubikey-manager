@@ -84,6 +84,18 @@ jobs:
             "$GITHUB_WORKSPACE/tests" --ignore="$GITHUB_WORKSPACE/tests/device"
           "$RUNNER_TEMP/sdist-venv/bin/python" -m ykman --version
 
+      - name: Check documented migration from 5.x
+        run: |
+          uv venv --seed "$RUNNER_TEMP/migration-venv"
+          python="$RUNNER_TEMP/migration-venv/bin/python"
+          "$python" -m pip install --no-deps "yubikey-manager==5.9.2"
+          "$python" -m pip uninstall -y yubikey-manager yubikit
+          "$python" -m pip install "$RUNNER_TEMP"/sdist-wheels/*.whl
+          cd "$RUNNER_TEMP"
+          "$python" -I -c \
+            'from yubikit.device import list_all_devices; from yubikit.core import PID; print(list_all_devices, PID)'
+          "$python" -m ykman --version
+
       - name: Upload source packages
         if: matrix.python-version == '3.14'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -45,16 +45,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        if: matrix.python-versions
+        if: matrix.python-versions || matrix.container
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: ${{ matrix.python-versions }}
+          python-version: ${{ matrix.python-versions || '3.11' }}
 
       - name: Install dependencies
         if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -qq libpcsclite-dev libudev-dev
+          sudo apt-get install -qq libpcsclite-dev libudev-dev pcscd
 
       - name: Install Rust toolchain
         if: matrix.package == 'ykman' && !matrix.container
@@ -70,7 +70,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
-          args: --locked --release --out dist ${{ matrix.interpreter && format('--interpreter {0}', matrix.interpreter) || '--find-interpreter' }}
+          args: --locked --release --out ${{ matrix.container && 'unrepaired' || 'dist' }} ${{ matrix.container && '--auditwheel skip' || '' }} ${{ matrix.interpreter && format('--interpreter {0}', matrix.interpreter) || '--find-interpreter' }}
           manylinux: manylinux_2_28
           container: ${{ matrix.container }}
           before-script-linux: >-
@@ -78,6 +78,54 @@ jobs:
               && 'dnf install -y pcsc-lite-devel systemd-devel dbus-devel'
               || 'dnf install -y pcsc-lite-devel systemd-devel') || '' }}
           working-directory: packages/${{ matrix.package }}
+
+      - name: Repair Linux wheels using system PC/SC
+        if: matrix.container
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/io" \
+            -w "/io/packages/${{ matrix.package }}" \
+            "${{ matrix.container }}" \
+            bash -euxo pipefail -c '
+              dnf install -y pcsc-lite-libs systemd-libs dbus-libs
+              auditwheel repair --plat "manylinux_2_28_${{ matrix.target }}" \
+                --exclude libpcsclite.so.1 --wheel-dir dist unrepaired/*.whl
+            '
+
+      - name: Check Linux wheel PC/SC dependencies and enumeration
+        if: matrix.container
+        working-directory: ${{ runner.temp }}
+        env:
+          WHEEL_DIR: ${{ github.workspace }}/packages/${{ matrix.package }}/dist
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          wheels = list(Path(os.environ["WHEEL_DIR"]).glob("*.whl"))
+          assert wheels, "No repaired wheels found"
+          for wheel in wheels:
+              with ZipFile(wheel) as archive:
+                  bundled = [
+                      name for name in archive.namelist()
+                      if Path(name).name.startswith("libpcsclite")
+                  ]
+                  assert not bundled, f"{wheel.name} bundles PC/SC: {bundled}"
+          PY
+          sudo systemctl start pcscd.socket
+          python -m venv wheel-smoke
+          if [ "$PACKAGE" = yubikit ]; then
+            wheel-smoke/bin/python -m pip install \
+              "$WHEEL_DIR"/yubikit-*-cp311-cp311-*.whl
+            timeout 30s wheel-smoke/bin/python -I -c \
+              'from yubikit.device import list_all_devices; from _yubikit_native.pcsc import list_readers; print(list_readers())'
+          else
+            wheel-smoke/bin/python -m pip install --no-deps --no-index \
+              --find-links "$WHEEL_DIR" yubikey-manager
+            timeout 30s wheel-smoke/bin/ykman list --readers
+          fi
 
       - name: Upload wheels
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

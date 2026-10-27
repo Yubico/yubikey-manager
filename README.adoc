@@ -82,6 +82,11 @@ equivalent):
 
   pip install --user yubikey-manager
 
+When upgrading from 5.x, use a new virtual environment or uninstall the old
+distribution first. An in-place upgrade can delete files now owned by the
+separate `yubikit` package. See link:doc/Migration_5-6.adoc[the migration guide]
+for upgrade and repair commands.
+
 On Linux platforms you will need `pcscd` installed and running to be able to
 communicate with a YubiKey over the SmartCard interface. Additionally, you may
 need to set permissions for your user to access YubiKeys via the HID interfaces.

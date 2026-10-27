@@ -157,6 +157,16 @@ CI rebuilds wheels from these archives with `--locked` on Python 3.11 and 3.14,
 then installs and tests the wheels outside the workspace. Release wheels for
 the full platform and architecture matrix are built by the Wheels workflow.
 
+Linux wheels for both packages must use the host's `libpcsclite.so.1`, not a
+bundled copy: the client/daemon protocol is not compatible across all PC/SC
+versions and distribution builds. The Wheels workflow builds unrepaired wheels
+with Maturin, then runs `auditwheel repair --exclude libpcsclite.so.1` inside the
+same manylinux image. Other non-policy libraries are still bundled. The system
+PC/SC runtime remains an explicit installation prerequisite, rather than a
+library supplied by the wheel. CI rejects wheels containing bundled PC/SC
+libraries and exercises installed-wheel reader enumeration against the host
+daemon with a timeout.
+
 === Code style & security
 
 https://docs.astral.sh/ruff/[ruff] handles Python style and security linting.
