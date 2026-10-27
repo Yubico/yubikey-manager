@@ -204,6 +204,24 @@ jobs for the x64 and ARM64 executables and installers.
 Signing accepts unprefixed `X.Y.Z-alpha.N`, `X.Y.Z-beta.N` and `X.Y.Z-rc.N`
 tags. Stable releases reuse the signed RC artifacts without rebuilding.
 
+Windows numeric file and product versions use `CargoMajor.CargoMinor.Build.0`.
+Major and minor are derived automatically from each crate's Cargo version;
+the independent third component is maintained in the `WINDOWS_BUILD` constants
+in `crates/ykman-cli/build.rs` and `crates/ykman-svc/build.rs`. The initial alpha
+uses `6.0.0.0` for the CLI and `1.0.0.0` for the shared service. Descriptive
+version strings retain the full Cargo versions. The MSI and service merge
+module derive their versions from the respective executables' numeric resources.
+
+Within each major/minor series, increment the third component for each new
+release build, regardless of alpha, beta, RC or stable status or Cargo patch
+version. Coordinate the service's independent counter with other products
+sharing it. Keep the fourth component zero: MSI compares only the first three
+components, with limits of 255, 255 and 65535. Update the Windows CI build-counter
+expectations when changing these constants. Promoting an RC without rebuilding
+retains its numeric versions and descriptive strings; do not reset the counter
+for stable. Each stable release's `NEWS` entry must record the corresponding
+CLI and shared-service Windows file versions.
+
 Signing containers receive only `GOOGLE_APPLICATION_CREDENTIALS`, `CI`,
 `GITHUB_EVENT_NAME`, `GITHUB_REF`, and `GITHUB_REPOSITORY` from the runner.
 Scribe needs the CI metadata to construct the release reference; keep these
@@ -346,7 +364,9 @@ with the release.
   projects and both PyPI projects, and configure publishing credentials or
   trusted publishing.
 . Prepare release notes and tag the exact source commit used for the verified
-  artifacts.
+  artifacts. For every stable release, record the CLI and shared-service Windows
+  file versions in its `NEWS` entry, including when promoting an existing RC
+  without rebuilding.
 . Publish Rust crates in dependency order: `yubikit`, then `ykman`, then
   `ykman-cli` and `ykman-svc`. Keep the `yubikit-pyo3` crate unpublished on
   crates.io; its native extension is distributed inside the Python `yubikit`

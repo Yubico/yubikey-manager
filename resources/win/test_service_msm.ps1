@@ -46,6 +46,7 @@ public class TestService : ServiceBase {
     }
     Set-Content "$root\ykman-service.wxs" $module
     Copy-Item "$PSScriptRoot\make_service_msm.ps1" $root
+    Copy-Item "$PSScriptRoot\get_msi_version.ps1" $root
     & "$root\make_service_msm.ps1" -ServiceSource "$root\service.exe" -Architecture $Architecture -OutputPath "$root\service.msm" -WixBin $WixBin
     $installerVersion = if ($Architecture -eq 'arm64') { '500' } else { '301' }
     for ($i = 0; $i -lt 4; $i++) {

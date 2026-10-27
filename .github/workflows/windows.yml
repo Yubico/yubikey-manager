@@ -41,6 +41,31 @@ jobs:
           cp target/release/ykman-svc.exe dist/ykman/
           dist/ykman/ykman.exe --version
 
+      - name: Test MSI version extraction
+        run: .\resources\win\test_msi_version.ps1
+
+      - name: Verify executable versions
+        run: |
+          $packages = (cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json).packages
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read Cargo package versions' }
+          foreach ($expected in @(
+            @{ File = 'ykman.exe'; Package = 'ykman-cli'; Build = 0 },
+            @{ File = 'ykman-svc.exe'; Package = 'ykman-svc'; Build = 0 }
+          )) {
+            $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path "dist/ykman/$($expected.File)").Path)
+            $file = "$($version.FileMajorPart).$($version.FileMinorPart).$($version.FileBuildPart).$($version.FilePrivatePart)"
+            $product = "$($version.ProductMajorPart).$($version.ProductMinorPart).$($version.ProductBuildPart).$($version.ProductPrivatePart)"
+            $text = ($packages | Where-Object name -eq $expected.Package).version
+            $cargoVersion = [version]$text.Split('-')[0]
+            $numeric = "$($cargoVersion.Major).$($cargoVersion.Minor).$($expected.Build).0"
+            if ($file -ne $numeric -or $product -ne $numeric) {
+              throw "$($expected.File) has unexpected numeric versions: file=$file, product=$product"
+            }
+            if ($version.FileVersion -ne $text -or $version.ProductVersion -ne $text) {
+              throw "$($expected.File) must retain its Cargo version text: $text"
+            }
+          }
+
       - name: Copy scripts
         shell: bash
         run: cp -r resources/win dist/scripts
@@ -67,6 +92,10 @@ jobs:
         if: matrix.os == 'windows-latest'
         working-directory: ./dist
         run: .\scripts\make_msi.ps1 -SourceDir .\ykman
+
+      - name: Verify installer and service module versions
+        if: matrix.os == 'windows-latest'
+        run: .\resources\win\test_installer_versions.ps1 -BuildDir .\dist
 
       - name: Upload build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -161,6 +190,9 @@ jobs:
       - name: Build installer
         working-directory: .\ykman-builds-windows
         run: .\scripts\make_msi.ps1 -SourceDir .\ykman
+
+      - name: Verify installer and service module versions
+        run: .\resources\win\test_installer_versions.ps1 -BuildDir .\ykman-builds-windows
 
       - name: Upload installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -323,6 +355,9 @@ jobs:
       - name: Build ARM64 MSI from signed executables
         working-directory: .\ykman-builds-windows-arm64
         run: .\scripts\make_msi.ps1 -SourceDir .\ykman -Architecture arm64 -WixBin $env:WIX_BIN
+
+      - name: Verify ARM64 installer and service module versions
+        run: .\resources\win\test_installer_versions.ps1 -BuildDir .\ykman-builds-windows-arm64 -Architecture arm64
 
       - name: Upload unsigned ARM64 MSI
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

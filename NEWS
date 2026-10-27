@@ -4,6 +4,7 @@
  ** Python library distributed separately as yubikit; yubikey-manager provides the CLI.
  ** Python 3.11 or later is now required.
  ** Breaking Python API and CLI changes; see doc/Migration_5-6.adoc.
+ ** Windows file versions: CLI 6.0.0.0; shared service 1.0.0.0.
 
 * Version 5.9.0 (released 2026-01-22)
  ** OATH: Add support for importing credentials from PSKC files.

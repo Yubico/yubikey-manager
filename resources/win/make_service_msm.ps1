@@ -11,11 +11,7 @@ if (-not [IO.Path]::IsPathRooted($OutputPath)) {
     $OutputPath = Join-Path (Get-Location) $OutputPath
 }
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
-$version = [Diagnostics.FileVersionInfo]::GetVersionInfo($ServiceSource)
-if (-not $version.FileVersion) {
-    throw 'ykman-svc.exe must have a Windows file version'
-}
-$serviceVersion = "$($version.FileMajorPart).$($version.FileMinorPart).$($version.FileBuildPart)"
+$serviceVersion = & "$PSScriptRoot\get_msi_version.ps1" -Path $ServiceSource
 $objectPath = [IO.Path]::ChangeExtension($OutputPath, '.wixobj')
 try {
     & "$WixBin\candle.exe" "$PSScriptRoot\ykman-service.wxs" "-dServiceSource=$ServiceSource" "-dServiceVersion=$serviceVersion" "-dPlatform=$Architecture" -arch $Architecture -out $objectPath

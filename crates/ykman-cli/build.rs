@@ -6,6 +6,8 @@ use std::path::Path;
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
 
+const WINDOWS_BUILD: u16 = 0;
+
 fn main() {
     embed_licenses();
 
@@ -16,6 +18,16 @@ fn main() {
         res.set("LegalCopyright", "Copyright 2024 Yubico AB. Apache-2.0");
         res.set("OriginalFilename", "ykman.exe");
         res.set("ProductName", "YubiKey Manager");
+        let major = env!("CARGO_PKG_VERSION_MAJOR")
+            .parse::<u8>()
+            .expect("Cargo major version must fit MSI's 0..=255 range");
+        let minor = env!("CARGO_PKG_VERSION_MINOR")
+            .parse::<u8>()
+            .expect("Cargo minor version must fit MSI's 0..=255 range");
+        let version =
+            (u64::from(major) << 48) | (u64::from(minor) << 32) | (u64::from(WINDOWS_BUILD) << 16);
+        res.set_version_info(winresource::VersionInfo::FILEVERSION, version);
+        res.set_version_info(winresource::VersionInfo::PRODUCTVERSION, version);
         res.set_manifest_file("ykman.exe.manifest");
         res.compile().expect("Failed to compile Windows resources");
     }

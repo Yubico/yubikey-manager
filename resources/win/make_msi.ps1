@@ -30,8 +30,8 @@ $VERSION = $(& "$SourceDir\ykman.exe" --version).Split(' ')[-1]
 echo "Release version: $VERSION"
 echo "Source: $SourceDir"
 
-# WiX needs a 4-part version (major.minor.patch.build)
-$SIMPLE_VERSION = "$($VERSION.Split('-')[0]).0"
+# MSI compares only the first three numeric components, not the display version.
+$SIMPLE_VERSION = & "$SCRIPT_DIR\get_msi_version.ps1" -Path "$SourceDir\ykman.exe"
 echo "MSI version: $SIMPLE_VERSION"
 
 # Generate .wxs from template
