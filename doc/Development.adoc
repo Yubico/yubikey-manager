@@ -354,9 +354,9 @@ Open `docs/_build/html/index.html` in a browser to view the result.
 === Release checklist
 
 A release includes both the Rust crates on crates.io and the Python packages on
-PyPI. Python package versions use PEP 440 spelling: the initial alpha is
-`yubikit` `1.0.0a0` and `yubikey-manager` `6.0.0a0`, corresponding to Rust
-`1.0.0-alpha.0` and `6.0.0-alpha.0`. Keep the Python package metadata, the
+PyPI. Python package versions use PEP 440 spelling. The Python-only packaging
+release is `yubikit` `1.0.0a1` and `yubikey-manager` `6.0.0a1`; the Rust crates
+remain at `1.0.0-alpha.0` and `6.0.0-alpha.0`. Keep the Python package metadata, the
 manager's minimum `yubikit` dependency, and both workspace lockfiles consistent
 with the release.
 

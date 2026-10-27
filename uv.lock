@@ -817,7 +817,7 @@ wheels = [
 
 [[package]]
 name = "yubikey-manager"
-version = "6.0.0a0"
+version = "6.0.0a1"
 source = { editable = "packages/ykman" }
 dependencies = [
     { name = "yubikit" },
@@ -828,7 +828,7 @@ requires-dist = [{ name = "yubikit", editable = "packages/yubikit" }]
 
 [[package]]
 name = "yubikey-manager-workspace"
-version = "6.0.0a0"
+version = "6.0.0a1"
 source = { virtual = "." }
 
 [package.dev-dependencies]
@@ -857,7 +857,7 @@ dev = [
 
 [[package]]
 name = "yubikit"
-version = "1.0.0a0"
+version = "1.0.0a1"
 source = { editable = "packages/yubikit" }
 dependencies = [
     { name = "cryptography" },
