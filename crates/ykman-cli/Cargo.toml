@@ -23,7 +23,7 @@ default = ["hardware"]
 hardware = ["ykman/hardware", "yubikit/pcsc", "yubikit/hid"]
 
 [dependencies]
-ykman.workspace = true
+ykman = { workspace = true, default-features = true }
 yubikit.workspace = true
 anyhow.workspace = true
 clap.workspace = true
