@@ -2,6 +2,7 @@
 name = "yubikey-manager"
 version = "6.0.0a1"
 description = "CLI for managing your YubiKey configuration."
+readme = "README.md"
 authors = [
   { name = "Dain Nilsson", email = "dain@yubico.com" }
 ]
