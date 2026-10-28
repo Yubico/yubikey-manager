@@ -9,7 +9,7 @@ native executable. **This Python package exists only to ease migration from
 earlier Python-based versions of YubiKey Manager. Installing the Rust CLI
 directly is the preferred approach.**
 
-**This is an alpha release.** Commands and behavior may change before the
+**This is a beta release.** Commands and behavior may change before the
 stable release.
 
 ## Installation
@@ -19,7 +19,7 @@ stable release.
 Install the native CLI through Cargo:
 
 ```sh
-cargo install ykman-cli --version 6.0.0-alpha.0 --locked
+cargo install ykman-cli --version 6.0.0-beta.0 --locked
 ```
 
 Building requires Rust 1.88 or later and the platform prerequisites listed in

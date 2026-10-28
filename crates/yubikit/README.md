@@ -16,11 +16,11 @@ YubiKey applications:
 
 ## Getting started
 
-Requires Rust 1.88 or later. Add the alpha explicitly to your `Cargo.toml`:
+Requires Rust 1.88 or later. Add the beta explicitly to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-yubikit = "1.0.0-alpha.0"
+yubikit = "1.0.0-beta.0"
 ```
 
 Install the native prerequisites below before building with the default features.

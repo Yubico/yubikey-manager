@@ -48,10 +48,10 @@ such as GNOME Keyring.
 
 ### Alpha release
 
-The crates.io installation command selects the alpha explicitly:
+The crates.io installation command selects the beta explicitly:
 
 ```sh
-cargo install ykman-cli --version 6.0.0-alpha.0 --locked
+cargo install ykman-cli --version 6.0.0-beta.0 --locked
 ```
 
 To install from a repository checkout instead:

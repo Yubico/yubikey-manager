@@ -1,6 +1,6 @@
 [project]
 name = "yubikey-manager"
-version = "6.0.0a1"
+version = "6.0.0b0"
 description = "CLI for managing your YubiKey configuration."
 readme = "README.md"
 authors = [

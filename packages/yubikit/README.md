@@ -7,7 +7,7 @@ YubiHSM Auth, and device management over USB and NFC.
 The protocol implementations and device transports are written in Rust and
 exposed through Python bindings.
 
-**This is an alpha release.** APIs may change before the stable release.
+**This is a beta release.** APIs may change before the stable release.
 
 ## Installation
 

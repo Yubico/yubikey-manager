@@ -9,11 +9,11 @@ CLI](https://crates.io/crates/ykman-cli).
 
 ## Getting started
 
-Requires Rust 1.88 or later. Add the alpha explicitly to your `Cargo.toml`:
+Requires Rust 1.88 or later. Add the beta explicitly to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ykman = "1.0.0-alpha.0"
+ykman = "1.0.0-beta.0"
 ```
 
 ## Features

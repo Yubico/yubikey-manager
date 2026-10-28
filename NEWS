@@ -1,5 +1,5 @@
-* Version 6.0.0-alpha.0 (unreleased)
- ** Initial alpha of the Rust rewrite, with a native CLI and Rust-backed Python bindings.
+* Version 6.0.0-beta.0 (unreleased)
+ ** Initial beta of the Rust rewrite, with a native CLI and Rust-backed Python bindings.
  ** Rust libraries provided by the yubikit and ykman crates.
  ** Python library distributed separately as yubikit; yubikey-manager provides the CLI.
  ** Python 3.11 or later is now required.

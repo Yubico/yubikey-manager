@@ -55,8 +55,8 @@ uninstall both distributions before installing 6.x:
 [source,sh]
 ----
 python -m pip uninstall yubikey-manager yubikit
-python -m pip install --pre "yubikey-manager>=6.0.0a0,<7"
-python -m pip install --pre "yubikit>=1.0.0a0,<2"
+python -m pip install --pre "yubikey-manager>=6.0.0b0,<7"
+python -m pip install --pre "yubikit>=1.0.0b0,<2"
 ----
 
 The two install commands are independent. For CLI-only use, omit the `yubikit`
@@ -70,11 +70,11 @@ installed packages that fail with errors such as
 
 If both new distributions are already installed, force-reinstall only `yubikit`
 to restore its files without changing other dependencies. Use your installed
-library version in the command below (shown for the first alpha):
+library version in the command below (shown for the first beta):
 
 [source,sh]
 ----
-python -m pip install --no-cache-dir --force-reinstall --no-deps "yubikit==1.0.0a0"
+python -m pip install --no-cache-dir --force-reinstall --no-deps "yubikit==1.0.0b0"
 ----
 
 Restart any Python interpreter that was running during the repair.

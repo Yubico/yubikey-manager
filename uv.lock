@@ -817,12 +817,12 @@ wheels = [
 
 [[package]]
 name = "yubikey-manager"
-version = "6.0.0a1"
+version = "6.0.0b0"
 source = { editable = "packages/ykman" }
 
 [[package]]
 name = "yubikey-manager-workspace"
-version = "6.0.0a1"
+version = "6.0.0b0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
@@ -851,7 +851,7 @@ dev = [
 
 [[package]]
 name = "yubikit"
-version = "1.0.0a1"
+version = "1.0.0b0"
 source = { editable = "packages/yubikit" }
 dependencies = [
     { name = "cryptography" },

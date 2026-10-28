@@ -217,7 +217,7 @@ tags. Stable releases reuse the signed RC artifacts without rebuilding.
 Windows numeric file and product versions use `CargoMajor.CargoMinor.Build.0`.
 Major and minor are derived automatically from each crate's Cargo version;
 the independent third component is maintained in the `WINDOWS_BUILD` constants
-in `crates/ykman-cli/build.rs` and `crates/ykman-svc/build.rs`. The initial alpha
+in `crates/ykman-cli/build.rs` and `crates/ykman-svc/build.rs`. The initial beta
 uses `6.0.0.0` for the CLI and `1.0.0.0` for the shared service. Descriptive
 version strings retain the full Cargo versions. The MSI and service merge
 module derive their versions from the respective executables' numeric resources.
@@ -354,9 +354,9 @@ Open `docs/_build/html/index.html` in a browser to view the result.
 === Release checklist
 
 A release includes both the Rust crates on crates.io and the Python packages on
-PyPI. Python package versions use PEP 440 spelling. The Python-only packaging
-release is `yubikit` `1.0.0a1` and `yubikey-manager` `6.0.0a1`; the Rust crates
-remain at `1.0.0-alpha.0` and `6.0.0-alpha.0`. The Python CLI and SDK are
+PyPI. Python package versions use PEP 440 spelling: `yubikit` `1.0.0b0` and
+`yubikey-manager` `6.0.0b0` correspond to Rust versions `1.0.0-beta.0` and
+`6.0.0-beta.0`. The Python CLI and SDK are
 independently installed distributions, with no dependency between them. Keep
 the Python package metadata and both workspace lockfiles consistent with the
 release.
@@ -386,4 +386,4 @@ release.
   The `yubikit` and `yubikey-manager` Python packages can be published in either
   order.
 . Smoke-test registry-only Rust installation and clean Python installation
-  from PyPI, explicitly selecting the prerelease versions for an alpha.
+  from PyPI, explicitly selecting the prerelease versions for a beta.

@@ -1,6 +1,6 @@
 [project]
 name = "yubikit"
-version = "1.0.0a1"
+version = "1.0.0b0"
 description = "Python library for managing YubiKey configuration."
 readme = "README.md"
 authors = [
