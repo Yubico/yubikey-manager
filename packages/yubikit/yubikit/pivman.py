@@ -27,48 +27,29 @@
 
 from __future__ import annotations
 
-import logging
-import os
 import struct
-from typing import cast
-
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from collections.abc import Iterable
 
 from yubikit.core import Tlv
-from yubikit.core.smartcard import SW, ApduError
 from yubikit.piv import (
     MANAGEMENT_KEY_TYPE,
     OBJECT_ID,
     PivSession,
 )
 
-logger = logging.getLogger(__name__)
-
-
 OBJECT_ID_PIVMAN_DATA = 0x5FFF00
 OBJECT_ID_PIVMAN_PROTECTED_DATA = OBJECT_ID.PRINTED  # Use slot for printed information.
 
 
-def derive_management_key(pin: str, salt: bytes) -> bytes:
-    """Derive a management key from the users PIN and a salt.
-
-    NOTE: This method of derivation is deprecated! Protect the management key using
-    PivmanProtectedData instead.
-
-    :param pin: The PIN.
-    :param salt: The salt.
-    """
-    kdf = PBKDF2HMAC(hashes.SHA1(), 24, salt, 10000)  # noqa: S303
-    return kdf.derive(pin.encode("utf-8"))
+def _encode_pivman_data(tag: int, entries: Iterable[tuple[int, bytes]]) -> bytes:
+    return Tlv(tag, b"".join(Tlv(t, value) for t, value in entries))
 
 
 class PivmanData:
     def __init__(self, raw_data: bytes = Tlv(0x80)):
         data = Tlv.parse_dict(Tlv(raw_data).value)
+        self._data = data
         self._flags = struct.unpack(">B", data[0x81])[0] if 0x81 in data else None
-        self.salt = data.get(0x82)
-        self.pin_timestamp = struct.unpack(">I", data[0x83]) if 0x83 in data else None
 
     def _get_flag(self, mask: int) -> bool:
         return bool((self._flags or 0) & mask)
@@ -80,14 +61,6 @@ class PivmanData:
             self._flags &= ~mask
 
     @property
-    def puk_blocked(self) -> bool:
-        return self._get_flag(0x01)
-
-    @puk_blocked.setter
-    def puk_blocked(self, value: bool) -> None:
-        self._set_flag(0x01, value)
-
-    @property
     def mgm_key_protected(self) -> bool:
         return self._get_flag(0x02)
 
@@ -96,38 +69,31 @@ class PivmanData:
         self._set_flag(0x02, value)
 
     @property
-    def has_protected_key(self) -> bool:
-        return self.has_derived_key or self.has_stored_key
-
-    @property
-    def has_derived_key(self) -> bool:
-        return self.salt is not None
-
-    @property
     def has_stored_key(self) -> bool:
         return self.mgm_key_protected
 
     def get_bytes(self) -> bytes:
-        data = b""
+        data = self._data.copy()
         if self._flags:
-            data += Tlv(0x81, struct.pack(">B", self._flags))
-        if self.salt is not None:
-            data += Tlv(0x82, self.salt)
-        if self.pin_timestamp is not None:
-            data += Tlv(0x83, struct.pack(">I", self.pin_timestamp))
-        return Tlv(0x80, data) if data else b""
+            data[0x81] = struct.pack(">B", self._flags)
+        else:
+            data.pop(0x81, None)
+        return _encode_pivman_data(0x80, data.items()) if data else b""
 
 
 class PivmanProtectedData:
     def __init__(self, raw_data: bytes = Tlv(0x88)):
         data = Tlv.parse_dict(Tlv(raw_data).value)
+        self._data = data
         self.key = data.get(0x89)
 
     def get_bytes(self) -> bytes:
-        data = b""
+        data = self._data.copy()
         if self.key is not None:
-            data += Tlv(0x89, self.key)
-        return Tlv(0x88, data) if data else b""
+            data[0x89] = self.key
+        else:
+            data.pop(0x89, None)
+        return _encode_pivman_data(0x88, data.items()) if data else b""
 
 
 def get_pivman_data(session: PivSession) -> PivmanData:
@@ -135,15 +101,7 @@ def get_pivman_data(session: PivSession) -> PivmanData:
 
     :param session: The PIV session.
     """
-    logger.debug("Reading pivman data")
-    try:
-        return PivmanData(session.get_object(OBJECT_ID_PIVMAN_DATA))
-    except ApduError as e:
-        if e.sw == SW.FILE_NOT_FOUND:
-            # No data there, initialise a new object.
-            logger.debug("No data, initializing blank")
-            return PivmanData()
-        raise
+    return PivmanData(_encode_pivman_data(0x80, session._native.get_pivman_data()))
 
 
 def get_pivman_protected_data(session: PivSession) -> PivmanProtectedData:
@@ -153,19 +111,9 @@ def get_pivman_protected_data(session: PivSession) -> PivmanProtectedData:
 
     :param session: The PIV session.
     """
-    logger.debug("Reading protected pivman data")
-    try:
-        return PivmanProtectedData(session.get_object(OBJECT_ID_PIVMAN_PROTECTED_DATA))
-    except ApduError as e:
-        if e.sw == SW.FILE_NOT_FOUND:
-            # No data there, initialise a new object.
-            logger.debug("No data, initializing blank")
-            return PivmanProtectedData()
-        raise
-    except Exception:
-        raise ValueError(
-            f"Invalid data in protected slot ({hex(OBJECT_ID_PIVMAN_PROTECTED_DATA)})"
-        )
+    return PivmanProtectedData(
+        _encode_pivman_data(0x88, session._native.get_pivman_protected_data())
+    )
 
 
 def pivman_set_mgm_key(
@@ -182,90 +130,15 @@ def pivman_set_mgm_key(
     :param algorithm: The algorithm for the management key.
     :param touch: If set, touch is required.
     :param store_on_device: If set, the management key is stored on device.
+
+    Storing a key requires PIN verification and access to protected metadata.
+    Metadata write errors may occur after the management key has changed.
     """
-    pivman = get_pivman_data(session)
-    pivman_old_bytes = pivman.get_bytes()
-    pivman_prot = None
-
-    if store_on_device or (not store_on_device and pivman.has_stored_key):
-        # Ensure we have access to protected data before overwriting key
-        try:
-            pivman_prot = get_pivman_protected_data(session)
-        except Exception:
-            logger.debug("Failed to initialize protected pivman data", exc_info=True)
-            if store_on_device:
-                raise
-
-    # Set the new management key
-    session.set_management_key(algorithm, new_key, touch)
-
-    if pivman.has_derived_key:
-        # Clear salt for old derived keys.
-        logger.debug("Clearing salt in pivman data")
-        pivman.salt = None
-
-    # Set flag for stored or not stored key.
-    pivman.mgm_key_protected = store_on_device
-
-    # Update readable pivman data, if changed
-    pivman_bytes = pivman.get_bytes()
-    if pivman_old_bytes != pivman_bytes:
-        session.put_object(OBJECT_ID_PIVMAN_DATA, pivman_bytes)
-
-    if pivman_prot is not None:
-        if store_on_device:
-            # Store key in protected pivman data
-            logger.debug("Storing key in protected pivman data")
-            pivman_prot.key = new_key
-            session.put_object(OBJECT_ID_PIVMAN_PROTECTED_DATA, pivman_prot.get_bytes())
-        elif pivman_prot.key:
-            # If new key should not be stored and there is an old stored key,
-            # try to clear it.
-            logger.debug("Clearing old key in protected pivman data")
-            try:
-                pivman_prot.key = None
-                session.put_object(
-                    OBJECT_ID_PIVMAN_PROTECTED_DATA,
-                    pivman_prot.get_bytes(),
-                )
-            except ApduError:
-                logger.debug("No PIN provided, can't clear key...", exc_info=True)
-
-
-def pivman_change_pin(session: PivSession, old_pin: str, new_pin: str) -> None:
-    """Change the PIN, while keeping PivmanData in sync.
-
-    :param session: The PIV session.
-    :param old_pin: The old PIN.
-    :param new_pin: The new PIN.
-    """
-    session.change_pin(old_pin, new_pin)
-
-    pivman = get_pivman_data(session)
-    if pivman.has_derived_key:
-        logger.debug("Has derived management key, update for new PIN")
-        session.authenticate(
-            derive_management_key(old_pin, cast(bytes, pivman.salt)),
-        )
-        session.verify_pin(new_pin)
-        new_salt = os.urandom(16)
-        new_key = derive_management_key(new_pin, new_salt)
-        session.set_management_key(MANAGEMENT_KEY_TYPE.TDES, new_key)
-        pivman.salt = new_salt
-        session.put_object(OBJECT_ID_PIVMAN_DATA, pivman.get_bytes())
-
-
-def pivman_set_pin_attempts(
-    session: PivSession, pin_attempts: int, puk_attempts: int
-) -> None:
-    """Set the number of PIN and PUK retry attempts, while keeping PivmanData in sync.
-
-    :param session: The PIV session.
-    :param pin_attempts: The PIN attempts.
-    :param puk_attempts: The PUK attempts.
-    """
-    session.set_pin_attempts(pin_attempts, puk_attempts)
-    pivman = get_pivman_data(session)
-    if pivman.puk_blocked:
-        pivman.puk_blocked = False
-        session.put_object(OBJECT_ID_PIVMAN_DATA, pivman.get_bytes())
+    algorithm = MANAGEMENT_KEY_TYPE(algorithm)
+    native = session._native
+    session._management_key_type = MANAGEMENT_KEY_TYPE(native.management_key_type)
+    try:
+        native.pivman_set_mgm_key(int(algorithm), new_key, touch, store_on_device)
+    finally:
+        # A metadata write can fail after the key itself has changed.
+        session._management_key_type = MANAGEMENT_KEY_TYPE(native.management_key_type)

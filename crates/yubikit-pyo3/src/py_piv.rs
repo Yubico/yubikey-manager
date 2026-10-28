@@ -25,6 +25,20 @@ fn piv_err(e: piv::PivError) -> PyErr {
     }
 }
 
+#[pyfunction]
+pub fn generate_chuid() -> PyResult<Vec<u8>> {
+    yubikit::piv_util::generate_chuid()
+        .map(|chuid| chuid.to_bytes())
+        .map_err(piv_err)
+}
+
+fn pivman_err(e: piv::PivError) -> PyErr {
+    match e {
+        piv::PivError::InvalidData(msg) => pyo3::exceptions::PyValueError::new_err(msg),
+        other => piv_err(other),
+    }
+}
+
 fn parse_slot(v: u8) -> PyResult<Slot> {
     Slot::from_u8(v).ok_or_else(|| {
         pyo3::exceptions::PyValueError::new_err(format!("Invalid slot: 0x{:02X}", v))
@@ -236,6 +250,33 @@ impl PivSession {
         self.session_mut()?
             .set_management_key(&management_key, require_touch)
             .map_err(piv_err)
+    }
+
+    fn get_pivman_data(&mut self) -> PyResult<Vec<(u32, Vec<u8>)>> {
+        yubikit::piv_util::get_pivman_data(self.session_mut()?).map_err(pivman_err)
+    }
+
+    fn get_pivman_protected_data(&mut self) -> PyResult<Vec<(u32, Vec<u8>)>> {
+        yubikit::piv_util::get_pivman_protected_data(self.session_mut()?).map_err(pivman_err)
+    }
+
+    fn pivman_set_mgm_key(
+        &mut self,
+        key_type: u8,
+        new_key: &[u8],
+        touch: bool,
+        store_on_device: bool,
+    ) -> PyResult<()> {
+        let key_type = parse_mgmt_key_type(key_type)?;
+        parse_management_key(key_type, new_key)?;
+        yubikit::piv_util::pivman_set_mgm_key(
+            self.session_mut()?,
+            key_type,
+            new_key,
+            touch,
+            store_on_device,
+        )
+        .map_err(pivman_err)
     }
 
     fn verify_pin(&mut self, pin: &str) -> PyResult<()> {

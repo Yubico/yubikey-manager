@@ -88,12 +88,25 @@ def test_chuid_deserialize():
 
 
 def test_generate_chuid():
-    chuid = Chuid.from_bytes(generate_chuid())
+    chuid = generate_chuid()
+    assert isinstance(chuid, Chuid)
+    encoded = bytes(chuid)
+    assert Chuid.from_bytes(encoded) == chuid
     assert chuid.fasc_n == FascN(9999, 9999, 999999, 0, 1, 0, 3, 0, 1)
     assert chuid.expiration_date == date(2030, 1, 1)
     assert chuid.asymmetric_signature == b""
     assert len(chuid.guid) == 16
-    assert chuid.guid != Chuid.from_bytes(generate_chuid()).guid
+    assert chuid.guid[6] >> 4 == 4
+    assert chuid.guid[8] & 0xC0 == 0x80
+    assert chuid.guid != generate_chuid().guid
+    assert encoded == bytes(
+        Chuid(
+            fasc_n=FascN(9999, 9999, 999999, 0, 1, 0, 3, 0, 1),
+            guid=chuid.guid,
+            expiration_date=date(2030, 1, 1),
+            asymmetric_signature=b"",
+        )
+    )
 
 
 def test_generate_ccc():

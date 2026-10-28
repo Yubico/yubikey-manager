@@ -36,7 +36,6 @@ from dataclasses import astuple, dataclass
 from datetime import date, datetime
 from enum import Enum, IntEnum, unique
 from typing import TYPE_CHECKING, TypeAlias, cast
-from uuid import uuid4
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
@@ -82,6 +81,7 @@ if TYPE_CHECKING:
 
 from _yubikit_native import padding as _native_padding
 from _yubikit_native.sessions import PivSession as _NativePivSession
+from _yubikit_native.sessions import generate_chuid as _native_generate_chuid
 
 logger = logging.getLogger(__name__)
 
@@ -703,19 +703,13 @@ def decompress_certificate(cert_data: bytes) -> bytes:
     raise BadResponseError("Failed to decompress certificate")
 
 
-def generate_chuid() -> bytes:
-    """Generate a CHUID (Cardholder Unique Identifier)."""
+def generate_chuid() -> Chuid:
+    """Generate a CHUID (Cardholder Unique Identifier).
 
-    chuid = Chuid(
-        # Non-Federal Issuer FASC-N
-        fasc_n=FascN(9999, 9999, 999999, 0, 1, 0000000000, 3, 0000, 1),
-        guid=uuid4().bytes,
-        # Expires on: 2030-01-01
-        expiration_date=date(2030, 1, 1),
-        asymmetric_signature=b"",
-    )
-
-    return bytes(chuid)
+    The CHUID has a Non-Federal Issuer FASC-N, a random version 4 UUID
+    as its GUID, and an expiration date of 2030-01-01.
+    """
+    return Chuid.from_bytes(_native_generate_chuid())
 
 
 def generate_ccc() -> bytes:

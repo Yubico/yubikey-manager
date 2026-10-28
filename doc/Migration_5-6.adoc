@@ -166,6 +166,49 @@ pids, state = scan_devices()
 | `from yubikit import scripting`
 |===
 
+== PIV helpers
+
+=== CHUID generation
+
+`yubikit.piv.generate_chuid()` now returns a `Chuid` object instead of encoded
+bytes. Use `bytes(chuid)` when writing the generated object to a YubiKey or
+otherwise needing its encoded representation:
+
+[source,python]
+----
+from yubikit.piv import OBJECT_ID, generate_chuid
+
+chuid = generate_chuid()
+session.put_object(OBJECT_ID.CHUID, bytes(chuid))
+----
+
+=== Management-key metadata
+
+Legacy PIN-derived management keys are no longer supported. Before upgrading,
+use 5.x to replace a derived key with a random management key, optionally stored
+on the YubiKey in the PIN-protected pivman object.
+
+The `derive_management_key()` helper and the `PivmanData.salt` and
+`PivmanData.has_derived_key` attributes have been removed.
+`PivmanData.pin_timestamp` and `PivmanData.puk_blocked` have also been removed.
+Legacy salt and timestamp fields and the old PUK-blocked flag are preserved as
+unrecognized metadata without being interpreted or updated. Setting PIN/PUK
+retry attempts no longer clears that flag.
+
+`PivmanData.has_protected_key` has also been removed; use
+`PivmanData.has_stored_key` to check whether the management key is stored on the
+YubiKey.
+
+`pivman_change_pin()` has been removed. Call `PivSession.change_pin()` directly;
+changing the PIN no longer derives or updates the management key.
+`pivman_set_pin_attempts()` has also been removed; call
+`PivSession.set_pin_attempts()` directly.
+
+Pivman readers return empty metadata only when the object is missing; other read
+errors are propagated, and malformed metadata raises `ValueError`. The public
+`PivmanData` and `PivmanProtectedData` classes remain available and preserve
+unrecognized metadata fields when serialized.
+
 == YubiKeyDevice
 
 In 5.x, the concrete device class was `YkmanDevice` (from `ykman.base`).

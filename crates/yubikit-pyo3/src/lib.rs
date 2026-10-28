@@ -50,6 +50,7 @@ fn register_sessions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(parent.py(), "sessions")?;
     m.add_class::<py_oath::OathSession>()?;
     m.add_class::<py_piv::PivSession>()?;
+    m.add_function(wrap_pyfunction!(py_piv::generate_chuid, &m)?)?;
     m.add_class::<py_openpgp::OpenPgpSession>()?;
     m.add_class::<py_hsmauth::HsmAuthSession>()?;
     m.add_class::<py_management::ManagementSessionCcid>()?;

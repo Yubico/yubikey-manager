@@ -72,6 +72,7 @@
 //! ## YubiKey applications
 //! - [`oath`] — OATH TOTP/HOTP credential management and code calculation
 //! - [`piv`] — PIV (FIPS 201) smart card operations (keys, certificates, PIN)
+//! - [`piv_util`] — CHUID generation and pivman management-key metadata helpers
 //! - [`openpgp`] — OpenPGP card operations (keys, certificates, PIN)
 //! - [`hsmauth`] — YubiHSM Auth credential management
 //! - [`yubiotp`] — YubiOTP slot configuration (challenge-response, static passwords, HOTP)
@@ -119,6 +120,8 @@ pub mod openpgp;
 pub mod otp;
 /// PIV (Personal Identity Verification) smart card application.
 pub mod piv;
+/// PIV utilities for CHUID generation and pivman management-key metadata.
+pub mod piv_util;
 /// Platform-specific transport implementations (HID, PC/SC).
 ///
 /// This module is available when the `pcsc` and/or `hid` features are enabled.

@@ -20,7 +20,7 @@ use yubikit::piv::{
 };
 use zeroize::Zeroizing;
 
-use ykman::piv::{
+use yubikit::piv_util::{
     TAG_PIVMAN_KEY, get_pivman_data, get_pivman_protected_data, has_stored_key, pivman_set_mgm_key,
 };
 use yubikit::smartcard::{SmartCardConnection, SmartCardError, Sw};
@@ -825,11 +825,13 @@ fn authenticate_session(
     }
 
     // Check if the key is stored on device (protected by PIN)
-    let pivman = get_pivman_data(session);
+    let pivman =
+        get_pivman_data(session).map_err(|e| anyhow!("Failed to read pivman data: {e}"))?;
     if has_stored_key(&pivman) {
         ensure_pin(session, pin)?;
-        let prot = get_pivman_protected_data(session);
-        if let Some((_, key)) = prot.iter().find(|(t, _)| *t == TAG_PIVMAN_KEY) {
+        let prot = get_pivman_protected_data(session)
+            .map_err(|e| anyhow!("Failed to read protected pivman data: {e}"))?;
+        if let Some((_, key)) = prot.iter().rfind(|(t, _)| *t == TAG_PIVMAN_KEY) {
             let management_key = to_management_key(session.management_key_type(), key)?;
             session
                 .authenticate(&management_key)
@@ -2118,11 +2120,11 @@ pub fn run_objects_import(
 fn generate_chuid(
     session: &mut PivSession<impl yubikit::smartcard::SmartCardConnection>,
 ) -> Result<()> {
-    let chuid =
-        ykman::piv::generate_chuid().map_err(|e| anyhow!("Failed to generate CHUID: {e}"))?;
+    let chuid = yubikit::piv_util::generate_chuid()
+        .map_err(|e| anyhow!("Failed to generate CHUID: {e}"))?;
 
     session
-        .put_object(ObjectId::Chuid, Some(&chuid))
+        .put_object(ObjectId::Chuid, Some(&chuid.to_bytes()))
         .map_err(|e| anyhow!("Failed to update CHUID: {e}"))?;
     Ok(())
 }
@@ -2139,10 +2141,10 @@ pub fn run_objects_generate(
 
     match object.to_uppercase().as_str() {
         "CHUID" => {
-            let chuid = ykman::piv::generate_chuid()
+            let chuid = yubikit::piv_util::generate_chuid()
                 .map_err(|e| anyhow!("Failed to generate CHUID: {e}"))?;
             session
-                .put_object(ObjectId::Chuid, Some(&chuid))
+                .put_object(ObjectId::Chuid, Some(&chuid.to_bytes()))
                 .map_err(|e| anyhow!("Failed to write CHUID: {e}"))?;
             eprintln!("CHUID generated.");
         }
