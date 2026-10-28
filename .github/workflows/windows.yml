@@ -98,7 +98,7 @@ jobs:
         run: .\resources\win\test_installer_versions.ps1 -BuildDir .\dist
 
       - name: Upload build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact }}
           path: dist
@@ -130,7 +130,7 @@ jobs:
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
       - name: Download successful builds
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ykman-builds-windows-*
           path: artifacts
@@ -140,7 +140,7 @@ jobs:
         run: python3 .github/scripts/windows_signing.py prepare binaries artifacts signing-input >> "$GITHUB_OUTPUT"
 
       - name: docker login
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ci@yubico.com
@@ -181,7 +181,7 @@ jobs:
 
       - name: Upload signed x64 binaries
         if: contains(fromJSON(steps.prepare.outputs.architectures), 'x64')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: signed-files
           path: artifacts/ykman-builds-windows-x64
@@ -190,7 +190,7 @@ jobs:
 
       - name: Upload signed ARM64 binaries
         if: contains(fromJSON(steps.prepare.outputs.architectures), 'arm64')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: signed-files-arm64
           path: artifacts/ykman-builds-windows-arm64
@@ -212,7 +212,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: signed-files${{ env.SUFFIX }}
           path: ykman-builds-windows
@@ -239,7 +239,7 @@ jobs:
         run: .\resources\win\test_installer_versions.ps1 -BuildDir .\ykman-builds-windows -Architecture ${{ matrix.arch }}
 
       - name: Upload installer
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ykman-installer-windows${{ env.SUFFIX }}
           path: .\ykman-builds-windows
@@ -258,7 +258,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download successful MSI builds
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ykman-installer-windows*
           path: artifacts
@@ -268,7 +268,7 @@ jobs:
         run: python3 .github/scripts/windows_signing.py prepare installers artifacts signing-input >> "$GITHUB_OUTPUT"
 
       - name: Docker login
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ci@yubico.com
@@ -309,7 +309,7 @@ jobs:
 
       - name: Upload signed x64 installer
         if: contains(fromJSON(steps.prepare.outputs.architectures), 'x64')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: signed-files-and-msi
           path: artifacts/ykman-installer-windows
@@ -318,7 +318,7 @@ jobs:
 
       - name: Upload signed ARM64 installer
         if: contains(fromJSON(steps.prepare.outputs.architectures), 'arm64')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: signed-files-and-msi-arm64
           path: artifacts/ykman-installer-windows-arm64
@@ -338,7 +338,7 @@ jobs:
       SUFFIX: ${{ matrix.arch == 'arm64' && '-arm64' || '' }}
     steps:
       - name: Download signed installer
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: signed-files-and-msi${{ env.SUFFIX }}
           path: signed
