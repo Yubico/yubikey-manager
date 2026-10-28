@@ -82,6 +82,9 @@ equivalent):
 
   pip install --user yubikey-manager
 
+This installs only the CLI. Install `yubikit` separately to use the Python SDK;
+neither Python distribution requires the other.
+
 When upgrading from 5.x, use a new virtual environment or uninstall the old
 distribution first. An in-place upgrade can delete files now owned by the
 separate `yubikit` package. See link:doc/Migration_5-6.adoc[the migration guide]

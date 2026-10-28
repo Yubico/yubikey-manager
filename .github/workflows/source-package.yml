@@ -84,14 +84,18 @@ jobs:
             "$GITHUB_WORKSPACE/tests" --ignore="$GITHUB_WORKSPACE/tests/device"
           "$RUNNER_TEMP/sdist-venv/bin/python" -m ykman --version
 
-      - name: Check documented migration from 5.x
+      - name: Check documented migration and independent CLI installation
         run: |
           uv venv --seed "$RUNNER_TEMP/migration-venv"
           python="$RUNNER_TEMP/migration-venv/bin/python"
           "$python" -m pip install --no-deps "yubikey-manager==5.9.2"
           "$python" -m pip uninstall -y yubikey-manager yubikit
-          "$python" -m pip install "$RUNNER_TEMP"/sdist-wheels/*.whl
+          "$python" -m pip install "$RUNNER_TEMP"/sdist-wheels/yubikey_manager-*.whl
           cd "$RUNNER_TEMP"
+          "$python" -I -c \
+            'from importlib.util import find_spec; assert find_spec("yubikit") is None'
+          "$python" -m ykman --version
+          "$python" -m pip install "$RUNNER_TEMP"/sdist-wheels/yubikit-*.whl
           "$python" -I -c \
             'from yubikit.device import list_all_devices; from yubikit.core import PID; print(list_all_devices, PID)'
           "$python" -m ykman --version

@@ -819,12 +819,6 @@ wheels = [
 name = "yubikey-manager"
 version = "6.0.0a1"
 source = { editable = "packages/ykman" }
-dependencies = [
-    { name = "yubikit" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "yubikit", editable = "packages/yubikit" }]
 
 [[package]]
 name = "yubikey-manager-workspace"

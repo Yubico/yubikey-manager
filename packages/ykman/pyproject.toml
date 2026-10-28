@@ -1,7 +1,7 @@
 [project]
 name = "yubikey-manager"
 version = "6.0.0a1"
-description = "Library and CLI for managing your YubiKey configuration."
+description = "CLI for managing your YubiKey configuration."
 authors = [
   { name = "Dain Nilsson", email = "dain@yubico.com" }
 ]
@@ -14,10 +14,6 @@ classifiers = [
   "Topic :: Security :: Cryptography",
   "Topic :: Utilities"
 ]
-dependencies = [
-  "yubikit>=1.0.0a1",
-]
-
 [project.urls]
 Homepage = "https://github.com/Yubico/yubikey-manager"
 

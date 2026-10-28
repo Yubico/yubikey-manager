@@ -18,8 +18,10 @@ the main library, with additional functionality provided to replace most of
 that of ykman. The ykman CLI tool is now fully written in Rust.
 
 Note: The `yubikey-manager` Python package still exists, but only provides the
-ykman CLI tool. It no longer contains any Python library code. The remaining
-Python helpers from `ykman` have moved into `yubikit`:
+ykman CLI tool. It does not depend on or install the `yubikit` Python SDK.
+Install `yubikit` separately when using the Python API; neither distribution
+requires the other. The remaining Python helpers from `ykman` have moved into
+`yubikit`:
 
 * The certificate, CSR, CHUID, and CCC generation helpers and the certificate
   and CSR signing helpers from `ykman.piv` are now in `yubikit.piv`.
@@ -54,10 +56,11 @@ uninstall both distributions before installing 6.x:
 ----
 python -m pip uninstall yubikey-manager yubikit
 python -m pip install --pre "yubikey-manager>=6.0.0a0,<7"
+python -m pip install --pre "yubikit>=1.0.0a0,<2"
 ----
 
-For library-only use, replace the second command with
-`python -m pip install --pre "yubikit>=1.0.0a0,<2"`.
+The two install commands are independent. For CLI-only use, omit the `yubikit`
+install; for library-only use, omit the `yubikey-manager` install.
 
 The 5.x `yubikey-manager` distribution owns files that now belong to the separate
 `yubikit` distribution. An in-place upgrade can install the new library before

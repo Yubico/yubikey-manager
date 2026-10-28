@@ -356,9 +356,10 @@ Open `docs/_build/html/index.html` in a browser to view the result.
 A release includes both the Rust crates on crates.io and the Python packages on
 PyPI. Python package versions use PEP 440 spelling. The Python-only packaging
 release is `yubikit` `1.0.0a1` and `yubikey-manager` `6.0.0a1`; the Rust crates
-remain at `1.0.0-alpha.0` and `6.0.0-alpha.0`. Keep the Python package metadata, the
-manager's minimum `yubikit` dependency, and both workspace lockfiles consistent
-with the release.
+remain at `1.0.0-alpha.0` and `6.0.0-alpha.0`. The Python CLI and SDK are
+independently installed distributions, with no dependency between them. Keep
+the Python package metadata and both workspace lockfiles consistent with the
+release.
 
 . Verify the declared Rust minimum, all workspace targets and features, unit
   tests, and relevant device tests. Require green Linux, macOS and Windows CI
@@ -381,7 +382,8 @@ with the release.
   `ykman-cli` and `ykman-svc`. Keep the `yubikit-pyo3` crate unpublished on
   crates.io; its native extension is distributed inside the Python `yubikit`
   wheels and source distribution.
-. Publish the verified Python wheels and source distributions to PyPI:
-  `yubikit` first, then `yubikey-manager`.
+. Publish the verified Python wheels and source distributions to PyPI.
+  The `yubikit` and `yubikey-manager` Python packages can be published in either
+  order.
 . Smoke-test registry-only Rust installation and clean Python installation
   from PyPI, explicitly selecting the prerelease versions for an alpha.
