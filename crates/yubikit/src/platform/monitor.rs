@@ -126,9 +126,9 @@ enum Change {
     /// A PC/SC reader or card state changed; re-diff the PC/SC transport.
     #[cfg(feature = "pcsc")]
     Pcsc,
-    /// A smart card reader's device instance was removed.
+    /// A smart card reader's device instance was removed, or `None` if unrecognised.
     #[cfg(all(feature = "pcsc", windows))]
-    PcscReaderRemoved(String),
+    PcscReaderRemoved(Option<String>),
     /// A HID device was added or removed; re-diff the HID transport.
     #[cfg(feature = "hid")]
     Hid,
@@ -513,7 +513,7 @@ pub fn monitor_device_events(
                 Change::Pcsc => state.refresh_pcsc(&mut on_event, &verified),
                 #[cfg(all(feature = "pcsc", windows))]
                 Change::PcscReaderRemoved(instance) => {
-                    state.forget_usb_cards(&instance, &mut on_event);
+                    state.forget_usb_cards(instance.as_deref(), &mut on_event);
                     state.refresh_pcsc(&mut on_event, &verified);
                 }
                 #[cfg(feature = "hid")]
@@ -562,7 +562,7 @@ struct MonitorState {
     card_events: HashMap<String, u32>,
     /// Cached Windows device instance IDs, available even after a reader disappears.
     #[cfg(all(feature = "pcsc", any(windows, test)))]
-    reader_instances: HashMap<String, String>,
+    reader_instances: HashMap<String, ReaderInstance>,
     /// OTP HID nodes, keyed by HID path.
     #[cfg(feature = "hid")]
     hid_otp: HashMap<String, DeviceNode>,
@@ -571,6 +571,21 @@ struct MonitorState {
     hid_fido: HashMap<String, DeviceNode>,
 }
 
+/// The Windows device instance ID of a USB reader, if it could be read.
+#[cfg(all(feature = "pcsc", any(windows, test)))]
+#[derive(Debug, Clone, PartialEq)]
+enum ReaderInstance {
+    Known(String),
+    /// The lookup failed; it is retried once `retry_at` has passed.
+    Unknown {
+        retry_at: Instant,
+    },
+}
+
+/// How long to wait before retrying a failed reader instance lookup.
+#[cfg(all(feature = "pcsc", windows))]
+const READER_INSTANCE_RETRY: Duration = Duration::from_secs(5);
+
 #[cfg(feature = "pcsc")]
 impl MonitorState {
     /// Drop tracked cards of USB readers that were removed, so they are re-read.
@@ -578,16 +593,21 @@ impl MonitorState {
     /// A rebooting YubiKey (e.g. after a configuration change) can remove and
     /// re-create its reader between two polls, reusing the reader name and
     /// card event count, which would otherwise keep the stale device info.
+    ///
+    /// Readers whose instance is unknown, either because the lookup failed or
+    /// the removed path was unrecognised (`None`), are conservatively re-read.
     #[cfg(any(windows, test))]
-    fn forget_usb_cards(&mut self, instance: &str, on_event: &mut impl FnMut(NodeEvent)) {
+    fn forget_usb_cards(&mut self, instance: Option<&str>, on_event: &mut impl FnMut(NodeEvent)) {
         let names: Vec<String> = self
-            .reader_instances
-            .iter()
-            .filter(|(name, reader_instance)| {
-                self.usb_readers.contains_key(*name)
-                    && reader_instance.eq_ignore_ascii_case(instance)
+            .usb_readers
+            .keys()
+            .filter(|name| match (instance, self.reader_instances.get(*name)) {
+                (Some(removed), Some(ReaderInstance::Known(known))) => {
+                    known.eq_ignore_ascii_case(removed)
+                }
+                _ => true,
             })
-            .map(|(name, _)| name.clone())
+            .cloned()
             .collect();
         for name in names {
             self.reader_instances.remove(&name);
@@ -595,6 +615,48 @@ impl MonitorState {
             if let Some(node) = self.cards.remove(&name) {
                 on_event(NodeEvent::Removed(node));
             }
+        }
+    }
+
+    /// Look up device instance IDs of USB readers not yet cached, using one
+    /// smart card context, and back off after failures.
+    #[cfg(windows)]
+    fn lookup_reader_instances(&mut self, readers: &[super::pcsc::ReaderStatus]) {
+        let now = Instant::now();
+        let names: Vec<&str> = readers
+            .iter()
+            .map(|status| status.name.as_str())
+            .filter(|name| is_reader_usb(name))
+            .filter(|name| match self.reader_instances.get(*name) {
+                None => true,
+                Some(ReaderInstance::Known(_)) => false,
+                Some(ReaderInstance::Unknown { retry_at }) => now >= *retry_at,
+            })
+            .collect();
+        if names.is_empty() {
+            return;
+        }
+        let results = match windows_pcsc::reader_device_instances(&names) {
+            Ok(results) => results,
+            Err(e) => {
+                log::debug!("Reading reader device instances failed: {e}");
+                names
+                    .iter()
+                    .map(|_| Err(std::io::Error::other("no smart card context")))
+                    .collect()
+            }
+        };
+        for (name, result) in names.into_iter().zip(results) {
+            let instance = match result {
+                Ok(instance) => ReaderInstance::Known(instance),
+                Err(e) => {
+                    log::debug!("Reading device instance for '{name}' failed: {e}");
+                    ReaderInstance::Unknown {
+                        retry_at: now + READER_INSTANCE_RETRY,
+                    }
+                }
+            };
+            self.reader_instances.insert(name.to_string(), instance);
         }
     }
 
@@ -648,23 +710,14 @@ impl MonitorState {
             }
         }
 
+        #[cfg(windows)]
+        self.lookup_reader_instances(&readers);
+
         // --- Process each currently-connected reader ---
         for status in &readers {
             let name = &status.name;
             let card_present = &status.card_present;
             let usb = is_reader_usb(name);
-
-            #[cfg(windows)]
-            if usb && !self.reader_instances.contains_key(name) {
-                match windows_pcsc::reader_device_instance(name) {
-                    Ok(instance) => {
-                        self.reader_instances.insert(name.clone(), instance);
-                    }
-                    Err(e) => {
-                        log::debug!("Reading device instance for '{name}' failed: {e}");
-                    }
-                }
-            }
 
             // A card swapped faster than the polling interval never shows as
             // absent; the changed event counter reveals the replacement.
@@ -1015,7 +1068,10 @@ mod windows_pcsc {
         value.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    pub(super) fn reader_device_instance(name: &str) -> std::io::Result<String> {
+    /// Look up the device instance IDs of readers using one smart card context.
+    pub(super) fn reader_device_instances(
+        names: &[&str],
+    ) -> std::io::Result<Vec<std::io::Result<String>>> {
         struct Context(usize);
         impl Drop for Context {
             fn drop(&mut self) {
@@ -1026,13 +1082,44 @@ mod windows_pcsc {
             }
         }
 
-        let check = |status| {
+        fn check(status: i32) -> std::io::Result<()> {
             if status == 0 {
                 Ok(())
             } else {
                 Err(std::io::Error::from_raw_os_error(status))
             }
-        };
+        }
+
+        fn instance_id(context: usize, name: &str) -> std::io::Result<String> {
+            let name = wide(name);
+            let mut len = 0;
+            check(unsafe {
+                SCardGetReaderDeviceInstanceIdW(
+                    context,
+                    name.as_ptr(),
+                    std::ptr::null_mut(),
+                    &mut len,
+                )
+            })?;
+            let mut instance = vec![0; len as usize];
+            check(unsafe {
+                SCardGetReaderDeviceInstanceIdW(
+                    context,
+                    name.as_ptr(),
+                    instance.as_mut_ptr(),
+                    &mut len,
+                )
+            })?;
+            let end = instance.iter().position(|&c| c == 0).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Unterminated device instance ID",
+                )
+            })?;
+            String::from_utf16(&instance[..end])
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        }
+
         let mut context = 0;
         check(unsafe {
             SCardEstablishContext(
@@ -1043,33 +1130,10 @@ mod windows_pcsc {
             )
         })?;
         let context = Context(context);
-        let name = wide(name);
-        let mut len = 0;
-        check(unsafe {
-            SCardGetReaderDeviceInstanceIdW(
-                context.0,
-                name.as_ptr(),
-                std::ptr::null_mut(),
-                &mut len,
-            )
-        })?;
-        let mut instance = vec![0; len as usize];
-        check(unsafe {
-            SCardGetReaderDeviceInstanceIdW(
-                context.0,
-                name.as_ptr(),
-                instance.as_mut_ptr(),
-                &mut len,
-            )
-        })?;
-        let end = instance.iter().position(|&c| c == 0).ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Unterminated device instance ID",
-            )
-        })?;
-        String::from_utf16(&instance[..end])
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        Ok(names
+            .iter()
+            .map(|name| instance_id(context.0, name))
+            .collect())
     }
 
     unsafe extern "system" fn wndproc(
@@ -1100,15 +1164,15 @@ mod windows_pcsc {
                 };
                 let name = String::from_utf16_lossy(&name[..end]);
                 log::debug!("Smart card reader removed: {name}");
-                if let Some(instance) = reader_instance_from_path(&name) {
-                    SENDER.with(|sender| {
-                        if let Some(tx) = sender.borrow().as_ref() {
-                            let _ = tx.send(Change::PcscReaderRemoved(instance));
-                        }
-                    });
-                } else {
-                    log::debug!("Smart card removal notification has an unrecognised path");
+                let instance = reader_instance_from_path(&name);
+                if instance.is_none() {
+                    log::debug!("Unrecognised reader path; re-reading all USB readers");
                 }
+                SENDER.with(|sender| {
+                    if let Some(tx) = sender.borrow().as_ref() {
+                        let _ = tx.send(Change::PcscReaderRemoved(instance));
+                    }
+                });
             }
             return 1;
         }
@@ -2100,6 +2164,59 @@ mod tests {
     }
 
     #[cfg(feature = "pcsc")]
+    fn state_with_usb_cards(readers: &[(&str, Option<ReaderInstance>)]) -> MonitorState {
+        let info = DeviceInfo::parse_tlvs(&HashMap::new(), Version(5, 8, 0)).unwrap();
+        let mut state = MonitorState::default();
+        for (name, instance) in readers {
+            let name = *name;
+            state.usb_readers.insert(
+                name.into(),
+                DeviceNode::UsbReaderNode {
+                    reader_name: name.into(),
+                    pid: 0x407,
+                },
+            );
+            state.cards.insert(
+                name.into(),
+                DeviceNode::CardNode {
+                    reader_name: name.into(),
+                    device_info: info.clone(),
+                },
+            );
+            state.card_events.insert(name.into(), 1);
+            if let Some(instance) = instance {
+                state.reader_instances.insert(name.into(), instance.clone());
+            }
+        }
+        state
+    }
+
+    #[cfg(feature = "pcsc")]
+    #[test]
+    fn removed_reader_with_unknown_instance_is_reread() {
+        let known = |id: &str| Some(ReaderInstance::Known(id.into()));
+        let failed = Some(ReaderInstance::Unknown {
+            retry_at: Instant::now(),
+        });
+        let mut state = state_with_usb_cards(&[
+            ("known", known(r"USB\VID_1050&PID_0407\1")),
+            ("failed", failed),
+            ("uncached", None),
+        ]);
+        let mut removed = Vec::new();
+        state.forget_usb_cards(Some(r"USB\VID_1050&PID_0407\0"), &mut |e| removed.push(e));
+        assert_eq!(removed.len(), 2);
+        assert!(state.cards.contains_key("known"));
+        assert!(!state.cards.contains_key("failed") && !state.cards.contains_key("uncached"));
+        assert!(!state.reader_instances.contains_key("failed"));
+
+        state.forget_usb_cards(None, &mut |e| removed.push(e));
+        assert_eq!(removed.len(), 3);
+        assert!(state.cards.is_empty());
+        assert!(state.reader_instances.is_empty());
+    }
+
+    #[cfg(feature = "pcsc")]
     #[test]
     fn removed_reader_preserves_other_cards_with_the_same_pid() {
         let info = DeviceInfo::parse_tlvs(&HashMap::new(), Version(5, 8, 0)).unwrap();
@@ -2123,11 +2240,15 @@ mod tests {
                 },
             );
             state.card_events.insert(name.into(), 1);
-            state.reader_instances.insert(name.into(), instance.into());
+            state
+                .reader_instances
+                .insert(name.into(), ReaderInstance::Known(instance.into()));
         }
 
         let mut removed = Vec::new();
-        state.forget_usb_cards(r"usb\vid_1050&pid_0407\0", &mut |event| removed.push(event));
+        state.forget_usb_cards(Some(r"usb\vid_1050&pid_0407\0"), &mut |event| {
+            removed.push(event)
+        });
         assert_eq!(removed.len(), 1);
         assert!(!state.cards.contains_key("yk 0") && !state.card_events.contains_key("yk 0"));
         assert!(state.cards.contains_key("yk 1") && state.usb_readers.contains_key("yk 0"));
@@ -2136,7 +2257,7 @@ mod tests {
         assert!(state.reader_instances.contains_key("yk 1"));
 
         for instance in [r"SWD\ScReader\unknown", r"USB\VID_1050&PID_0407\unknown"] {
-            state.forget_usb_cards(instance, &mut |event| removed.push(event));
+            state.forget_usb_cards(Some(instance), &mut |event| removed.push(event));
         }
         assert_eq!(removed.len(), 1);
         assert!(state.cards.contains_key("yk 1"));

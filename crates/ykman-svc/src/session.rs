@@ -189,8 +189,9 @@ impl Drop for SessionExitNotifier {
 fn run_reader<R: Read>(reader: R, event_tx: mpsc::SyncSender<SessionEvent>) {
     let mut reader = BufReader::new(reader);
     let mut pending_line = SecretValue::new(Vec::new());
+    let mut discarding = false;
     loop {
-        let request = read_request(&mut reader, &mut pending_line);
+        let request = read_request(&mut reader, &mut pending_line, &mut discarding);
         let disconnected = matches!(request, ReadRequest::Disconnected);
         if event_tx.send(SessionEvent::Client(request)).is_err() || disconnected {
             break;
@@ -198,9 +199,14 @@ fn run_reader<R: Read>(reader: R, event_tx: mpsc::SyncSender<SessionEvent>) {
     }
 }
 
+/// Read the next request line.
+///
+/// After an oversized line is rejected, `discarding` is set and the rest of
+/// that line is skipped, rather than being parsed as further requests.
 fn read_request<R: Read>(
     reader: &mut BufReader<R>,
     pending_line: &mut SecretValue<Vec<u8>>,
+    discarding: &mut bool,
 ) -> ReadRequest {
     loop {
         let available = match reader.fill_buf() {
@@ -215,6 +221,11 @@ fn read_request<R: Read>(
 
         let newline = available.iter().position(|&b| b == b'\n');
         let len = newline.unwrap_or(available.len());
+        if *discarding {
+            reader.consume(len + usize::from(newline.is_some()));
+            *discarding = newline.is_none();
+            continue;
+        }
         pending_line
             .expose_secret_mut()
             .extend_from_slice(&available[..len]);
@@ -222,6 +233,7 @@ fn read_request<R: Read>(
         if pending_line.expose_secret().len() > MAX_RPC_LINE_LEN {
             pending_line.expose_secret_mut().zeroize();
             pending_line.expose_secret_mut().clear();
+            *discarding = newline.is_none();
             return ReadRequest::Invalid("RPC request is too large");
         }
 
@@ -666,7 +678,8 @@ mod tests {
             assert_eq!(line.len(), len + 1);
             let mut reader = BufReader::with_capacity(line.len(), Cursor::new(line));
             let mut pending = SecretValue::new(Vec::new());
-            let request = read_request(&mut reader, &mut pending);
+            let mut discarding = false;
+            let request = read_request(&mut reader, &mut pending, &mut discarding);
             if len == MAX_RPC_LINE_LEN {
                 assert!(matches!(request, ReadRequest::Request(_)));
             } else {
@@ -676,6 +689,32 @@ mod tests {
                 ));
             }
             assert!(pending.expose_secret().is_empty());
+            assert!(!discarding);
         }
+    }
+
+    #[test]
+    fn rest_of_oversized_request_is_discarded() {
+        let mut input = vec![b'{'; MAX_RPC_LINE_LEN + 8192];
+        input.extend_from_slice(b"\"} garbage\n");
+        input.extend_from_slice(br#"{"kind":"command","action":"noop","body":{}}"#);
+        input.push(b'\n');
+        let mut reader = BufReader::with_capacity(4096, Cursor::new(input));
+        let mut pending = SecretValue::new(Vec::new());
+        let mut discarding = false;
+        assert!(matches!(
+            read_request(&mut reader, &mut pending, &mut discarding),
+            ReadRequest::Invalid("RPC request is too large")
+        ));
+        assert!(discarding);
+        assert!(matches!(
+            read_request(&mut reader, &mut pending, &mut discarding),
+            ReadRequest::Request(_)
+        ));
+        assert!(!discarding);
+        assert!(matches!(
+            read_request(&mut reader, &mut pending, &mut discarding),
+            ReadRequest::Disconnected
+        ));
     }
 }
