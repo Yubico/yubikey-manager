@@ -623,7 +623,11 @@ impl MonitorState {
             .collect();
         for (name, removed) in names {
             if !removed {
-                self.stale_cards.insert(name.clone());
+                // Readers without a cached card keep using the regular read
+                // path, which can fall back to shared access.
+                if self.cards.contains_key(&name) {
+                    self.stale_cards.insert(name.clone());
+                }
                 if matches!(
                     self.reader_instances.get(&name),
                     Some(ReaderInstance::Known(_))
@@ -2382,6 +2386,36 @@ mod tests {
         );
         assert_eq!(state.cards[reader], node);
         assert!(state.stale_cards.is_empty());
+    }
+
+    #[cfg(feature = "pcsc")]
+    #[test]
+    fn uncertain_refresh_uses_regular_read_for_uncached_card() {
+        let reader = "Yubico YubiKey OTP+FIDO+CCID 0";
+        let mut state = state_with_usb_cards(&[(reader, None)]);
+        let node = state.cards.remove(reader).unwrap();
+        state.card_events.remove(reader);
+        let info = match &node {
+            DeviceNode::CardNode { device_info, .. } => device_info.clone(),
+            _ => unreachable!(),
+        };
+        let mut events = Vec::new();
+        state.invalidate_usb_cards(None, &mut |e| events.push(e));
+        assert!(state.stale_cards.is_empty());
+        state.refresh_pcsc_cards(
+            &[ReaderStatus {
+                name: reader.into(),
+                card_present: true,
+                event_count: 1,
+            }],
+            &mut |e| events.push(e),
+            &[],
+            |_, _, exclusive_only| {
+                assert!(!exclusive_only);
+                Ok(info.clone())
+            },
+        );
+        assert_eq!(events, vec![NodeEvent::Added(node)]);
     }
 
     #[cfg(feature = "pcsc")]
