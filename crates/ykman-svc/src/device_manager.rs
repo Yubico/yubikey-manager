@@ -6,7 +6,7 @@
 //! The monitor is started when the first client connects and is stopped 30
 //! seconds after the last client disconnects. While running, it pushes device
 //! Added/Changed/Removed events that keep an in-memory inventory up to date;
-//! `update_devices()` simply projects that inventory into the RPC device map.
+//! `update_devices()` caches the projection of that inventory into the RPC device map.
 //! Devices released after application use are refreshed before subsequent get
 //! requests, since configuration writes need not generate monitor events.
 
@@ -48,6 +48,7 @@ pub struct DeviceManager {
     /// Live device inventory, keyed by stable monitor id. Updated by the
     /// monitor's event callback.
     monitored: Arc<Mutex<HashMap<YubiKeyId, (LocalYubiKeyDevice, u64)>>>,
+    /// Also invalidates the projected inventory on removal or monitor shutdown.
     next_revision: Arc<AtomicU64>,
 }
 
@@ -61,6 +62,7 @@ struct MonitorLifecycle {
 }
 
 struct ManagerState {
+    projected_revision: Option<u64>,
     /// Current device inventory: name → device info for list_children.
     devices: BTreeMap<String, Value>,
     /// Cached device objects for fast re-open without re-enumeration.
@@ -88,6 +90,7 @@ impl DeviceManager {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(ManagerState {
+                projected_revision: None,
                 devices: BTreeMap::new(),
                 device_objects: BTreeMap::new(),
                 device_revisions: BTreeMap::new(),
@@ -121,6 +124,7 @@ impl DeviceManager {
                 }
                 YubiKeyEvent::Removed(yk) => {
                     inv.remove(&yk.id());
+                    next_revision.fetch_add(1, Ordering::Relaxed);
                 }
             }
         });
@@ -221,8 +225,11 @@ impl DeviceManager {
             };
             if let Some(handle) = handle {
                 handle.stop();
-                recover_lock(this.monitored.lock(), "monitored inventory").clear();
+                let mut inventory = recover_lock(this.monitored.lock(), "monitored inventory");
+                inventory.clear();
+                this.next_revision.fetch_add(1, Ordering::Relaxed);
                 let mut state = recover_lock(this.state.lock(), "device manager state");
+                state.projected_revision = None;
                 state.devices.clear();
                 state.device_objects.clear();
                 state.device_revisions.clear();
@@ -235,9 +242,18 @@ impl DeviceManager {
     /// Project the live monitored inventory into the RPC device map.
     /// Returns the current device map.
     pub fn update_devices(&self) -> BTreeMap<String, Value> {
+        self.projected_state().devices.clone()
+    }
+
+    fn projected_state(&self) -> MutexGuard<'_, ManagerState> {
         // Keep revisions stable through projection so concurrent listings cannot
         // reinstate an older snapshot or discard a newer reservation.
         let inventory = recover_lock(self.monitored.lock(), "monitored inventory");
+        let revision = self.next_revision.load(Ordering::Relaxed);
+        let mut state = self.lock_state();
+        if state.projected_revision == Some(revision) {
+            return state;
+        }
         let mut devices: Vec<(YubiKeyId, LocalYubiKeyDevice, u64)> = inventory
             .iter()
             .map(|(id, (dev, revision))| (*id, dev.clone(), *revision))
@@ -304,8 +320,6 @@ impl DeviceManager {
             true
         });
 
-        let mut state = self.lock_state();
-
         // Remove locks for devices that are no longer present
         state
             .locked_devices
@@ -314,17 +328,16 @@ impl DeviceManager {
             .stale_devices
             .retain(|name, revision| new_revisions.get(name) == Some(revision));
 
-        state.devices = new_devices.clone();
+        state.devices = new_devices;
         state.device_objects = new_device_objects;
         state.device_revisions = new_revisions;
-        new_devices
+        state.projected_revision = Some(revision);
+        state
     }
 
     /// Return the current monitor revision, refreshing the projected inventory.
     pub fn device_revision(&self, name: &str) -> Option<u64> {
-        self.update_devices();
-        let state = self.lock_state();
-        state.device_revisions.get(name).copied()
+        self.projected_state().device_revisions.get(name).copied()
     }
 
     pub(crate) fn invalidate_metadata(&self, name: &str, revision: u64) {
@@ -336,7 +349,7 @@ impl DeviceManager {
 
     /// Refresh released devices under exclusive reservations before listing them.
     pub(crate) fn refresh_metadata(self: &Arc<Self>) -> Result<(), RpcError> {
-        self.update_devices();
+        drop(self.projected_state());
         let devices = {
             let mut state = self.lock_state();
             let devices = state
@@ -382,7 +395,7 @@ impl DeviceManager {
                 state.stale_devices.remove(&name);
             }
         }
-        self.update_devices();
+        drop(self.projected_state());
         Ok(())
     }
 
@@ -426,8 +439,7 @@ impl DeviceManager {
 
     /// Reserve monitored FIDO devices while touch selection opens their connections.
     pub(crate) fn reserve_fido_devices(self: &Arc<Self>) -> Result<DeviceReservation, RpcError> {
-        self.update_devices();
-        let mut state = self.lock_state();
+        let mut state = self.projected_state();
         let reserved: Vec<(String, u64)> = state
             .device_objects
             .iter()
@@ -520,6 +532,36 @@ fn device_name(dev: &LocalYubiKeyDevice, counts: &mut HashMap<String, usize>) ->
 mod tests {
     use super::{DeviceManager, DeviceReservation};
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn unchanged_inventory_reuses_projection_until_removal_invalidates_it() {
+        let manager = DeviceManager::new();
+        manager.update_devices();
+        {
+            // Stand in for a projected device without requiring hardware.
+            let mut state = manager.lock_state();
+            state
+                .devices
+                .insert("123".into(), serde_json::json!({"serial": 123}));
+            state.device_revisions.insert("123".into(), 1);
+        }
+        manager.lock_device("123", 1).unwrap();
+        manager.invalidate_metadata("123", 1);
+
+        assert_eq!(manager.device_revision("123"), Some(1));
+        assert!(manager.update_devices().contains_key("123"));
+        assert_eq!(manager.lock_state().locked_devices.get("123"), Some(&1));
+        assert_eq!(manager.lock_state().stale_devices.get("123"), Some(&1));
+
+        // A removal leaves no inventory entry carrying the new revision.
+        // The global revision must invalidate the old projection anyway.
+        manager.next_revision.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(manager.device_revision("123"), None);
+        assert!(manager.update_devices().is_empty());
+        assert!(manager.lock_state().locked_devices.is_empty());
+        assert!(manager.lock_state().stale_devices.is_empty());
+    }
 
     #[test]
     fn metadata_invalidation_and_reservation_release_are_revision_scoped() {
