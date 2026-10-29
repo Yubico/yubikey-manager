@@ -126,6 +126,9 @@ enum Change {
     /// A PC/SC reader or card state changed; re-diff the PC/SC transport.
     #[cfg(feature = "pcsc")]
     Pcsc,
+    /// A USB smart card reader was removed, for the given YubiKey PID if known.
+    #[cfg(all(feature = "pcsc", windows))]
+    PcscReaderRemoved(Option<u16>),
     /// A HID device was added or removed; re-diff the HID transport.
     #[cfg(feature = "hid")]
     Hid,
@@ -508,6 +511,11 @@ pub fn monitor_device_events(
                 Change::Stop => break,
                 #[cfg(feature = "pcsc")]
                 Change::Pcsc => state.refresh_pcsc(&mut on_event, &verified),
+                #[cfg(all(feature = "pcsc", windows))]
+                Change::PcscReaderRemoved(pid) => {
+                    state.forget_usb_cards(pid, &mut on_event);
+                    state.refresh_pcsc(&mut on_event, &verified);
+                }
                 #[cfg(feature = "hid")]
                 Change::Hid => state.refresh_hid(usb_interfaces, &mut on_event, &verified),
                 Change::VerifiedReinsert(id) => {
@@ -562,6 +570,30 @@ struct MonitorState {
 
 #[cfg(feature = "pcsc")]
 impl MonitorState {
+    /// Drop tracked cards of USB readers that were removed, so they are re-read.
+    ///
+    /// A rebooting YubiKey (e.g. after a configuration change) can remove and
+    /// re-create its reader between two polls, reusing the reader name and
+    /// card event count, which would otherwise keep the stale device info.
+    #[cfg(windows)]
+    fn forget_usb_cards(&mut self, pid: Option<u16>, on_event: &mut impl FnMut(NodeEvent)) {
+        let names: Vec<String> = self
+            .usb_readers
+            .iter()
+            .filter(|(_, node)| {
+                matches!(node, DeviceNode::UsbReaderNode { pid: reader_pid, .. }
+                    if pid.is_none_or(|pid| *reader_pid == pid))
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in names {
+            self.card_events.remove(&name);
+            if let Some(node) = self.cards.remove(&name) {
+                on_event(NodeEvent::Removed(node));
+            }
+        }
+    }
+
     /// Re-enumerate PC/SC readers and emit events for any changes.
     fn refresh_pcsc(
         &mut self,
@@ -907,16 +939,176 @@ fn pcsc_watch_loop(tx: &mpsc::Sender<Change>, shutdown: &Shutdown) {
 /// a fixed interval and let the monitor loop diff it. `list_readers` snapshots
 /// (used by the monitor's `refresh_pcsc`) are reliable here.
 ///
+/// Polling alone can miss a reader that is removed and re-created between two
+/// polls, so smart card reader removal notifications are also forwarded.
+///
 /// Stop latency is bounded by the poll interval, since the loop checks the
 /// shutdown flag each iteration.
 #[cfg(all(feature = "pcsc", windows))]
 fn pcsc_watch_loop(tx: &mpsc::Sender<Change>, shutdown: &Shutdown) {
+    windows_pcsc::run(tx, shutdown);
+}
+
+#[cfg(all(feature = "pcsc", windows))]
+mod windows_pcsc {
+    use super::{Change, Shutdown};
+    use std::cell::RefCell;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DBT_DEVICEREMOVECOMPLETE, DBT_DEVTYP_DEVICEINTERFACE,
+        DEV_BROADCAST_DEVICEINTERFACE_W, DEV_BROADCAST_HDR, DEVICE_NOTIFY_WINDOW_HANDLE,
+        DefWindowProcW, DestroyWindow, DispatchMessageW, HWND_MESSAGE, MSG,
+        MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, QS_ALLINPUT, RegisterClassW,
+        RegisterDeviceNotificationW, TranslateMessage, UnregisterDeviceNotification,
+        WM_DEVICECHANGE, WNDCLASSW,
+    };
+    use windows_sys::core::GUID;
+
     const POLL_INTERVAL: Duration = Duration::from_millis(750);
-    while !shutdown.is_stopped() {
-        thread::sleep(POLL_INTERVAL);
-        if shutdown.is_stopped() || tx.send(Change::Pcsc).is_err() {
-            return;
+    const GUID_DEVINTERFACE_SMARTCARD_READER: GUID =
+        GUID::from_u128(0x50dd5230_ba8a_11d1_bf5d_0000f805f530);
+
+    thread_local! {
+        static SENDER: RefCell<Option<mpsc::Sender<Change>>> = const { RefCell::new(None) };
+    }
+
+    fn wide(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    /// Which USB readers a removed reader interface path may correspond to:
+    /// `None` for non-YubiKey readers, `Some(None)` when the PID is unknown.
+    pub(super) fn removed_reader_pid(path: &str) -> Option<Option<u16>> {
+        let path = path.to_ascii_uppercase();
+        let field = |key: &str| {
+            let start = path.find(key)? + key.len();
+            u16::from_str_radix(path.get(start..start + 4)?, 16).ok()
+        };
+        match field("VID_") {
+            Some(0x1050) => Some(field("PID_")),
+            Some(_) => None,
+            None => Some(None),
         }
+    }
+
+    unsafe extern "system" fn wndproc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        if msg == WM_DEVICECHANGE && wparam == DBT_DEVICEREMOVECOMPLETE as WPARAM {
+            let header = lparam as *const DEV_BROADCAST_HDR;
+            if !header.is_null()
+                && unsafe { (*header).dbch_devicetype } == DBT_DEVTYP_DEVICEINTERFACE
+            {
+                let broadcast = lparam as *const DEV_BROADCAST_DEVICEINTERFACE_W;
+                let name = unsafe {
+                    let start = std::ptr::addr_of!((*broadcast).dbcc_name).cast::<u16>();
+                    let len = (0..).take_while(|&i| *start.add(i) != 0).count();
+                    String::from_utf16_lossy(std::slice::from_raw_parts(start, len))
+                };
+                log::debug!("Smart card reader removed: {name}");
+                if let Some(pid) = removed_reader_pid(&name) {
+                    SENDER.with(|sender| {
+                        if let Some(tx) = sender.borrow().as_ref() {
+                            let _ = tx.send(Change::PcscReaderRemoved(pid));
+                        }
+                    });
+                }
+            }
+            return 1;
+        }
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    }
+
+    /// Create a message-only window registered for reader notifications.
+    fn register_notifications() -> Option<(HWND, *mut core::ffi::c_void)> {
+        unsafe {
+            let hinstance = GetModuleHandleW(std::ptr::null());
+            let class_name = wide("YubiKitPcscMonitor");
+            let mut wc: WNDCLASSW = std::mem::zeroed();
+            wc.lpfnWndProc = Some(wndproc);
+            wc.hInstance = hinstance;
+            wc.lpszClassName = class_name.as_ptr();
+            RegisterClassW(&wc);
+
+            let hwnd = CreateWindowExW(
+                0,
+                class_name.as_ptr(),
+                std::ptr::null(),
+                0,
+                0,
+                0,
+                0,
+                0,
+                HWND_MESSAGE,
+                std::ptr::null_mut(),
+                hinstance,
+                std::ptr::null(),
+            );
+            if hwnd.is_null() {
+                return None;
+            }
+            let mut filter: DEV_BROADCAST_DEVICEINTERFACE_W = std::mem::zeroed();
+            filter.dbcc_size = std::mem::size_of::<DEV_BROADCAST_DEVICEINTERFACE_W>() as u32;
+            filter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+            filter.dbcc_classguid = GUID_DEVINTERFACE_SMARTCARD_READER;
+            let notify = RegisterDeviceNotificationW(
+                hwnd as _,
+                &mut filter as *mut _ as *mut _,
+                DEVICE_NOTIFY_WINDOW_HANDLE,
+            );
+            if notify.is_null() {
+                DestroyWindow(hwnd);
+                return None;
+            }
+            Some((hwnd, notify))
+        }
+    }
+
+    pub(super) fn run(tx: &mpsc::Sender<Change>, shutdown: &Shutdown) {
+        SENDER.with(|sender| *sender.borrow_mut() = Some(tx.clone()));
+        let registration = register_notifications();
+        if registration.is_none() {
+            log::debug!("Failed to register for smart card reader notifications");
+        }
+
+        let mut next_poll = Instant::now() + POLL_INTERVAL;
+        while !shutdown.is_stopped() {
+            let timeout = next_poll.saturating_duration_since(Instant::now());
+            unsafe {
+                MsgWaitForMultipleObjects(
+                    0,
+                    std::ptr::null(),
+                    0,
+                    timeout.as_millis() as u32,
+                    QS_ALLINPUT,
+                );
+                let mut msg: MSG = std::mem::zeroed();
+                while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            if Instant::now() >= next_poll {
+                if shutdown.is_stopped() || tx.send(Change::Pcsc).is_err() {
+                    break;
+                }
+                next_poll = Instant::now() + POLL_INTERVAL;
+            }
+        }
+
+        if let Some((hwnd, notify)) = registration {
+            unsafe {
+                UnregisterDeviceNotification(notify);
+                DestroyWindow(hwnd);
+            }
+        }
+        SENDER.with(|sender| *sender.borrow_mut() = None);
     }
 }
 
@@ -1815,5 +2007,57 @@ mod tests {
             );
             assert_eq!(verified_info(&verified, interface, path, Some(0x408)), None);
         }
+    }
+
+    #[cfg(all(feature = "pcsc", windows))]
+    #[test]
+    fn removed_reader_drops_cards_of_matching_usb_readers() {
+        let info = DeviceInfo::parse_tlvs(&HashMap::new(), Version(5, 8, 0)).unwrap();
+        let mut state = MonitorState::default();
+        for (name, pid) in [("yk 0", 0x407), ("yk 1", 0x406)] {
+            state.usb_readers.insert(
+                name.into(),
+                DeviceNode::UsbReaderNode {
+                    reader_name: name.into(),
+                    pid,
+                },
+            );
+            state.cards.insert(
+                name.into(),
+                DeviceNode::CardNode {
+                    reader_name: name.into(),
+                    device_info: info.clone(),
+                },
+            );
+            state.card_events.insert(name.into(), 1);
+        }
+
+        let mut removed = Vec::new();
+        state.forget_usb_cards(Some(0x407), &mut |event| removed.push(event));
+        assert_eq!(removed.len(), 1);
+        assert!(!state.cards.contains_key("yk 0") && !state.card_events.contains_key("yk 0"));
+        assert!(state.cards.contains_key("yk 1") && state.usb_readers.contains_key("yk 0"));
+
+        state.forget_usb_cards(None, &mut |event| removed.push(event));
+        assert_eq!(removed.len(), 2);
+        assert!(state.cards.is_empty());
+    }
+
+    #[cfg(all(feature = "pcsc", windows))]
+    #[test]
+    fn removed_reader_pid_is_parsed_from_interface_path() {
+        use windows_pcsc::removed_reader_pid;
+        assert_eq!(
+            removed_reader_pid(
+                r"\\?\USB#VID_1050&PID_0407&MI_02#7&1a2b&0&0002#{50dd5230-ba8a-11d1-bf5d-0000f805f530}"
+            ),
+            Some(Some(0x407))
+        );
+        assert_eq!(
+            removed_reader_pid(r"\\?\usb#vid_1050&pid_0116#x"),
+            Some(Some(0x116))
+        );
+        assert_eq!(removed_reader_pid(r"\\?\USB#VID_076B&PID_5427#x"), None);
+        assert_eq!(removed_reader_pid(r"\\?\SWD#ScReader#x"), Some(None));
     }
 }
