@@ -45,12 +45,18 @@
 //! transiently ejects and re-inserts the CCID card, which surfaces as a
 //! matching pair of card removal/insertion events.
 //!
+//! Uncertain reader changes do not by themselves remove cards. Metadata
+//! refreshes require exclusive access, retaining cached information while
+//! cards are busy. Successful unchanged refreshes emit no events.
+//!
 //! A local device's [`reinsert`](crate::device::YubiKeyDevice::reinsert) operation
 //! pauses in-process monitor probes and
 //! supplies its verified identity and paths for the ensuing reconciliation.
 //! Unannounced hotplugs still require DeviceInfo reads.
 
 use std::collections::HashMap;
+#[cfg(feature = "pcsc")]
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError, Weak};
@@ -69,7 +75,7 @@ use super::hidapi::{
     FidoDeviceInfo, HidFidoConnection, HidOtpConnection, list_fido_devices, list_otp_devices,
 };
 #[cfg(feature = "pcsc")]
-use super::pcsc::{PcscSmartCardConnection, is_reader_usb, list_reader_statuses};
+use super::pcsc::{PcscSmartCardConnection, ReaderStatus, is_reader_usb, list_reader_statuses};
 #[cfg(feature = "pcsc")]
 use crate::device::read_info_ccid;
 #[cfg(feature = "hid")]
@@ -513,7 +519,7 @@ pub fn monitor_device_events(
                 Change::Pcsc => state.refresh_pcsc(&mut on_event, &verified),
                 #[cfg(all(feature = "pcsc", windows))]
                 Change::PcscReaderRemoved(instance) => {
-                    state.forget_usb_cards(instance.as_deref(), &mut on_event);
+                    state.invalidate_usb_cards(instance.as_deref(), &mut on_event);
                     state.refresh_pcsc(&mut on_event, &verified);
                 }
                 #[cfg(feature = "hid")]
@@ -560,6 +566,9 @@ struct MonitorState {
     /// Event counter of each tracked card, to detect replacement.
     #[cfg(feature = "pcsc")]
     card_events: HashMap<String, u32>,
+    /// Cards scheduled for a non-intrusive metadata refresh.
+    #[cfg(feature = "pcsc")]
+    stale_cards: HashSet<String>,
     /// Cached Windows device instance IDs, available even after a reader disappears.
     #[cfg(all(feature = "pcsc", any(windows, test)))]
     reader_instances: HashMap<String, ReaderInstance>,
@@ -588,30 +597,44 @@ const READER_INSTANCE_RETRY: Duration = Duration::from_secs(5);
 
 #[cfg(feature = "pcsc")]
 impl MonitorState {
-    /// Drop tracked cards of USB readers that were removed, so they are re-read.
+    /// Invalidate a confirmed removal, or schedule uncertain readers for refresh.
     ///
     /// A rebooting YubiKey (e.g. after a configuration change) can remove and
     /// re-create its reader between two polls, reusing the reader name and
     /// card event count, which would otherwise keep the stale device info.
     ///
-    /// Readers whose instance is unknown, either because the lookup failed or
-    /// the removed path was unrecognised (`None`), are conservatively re-read.
+    /// Uncertain readers retain their cards until a probe succeeds or PC/SC
+    /// confirms removal. Failed instance lookups keep their retry deadlines.
     #[cfg(any(windows, test))]
-    fn forget_usb_cards(&mut self, instance: Option<&str>, on_event: &mut impl FnMut(NodeEvent)) {
-        let names: Vec<String> = self
+    fn invalidate_usb_cards(
+        &mut self,
+        instance: Option<&str>,
+        on_event: &mut impl FnMut(NodeEvent),
+    ) {
+        let names: Vec<(String, bool)> = self
             .usb_readers
             .keys()
-            .filter(|name| match (instance, self.reader_instances.get(*name)) {
-                (Some(removed), Some(ReaderInstance::Known(known))) => {
-                    known.eq_ignore_ascii_case(removed)
-                }
-                _ => true,
+            .filter_map(|name| match (instance, self.reader_instances.get(name)) {
+                (Some(removed), Some(ReaderInstance::Known(known))) => known
+                    .eq_ignore_ascii_case(removed)
+                    .then(|| (name.clone(), true)),
+                _ => Some((name.clone(), false)),
             })
-            .cloned()
             .collect();
-        for name in names {
+        for (name, removed) in names {
+            if !removed {
+                self.stale_cards.insert(name.clone());
+                if matches!(
+                    self.reader_instances.get(&name),
+                    Some(ReaderInstance::Known(_))
+                ) {
+                    self.reader_instances.remove(&name);
+                }
+                continue;
+            }
             self.reader_instances.remove(&name);
             self.card_events.remove(&name);
+            self.stale_cards.remove(&name);
             if let Some(node) = self.cards.remove(&name) {
                 on_event(NodeEvent::Removed(node));
             }
@@ -621,7 +644,7 @@ impl MonitorState {
     /// Look up device instance IDs of USB readers not yet cached, using one
     /// smart card context, and back off after failures.
     #[cfg(windows)]
-    fn lookup_reader_instances(&mut self, readers: &[super::pcsc::ReaderStatus]) {
+    fn lookup_reader_instances(&mut self, readers: &[ReaderStatus]) {
         let now = Instant::now();
         let names: Vec<&str> = readers
             .iter()
@@ -689,6 +712,7 @@ impl MonitorState {
             #[cfg(windows)]
             self.reader_instances.remove(&name);
             self.card_events.remove(&name);
+            self.stale_cards.remove(&name);
             // Card first, then reader.
             if let Some(node) = self.cards.remove(&name) {
                 on_event(NodeEvent::Removed(node));
@@ -713,8 +737,18 @@ impl MonitorState {
         #[cfg(windows)]
         self.lookup_reader_instances(&readers);
 
+        self.refresh_pcsc_cards(&readers, on_event, verified, read_card_info);
+    }
+
+    fn refresh_pcsc_cards(
+        &mut self,
+        readers: &[ReaderStatus],
+        on_event: &mut impl FnMut(NodeEvent),
+        verified: &[LocalYubiKeyDevice],
+        mut read_info: impl FnMut(&str, bool, bool) -> Result<DeviceInfo, DeviceError>,
+    ) {
         // --- Process each currently-connected reader ---
-        for status in &readers {
+        for status in readers {
             let name = &status.name;
             let card_present = &status.card_present;
             let usb = is_reader_usb(name);
@@ -726,6 +760,7 @@ impl MonitorState {
                 && self.card_events.get(name) != Some(&status.event_count)
                 && let Some(node) = self.cards.remove(name)
             {
+                self.stale_cards.remove(name);
                 on_event(NodeEvent::Removed(node));
             }
 
@@ -743,7 +778,8 @@ impl MonitorState {
             }
 
             if *card_present {
-                if !self.cards.contains_key(name) {
+                let refresh = self.stale_cards.contains(name);
+                if refresh || !self.cards.contains_key(name) {
                     let pid = if usb {
                         pid_from_reader_name(name)
                     } else {
@@ -751,24 +787,33 @@ impl MonitorState {
                     };
                     let info = verified_info(verified, VerifiedInterface::Ccid, name, pid)
                         .map(Ok)
-                        .unwrap_or_else(|| read_card_info(name, usb));
+                        .unwrap_or_else(|| read_info(name, usb, refresh));
                     match info {
                         Ok(info) => {
                             let node = DeviceNode::CardNode {
                                 reader_name: name.clone(),
                                 device_info: info,
                             };
-                            self.cards.insert(name.clone(), node.clone());
+                            let previous = self.cards.insert(name.clone(), node.clone());
                             self.card_events.insert(name.clone(), status.event_count);
-                            on_event(NodeEvent::Added(node));
+                            self.stale_cards.remove(name);
+                            if previous.as_ref() != Some(&node) {
+                                if let Some(previous) = previous {
+                                    on_event(NodeEvent::Removed(previous));
+                                }
+                                on_event(NodeEvent::Added(node));
+                            }
                         }
                         Err(e) => {
                             log::debug!("Reading card info from '{name}' failed: {e}");
                         }
                     }
                 }
-            } else if let Some(node) = self.cards.remove(name) {
-                on_event(NodeEvent::Removed(node));
+            } else {
+                self.stale_cards.remove(name);
+                if let Some(node) = self.cards.remove(name) {
+                    on_event(NodeEvent::Removed(node));
+                }
             }
         }
     }
@@ -890,8 +935,16 @@ impl MonitorState {
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "pcsc")]
-fn read_card_info(reader_name: &str, usb: bool) -> Result<DeviceInfo, DeviceError> {
-    let conn = PcscSmartCardConnection::open(reader_name)?;
+fn read_card_info(
+    reader_name: &str,
+    usb: bool,
+    exclusive_only: bool,
+) -> Result<DeviceInfo, DeviceError> {
+    let conn = if exclusive_only {
+        PcscSmartCardConnection::new(reader_name, true)
+    } else {
+        PcscSmartCardConnection::open(reader_name)
+    }?;
     let pid = if usb {
         pid_from_reader_name(reader_name)
     } else {
@@ -2193,27 +2246,201 @@ mod tests {
 
     #[cfg(feature = "pcsc")]
     #[test]
-    fn removed_reader_with_unknown_instance_is_reread() {
+    fn uncertain_reader_removal_preserves_cards_and_retry_deadlines() {
         let known = |id: &str| Some(ReaderInstance::Known(id.into()));
-        let failed = Some(ReaderInstance::Unknown {
-            retry_at: Instant::now(),
-        });
+        let failed = ReaderInstance::Unknown {
+            retry_at: Instant::now() + Duration::from_secs(5),
+        };
         let mut state = state_with_usb_cards(&[
             ("known", known(r"USB\VID_1050&PID_0407\1")),
-            ("failed", failed),
+            ("failed", Some(failed.clone())),
             ("uncached", None),
         ]);
+        let cards = state.cards.clone();
+        let counters = state.card_events.clone();
         let mut removed = Vec::new();
-        state.forget_usb_cards(Some(r"USB\VID_1050&PID_0407\0"), &mut |e| removed.push(e));
-        assert_eq!(removed.len(), 2);
-        assert!(state.cards.contains_key("known"));
-        assert!(!state.cards.contains_key("failed") && !state.cards.contains_key("uncached"));
-        assert!(!state.reader_instances.contains_key("failed"));
+        state.invalidate_usb_cards(Some(r"USB\VID_1050&PID_0407\0"), &mut |e| removed.push(e));
+        assert!(removed.is_empty());
+        assert_eq!(state.cards, cards);
+        assert_eq!(state.card_events, counters);
+        assert_eq!(state.reader_instances.get("failed"), Some(&failed));
+        assert_eq!(state.stale_cards.len(), 2);
+        assert!(!state.stale_cards.contains("known"));
 
-        state.forget_usb_cards(None, &mut |e| removed.push(e));
-        assert_eq!(removed.len(), 3);
-        assert!(state.cards.is_empty());
-        assert!(state.reader_instances.is_empty());
+        state.invalidate_usb_cards(None, &mut |e| removed.push(e));
+        assert!(removed.is_empty());
+        assert_eq!(state.cards, cards);
+        assert_eq!(state.card_events, counters);
+        assert_eq!(state.stale_cards.len(), 3);
+        assert_eq!(state.reader_instances.get("failed"), Some(&failed));
+        assert!(!state.reader_instances.contains_key("known"));
+    }
+
+    #[cfg(feature = "pcsc")]
+    #[test]
+    fn uncertain_refresh_keeps_busy_card_and_retries_without_invalidating_it() {
+        let reader = "Yubico YubiKey OTP+FIDO+CCID 0";
+        let failed = ReaderInstance::Unknown {
+            retry_at: Instant::now() + Duration::from_secs(5),
+        };
+        for (instance, removed) in [
+            (Some(failed.clone()), Some(r"USB\VID_1050&PID_0407\other")),
+            (Some(failed), None),
+            (
+                Some(ReaderInstance::Known(r"USB\VID_1050&PID_0407\0".into())),
+                None,
+            ),
+            (None, Some(r"USB\VID_1050&PID_0407\other")),
+        ] {
+            let mut state = state_with_usb_cards(&[(reader, instance)]);
+            let cards = state.cards.clone();
+            let counters = state.card_events.clone();
+            let info = match &cards[reader] {
+                DeviceNode::CardNode { device_info, .. } => device_info.clone(),
+                _ => unreachable!(),
+            };
+            let statuses = [ReaderStatus {
+                name: reader.into(),
+                card_present: true,
+                event_count: 1,
+            }];
+            let mut events = Vec::new();
+            state.invalidate_usb_cards(removed, &mut |e| events.push(e));
+            let instances = state.reader_instances.clone();
+            let mut probes = 0;
+            state.refresh_pcsc_cards(
+                &statuses,
+                &mut |e| events.push(e),
+                &[],
+                |name, usb, exclusive_only| {
+                    assert_eq!(name, reader);
+                    assert!(usb && exclusive_only);
+                    probes += 1;
+                    Err(
+                        crate::platform::pcsc::PcscError::Pcsc(::pcsc::Error::SharingViolation)
+                            .into(),
+                    )
+                },
+            );
+            assert_eq!(probes, 1);
+            assert!(events.is_empty());
+            assert_eq!(state.cards, cards);
+            assert_eq!(state.card_events, counters);
+            assert_eq!(state.reader_instances, instances);
+            assert!(state.stale_cards.contains(reader));
+
+            state.refresh_pcsc_cards(
+                &statuses,
+                &mut |e| events.push(e),
+                &[],
+                |_, _, exclusive_only| {
+                    assert!(exclusive_only);
+                    Ok(info.clone())
+                },
+            );
+            assert!(events.is_empty());
+            assert_eq!(state.cards, cards);
+            assert_eq!(state.card_events, counters);
+            assert_eq!(state.reader_instances, instances);
+            assert!(state.stale_cards.is_empty());
+            state.refresh_pcsc_cards(&statuses, &mut |e| events.push(e), &[], |_, _, _| {
+                panic!("An unchanged card should not be probed again")
+            });
+        }
+    }
+
+    #[cfg(feature = "pcsc")]
+    #[test]
+    fn uncertain_refresh_publishes_changed_metadata_after_successful_probe() {
+        let reader = "Yubico YubiKey OTP+FIDO+CCID 0";
+        let mut state = state_with_usb_cards(&[(reader, None)]);
+        let previous = state.cards[reader].clone();
+        let mut events = Vec::new();
+        state.invalidate_usb_cards(None, &mut |e| events.push(e));
+        assert!(events.is_empty());
+        let info = DeviceInfo::parse_tlvs(&HashMap::new(), Version(5, 8, 1)).unwrap();
+        let node = DeviceNode::CardNode {
+            reader_name: reader.into(),
+            device_info: info.clone(),
+        };
+        state.refresh_pcsc_cards(
+            &[ReaderStatus {
+                name: reader.into(),
+                card_present: true,
+                event_count: 1,
+            }],
+            &mut |e| events.push(e),
+            &[],
+            |_, _, exclusive_only| {
+                assert!(exclusive_only);
+                Ok(info.clone())
+            },
+        );
+        assert_eq!(
+            events,
+            vec![NodeEvent::Removed(previous), NodeEvent::Added(node.clone())]
+        );
+        assert_eq!(state.cards[reader], node);
+        assert!(state.stale_cards.is_empty());
+    }
+
+    #[cfg(feature = "pcsc")]
+    #[test]
+    fn uncertain_refresh_does_not_hide_confirmed_card_removal() {
+        let reader = "Yubico YubiKey OTP+FIDO+CCID 0";
+        let mut state = state_with_usb_cards(&[(reader, None)]);
+        let previous = state.cards[reader].clone();
+        let mut events = Vec::new();
+        state.invalidate_usb_cards(None, &mut |e| events.push(e));
+        state.refresh_pcsc_cards(
+            &[ReaderStatus {
+                name: reader.into(),
+                card_present: false,
+                event_count: 2,
+            }],
+            &mut |e| events.push(e),
+            &[],
+            |_, _, _| panic!("An absent card should not be probed"),
+        );
+        assert_eq!(events, vec![NodeEvent::Removed(previous)]);
+        assert!(!state.cards.contains_key(reader));
+        assert!(state.stale_cards.is_empty());
+    }
+
+    #[cfg(feature = "pcsc")]
+    #[test]
+    fn uncertain_refresh_does_not_hide_confirmed_card_replacement() {
+        let reader = "Yubico YubiKey OTP+FIDO+CCID 0";
+        let mut state = state_with_usb_cards(&[(reader, None)]);
+        let previous = state.cards[reader].clone();
+        let info = match &previous {
+            DeviceNode::CardNode { device_info, .. } => device_info.clone(),
+            _ => unreachable!(),
+        };
+        let mut events = Vec::new();
+        state.invalidate_usb_cards(None, &mut |e| events.push(e));
+        state.refresh_pcsc_cards(
+            &[ReaderStatus {
+                name: reader.into(),
+                card_present: true,
+                event_count: 2,
+            }],
+            &mut |e| events.push(e),
+            &[],
+            |_, _, exclusive_only| {
+                assert!(!exclusive_only);
+                Ok(info.clone())
+            },
+        );
+        assert_eq!(
+            events,
+            vec![
+                NodeEvent::Removed(previous.clone()),
+                NodeEvent::Added(previous)
+            ]
+        );
+        assert_eq!(state.card_events.get(reader), Some(&2));
+        assert!(state.stale_cards.is_empty());
     }
 
     #[cfg(feature = "pcsc")]
@@ -2246,7 +2473,7 @@ mod tests {
         }
 
         let mut removed = Vec::new();
-        state.forget_usb_cards(Some(r"usb\vid_1050&pid_0407\0"), &mut |event| {
+        state.invalidate_usb_cards(Some(r"usb\vid_1050&pid_0407\0"), &mut |event| {
             removed.push(event)
         });
         assert_eq!(removed.len(), 1);
@@ -2257,7 +2484,7 @@ mod tests {
         assert!(state.reader_instances.contains_key("yk 1"));
 
         for instance in [r"SWD\ScReader\unknown", r"USB\VID_1050&PID_0407\unknown"] {
-            state.forget_usb_cards(Some(instance), &mut |event| removed.push(event));
+            state.invalidate_usb_cards(Some(instance), &mut |event| removed.push(event));
         }
         assert_eq!(removed.len(), 1);
         assert!(state.cards.contains_key("yk 1"));
