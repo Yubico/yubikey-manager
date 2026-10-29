@@ -3,17 +3,16 @@
 //! Each connected client gets a `ClientSession` with its own NodeHost tree.
 //! Device locks are released on disconnect.
 //!
-//! The pipe/socket is put in nonblocking mode by `pipe_server`, and this loop
-//! owns all I/O. RPC work runs on a worker thread and communicates back via a
-//! channel, which lets the I/O loop process cancel signals while an action is
-//! running without concurrent writes to the same endpoint.
+//! A reader thread performs blocking reads from the pipe/socket and forwards
+//! parsed requests over a channel. RPC work runs on a worker thread which
+//! reports signals and responses over the same channel. The session loop
+//! blocks on that channel and is the only writer to the endpoint, which lets
+//! it process cancel signals while an action is running, without polling and
+//! without concurrent writes.
 
 use std::io::{BufRead, BufReader, Read, Write};
-#[cfg(target_os = "windows")]
-use std::os::windows::io::AsRawHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
-use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -30,19 +29,17 @@ use crate::device_manager::DeviceManager;
 use crate::root_node::ServiceRootNode;
 
 const MAX_RPC_LINE_LEN: usize = 1_048_576;
-const ACTIVE_POLL_INTERVAL: Duration = Duration::from_millis(1);
-const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(10);
-const ACTIVE_WINDOW: Duration = Duration::from_millis(100);
 
-#[cfg(target_os = "windows")]
-pub(crate) trait SessionIo: Read + Write + Send + AsRawHandle {}
-#[cfg(target_os = "windows")]
-impl<T: Read + Write + Send + AsRawHandle> SessionIo for T {}
+/// A bidirectional client endpoint which can be read from a separate thread.
+pub(crate) trait SessionIo: Write + Send + 'static {
+    type Reader: Read + Send + 'static;
 
-#[cfg(not(target_os = "windows"))]
-pub(crate) trait SessionIo: Read + Write + Send {}
-#[cfg(not(target_os = "windows"))]
-impl<T: Read + Write + Send> SessionIo for T {}
+    /// Create an independent blocking reader for the endpoint.
+    fn reader(&self) -> std::io::Result<Self::Reader>;
+
+    /// Close the endpoint, unblocking any pending read.
+    fn shutdown(&self);
+}
 
 /// A session for a single connected client.
 pub struct ClientSession {
@@ -55,105 +52,62 @@ impl ClientSession {
     }
 
     /// Run the RPC loop for this client session.
-    pub fn run<T: SessionIo + 'static>(self, io: T) {
-        let mut reader = BufReader::new(io);
+    pub fn run<T: SessionIo>(self, mut io: T) {
+        let reader = match io.reader() {
+            Ok(reader) => reader,
+            Err(e) => {
+                log::error!("Failed to create client reader: {e}");
+                io.shutdown();
+                return;
+            }
+        };
         let (command_tx, command_rx) = mpsc::channel::<WorkerCommand>();
-        let (event_tx, event_rx) = mpsc::channel::<WorkerEvent>();
+        let (event_tx, event_rx) = mpsc::channel::<SessionEvent>();
         let manager = self.manager.clone();
-        let io_thread = std::thread::current();
-        let worker =
-            std::thread::spawn(move || run_worker(manager, command_rx, event_tx, io_thread));
+        let worker_tx = event_tx.clone();
+        let worker = std::thread::spawn(move || run_worker(manager, command_rx, worker_tx));
+        let reader_thread = std::thread::spawn(move || run_reader(reader, event_tx));
         let mut active_cancel: Option<Arc<AtomicBool>> = None;
-        let mut last_activity = None;
         let mut handshaken = false;
-        let mut pending_line = SecretValue::new(Vec::new());
 
         log::debug!("Client session started");
 
-        loop {
-            let mut disconnected = false;
-            loop {
-                match read_request(&mut reader, &mut pending_line) {
-                    ReadRequest::Version(version) => {
-                        if !handle_version(version, reader.get_mut(), &mut handshaken) {
-                            disconnected = true;
-                            break;
-                        }
-                    }
-                    ReadRequest::Request(request) => {
-                        last_activity = Some(Instant::now());
-                        if !handle_request(
-                            request,
-                            reader.get_mut(),
-                            &command_tx,
-                            &mut active_cancel,
-                            handshaken,
-                        ) {
-                            disconnected = true;
-                            break;
-                        }
-                    }
-                    ReadRequest::Invalid(message) => {
-                        if !write_invalid_request(reader.get_mut(), message) {
-                            disconnected = true;
-                            break;
-                        }
-                    }
-                    ReadRequest::WouldBlock => break,
-                    ReadRequest::Disconnected => {
-                        disconnected = true;
-                        break;
-                    }
+        // Both senders are dropped once the reader and worker have exited.
+        while let Ok(event) = event_rx.recv() {
+            let connected = match event {
+                SessionEvent::Client(ReadRequest::Version(version)) => {
+                    handle_version(version, &mut io, &mut handshaken)
                 }
-            }
-
-            if disconnected {
-                break;
-            }
-
-            loop {
-                match event_rx.try_recv() {
-                    Ok(WorkerEvent::Signal(signal)) => {
-                        if write_response(reader.get_mut(), &signal).is_err() {
-                            disconnected = true;
-                            break;
-                        }
-                    }
-                    Ok(WorkerEvent::Response(response)) => {
-                        last_activity = Some(Instant::now());
-                        active_cancel = None;
-                        if write_response(reader.get_mut(), &response).is_err() {
-                            disconnected = true;
-                            break;
-                        }
-                    }
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        disconnected = true;
-                        break;
-                    }
+                SessionEvent::Client(ReadRequest::Request(request)) => handle_request(
+                    request,
+                    &mut io,
+                    &command_tx,
+                    &mut active_cancel,
+                    handshaken,
+                ),
+                SessionEvent::Client(ReadRequest::Invalid(message)) => {
+                    write_invalid_request(&mut io, message)
                 }
-            }
-
-            if disconnected {
-                break;
-            }
-
-            // Keep APDU bursts responsive without polling every millisecond while idle.
-            let interval = if active_cancel.is_some()
-                || last_activity.is_some_and(|instant: Instant| instant.elapsed() < ACTIVE_WINDOW)
-            {
-                ACTIVE_POLL_INTERVAL
-            } else {
-                IDLE_POLL_INTERVAL
+                SessionEvent::Client(ReadRequest::Disconnected) => false,
+                SessionEvent::Signal(signal) => write_response(&mut io, &signal).is_ok(),
+                SessionEvent::Response(response) => {
+                    active_cancel = None;
+                    write_response(&mut io, &response).is_ok()
+                }
             };
-            std::thread::park_timeout(interval);
+            if !connected {
+                break;
+            }
         }
 
         if let Some(cancel) = active_cancel {
             cancel.store(true, Ordering::Relaxed);
         }
         drop(command_tx);
+        io.shutdown();
+        if reader_thread.join().is_err() {
+            log::warn!("Client session reader panicked");
+        }
         if let Err(payload) = worker.join() {
             if payload
                 .downcast_ref::<String>()
@@ -189,7 +143,6 @@ enum ReadRequest {
     Version(String),
     Request(ClientMessage),
     Invalid(&'static str),
-    WouldBlock,
     Disconnected,
 }
 
@@ -200,29 +153,33 @@ struct WorkerCommand {
     cancel: Arc<AtomicBool>,
 }
 
-enum WorkerEvent {
+enum SessionEvent {
+    Client(ReadRequest),
     Signal(ServerMessage),
     Response(ServerMessage),
 }
 
-fn read_request<T: SessionIo>(
-    reader: &mut BufReader<T>,
+fn run_reader<R: Read>(reader: R, event_tx: mpsc::Sender<SessionEvent>) {
+    let mut reader = BufReader::new(reader);
+    let mut pending_line = SecretValue::new(Vec::new());
+    loop {
+        let request = read_request(&mut reader, &mut pending_line);
+        let disconnected = matches!(request, ReadRequest::Disconnected);
+        if event_tx.send(SessionEvent::Client(request)).is_err() || disconnected {
+            break;
+        }
+    }
+}
+
+fn read_request<R: Read>(
+    reader: &mut BufReader<R>,
     pending_line: &mut SecretValue<Vec<u8>>,
 ) -> ReadRequest {
     loop {
-        #[cfg(target_os = "windows")]
-        match windows_pipe_read_state(reader.get_ref()) {
-            PipeReadState::NoData => return ReadRequest::WouldBlock,
-            PipeReadState::Disconnected => return ReadRequest::Disconnected,
-            PipeReadState::DataAvailable => {}
-        }
-
         let available = match reader.fill_buf() {
             Ok([]) => return ReadRequest::Disconnected,
             Ok(buf) => buf,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                return ReadRequest::WouldBlock;
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) => {
                 log::debug!("Client read failed: {e}");
                 return ReadRequest::Disconnected;
@@ -252,39 +209,6 @@ fn read_request<T: SessionIo>(
             pending_line.expose_secret_mut().zeroize();
             pending_line.expose_secret_mut().clear();
             return ReadRequest::Invalid("RPC request is too large");
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    enum PipeReadState {
-        DataAvailable,
-        NoData,
-        Disconnected,
-    }
-
-    #[cfg(target_os = "windows")]
-    fn windows_pipe_read_state<T: AsRawHandle>(io: &T) -> PipeReadState {
-        use windows_sys::Win32::System::Pipes::PeekNamedPipe;
-
-        let mut available = 0u32;
-        let ok = unsafe {
-            PeekNamedPipe(
-                io.as_raw_handle() as _,
-                std::ptr::null_mut(),
-                0,
-                std::ptr::null_mut(),
-                &mut available,
-                std::ptr::null_mut(),
-            )
-        };
-        if ok == 0 {
-            let err = std::io::Error::last_os_error();
-            log::debug!("PeekNamedPipe failed: {err}");
-            PipeReadState::Disconnected
-        } else if available == 0 {
-            PipeReadState::NoData
-        } else {
-            PipeReadState::DataAvailable
         }
     }
 }
@@ -403,22 +327,18 @@ fn write_protocol_error<T: Write>(writer: &mut T, message: &'static str) -> bool
 fn run_worker(
     manager: Arc<DeviceManager>,
     command_rx: mpsc::Receiver<WorkerCommand>,
-    event_tx: mpsc::Sender<WorkerEvent>,
-    io_thread: std::thread::Thread,
+    event_tx: mpsc::Sender<SessionEvent>,
 ) {
     let root = Box::new(ServiceRootNode::new(manager));
     let mut host = NodeHost::new(root);
 
     for command in command_rx {
         let signal_tx = event_tx.clone();
-        let signal_thread = io_thread.clone();
         let signal_fn = move |status: &str, body: Value| {
             let signal = SignalMessage::new(status, body)
                 .map(ServerMessage::Signal)
                 .expect("signal body serializes to valid JSON");
-            if signal_tx.send(WorkerEvent::Signal(signal)).is_ok() {
-                signal_thread.unpark();
-            }
+            let _ = signal_tx.send(SessionEvent::Signal(signal));
         };
 
         let mut params = match command.body.to_value() {
@@ -430,10 +350,9 @@ fn run_worker(
                     json!({}),
                 )
                 .expect("empty error body is valid JSON");
-                if event_tx.send(WorkerEvent::Response(response)).is_err() {
+                if event_tx.send(SessionEvent::Response(response)).is_err() {
                     break;
                 }
-                io_thread.unpark();
                 continue;
             }
         };
@@ -466,10 +385,12 @@ fn run_worker(
             }
         };
         zeroize_value(&mut params);
-        if event_tx.send(WorkerEvent::Response(response_json)).is_err() {
+        if event_tx
+            .send(SessionEvent::Response(response_json))
+            .is_err()
+        {
             break;
         }
-        io_thread.unpark();
     }
 }
 

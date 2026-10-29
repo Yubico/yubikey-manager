@@ -41,8 +41,7 @@ pub fn run_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
 
 #[cfg(target_os = "windows")]
 fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
-    use std::fs::File;
-    use std::os::windows::io::FromRawHandle;
+    use std::os::windows::io::{FromRawHandle, OwnedHandle};
 
     use windows_sys::Win32::Foundation::{
         CloseHandle, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, GetLastError, INVALID_HANDLE_VALUE,
@@ -279,15 +278,93 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
             let handle = handle_addr as *mut core::ffi::c_void;
             // SAFETY: handle is a valid pipe handle that we own exclusively in this thread.
             // ClientSession owns all I/O for the endpoint.
-            let file = unsafe { File::from_raw_handle(handle) };
+            let pipe = unsafe { OwnedHandle::from_raw_handle(handle) };
+            let io = match named_pipe_io::NamedPipeIo::new(pipe) {
+                Ok(io) => io,
+                Err(e) => {
+                    log::error!("Failed to set up client pipe I/O: {e}");
+                    return;
+                }
+            };
 
             if let Some(session) = ClientSession::new(manager) {
-                session.run(file);
+                session.run(io);
             }
         });
     }
 
     log::info!("Pipe server stopped");
+}
+
+/// Client I/O on an overlapped server pipe handle.
+///
+/// The session reads and writes the pipe concurrently from different threads,
+/// using separate overlapped endpoints so a pending read never blocks a write.
+#[cfg(target_os = "windows")]
+mod named_pipe_io {
+    use std::io::{self, Write};
+    use std::os::windows::io::{AsRawHandle, OwnedHandle};
+    use std::sync::Arc;
+
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::IO::CancelIoEx;
+    use windows_sys::Win32::System::Pipes::DisconnectNamedPipe;
+    use ykman::rpc::pipe::PipeEndpoint;
+
+    use crate::session::SessionIo;
+
+    pub struct NamedPipeIo {
+        writer: PipeEndpoint,
+    }
+
+    impl NamedPipeIo {
+        pub fn new(pipe: OwnedHandle) -> io::Result<Self> {
+            Ok(Self {
+                writer: PipeEndpoint::new(Arc::new(pipe))?,
+            })
+        }
+    }
+
+    impl Write for NamedPipeIo {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.writer.write(buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.writer.flush()
+        }
+    }
+
+    impl SessionIo for NamedPipeIo {
+        type Reader = PipeEndpoint;
+
+        fn reader(&self) -> io::Result<PipeEndpoint> {
+            PipeEndpoint::new(self.writer.pipe().clone())
+        }
+
+        fn shutdown(&self) {
+            let handle = self.writer.pipe().as_raw_handle() as HANDLE;
+            // Disconnecting makes any subsequent read fail immediately, and
+            // cancelling aborts a read that is already pending.
+            unsafe {
+                DisconnectNamedPipe(handle);
+                CancelIoEx(handle, std::ptr::null());
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+impl crate::session::SessionIo for std::os::unix::net::UnixStream {
+    type Reader = std::os::unix::net::UnixStream;
+
+    fn reader(&self) -> std::io::Result<Self::Reader> {
+        self.try_clone()
+    }
+
+    fn shutdown(&self) {
+        let _ = std::os::unix::net::UnixStream::shutdown(self, std::net::Shutdown::Both);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -337,8 +414,9 @@ fn run_unix_socket_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         match listener.accept() {
             Ok((stream, _addr)) => {
                 log::info!("Client connected");
-                if let Err(e) = stream.set_nonblocking(true) {
-                    log::error!("Failed to set client socket nonblocking: {e}");
+                // Accepted sockets may inherit the listener's nonblocking mode.
+                if let Err(e) = stream.set_nonblocking(false) {
+                    log::error!("Failed to set client socket blocking: {e}");
                     continue;
                 }
                 let manager = manager.clone();

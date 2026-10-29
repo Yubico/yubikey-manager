@@ -22,8 +22,6 @@ enum Transport {
     Stream {
         reader: BufReader<Box<dyn Read + Send>>,
         writer: Arc<Mutex<Box<dyn Write + Send>>>,
-        #[cfg(target_os = "windows")]
-        reader_handle: usize,
     },
 }
 
@@ -62,7 +60,10 @@ impl RpcClient {
         {
             use std::fs::OpenOptions;
             use std::os::windows::fs::OpenOptionsExt;
-            use std::os::windows::io::AsRawHandle;
+            use std::os::windows::io::{AsRawHandle, OwnedHandle};
+            use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OVERLAPPED;
+
+            use super::pipe::PipeEndpoint;
 
             let service = super::windows::client_service().map_err(|e| {
                 RpcCallError::Transport(format!("Failed to determine package identity: {e}"))
@@ -70,10 +71,12 @@ impl RpcClient {
             let pipe_path = service.pipe();
             log::debug!("Connecting to Named Pipe: {pipe_path}");
 
+            // Overlapped I/O lets reads wait on an event with a timeout, so
+            // cancellation can be checked without polling and sleeping.
             let file = OpenOptions::new()
                 .read(true)
                 .write(true)
-                .custom_flags(0) // FILE_FLAG_NORMAL
+                .custom_flags(FILE_FLAG_OVERLAPPED)
                 .open(pipe_path)
                 .map_err(|e| {
                     RpcCallError::Transport(format!("Failed to connect to ykman-svc pipe: {e}"))
@@ -82,19 +85,21 @@ impl RpcClient {
             // Verify the server is signed with the same certificate as us
             Self::verify_pipe_server(file.as_raw_handle() as _)?;
 
-            let reader_file = file.try_clone().map_err(|e| {
-                RpcCallError::Transport(format!("Failed to clone pipe handle: {e}"))
-            })?;
-            let reader_handle = reader_file.as_raw_handle() as usize;
+            let pipe = Arc::new(OwnedHandle::from(file));
+            let endpoint = |pipe| {
+                PipeEndpoint::new(pipe)
+                    .map_err(|e| RpcCallError::Transport(format!("Failed to set up pipe I/O: {e}")))
+            };
+            let mut reader_endpoint = endpoint(pipe.clone())?;
+            reader_endpoint.set_read_timeout(Some(std::time::Duration::from_millis(10)));
 
-            let reader: Box<dyn Read + Send> = Box::new(reader_file);
-            let writer: Box<dyn Write + Send> = Box::new(file);
+            let reader: Box<dyn Read + Send> = Box::new(reader_endpoint);
+            let writer: Box<dyn Write + Send> = Box::new(endpoint(pipe)?);
 
             let mut client = Self {
                 transport: Transport::Stream {
                     reader: BufReader::new(reader),
                     writer: Arc::new(Mutex::new(writer)),
-                    reader_handle,
                 },
                 open_connections: HashMap::new(),
             };
@@ -382,22 +387,8 @@ impl RpcClient {
                 cancel.sent = true;
             }
 
-            #[cfg(target_os = "windows")]
-            if cancellation.is_some() {
-                match self.windows_read_state()? {
-                    PipeReadState::NoData => {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                        continue;
-                    }
-                    PipeReadState::Disconnected => {
-                        return Err(RpcCallError::Transport(
-                            "RPC subprocess closed unexpectedly".into(),
-                        ));
-                    }
-                    PipeReadState::DataAvailable => {}
-                }
-            }
-
+            // Reads time out periodically (but return as soon as data arrives),
+            // giving the loop a chance to check for cancellation.
             match self.read_line(buf.expose_secret_mut()) {
                 Ok(0) => {
                     return Err(RpcCallError::Transport(
@@ -425,101 +416,11 @@ impl RpcClient {
             }
         }
     }
-
-    #[cfg(target_os = "windows")]
-    fn windows_read_state(&self) -> Result<PipeReadState, RpcCallError> {
-        use windows_sys::Win32::System::Pipes::PeekNamedPipe;
-
-        let Transport::Stream {
-            reader,
-            reader_handle,
-            ..
-        } = &self.transport;
-        if !reader.buffer().is_empty() {
-            return Ok(PipeReadState::DataAvailable);
-        }
-        let mut available = 0u32;
-        let ok = unsafe {
-            PeekNamedPipe(
-                *reader_handle as windows_sys::Win32::Foundation::HANDLE,
-                std::ptr::null_mut(),
-                0,
-                std::ptr::null_mut(),
-                &mut available,
-                std::ptr::null_mut(),
-            )
-        };
-        if ok == 0 {
-            return Ok(PipeReadState::Disconnected);
-        }
-        if available == 0 {
-            Ok(PipeReadState::NoData)
-        } else {
-            Ok(PipeReadState::DataAvailable)
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-enum PipeReadState {
-    DataAvailable,
-    NoData,
-    Disconnected,
 }
 
 impl Drop for RpcClient {
     fn drop(&mut self) {
         // Dropping the Transport::Stream writer closes the handle, signaling EOF to the server.
-    }
-}
-
-#[cfg(all(test, target_os = "windows"))]
-mod windows_tests {
-    use super::*;
-    use std::cell::Cell;
-    use std::io::Cursor;
-
-    #[test]
-    fn buffered_pipe_response_does_not_wait_for_more_pipe_data() {
-        let signal =
-            ServerMessage::Signal(SignalMessage::new("keepalive", json!({"status": 1})).unwrap());
-        let response = ServerMessage::success(json!({"ready": true}), vec![]).unwrap();
-        let data = format!(
-            "{}\n{}\n",
-            serde_json::to_string(&signal).unwrap(),
-            serde_json::to_string(&response).unwrap()
-        );
-        let mut reader: BufReader<Box<dyn Read + Send>> =
-            BufReader::new(Box::new(Cursor::new(data.into_bytes())));
-        reader.fill_buf().unwrap();
-        let mut client = RpcClient {
-            transport: Transport::Stream {
-                reader,
-                writer: Arc::new(Mutex::new(Box::new(Vec::<u8>::new()))),
-                reader_handle: 0,
-            },
-            open_connections: HashMap::new(),
-        };
-        assert!(matches!(
-            client.windows_read_state().unwrap(),
-            PipeReadState::DataAvailable
-        ));
-        let signals = Cell::new(0);
-        let on_signal = |status: &str, _: &Value| {
-            assert_eq!(status, "keepalive");
-            signals.set(signals.get() + 1);
-        };
-        let result = client
-            .call_with_cancel(
-                "get",
-                &[] as &[&str],
-                json!({}),
-                Some(&on_signal),
-                Some(&|| false),
-            )
-            .unwrap();
-        assert_eq!(result.body, json!({"ready": true}));
-        assert_eq!(signals.get(), 1);
     }
 }
 

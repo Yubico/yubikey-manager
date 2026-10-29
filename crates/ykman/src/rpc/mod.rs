@@ -1,6 +1,8 @@
 pub mod client;
 pub mod error;
 pub mod node;
+#[cfg(target_os = "windows")]
+pub mod pipe;
 pub mod protocol;
 pub mod proxy;
 pub mod signing;
