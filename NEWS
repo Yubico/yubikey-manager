@@ -4,7 +4,26 @@
  ** Python library distributed separately as yubikit; yubikey-manager provides the CLI.
  ** Python 3.11 or later is now required.
  ** Breaking Python API and CLI changes; see doc/Migration_5-6.adoc.
+ ** CLI: Automatically discover NFC-connected YubiKeys alongside USB devices; use --device to select by serial number instead of --reader.
+ ** Windows: Bundle a background service allowing FIDO management without running the CLI as administrator.
+ ** Windows: Add native ARM64 installers.
+ ** Management: Show application storage usage in "ykman info" on supported devices.
+ ** PIV: Add support for ML-DSA and ML-KEM, including ML-DSA context and external mu signing.
+ ** PIV: Add "piv keys sign", "piv keys decrypt", "piv keys derive", and "piv keys decapsulate" commands.
+ ** PIV: Remove support for legacy PIN-derived management keys. Use 5.x to replace derived keys before upgrading.
+ ** FIDO: Add "fido credentials update" to change stored credentials' user names and display names.
+ ** OTP: Expand static-password keyboard layouts and variants; add "otp static --list-layouts".
+ ** Python: Add a Rust-backed WebAuthn client API supporting FIDO HID and CCID transports.
  ** Windows file versions: CLI 6.0.0.0; shared service 1.0.0.0.
+
+* Version 5.9.2 (released 2026-06-30)
+ ** CLI: Fix YubiKey 4 FIPS CLI PIN commands for FIDO
+ ** Windows and MacOS installers built with Python 3.14.6
+
+* Version 5.9.1 (released 2026-04-15)
+ ** Restrict DLL search paths (YSA-2026-01).
+ ** Improve device information when listing YubiKeys with no serial number visible over OTP.
+ ** Windows and MacOS installers built with Python 3.14.4
 
 * Version 5.9.0 (released 2026-01-22)
  ** OATH: Add support for importing credentials from PSKC files.
