@@ -73,9 +73,14 @@ def parse_oath_key(val: str) -> bytes:
     :param val: The secret key.
     """
     try:
-        return bytes.fromhex(val)
+        key = bytes.fromhex(val)
     except ValueError:
-        return parse_b32_key(val)
+        key = parse_b32_key(val)
+    if not key:
+        # An empty prompt entry (or blank input, which hex decoding ignores)
+        # must not silently program an empty key onto the YubiKey.
+        raise ValueError("No secret key provided")
+    return key
 
 
 def format_oath_code(response: bytes, digits: int = 6) -> str:
