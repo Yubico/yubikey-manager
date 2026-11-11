@@ -1488,10 +1488,7 @@ pub fn run_keys_generate(
     check_key_support_fips(dev.info(), key_type, pp)?;
 
     let mut session = open_session(dev, scp_params)?;
-    let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
-    if !pin_verified {
-        ensure_pin(&mut session, pin)?;
-    }
+    authenticate_session(&mut session, mgmt_key, pin)?;
 
     let public_key = session
         .generate_key(slot, key_type, pp, tp)
