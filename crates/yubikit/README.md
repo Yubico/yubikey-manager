@@ -92,8 +92,6 @@ PC/SC and HID support use system libraries on both platforms.
 
 With `default-features = false`, device discovery and platform transport
 modules are unavailable; provide your own connection implementations instead.
-On Linux, libudev remains a build dependency even with both transport features
-disabled.
 
 ## License
 

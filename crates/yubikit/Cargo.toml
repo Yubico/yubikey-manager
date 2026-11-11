@@ -18,7 +18,7 @@ targets = ["x86_64-unknown-linux-gnu"]
 [features]
 default = ["pcsc", "hid"]
 pcsc = ["dep:pcsc"]
-hid = ["dep:hidapi"]
+hid = ["dep:hidapi", "dep:udev"]
 
 [dependencies]
 aes.workspace = true
@@ -57,7 +57,7 @@ signature.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 hidapi = { workspace = true, default-features = false, features = ["linux-native"], optional = true }
-udev = { workspace = true }
+udev = { workspace = true, optional = true }
 libc = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
