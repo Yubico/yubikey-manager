@@ -37,8 +37,9 @@ exits its ``with`` block.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from threading import Event
-from typing import Any, Callable
+from typing import Any
 
 from _yubikit_native.sessions import BioEnrollmentCcid as _BioEnrollmentCcid
 from _yubikit_native.sessions import BioEnrollmentFido as _BioEnrollmentFido
@@ -171,13 +172,10 @@ class ClientPin(Closable):
     def close(self) -> None:
         """Restore the session so it can be reused."""
         native_session = self._session._native
-        if isinstance(self._native, _ClientPinCcid) and isinstance(
-            native_session, _Ctap2SessionCcid
-        ):
-            self._native.close(native_session)
-        elif isinstance(self._native, _ClientPinFido) and isinstance(
-            native_session, _Ctap2SessionFido
-        ):
+        if isinstance(self._native, _ClientPinCcid):
+            if isinstance(native_session, _Ctap2SessionCcid):
+                self._native.close(native_session)
+        elif isinstance(native_session, _Ctap2SessionFido):
             self._native.close(native_session)
 
     @property
@@ -251,13 +249,10 @@ class CredentialManagement(Closable):
     def close(self) -> None:
         """Restore the session so it can be reused."""
         native_session = self._session._native
-        if isinstance(self._native, _CredentialManagementCcid) and isinstance(
-            native_session, _Ctap2SessionCcid
-        ):
-            self._native.close(native_session)
-        elif isinstance(self._native, _CredentialManagementFido) and isinstance(
-            native_session, _Ctap2SessionFido
-        ):
+        if isinstance(self._native, _CredentialManagementCcid):
+            if isinstance(native_session, _Ctap2SessionCcid):
+                self._native.close(native_session)
+        elif isinstance(native_session, _Ctap2SessionFido):
             self._native.close(native_session)
 
     @property
@@ -311,13 +306,10 @@ class Config(Closable):
     def close(self) -> None:
         """Restore the session so it can be reused."""
         native_session = self._session._native
-        if isinstance(self._native, _ConfigCcid) and isinstance(
-            native_session, _Ctap2SessionCcid
-        ):
-            self._native.close(native_session)
-        elif isinstance(self._native, _ConfigFido) and isinstance(
-            native_session, _Ctap2SessionFido
-        ):
+        if isinstance(self._native, _ConfigCcid):
+            if isinstance(native_session, _Ctap2SessionCcid):
+                self._native.close(native_session)
+        elif isinstance(native_session, _Ctap2SessionFido):
             self._native.close(native_session)
 
     def enable_enterprise_attestation(self) -> None:
@@ -366,13 +358,10 @@ class BioEnrollment(Closable):
     def close(self) -> None:
         """Restore the session so it can be reused."""
         native_session = self._session._native
-        if isinstance(self._native, _BioEnrollmentCcid) and isinstance(
-            native_session, _Ctap2SessionCcid
-        ):
-            self._native.close(native_session)
-        elif isinstance(self._native, _BioEnrollmentFido) and isinstance(
-            native_session, _Ctap2SessionFido
-        ):
+        if isinstance(self._native, _BioEnrollmentCcid):
+            if isinstance(native_session, _Ctap2SessionCcid):
+                self._native.close(native_session)
+        elif isinstance(native_session, _Ctap2SessionFido):
             self._native.close(native_session)
 
     def get_fingerprint_sensor_info(self) -> dict[int, Any]:
@@ -441,13 +430,10 @@ class LargeBlobs(Closable):
     def close(self) -> None:
         """Restore the session so it can be reused."""
         native_session = self._session._native
-        if isinstance(self._native, _LargeBlobsCcid) and isinstance(
-            native_session, _Ctap2SessionCcid
-        ):
-            self._native.close(native_session)
-        elif isinstance(self._native, _LargeBlobsFido) and isinstance(
-            native_session, _Ctap2SessionFido
-        ):
+        if isinstance(self._native, _LargeBlobsCcid):
+            if isinstance(native_session, _Ctap2SessionCcid):
+                self._native.close(native_session)
+        elif isinstance(native_session, _Ctap2SessionFido):
             self._native.close(native_session)
 
     def read_blob_array(self) -> bytes:

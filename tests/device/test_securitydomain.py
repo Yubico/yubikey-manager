@@ -5,7 +5,6 @@ from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-
 from yubikit.core import TRANSPORT, NotSupportedError, Tlv
 from yubikit.core.smartcard import AID, SW, ApduError, SmartCardProtocol
 from yubikit.core.smartcard.scp import (
@@ -70,14 +69,16 @@ class TestScp03:
             session.put_key(ref, keys)
 
         # Test new key
-        with SecurityDomainSession(ccid_connection) as session:
-            session.authenticate(Scp03KeyParams(keys=keys))
-            _verify_auth(session)
+        with SecurityDomainSession(ccid_connection) as new_session:
+            new_session.authenticate(Scp03KeyParams(keys=keys))
+            _verify_auth(new_session)
 
         # Verify default key is removed
-        with SecurityDomainSession(ccid_connection) as session:
-            with pytest.raises(ValueError):
-                session.authenticate(Scp03KeyParams())
+        with (
+            SecurityDomainSession(ccid_connection) as new_session,
+            pytest.raises(ValueError),
+        ):
+            new_session.authenticate(Scp03KeyParams())
 
 
 def _load_scp11_keys(session, kid, kvn):
@@ -239,8 +240,8 @@ class TestScp11:
             params = Scp11KeyParams(ref, sk.public_key())
 
         # Authenticate
-        with SecurityDomainSession(ccid_connection) as session:
-            session.authenticate(params)
+        with SecurityDomainSession(ccid_connection) as new_session:
+            new_session.authenticate(params)
 
     def test_scp11a_ok(self, ccid_connection, session):
         with session:
@@ -249,11 +250,11 @@ class TestScp11:
             params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
 
         # Authenticate
-        with SecurityDomainSession(ccid_connection) as session:
-            session.authenticate(params)
+        with SecurityDomainSession(ccid_connection) as new_session:
+            new_session.authenticate(params)
 
             # Verify by deleting keys
-            session.delete_key(kvn=kvn)
+            new_session.delete_key(kvn=kvn)
 
     def test_scp11a_allowlist(self, ccid_connection, session):
         with session:
@@ -264,11 +265,11 @@ class TestScp11:
             session.store_allowlist(params.oce_ref, serials)
 
         # Authenticate
-        with SecurityDomainSession(ccid_connection) as session:
-            session.authenticate(params)
+        with SecurityDomainSession(ccid_connection) as new_session:
+            new_session.authenticate(params)
 
             # Verify by deleting keys
-            session.delete_key(kvn=kvn)
+            new_session.delete_key(kvn=kvn)
 
     def test_scp11a_allowlist_blocked(self, ccid_connection, session):
         with session:
@@ -286,17 +287,17 @@ class TestScp11:
             session.store_allowlist(params.oce_ref, serials)
 
         # Fail authentication
-        with SecurityDomainSession(ccid_connection) as session:
+        with SecurityDomainSession(ccid_connection) as new_session:
             with pytest.raises(ApduError):
-                session.authenticate(params)
+                new_session.authenticate(params)
 
             # Remove allowlist
-            session.authenticate(Scp03KeyParams(keys=keys))
-            session.store_allowlist(params.oce_ref, [])
+            new_session.authenticate(Scp03KeyParams(keys=keys))
+            new_session.store_allowlist(params.oce_ref, [])
 
         # Authenticate
-        with SecurityDomainSession(ccid_connection) as session:
-            session.authenticate(params)
+        with SecurityDomainSession(ccid_connection) as new_session:
+            new_session.authenticate(params)
 
     def test_scp11c_ok(self, ccid_connection, session):
         with session:
@@ -305,9 +306,9 @@ class TestScp11:
             params = _load_scp11_keys(session, ScpKid.SCP11c, kvn)
 
         # Authenticate
-        with SecurityDomainSession(ccid_connection) as session:
-            session.authenticate(params)
+        with SecurityDomainSession(ccid_connection) as new_session:
+            new_session.authenticate(params)
 
             # Verify not authenticated
             with pytest.raises(ApduError):
-                session.delete_key(kvn=kvn)
+                new_session.delete_key(kvn=kvn)

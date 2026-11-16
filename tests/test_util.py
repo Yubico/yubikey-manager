@@ -1,5 +1,3 @@
-#  vim: set fileencoding=utf-8 :
-
 import pytest
 from yubikit.core import Tlv, bytes2int, int2bytes
 from yubikit.core.otp import (

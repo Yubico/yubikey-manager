@@ -1,7 +1,7 @@
 import gzip
 import hashlib
 import zlib
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from unittest.mock import Mock
 
 import pytest
@@ -156,7 +156,7 @@ def test_generate_certificate_and_csr(key_type):
     session = Mock(spec=PivSession)
     session.sign.side_effect = sign
     public_key = private_key.public_key()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     certificate = generate_self_signed_certificate(
         session, SLOT.SIGNATURE, public_key, "CN=alice", now, now
     )
@@ -357,7 +357,7 @@ def test_ec_sign_hash_truncation():
 def test_pqc_key_types(key_type, algorithm):
     assert key_type.algorithm == algorithm
     with pytest.raises(ValueError):
-        key_type.bit_len
+        _ = key_type.bit_len
 
 
 def test_pqc_from_public_key():

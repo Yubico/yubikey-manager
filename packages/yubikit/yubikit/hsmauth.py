@@ -246,7 +246,7 @@ class HsmAuthSession(Session):
 
         require_version(self.version, (5, 6, 0))
         if not isinstance(private_key.curve, ec.SECP256R1):
-            raise ValueError("Unsupported curve")
+            raise ValueError("Unsupported curve")  # noqa: TRY004 - unsupported value
 
         ln = ALGORITHM.EC_P256_YUBICO_AUTHENTICATION.key_len
         numbers = private_key.private_numbers()
@@ -402,7 +402,7 @@ class HsmAuthSession(Session):
 
         require_version(self.version, (5, 6, 0))
         if not isinstance(public_key.curve, ec.SECP256R1):
-            raise ValueError("Unsupported curve")
+            raise ValueError("Unsupported curve")  # noqa: TRY004 - unsupported value
 
         numbers = public_key.public_numbers()
         public_key_data = (

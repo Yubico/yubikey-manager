@@ -3,7 +3,6 @@ import os
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import ApduError
 from yubikit.hsmauth import (

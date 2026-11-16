@@ -1,7 +1,8 @@
 import abc
+from collections.abc import Callable, Hashable
 from enum import Enum
 from threading import Event
-from typing import Callable, Hashable, TypeVar
+from typing import TypeVar
 
 from ..management import DeviceInfo
 from . import PID, TRANSPORT, Connection
@@ -82,8 +83,7 @@ class YubiKeyDevice(abc.ABC):
         return hash(self.fingerprint)
 
     def __repr__(self):
-        return "%s(pid=%04x, fingerprint=%r)" % (
-            type(self).__name__,
-            self.pid or 0,
-            self.fingerprint,
+        return (
+            f"{type(self).__name__}(pid={self.pid or 0:04x}, "
+            f"fingerprint={self.fingerprint!r})"
         )

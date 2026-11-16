@@ -1,5 +1,4 @@
 import pytest
-
 from yubikit.core import TRANSPORT, BadResponseError, NotSupportedError, Tlv
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
@@ -125,9 +124,11 @@ def test_read_storage_info_ignores_unknown_tlvs(before, after):
     ],
 )
 def test_read_storage_info_rejects_malformed_response(response):
-    with ManagementSession(StorageConnection(response)) as session:
-        with pytest.raises(BadResponseError):
-            session.read_storage_info()
+    with (
+        ManagementSession(StorageConnection(response)) as session,
+        pytest.raises(BadResponseError),
+    ):
+        session.read_storage_info()
 
 
 @pytest.mark.parametrize("version", [b"4.4.5", b"5.7.2"])
@@ -181,9 +182,11 @@ class StorageOtpConnection(OtpConnection):
     "connection_type", [StorageFidoConnection, StorageOtpConnection]
 )
 def test_read_storage_info_rejects_non_ccid_connection(connection_type):
-    with ManagementSession(connection_type()) as session:
-        with pytest.raises(NotImplementedError, match="CCID"):
-            session.read_storage_info()
+    with (
+        ManagementSession(connection_type()) as session,
+        pytest.raises(NotImplementedError, match="CCID"),
+    ):
+        session.read_storage_info()
 
 
 def test_native_read_storage_info_rejects_closed_session():

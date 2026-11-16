@@ -15,15 +15,13 @@ def try_connection(device, conn_type):
                 pass
             return True
         else:
-            with device.open_connection(conn_type) as conn:
-                with YubiOtpSession(conn) as s:
-                    serial = s.get_serial()
+            with device.open_connection(conn_type) as conn, YubiOtpSession(conn) as s:
+                serial = s.get_serial()
             assert serial == device.info.serial
             return True
 
-    with device.open_connection(conn_type) as conn:
-        with ManagementSession(conn) as m:
-            info = m.read_device_info()
+    with device.open_connection(conn_type) as conn, ManagementSession(conn) as m:
+        info = m.read_device_info()
     assert info.serial == device.info.serial
     return True
 

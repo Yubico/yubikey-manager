@@ -11,7 +11,9 @@ def _run() -> None:
         import subprocess
 
         try:
-            completed_process = subprocess.run([ykman, *sys.argv[1:]])  # noqa: S603
+            completed_process = subprocess.run(  # noqa: S603
+                [ykman, *sys.argv[1:]], check=False
+            )
         except KeyboardInterrupt:
             sys.exit(2)
         sys.exit(completed_process.returncode)

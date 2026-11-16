@@ -1,7 +1,4 @@
-#  vim: set fileencoding=utf-8 :
-
 import pytest
-
 from yubikit.core import TRANSPORT, Tlv
 from yubikit.core.smartcard import SW, ApduError, SmartCardConnection
 from yubikit.oath import (

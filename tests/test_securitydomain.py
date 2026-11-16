@@ -1,6 +1,5 @@
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
-
 from yubikit.core import NotSupportedError
 from yubikit.securitydomain import Curve
 

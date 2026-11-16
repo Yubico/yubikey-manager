@@ -42,18 +42,20 @@ def source_package(tmp_path):
 
 def test_normalize_sdist_preserves_sources_and_pins(source_package):
     with tarfile.open(source_package) as package:
-        before = {
-            member.name: (package.extractfile(member).read(), member.mtime, member.mode)
-            for member in package.getmembers()
-        }
+        before = {}
+        for member in package.getmembers():
+            contents = package.extractfile(member)
+            assert contents is not None
+            before[member.name] = (contents.read(), member.mtime, member.mode)
 
     normalize_sdist(source_package)
 
     with tarfile.open(source_package) as package:
-        after = {
-            member.name: (package.extractfile(member).read(), member.mtime, member.mode)
-            for member in package.getmembers()
-        }
+        after = {}
+        for member in package.getmembers():
+            contents = package.extractfile(member)
+            assert contents is not None
+            after[member.name] = (contents.read(), member.mtime, member.mode)
     assert before.keys() == after.keys()
     for name, value in before.items():
         if not name.endswith("/Cargo.lock"):

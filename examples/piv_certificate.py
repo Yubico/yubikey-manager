@@ -49,13 +49,11 @@ piv = PivSession(yubikey.smart_card())
 
 print("WARNING")
 print(f"This will overwrite any key already in slot {slot:X} of the YubiKey!")
-print("")
+print()
 
 # Unlock with the management key
 key = (
-    getpass.getpass(
-        "Enter management key (default: {})".format(DEFAULT_MANAGEMENT_KEY.hex())
-    )
+    getpass.getpass(f"Enter management key (default: {DEFAULT_MANAGEMENT_KEY.hex()})")
     or DEFAULT_MANAGEMENT_KEY.hex()
 )
 
@@ -111,7 +109,7 @@ certificate = sign_certificate_builder(piv, slot, key_type, builder)
 pem = certificate.public_bytes(serialization.Encoding.PEM)
 
 print("Certificate generated!")
-print("")
+print()
 
 # Print the certificate
 print(pem.decode())

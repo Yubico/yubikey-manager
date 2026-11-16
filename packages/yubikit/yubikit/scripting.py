@@ -26,8 +26,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+from collections.abc import Generator
 from time import sleep
-from typing import Generator
 
 from yubikit.core import TRANSPORT
 from yubikit.core.device import YubiKeyDevice
@@ -107,13 +107,13 @@ def single(*, prompt=True) -> ScriptingDevice:
     :param prompt: When set, you will be prompted to
         insert a YubiKey.
     """
-    pids, state = scan_devices()
+    pids, _state = scan_devices()
     n_devs = sum(pids.values())
     if prompt and n_devs == 0:
         print("Insert YubiKey...")
     while n_devs == 0:
         sleep(1.0)
-        pids, new_state = scan_devices()
+        pids, _new_state = scan_devices()
         n_devs = sum(pids.values())
     devs = list_all_devices()
     if len(devs) == 1:
@@ -238,8 +238,7 @@ def multi_nfc(
                 yield ScriptingDevice(device)
                 prompted = False
         except OSError:
-            if None in handled_serials:
-                handled_serials.remove(None)  # Allow one key without serial at a time
+            handled_serials.discard(None)  # Allow one key without serial at a time
             current = -1
             if prompt and not prompted:
                 print("Place YubiKey on NFC reader...")

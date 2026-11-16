@@ -3,7 +3,6 @@
 import re
 import sys
 from subprocess import check_output  # nosec
-from typing import List
 
 if len(sys.argv) != 4:
     print("Usage: generate-man.py <version> <year> <month>")
@@ -22,13 +21,13 @@ ykman \- YubiKey Manager (ykman)
 [\fI\,OPTIONS\/\fR] \fI\,COMMAND \/\fR[\fI\,ARGS\/\fR]..."""
 )
 
-help_text = check_output(["uv", "run", "ykman", "--help"]).decode()  # noqa: S603, S607
+help_text = check_output(["uv", "run", "ykman", "--help"]).decode()  # noqa: S607
 parts = re.split(r"\b[A-Z][a-z]+:\s+", help_text)
 description = re.split(r"\s{2,}", parts[1])[1].strip()
 
 print(f".SH DESCRIPTION\n.PP\n{description}\n.SH OPTIONS")
 
-opt: List[str] = []
+opt: list[str] = []
 options = parts[3].strip().split("\n  ")
 while options:
     o = options.pop(0)

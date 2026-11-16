@@ -32,8 +32,9 @@ Device enumeration and native connection implementations for YubiKeys.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from threading import Event
-from typing import Callable, Iterable, Iterator, Mapping, TypeAlias
+from typing import TypeAlias
 
 from _yubikit_native.device import NativeYubiKeyDevice as _NativeYubiKeyDevice
 from _yubikit_native.device import list_devices as _native_list_devices

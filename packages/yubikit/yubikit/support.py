@@ -62,16 +62,15 @@ def find_scp11_params(
                     for ref, ca_check in scp.get_supported_ca_identifiers(
                         klcc=True
                     ).items():
-                        if ca_check == ca_ski:
-                            if not kid or ref.kid == kid:
-                                kid, kvn = ref
-                                break
+                        if ca_check == ca_ski and (not kid or ref.kid == kid):
+                            kid, kvn = ref
+                            break
                     else:
                         raise ValueError(
                             f"No CA identifier found matching SKI: {ca_ski.hex()}"
                         )
                 # Find any matching KID
-                for ref in scp.get_key_information().keys():
+                for ref in scp.get_key_information():
                     if ref.kid == kid:
                         kvn = ref.kvn
                         break

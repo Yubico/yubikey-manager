@@ -29,10 +29,11 @@ from __future__ import annotations
 
 import logging
 import struct
+from collections.abc import Callable
 from enum import IntEnum, IntFlag, unique
 from hashlib import sha1
 from threading import Event
-from typing import Any, Callable, Self, TypeVar
+from typing import Any, Self, TypeVar
 
 from _yubikit_native.sessions import (
     YubiOtpSessionCcid as _NativeYubiOtpSessionCcid,
@@ -65,7 +66,7 @@ class SLOT(IntEnum):
     TWO = 2
 
     @staticmethod
-    def map(slot: "SLOT", one: T, two: T) -> T:
+    def map(slot: SLOT, one: T, two: T) -> T:
         if slot == 1:
             return one
         elif slot == 2:
@@ -366,7 +367,7 @@ class SlotConfiguration:
 
 class HmacSha1SlotConfiguration(SlotConfiguration):
     def __init__(self, key: bytes):
-        super(HmacSha1SlotConfiguration, self).__init__()
+        super().__init__()
 
         key = _shorten_hmac_key(key)
 
@@ -392,7 +393,7 @@ class HmacSha1SlotConfiguration(SlotConfiguration):
 
 class KeyboardSlotConfiguration(SlotConfiguration):
     def __init__(self):
-        super(KeyboardSlotConfiguration, self).__init__()
+        super().__init__()
         self._update_flags(TKTFLAG.APPEND_CR, True)
         self._update_flags(EXTFLAG.FAST_TRIG, True)
 
@@ -416,7 +417,7 @@ class KeyboardSlotConfiguration(SlotConfiguration):
 
 class HotpSlotConfiguration(KeyboardSlotConfiguration):
     def __init__(self, key: bytes):
-        super(HotpSlotConfiguration, self).__init__()
+        super().__init__()
 
         key = _shorten_hmac_key(key)
 
@@ -459,7 +460,7 @@ class HotpSlotConfiguration(KeyboardSlotConfiguration):
 
 class StaticPasswordSlotConfiguration(KeyboardSlotConfiguration):
     def __init__(self, scan_codes: bytes):
-        super(StaticPasswordSlotConfiguration, self).__init__()
+        super().__init__()
 
         if len(scan_codes) > SCAN_CODES_SIZE:
             raise NotSupportedError("Password is too long")
@@ -478,7 +479,7 @@ class StaticPasswordSlotConfiguration(KeyboardSlotConfiguration):
 
 class YubiOtpSlotConfiguration(KeyboardSlotConfiguration):
     def __init__(self, fixed: bytes, uid: bytes, key: bytes):
-        super(YubiOtpSlotConfiguration, self).__init__()
+        super().__init__()
 
         if len(fixed) > FIXED_SIZE:
             raise ValueError(f"fixed must be <= {FIXED_SIZE} bytes")
@@ -516,7 +517,7 @@ class YubiOtpSlotConfiguration(KeyboardSlotConfiguration):
 
 class StaticTicketSlotConfiguration(KeyboardSlotConfiguration):
     def __init__(self, fixed: bytes, uid: bytes, key: bytes):
-        super(StaticTicketSlotConfiguration, self).__init__()
+        super().__init__()
 
         if len(fixed) > FIXED_SIZE:
             raise ValueError(f"fixed must be <= {FIXED_SIZE} bytes")
@@ -552,7 +553,7 @@ class StaticTicketSlotConfiguration(KeyboardSlotConfiguration):
 
 class UpdateConfiguration(KeyboardSlotConfiguration):
     def __init__(self):
-        super(UpdateConfiguration, self).__init__()
+        super().__init__()
 
         self._fixed = b"\0" * FIXED_SIZE
         self._uid = b"\0" * UID_SIZE
@@ -566,10 +567,9 @@ class UpdateConfiguration(KeyboardSlotConfiguration):
         if isinstance(flag, TKTFLAG):
             if not TKTFLAG_UPDATE_MASK & flag:
                 raise ValueError("Unsupported TKT flag for update")
-        elif isinstance(flag, CFGFLAG):
-            if not CFGFLAG_UPDATE_MASK & flag:
-                raise ValueError("Unsupported CFG flag for update")
-        super(UpdateConfiguration, self)._update_flags(flag, value)
+        elif isinstance(flag, CFGFLAG) and not CFGFLAG_UPDATE_MASK & flag:
+            raise ValueError("Unsupported CFG flag for update")
+        super()._update_flags(flag, value)
 
     def protect_slot2(self, value):
         raise ValueError("protect_slot2 cannot be applied to UpdateConfiguration")
@@ -618,14 +618,14 @@ class ConfigState:
         items = []
         try:
             items.append(
-                "configured: (%s, %s)"
-                % (self.is_configured(SLOT.ONE), self.is_configured(SLOT.TWO))
+                f"configured: ({self.is_configured(SLOT.ONE)}, "
+                f"{self.is_configured(SLOT.TWO)})"
             )
             items.append(
-                "touch_triggered: (%s, %s)"
-                % (self.is_touch_triggered(SLOT.ONE), self.is_touch_triggered(SLOT.TWO))
+                f"touch_triggered: ({self.is_touch_triggered(SLOT.ONE)}, "
+                f"{self.is_touch_triggered(SLOT.TWO)})"
             )
-            items.append("led_inverted: %s" % self.is_led_inverted())
+            items.append(f"led_inverted: {self.is_led_inverted()}")
         except NotSupportedError:
             pass
         return f"ConfigState({', '.join(items)})"

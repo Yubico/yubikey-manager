@@ -46,5 +46,5 @@ try:
         SLOT.ONE, challenge, event=event, on_keepalive=on_keepalive
     )
     print(f"Response: {result.hex()}")
-except Exception as e:
+except Exception as e:  # noqa: BLE001 - report device errors in this example
     print(f"Error: {e}")

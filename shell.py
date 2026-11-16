@@ -56,7 +56,7 @@ class NamedPipeStream:
 
     def __init__(self, path: str) -> None:
         # Open in binary, unbuffered read/write mode.
-        self._pipe = open(path, "r+b", buffering=0)  # noqa: WPS515
+        self._pipe = open(path, "r+b", buffering=0)  # noqa: SIM115 - closed by close()
         self._buf = b""
 
     # ---- write-side (stdin interface) --------------------------------

@@ -77,7 +77,7 @@ class Version(NamedTuple):
     patch: int
 
     def __str__(self):
-        return "%d.%d.%d" % self
+        return f"{self.major}.{self.minor}.{self.patch}"
 
     def __bool__(self):
         return any(self)
@@ -131,6 +131,7 @@ class Connection(abc.ABC):
     """A connection to a YubiKey"""
 
     usb_interface: ClassVar[USB_INTERFACE] = USB_INTERFACE(0)
+    _session: Session | None = None
 
     def close(self) -> None:
         """Close the device, releasing any held resources.
@@ -184,13 +185,13 @@ class Session(Closable):
         if existing is not None:
             existing.close()
 
-        setattr(connection, "_session", self)
+        connection._session = self
         self._connection: Connection | None = connection
 
     def close(self) -> None:
         """Close the session, restoring the underlying connection."""
         if self._connection and getattr(self._connection, "_session", None) is self:
-            setattr(self._connection, "_session", None)
+            self._connection._session = None
             self._connection = None
 
         native = getattr(self, "_native", None)
@@ -283,7 +284,9 @@ def require_version(
     """Ensure a version is at least min_version."""
     if not my_version >= min_version:
         if not message:
-            message = "This action requires YubiKey %d.%d.%d or later" % min_version
+            message = "This action requires YubiKey {}.{}.{} or later".format(
+                *min_version
+            )
         raise NotSupportedError(message)
 
 
@@ -309,7 +312,7 @@ class Tlv(bytes):
                 raise ValueError("value can only be provided if tag_or_data is a tag")
             data = tag_or_data
 
-        return super(Tlv, cls).__new__(cls, data)
+        return super().__new__(cls, data)
 
     def __init__(self, tag_or_data: int | bytes, value: bytes | None = None):
         self._tag, self._value_offset, self._value_ln, end = _tlv_parse(self)
@@ -321,7 +324,7 @@ class Tlv(bytes):
 
     @classmethod
     def parse_from(cls: type[Tlv], data: bytes) -> tuple[Tlv, bytes]:
-        tag, offs, ln, end = _tlv_parse(data)
+        _tag, _offs, _ln, end = _tlv_parse(data)
         return cls(data[:end]), data[end:]
 
     @classmethod
@@ -334,7 +337,7 @@ class Tlv(bytes):
 
     @classmethod
     def parse_dict(cls: type[Tlv], data: bytes) -> dict[int, bytes]:
-        return dict((tlv.tag, tlv.value) for tlv in cls.parse_list(data))
+        return {tlv.tag: tlv.value for tlv in cls.parse_list(data)}
 
     @classmethod
     def unpack(cls: type[Tlv], tag: int, data: bytes) -> bytes:

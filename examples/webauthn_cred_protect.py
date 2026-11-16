@@ -72,7 +72,7 @@ def main() -> None:
                 print(f"  Echoed policy: {cp.get('policy')}")
             else:
                 print("  (no credProtect in response)")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - report errors for each policy
             print(f"  ❌ Failed: {e}")
 
     client.close()

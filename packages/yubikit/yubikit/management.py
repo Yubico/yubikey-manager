@@ -28,9 +28,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag, unique
-from typing import Mapping
 
 from _yubikit_native.sessions import (
     ManagementSessionCcid as _NativeManagementSessionCcid,
@@ -97,7 +97,7 @@ class CAPABILITY(IntFlag):
     def display_name(self) -> str:
         if self == 0:
             return "None"
-        if bin(self).count("1") > 1:
+        if (self).bit_count() > 1:
             i = 1
             names = []
             while i < self:
@@ -233,10 +233,10 @@ class DeviceInfo:
     is_fips: bool = False
     is_sky: bool = False
     part_number: str | None = None
-    fips_capable: CAPABILITY = CAPABILITY(0)
-    fips_approved: CAPABILITY = CAPABILITY(0)
+    fips_capable: CAPABILITY = field(default_factory=lambda: CAPABILITY(0))
+    fips_approved: CAPABILITY = field(default_factory=lambda: CAPABILITY(0))
     pin_complexity: bool = False
-    reset_blocked: CAPABILITY = CAPABILITY(0)
+    reset_blocked: CAPABILITY = field(default_factory=lambda: CAPABILITY(0))
     fps_version: Version | None = None
     stm_version: Version | None = None
     version_qualifier: VersionQualifier = _DUMMY_VQ

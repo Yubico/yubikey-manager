@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import IntEnum, unique
 from functools import total_ordering
 from time import time
-from typing import Mapping
 from urllib.parse import parse_qs, unquote, urlparse
 
 from _yubikit_native.oath import format_cred_id as _format_cred_id_native
@@ -66,7 +66,7 @@ class CredentialData:
             raise ValueError("Missing OATH type")
         oath_type = OATH_TYPE[parsed.hostname.upper()]
 
-        params = dict((k, v[0]) for k, v in parse_qs(parsed.query).items())
+        params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
         issuer = None
         name = unquote(parsed.path)[1:]  # Unquote and strip leading /
         if ":" in name:

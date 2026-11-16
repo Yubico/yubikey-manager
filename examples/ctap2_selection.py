@@ -57,7 +57,7 @@ def run_demo(session: Ctap2Session, transport: str) -> None:
         try:
             info = session.get_info()
             print_info(info)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - continue probing other devices
             print(f"  ✗ get_info failed: {e}")
 
     print()
@@ -116,7 +116,7 @@ def main() -> None:
 
         try:
             session = Ctap2Session(conn)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - continue probing other devices
             print(f"  Failed to open CTAP2 session: {e}")
             continue
 

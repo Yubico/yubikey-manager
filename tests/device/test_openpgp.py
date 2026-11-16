@@ -4,7 +4,6 @@ from typing import NamedTuple
 import pytest
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
-
 from yubikit.core import TRANSPORT, InvalidPinError
 from yubikit.core.smartcard import ApduError
 from yubikit.management import CAPABILITY

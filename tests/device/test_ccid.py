@@ -3,6 +3,8 @@ from yubikit.core.smartcard import ApplicationNotAvailableError, SmartCardProtoc
 
 
 def test_select_wrong_app(ccid_connection):
-    with SmartCardProtocol(ccid_connection) as p:
-        with pytest.raises(ApplicationNotAvailableError):
-            p.select(b"not_a_real_aid")
+    with (
+        SmartCardProtocol(ccid_connection) as p,
+        pytest.raises(ApplicationNotAvailableError),
+    ):
+        p.select(b"not_a_real_aid")

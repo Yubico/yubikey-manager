@@ -263,10 +263,7 @@ class TestCertificateSignatures:
             session, slot, public_key, "CN=alice", NOW, NOW, hash_algorithm
         )
 
-        if key_type == KEY_TYPE.ED25519:
-            assert cert.public_key() == public_key
-        else:
-            assert cert.public_key().public_numbers() == public_key.public_numbers()
+        assert cert.public_key() == public_key
         verify_cert_signature(cert, public_key)
 
     @pytest.mark.parametrize("key_type", ML_DSA_KEY_TYPES)
@@ -423,7 +420,7 @@ class TestKeyManagement:
         session.verify_pin(keys.pin)
         csr = generate_csr(session, SLOT.AUTHENTICATION, public_key, "CN=alice")
 
-        assert csr.public_key().public_numbers() == public_key.public_numbers()
+        assert csr.public_key() == public_key
         assert (
             csr.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value
             == "alice"
@@ -453,7 +450,7 @@ class TestKeyManagement:
             session, slot, public_key, "CN=alice", NOW, NOW
         )
 
-        assert cert.public_key().public_numbers() == public_key.public_numbers()
+        assert cert.public_key() == public_key
         assert (
             cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value
             == "alice"
@@ -686,10 +683,8 @@ class TestOperations:
 
 def block_pin(session):
     while session.get_pin_attempts() > 0:
-        try:
+        with pytest.raises(InvalidPinError):
             session.verify_pin(NON_DEFAULT_PIN)
-        except Exception:
-            pass
 
 
 class TestUnblockPin:

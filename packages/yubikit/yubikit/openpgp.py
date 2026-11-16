@@ -31,12 +31,11 @@ import abc
 import logging
 import os
 import struct
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum, IntEnum, IntFlag, unique
 from typing import (
     ClassVar,
-    Mapping,
-    Sequence,
     SupportsBytes,
     TypeAlias,
     cast,
@@ -79,7 +78,7 @@ DEFAULT_ADMIN_PIN = "12345678"
 
 
 @unique
-class UIF(IntEnum):  # noqa: N801
+class UIF(IntEnum):
     OFF = 0x00
     ON = 0x01
     FIXED = 0x02
@@ -110,7 +109,7 @@ class UIF(IntEnum):  # noqa: N801
 
 
 @unique
-class PIN_POLICY(IntEnum):  # noqa: N801
+class PIN_POLICY(IntEnum):
     ALWAYS = 0x00
     ONCE = 0x01
 
@@ -119,7 +118,7 @@ class PIN_POLICY(IntEnum):  # noqa: N801
 
 
 @unique
-class INS(IntEnum):  # noqa: N801
+class INS(IntEnum):
     VERIFY = 0x20
     CHANGE_PIN = 0x24
     RESET_RETRY_COUNTER = 0x2C
@@ -363,7 +362,7 @@ class CRT(bytes, Enum):
 
 
 @unique
-class KEY_REF(IntEnum):  # noqa: N801
+class KEY_REF(IntEnum):
     SIG = 0x01
     DEC = 0x02
     AUT = 0x03
@@ -454,7 +453,7 @@ class RSA_IMPORT_FORMAT(IntEnum):
 
 @dataclass
 class RsaAttributes(AlgorithmAttributes):
-    _supported_ids = [0x01]
+    _supported_ids: ClassVar[Sequence[int]] = [0x01]
 
     n_len: int
     e_len: int
@@ -533,7 +532,7 @@ class EC_IMPORT_FORMAT(IntEnum):
 
 @dataclass
 class EcAttributes(AlgorithmAttributes):
-    _supported_ids = [0x12, 0x13, 0x16]
+    _supported_ids: ClassVar[Sequence[int]] = [0x12, 0x13, 0x16]
 
     oid: CurveOid
     import_format: EC_IMPORT_FORMAT
@@ -940,7 +939,8 @@ def _prepare_private_key_for_native(
         raw = private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
         return (4, [raw], None)
     else:
-        raise ValueError(f"Unsupported key type: {type(private_key)}")
+        # Preserve the public API's exception type for unsupported keys.
+        raise ValueError(f"Unsupported key type: {type(private_key)}")  # noqa: TRY004
 
 
 class OpenPgpSession(Session):
@@ -1371,7 +1371,8 @@ class OpenPgpSession(Session):
         elif isinstance(value, bytes):
             data = value
         else:
-            raise ValueError("Value must be a bytes or public key")
+            # Preserve the public API's exception type for invalid values.
+            raise ValueError("Value must be a bytes or public key")  # noqa: TRY004
         response = self._native.decrypt(data)
         return response
 

@@ -33,9 +33,8 @@ def no_pin_complexity(info):
 @pytest.fixture()
 @condition.capability(CAPABILITY.OTP)
 def session(conn_type, info, device):
-    with device.open_connection(conn_type) as c:
-        with YubiOtpSession(c) as s:
-            yield s
+    with device.open_connection(conn_type) as c, YubiOtpSession(c) as s:
+        yield s
 
 
 def test_status(info, session):

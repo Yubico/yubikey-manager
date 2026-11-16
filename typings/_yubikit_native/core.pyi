@@ -1,5 +1,6 @@
+from collections.abc import Callable
 from threading import Event
-from typing import Any, Callable
+from typing import Any
 
 def calculate_crc(data: bytes) -> int: ...
 def check_crc(data: bytes) -> bool: ...

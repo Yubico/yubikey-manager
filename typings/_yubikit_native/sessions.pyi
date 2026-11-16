@@ -1,5 +1,6 @@
+from collections.abc import Callable
 from threading import Event
-from typing import Any, Callable
+from typing import Any
 
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection

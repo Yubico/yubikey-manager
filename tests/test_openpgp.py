@@ -5,7 +5,6 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
 from yubikit.core import TRANSPORT, Tlv
 from yubikit.core.smartcard import SW, SmartCardConnection
-
 from yubikit.openpgp import (
     DEFAULT_ADMIN_PIN,
     DEFAULT_USER_PIN,

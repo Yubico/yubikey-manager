@@ -1,5 +1,4 @@
 import pytest
-
 from yubikit.core.fido import FidoConnection
 from yubikit.ctap2 import ClientPin, Ctap2Session, PinProtocol
 
@@ -53,9 +52,11 @@ class CtapConnection(FidoConnection):
 )
 def test_cbor_to_python_rejects_colliding_keys(value):
     connection = CtapConnection(b"\xa1\x13\xa1\x64test" + value)
-    with Ctap2Session(connection) as session:
-        with pytest.raises(ValueError, match="CBOR map keys collide in Python"):
-            session.get_info()
+    with (
+        Ctap2Session(connection) as session,
+        pytest.raises(ValueError, match="CBOR map keys collide in Python"),
+    ):
+        session.get_info()
 
 
 @pytest.mark.parametrize(
@@ -80,11 +81,11 @@ def test_client_pin_rejects_invalid_peer_before_set_pin(protocol, label, replace
     peer = make_peer(label, replacement)
     connection = CtapConnection(b"\xa1\x06\x81" + bytes([protocol]), peer, protocol)
     with Ctap2Session(connection) as session:
-        with ClientPin(session, PinProtocol(protocol)) as client_pin:
-            with pytest.raises(
-                ValueError, match="key agreement failed: invalid peer key"
-            ):
-                client_pin.set_pin("2468")
+        with (
+            ClientPin(session, PinProtocol(protocol)) as client_pin,
+            pytest.raises(ValueError, match="key agreement failed: invalid peer key"),
+        ):
+            client_pin.set_pin("2468")
         assert connection.requests == [
             b"\x04",
             b"\x06\xa2\x01" + bytes([protocol]) + b"\x02\x02",

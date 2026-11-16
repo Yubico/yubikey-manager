@@ -165,9 +165,9 @@ class KEY_TYPE(IntEnum):
     def from_public_key(cls, key: PublicKeyTypes) -> KEY_TYPE:
         if isinstance(key, rsa.RSAPublicKey):
             try:
-                return getattr(cls, "RSA%d" % key.key_size)
+                return getattr(cls, f"RSA{key.key_size}")
             except AttributeError:
-                raise ValueError("Unsupported RSA key size: %d" % key.key_size)
+                raise ValueError(f"Unsupported RSA key size: {key.key_size}")
         elif isinstance(key, ec.EllipticCurvePublicKey):
             curve_name = key.curve.name
             if curve_name == "secp256r1":
@@ -519,7 +519,9 @@ class FascN:
         return cls(*args)
 
     def __str__(self):
-        return "[%04d-%04d-%06d-%d-%d-%010d%d%04d%d]" % astuple(self)
+        return "[{:04d}-{:04d}-{:06d}-{:d}-{:d}-{:010d}{:d}{:04d}{:d}]".format(
+            *astuple(self)
+        )
 
 
 @dataclass(kw_only=True)
@@ -964,7 +966,7 @@ class PivSession(Session):
         try:
             key_type, _, _ = self._native.get_management_key_metadata()
             self._management_key_type = MANAGEMENT_KEY_TYPE(key_type)
-        except Exception:
+        except Exception:  # noqa: BLE001 - fall back if metadata cannot be read
             self._management_key_type = MANAGEMENT_KEY_TYPE(
                 self._native.management_key_type
             )
@@ -1275,7 +1277,7 @@ class PivSession(Session):
         der_bytes = self._native.get_certificate(int(slot))
         try:
             return x509.load_der_x509_certificate(der_bytes)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - normalize certificate parsing errors
             raise BadResponseError("Invalid certificate", e)
 
     def put_certificate(

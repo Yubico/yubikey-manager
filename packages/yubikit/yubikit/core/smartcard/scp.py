@@ -29,9 +29,10 @@ from __future__ import annotations
 
 import abc
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum, unique
-from typing import NamedTuple, Sequence
+from typing import NamedTuple
 
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -82,7 +83,7 @@ class KeyRef(bytes):
                 raise ValueError("kvn can only be provided if kid_or_data is a kid")
             data = kid_or_data
 
-        return super(KeyRef, cls).__new__(cls, data)
+        return super().__new__(cls, data)
 
     def __init__(self, kid_or_data: int | bytes, kvn: int | None = None):
         if len(self) != 2:
@@ -102,8 +103,8 @@ class ScpKeyParams(abc.ABC):
 
 @dataclass(frozen=True)
 class Scp03KeyParams(ScpKeyParams):
-    ref: KeyRef = KeyRef(ScpKid.SCP03, 0)
-    keys: StaticKeys = StaticKeys.default()
+    ref: KeyRef = field(default_factory=lambda: KeyRef(ScpKid.SCP03, 0))
+    keys: StaticKeys = field(default_factory=StaticKeys.default)
 
 
 @dataclass(frozen=True)

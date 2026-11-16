@@ -27,9 +27,9 @@
 
 import abc
 import logging
+from collections.abc import Callable
 from datetime import datetime
 from threading import Event
-from typing import Callable
 
 from _yubikit_native.core import OtpProtocol as _NativeOtpProtocol
 from _yubikit_native.core import (

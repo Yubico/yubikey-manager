@@ -26,8 +26,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import abc
+from collections.abc import Callable
 from threading import Event
-from typing import Callable
 
 from . import USB_INTERFACE, Connection
 

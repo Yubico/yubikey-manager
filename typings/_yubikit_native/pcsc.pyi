@@ -1,4 +1,4 @@
-from typing_extensions import Self
+from typing import Self
 
 def list_readers() -> list[str]: ...
 

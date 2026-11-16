@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from enum import IntEnum, unique
-from typing import Mapping, Sequence
 
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature

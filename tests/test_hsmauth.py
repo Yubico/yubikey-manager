@@ -2,7 +2,6 @@ from unittest.mock import Mock
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
-
 from yubikit.hsmauth import (
     HsmAuthSession,
     _parse_credential_password,
@@ -76,55 +75,59 @@ def session(monkeypatch):
     [
         (
             "put_credential_symmetric",
-            dict(
-                management_key=bytes(16),
-                label="test",
-                key_enc=bytes(16),
-                key_mac=bytes(16),
-            ),
+            {
+                "management_key": bytes(16),
+                "label": "test",
+                "key_enc": bytes(16),
+                "key_mac": bytes(16),
+            },
             "credential_password",
         ),
         (
             "put_credential_derived",
-            dict(management_key=bytes(16), label="test", derivation_password="d" * 40),
+            {
+                "management_key": bytes(16),
+                "label": "test",
+                "derivation_password": "d" * 40,
+            },
             "credential_password",
         ),
         (
             "put_credential_asymmetric",
-            dict(management_key=bytes(16), label="test"),
+            {"management_key": bytes(16), "label": "test"},
             "credential_password",
         ),
         (
             "generate_credential_asymmetric",
-            dict(management_key=bytes(16), label="test"),
+            {"management_key": bytes(16), "label": "test"},
             "credential_password",
         ),
         (
             "change_credential_password",
-            dict(label="test", new_credential_password="new"),
+            {"label": "test", "new_credential_password": "new"},
             "credential_password",
         ),
         (
             "change_credential_password",
-            dict(label="test", credential_password="current"),
+            {"label": "test", "credential_password": "current"},
             "new_credential_password",
         ),
         (
             "change_credential_password_admin",
-            dict(management_key=bytes(16), label="test"),
+            {"management_key": bytes(16), "label": "test"},
             "new_credential_password",
         ),
         (
             "calculate_session_keys_symmetric",
-            dict(label="test", context=bytes(16)),
+            {"label": "test", "context": bytes(16)},
             "credential_password",
         ),
         (
             "calculate_session_keys_asymmetric",
-            dict(label="test", context=bytes(130), card_crypto=bytes(16)),
+            {"label": "test", "context": bytes(130), "card_crypto": bytes(16)},
             "credential_password",
         ),
-        ("get_challenge", dict(label="test"), "credential_password"),
+        ("get_challenge", {"label": "test"}, "credential_password"),
     ],
 )
 @pytest.mark.parametrize(
