@@ -46,7 +46,7 @@ distribution's YubiKey udev rules and reconnect the device after changing them.
 Saving credentials requires a session D-Bus and a Secret Service provider,
 such as GNOME Keyring.
 
-### Alpha release
+### Beta release
 
 The crates.io installation command selects the beta explicitly:
 

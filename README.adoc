@@ -4,186 +4,162 @@ image:https://github.com/Yubico/yubikey-manager/actions/workflows/windows.yml/ba
 image:https://github.com/Yubico/yubikey-manager/actions/workflows/macOS.yml/badge.svg["MacOS build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/macOS.yml"]
 image:https://github.com/Yubico/yubikey-manager/actions/workflows/ubuntu.yml/badge.svg["Ubuntu build", link="https://github.com/Yubico/yubikey-manager/actions/workflows/ubuntu.yml"]
 
-Python 3.11 (or later) library and command line tool for configuring a YubiKey.
-If you're looking for a graphical application, check out  https://developers.yubico.com/yubioath-flutter/[Yubico Authenticator].
+Command-line tool and libraries for configuring and managing YubiKeys over USB
+and NFC. Version 6 is a complete rewrite in Rust, with Python bindings available
+separately. The native `ykman` CLI does not require Python.
 
-=== Usage
-For more usage information and examples, see the https://docs.yubico.com/software/yubikey/tools/ykman/Using_the_ykman_CLI.html[YubiKey Manager CLI User Manual].
+[IMPORTANT]
+====
+Version 6 is currently in beta. Commands, APIs, and behavior may change before
+the stable release. Users upgrading from 5.x should read the
+link:doc/Migration_5-6.adoc[migration guide].
+====
 
-....
-Configure your YubiKey via the command line.
+See link:NEWS[release notes] for changes and
+https://github.com/Yubico/yubikey-manager/issues[report beta issues on GitHub].
+Include the output of `ykman version`, your operating system, and steps to
+reproduce the problem. Remove credentials and other sensitive information
+before sharing logs.
 
-USAGE
-  ykman [options] [command]
-
-COMMANDS
-  list     List connected YubiKeys
-  info     Show general information
-  config   Enable or disable applications and settings
-  oath     Manage the OATH application
-  otp      Manage the YubiKey OTP application
-  piv      Manage the PIV application
-  fido     Manage the FIDO applications
-  openpgp  Manage the OpenPGP application
-  hsmauth  Manage the YubiHSM Auth application
-  sd       Manage the Security Domain
-
-ADDITIONAL COMMANDS
-  apdu      Send raw APDUs to the YubiKey
-  diagnose  Show diagnostic information
-  version   Show the version
-  licenses  Show third-party licenses
-
-SECURE CHANNEL OPTIONS
-      --scp <CRED>               SCP key/cert files, or SCP03 K-ENC:K-MAC[:K-DEK] hex
-      --scp-ca <FILE>            SCP11 CA file (PEM/DER); alone, requests SCP11b
-      --scp-sd <KID> <KVN>       SCP card key reference (hex)
-      --scp-oce <KID> <KVN>      SCP OCE key reference (hex)
-      --scp-password <PASSWORD>  Password for SCP credential file
-
-GLOBAL OPTIONS
-  -d, --device <SERIAL>    Use the YubiKey with this serial number
-  -l, --log-level <LEVEL>  Log level: error, warning, info, debug, traffic
-      --log-file <FILE>    Write log to FILE (requires --log-level)
-      --color <WHEN>       Colour output: always, auto, never
-  -h, --help               Print help
-
-EXAMPLES
-  List connected YubiKeys, only output serial number:
-  $ ykman list --serials
-
-  Show information about YubiKey with serial number 123456:
-  $ ykman --device 123456 info
-
-LEARN MORE
-  Run `ykman <command> --help` for details about a command.
-  Read the manual at https://docs.yubico.com/ykman
-....
-
-The `--help` argument can also be used to get detailed information about specific
-subcommands:
-
-    ykman oath --help
-
-=== Versioning/Compatibility
-This project follows https://semver.org/[Semantic Versioning]. Any project
-depending on yubikey-manager should take care when specifying version ranges to
-not include any untested major version, as it is likely to have backwards
-incompatible changes. For example, you should NOT depend on ">=5", as it has no
-upper bound. Instead, depend on ">=5, <6", as any release before 6 will be
-compatible.
-
-Note that any private variables (names starting with '_') are not part of the
-public API, and may be changed between versions at any time.
+If you're looking for a graphical application, check out
+https://developers.yubico.com/yubioath-flutter/[Yubico Authenticator].
 
 === Installation
-YubiKey Manager can be installed independently of platform by using pip (or
-equivalent):
 
-  pip install --user yubikey-manager
+==== Windows and macOS installers
 
-This installs only the CLI. Install `yubikit` separately to use the Python SDK;
-neither Python distribution requires the other.
+Download the version 6 beta installer for your platform from the
+https://github.com/Yubico/yubikey-manager/releases[Releases page].
+Windows installers are available for x64 and ARM64 and bundle a background
+service that allows FIDO management without running the CLI as administrator.
 
-When upgrading from 5.x, use a new virtual environment or uninstall the old
-distribution first. An in-place upgrade can delete files now owned by the
-separate `yubikit` package. See link:doc/Migration_5-6.adoc[the migration guide]
-for upgrade and repair commands.
+See link:doc/Platform_Notes.adoc[platform notes] for macOS Input Monitoring
+permissions and uninstallation.
 
-On Linux platforms you will need `pcscd` installed and running to be able to
-communicate with a YubiKey over the SmartCard interface. Additionally, you may
-need to set permissions for your user to access YubiKeys via the HID interfaces.
-More information available link:doc/Device_Permissions.adoc[here].
+==== Cargo
 
-Some of the libraries used by yubikey-manager have C-extensions, and may require
-additional dependencies to build, such as http://www.swig.org/[swig] and
-potentially https://pcsclite.apdu.fr/[PCSC lite].
+Install the native Rust CLI, selecting the beta explicitly:
 
-=== Pre-built packages
-Pre-built packages specific to your platform may be available from Yubico or
-third parties. Please refer to your platforms native package manager for
-detailed instructions on how to install, if available.
+[source,sh]
+----
+cargo install ykman-cli --version 6.0.0-beta.0 --locked
+----
 
-==== Windows
-A Windows installer is available to download from the
-https://github.com/Yubico/yubikey-manager/releases/latest[Releases page].
+Building requires Rust 1.88 or later and the
+link:doc/Development.adoc[platform build prerequisites].
+The installed executable is named `ykman`. Ensure Cargo's binary directory
+(`$HOME/.cargo/bin` by default, or `%USERPROFILE%\.cargo\bin` on Windows) is on
+`PATH`.
 
-==== MacOS
-A MacOS installer is available to download from the
-https://github.com/Yubico/yubikey-manager/releases/latest[Releases page].
+==== Python package (migration only)
 
-Additionally, packages are available from Homebrew and MacPorts.
+The `yubikey-manager` Python package distributes the native executable to ease
+migration from earlier Python-based versions. Installing the Rust CLI directly
+is preferred. This migration package requires Python 3.11 or later:
 
-===== Input Monitoring access on MacOS
-When running one of the `ykman otp` commands you may run into an error such as:
-`Failed to open device for communication: -536870174`. This indicates a problem
-with the permission to access the OTP (keyboard) USB interface.
+[source,sh]
+----
+python -m pip install --pre yubikey-manager
+----
 
-To access a YubiKey over this interface the application needs the `Input
-Monitoring` permission. If you are not automatically prompted to grant this
-permission, you may have to do so manually. Note that it is the _terminal_ you
-are using that needs the permission, not the ykman executable.
+This installs only the CLI, not the Python SDK. See <<libraries,Libraries>>
+for SDK installation.
 
-To add your terminal application to the `Input Monitoring` permission list, go
-to `System Preferences -> Security & Privacy -> Privacy -> Input Monitoring` to
-resolve this.
+==== Linux prerequisites
 
-===== Uninstallation of the MacOS .pkg
-To uninstall yubikey-manager when installed via the pgk installer, run:
+Smart card and NFC access require the system PC/SC client library
+(`libpcsclite.so.1`) and `pcscd` running or socket-activated.
 
-  $ sudo rm -rf /usr/local/bin/ykman /usr/local/ykman
+HID access may require your distribution's YubiKey udev rules and suitable
+device permissions. See link:doc/Device_Permissions.adoc[device permissions].
+Saving credentials requires a session D-Bus and a Secret Service provider,
+such as GNOME Keyring.
 
-==== Linux
-Packages are available for several Linux distributions by third party package
-maintainers.
+==== Third-party packages
 
-Python-specific tools such as pip, pipx, or uv can be used directly to install and
-manage yubikey-manager, and is generally the recommended approach.
+Packages are available from Homebrew, MacPorts, and Linux distribution package
+maintainers. These may still provide the Python-based 5.x release; check the
+packaged version before installing. FreeBSD is not officially supported; see
+link:doc/Platform_Notes.adoc[platform notes].
 
-==== FreeBSD
-Although not being officially supported on this platform, YubiKey Manager can be
-installed on FreeBSD. It's available via its ports tree or as pre-built package.
-Should you opt to install and use YubiKey Manager on this platform, please be aware
-that it's **NOT** maintained by Yubico.
+=== Upgrading from 5.x
 
-To install the binary package, use `pkg install pyXY-yubikey-manager`, with `pyXY`
-specifying the version of Python the package was built for, so in order to install
-YubiKey Manager for Python 3.11, use:
+Version 6 has breaking CLI and Python API changes. For example, NFC-connected
+YubiKeys are now discovered alongside USB devices; use `--device` to select by
+serial number instead of `--reader`.
 
-  # pkg install py311-yubikey-manager
+For Python installations, use a new virtual environment or uninstall the old
+`yubikey-manager` distribution before installing either new package. An
+in-place upgrade can delete files now owned by the separate `yubikit` package.
+The link:doc/Migration_5-6.adoc[migration guide] includes upgrade and repair
+commands and details of Python API changes.
 
-For more information about how to install packages or ports on FreeBSD, please refer
-to its official documentation: https://docs.freebsd.org/en/books/handbook/ports[FreeBSD Handbook].
+If multiple installations provide `ykman`, check which executable your shell
+resolves and use `ykman version` to confirm that you are running the beta.
 
-In order to use `ykman otp` commands, you need to make sure the _uhid(4)_ driver
-attaches to the USB device:
+=== Usage
 
-  # usbconfig ugenX.Y add_quirk UQ_KBD_IGNORE
-  # usbconfig ugenX.Y reset
+The CLI supports device configuration and the OATH, Yubico OTP, PIV, FIDO,
+OpenPGP, YubiHSM Auth, and Security Domain applications.
 
-The correct device to operate on _(ugenX.Y)_ can be determined using
-`usbconfig list`.
+[source,sh]
+----
+ykman --help
+ykman list
+ykman list --serials
+ykman --device 123456 info
+ykman oath --help
+----
 
-When using FreeBSD 13 or higher, you can switch to the more modern _hidraw(4)_
-driver. This allows YubiKey Manager to access OTP HID in a non-exclusive way,
-so that the key will still function as a USB keyboard:
+Use `ykman <command> --help` for command details. The
+https://docs.yubico.com/software/yubikey/tools/ykman/Using_the_ykman_CLI.html[YubiKey Manager CLI User Manual]
+provides further usage information and examples; during the beta, installed
+command help is the reference for version 6 command syntax.
 
-  # sysrc kld_list+="hidraw hkbd"
-  # cat >>/boot/loader.conf<<EOF
-  hw.usb.usbhid.enable="1"
-  hw.usb.quirk.0="0x1050 0x0010 0 0xffff UQ_KBD_IGNORE"  # YKS_OTP
-  hw.usb.quirk.1="0x1050 0x0110 0 0xffff UQ_KBD_IGNORE"  # NEO_OTP
-  hw.usb.quirk.2="0x1050 0x0111 0 0xffff UQ_KBD_IGNORE"  # NEO_OTP_CCID
-  hw.usb.quirk.3="0x1050 0x0114 0 0xffff UQ_KBD_IGNORE"  # NEO_OTP_FIDO
-  hw.usb.quirk.4="0x1050 0x0116 0 0xffff UQ_KBD_IGNORE"  # NEO_OTP_FIDO_CCID
-  hw.usb.quirk.5="0x1050 0x0401 0 0xffff UQ_KBD_IGNORE"  # YK4_OTP
-  hw.usb.quirk.6="0x1050 0x0403 0 0xffff UQ_KBD_IGNORE"  # YK4_OTP_FIDO
-  hw.usb.quirk.7="0x1050 0x0405 0 0xffff UQ_KBD_IGNORE"  # YK4_OTP_CCID
-  hw.usb.quirk.8="0x1050 0x0407 0 0xffff UQ_KBD_IGNORE"  # YK4_OTP_FIDO_CCID
-  hw.usb.quirk.9="0x1050 0x0410 0 0xffff UQ_KBD_IGNORE"  # YKP_OTP_FIDO
-  EOF
-  # reboot
+[[libraries]]
+=== Libraries
 
-==== From source (for development)
-To install from source, see the link:doc/Development.adoc[development]
-instructions.
+The CLI and SDKs are distributed separately:
+
+[cols="1,2,2"]
+|===
+| Library | Purpose | Documentation
+
+| Rust `yubikit`
+| SDK for YubiKey protocols and device transports
+| link:crates/yubikit/README.md[Getting started],
+  https://docs.rs/yubikit[API reference]
+
+| Python `yubikit`
+| Python SDK backed by the Rust implementation
+| link:packages/yubikit/README.md[Getting started],
+  link:doc/Library_Usage.adoc[usage guide],
+  https://developers.yubico.com/yubikey-manager/API_Documentation/[API reference]
+|===
+
+To install the Python SDK beta (Python 3.11 or later):
+
+[source,sh]
+----
+python -m pip install --pre yubikit
+----
+
+Neither Python distribution installs the other. See
+link:doc/Scripting.adoc[scripting] and link:examples/README.adoc[examples] for
+Python usage, and the Rust crate READMEs for beta dependency declarations.
+Published API documentation may describe a different release; select the
+matching version where available.
+
+=== Versioning and compatibility
+
+Stable releases follow https://semver.org/[Semantic Versioning]. The CLI is
+versioned as 6.x, while the Rust libraries and Python SDK have their own 1.x
+versions. Specify dependency ranges that exclude untested major versions:
+for example `>=1, <2` for the stable Python SDK.
+
+Private Python names (starting with `_`) are not part of the public API.
+
+=== Development
+
+See the link:doc/Development.adoc[development instructions] for repository
+structure, prerequisites, source builds, and tests.
