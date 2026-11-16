@@ -115,7 +115,7 @@ builds from crates.io packages, do not require `cargo-about`.
 After changing dependencies, CLI features, the licence policy, or the report
 template, regenerate the notices using the same `cargo-about` version as CI:
 
-    $ cargo install cargo-about --version 0.9.1 --locked
+    $ cargo install cargo-about --version 0.9.1 --locked --features cli
     $ cargo fetch --locked
     $ cargo about generate --locked --offline --all-features --fail \
         --manifest-path crates/ykman-cli/Cargo.toml \
