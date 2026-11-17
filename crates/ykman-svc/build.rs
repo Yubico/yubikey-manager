@@ -21,4 +21,9 @@ fn main() {
             .compile()
             .expect("Failed to compile service version resources");
     }
+
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        // Resolve statically linked DLLs from System32 only (LOAD_LIBRARY_SEARCH_SYSTEM32)
+        println!("cargo:rustc-link-arg-bins=/DEPENDENTLOADFLAG:0x800");
+    }
 }

@@ -47,6 +47,24 @@ jobs:
           cp target/release/ykman-svc.exe dist/ykman/
           dist/ykman/ykman.exe --version
 
+      - name: Verify DLL search hardening
+        shell: bash
+        run: |
+          python -m pip install --quiet pefile
+          python - dist/ykman/ykman.exe dist/ykman/ykman-svc.exe <<'EOF'
+          import sys
+          import pefile
+
+          for path in sys.argv[1:]:
+              pe = pefile.PE(path, fast_load=True)
+              pe.parse_data_directories(
+                  [pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG"]]
+              )
+              flags = pe.DIRECTORY_ENTRY_LOAD_CONFIG.struct.DependentLoadFlags
+              if flags != 0x800:
+                  sys.exit(f"{path}: DependentLoadFlags is {flags:#x}, expected 0x800")
+              print(f"{path}: DependentLoadFlags {flags:#x}")
+          EOF
       - name: Test MSI version extraction
         run: .\resources\win\test_msi_version.ps1
 

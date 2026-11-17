@@ -31,6 +31,11 @@ fn main() {
         res.set_manifest_file("ykman.exe.manifest");
         res.compile().expect("Failed to compile Windows resources");
     }
+
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        // Resolve statically linked DLLs from System32 only (LOAD_LIBRARY_SEARCH_SYSTEM32)
+        println!("cargo:rustc-link-arg-bins=/DEPENDENTLOADFLAG:0x800");
+    }
 }
 
 fn compress(data: &[u8]) -> Vec<u8> {
