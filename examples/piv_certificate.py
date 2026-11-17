@@ -23,19 +23,18 @@ Usage: piv_certificate.py
 """
 
 import datetime
+import getpass
 
-import click
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import NameOID
-
-from ykman import scripting as s
-from ykman.piv import sign_certificate_builder
+from yubikit import scripting as s
 from yubikit.piv import (
     DEFAULT_MANAGEMENT_KEY,
     KEY_TYPE,
     SLOT,
     PivSession,
+    sign_certificate_builder,
 )
 
 # Use slot 9A (authentication), and key type RSA 2048
@@ -48,13 +47,14 @@ yubikey = s.single()
 # Establish a PIV session
 piv = PivSession(yubikey.smart_card())
 
-click.echo("WARNING")
-click.echo(f"This will overwrite any key already in slot {slot:X} of the YubiKey!")
-click.echo("")
+print("WARNING")
+print(f"This will overwrite any key already in slot {slot:X} of the YubiKey!")
+print()
 
 # Unlock with the management key
-key = click.prompt(
-    "Enter management key", default=DEFAULT_MANAGEMENT_KEY.hex(), hide_input=True
+key = (
+    getpass.getpass(f"Enter management key (default: {DEFAULT_MANAGEMENT_KEY.hex()})")
+    or DEFAULT_MANAGEMENT_KEY.hex()
 )
 
 piv.authenticate(bytes.fromhex(key))
@@ -101,15 +101,15 @@ builder = (
 
 
 # Verify the PIN
-pin = click.prompt("Enter PIN", hide_input=True)
+pin = getpass.getpass("🔑 Enter PIN: ")
 piv.verify_pin(pin)
 
 # Sign the certificate
 certificate = sign_certificate_builder(piv, slot, key_type, builder)
 pem = certificate.public_bytes(serialization.Encoding.PEM)
 
-click.echo("Certificate generated!")
-click.echo("")
+print("Certificate generated!")
+print()
 
 # Print the certificate
 print(pem.decode())

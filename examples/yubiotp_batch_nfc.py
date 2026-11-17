@@ -13,8 +13,8 @@ import os
 import struct
 import sys
 
-from ykman import scripting as s
-from ykman.otp import format_csv
+from yubikit import scripting as s
+from yubikit.core.otp import format_csv
 from yubikit.yubiotp import SLOT, YubiOtpSession, YubiOtpSlotConfiguration
 
 try:

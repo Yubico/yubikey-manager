@@ -1,0 +1,340 @@
+use super::common::{otp_delete_slot2, skip_before_version, ykman_dev};
+use predicates::prelude::*;
+
+#[test]
+fn test_otp_info() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    ykman_dev()
+        .args(["otp", "info"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Slot 1:").and(predicate::str::contains("Slot 2:")));
+}
+
+#[test]
+fn test_otp_static() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    otp_delete_slot2();
+
+    ykman_dev()
+        .args(["otp", "static", "2", "--generate", "-f"])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args(["otp", "info"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"Slot 2:\s+\S+").unwrap());
+
+    ykman_dev()
+        .args(["otp", "delete", "2", "-f"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_otp_chalresp() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    otp_delete_slot2();
+
+    ykman_dev()
+        .args(["otp", "chalresp", "2", "--generate", "-f"])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args(["otp", "calculate", "2", "--totp"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty().not());
+
+    ykman_dev()
+        .args(["otp", "delete", "2", "-f"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_otp_swap() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    otp_delete_slot2();
+
+    ykman_dev()
+        .args(["otp", "static", "2", "--generate", "-f"])
+        .assert()
+        .success();
+
+    ykman_dev().args(["otp", "swap", "-f"]).assert().success();
+
+    ykman_dev().args(["otp", "swap", "-f"]).assert().success();
+
+    ykman_dev()
+        .args(["otp", "delete", "2", "-f"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_otp_hotp() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    otp_delete_slot2();
+
+    ykman_dev()
+        .args([
+            "otp",
+            "hotp",
+            "2",
+            "3132333435363738393031323334353637383930",
+            "-f",
+        ])
+        .assert()
+        .success();
+
+    ykman_dev().args(["otp", "info"]).assert().success();
+
+    ykman_dev()
+        .args(["otp", "delete", "2", "-f"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_otp_yubiotp() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    otp_delete_slot2();
+
+    // Program Yubico OTP in slot 2 with auto-generated IDs and key
+    ykman_dev()
+        .args([
+            "otp",
+            "yubiotp",
+            "2",
+            "--serial-public-id",
+            "-g",
+            "-G",
+            "-f",
+        ])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args(["otp", "info"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"Slot 2:\s+\S+").unwrap());
+
+    ykman_dev()
+        .args(["otp", "delete", "2", "-f"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_otp_calculate_standalone() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    otp_delete_slot2();
+
+    // Program challenge-response in slot 2
+    ykman_dev()
+        .args(["otp", "chalresp", "2", "--generate", "-f"])
+        .assert()
+        .success();
+
+    // Calculate with a hex challenge
+    ykman_dev()
+        .args(["otp", "calculate", "2", "aabbccdd"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty().not());
+
+    ykman_dev()
+        .args(["otp", "delete", "2", "-f"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_otp_calculate_totp_8digits() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    otp_delete_slot2();
+
+    ykman_dev()
+        .args(["otp", "chalresp", "2", "--generate", "-f"])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args(["otp", "calculate", "2", "--totp", "--digits", "8"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"\d{8}").unwrap());
+
+    ykman_dev()
+        .args(["otp", "delete", "2", "-f"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_otp_delete() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    otp_delete_slot2();
+
+    // Program slot 2
+    ykman_dev()
+        .args(["otp", "static", "2", "--generate", "-f"])
+        .assert()
+        .success();
+
+    // Verify slot 2 is programmed
+    ykman_dev()
+        .args(["otp", "info"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"Slot 2:\s+\S+").unwrap());
+
+    // Delete slot 2
+    ykman_dev()
+        .args(["otp", "delete", "2", "-f"])
+        .assert()
+        .success();
+
+    // Verify slot 2 is empty
+    ykman_dev().args(["otp", "info"]).assert().success().stdout(
+        predicate::str::contains("Slot 2: empty").or(predicate::str::contains("Slot 2: Empty")),
+    );
+}
+
+#[test]
+fn test_otp_static_length() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    otp_delete_slot2();
+
+    ykman_dev()
+        .args(["otp", "static", "2", "--generate", "--length", "20", "-f"])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args(["otp", "info"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"Slot 2:\s+\S+").unwrap());
+
+    ykman_dev()
+        .args(["otp", "delete", "2", "-f"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_otp_hotp_8digits() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    otp_delete_slot2();
+
+    ykman_dev()
+        .args([
+            "otp",
+            "hotp",
+            "2",
+            "3132333435363738393031323334353637383930",
+            "--digits",
+            "8",
+            "-f",
+        ])
+        .assert()
+        .success();
+
+    ykman_dev().args(["otp", "info"]).assert().success();
+
+    ykman_dev()
+        .args(["otp", "delete", "2", "-f"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_otp_settings_enter() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    otp_delete_slot2();
+
+    // Program a static password first
+    ykman_dev()
+        .args(["otp", "static", "2", "--generate", "-f"])
+        .assert()
+        .success();
+
+    // Update settings to append Enter
+    ykman_dev()
+        .args(["otp", "settings", "2", "--enter", "-f"])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args(["otp", "delete", "2", "-f"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_otp_ndef() {
+    require_capability!("OTP");
+    if skip_before_version((4, 1, 0), "OTP device info") {
+        return;
+    }
+    otp_delete_slot2();
+
+    // Program slot 2
+    ykman_dev()
+        .args(["otp", "static", "2", "--generate", "-f"])
+        .assert()
+        .success();
+
+    // Configure NDEF for slot 2
+    ykman_dev()
+        .args(["otp", "ndef", "2", "-f"])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args(["otp", "delete", "2", "-f"])
+        .assert()
+        .success();
+}

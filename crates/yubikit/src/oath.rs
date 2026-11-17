@@ -1,0 +1,1131 @@
+// Copyright 2026 Yubico AB
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! OATH (TOTP/HOTP) credential management for YubiKeys.
+//!
+//! This module implements the YKOATH protocol for managing OATH credentials
+//! on a YubiKey — adding, listing, calculating, and deleting TOTP and HOTP
+//! accounts. The main entry point is [`OathSession`](crate::oath::OathSession), which wraps a
+//! [`SmartCardConnection`](crate::smartcard::SmartCardConnection).
+//!
+//! # Example
+//!
+//! ```no_run
+//! use yubikit::platform::device::list_devices;
+//! use yubikit::management::UsbInterface;
+//! use yubikit::oath::OathSession;
+//!
+//! let devices = list_devices(UsbInterface::CCID)?;
+//! let dev = devices.first().expect("no YubiKey found");
+//! let conn = dev.open_smartcard()?;
+//! let mut session = OathSession::new(conn).map_err(|(e, _)| e)?;
+//!
+//! for cred in session.list_credentials()? {
+//!     println!("{}: {:?}", cred.name, cred.oath_type);
+//! }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+
+use pbkdf2::hmac::{Hmac, Mac};
+use sha1::{Digest as _, Sha1};
+use sha2::{Digest, Sha256};
+use thiserror::Error;
+use zeroize::{Zeroize, Zeroizing};
+
+use crate::__internal::tlv::{
+    TlvError, parse_tlv_list, tlv_append, tlv_encode, tlv_get, tlv_unpack,
+};
+use crate::core::Version;
+use crate::core::patch_version;
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol};
+
+// TLV tags
+const TAG_NAME: u32 = 0x71;
+const TAG_NAME_LIST: u32 = 0x72;
+const TAG_KEY: u32 = 0x73;
+const TAG_CHALLENGE: u32 = 0x74;
+const TAG_RESPONSE: u32 = 0x75;
+const TAG_TRUNCATED: u32 = 0x76;
+const TAG_HOTP: u32 = 0x77;
+const TAG_PROPERTY: u32 = 0x78;
+const TAG_VERSION: u32 = 0x79;
+const TAG_IMF: u32 = 0x7A;
+const TAG_TOUCH: u32 = 0x7C;
+
+// Instruction bytes
+const INS_LIST: u8 = 0xA1;
+const INS_PUT: u8 = 0x01;
+const INS_DELETE: u8 = 0x02;
+const INS_SET_CODE: u8 = 0x03;
+const INS_RESET: u8 = 0x04;
+const INS_RENAME: u8 = 0x05;
+const INS_CALCULATE: u8 = 0xA2;
+const INS_VALIDATE: u8 = 0xA3;
+const INS_CALCULATE_ALL: u8 = 0xA4;
+const INS_SEND_REMAINING: u8 = 0xA5;
+
+/// Bitmask for extracting the hash algorithm from a combined type/algo byte.
+#[allow(dead_code)]
+const MASK_ALGO: u8 = 0x0F;
+/// Bitmask for extracting the OATH type from a combined type/algo byte.
+const MASK_TYPE: u8 = 0xF0;
+
+/// Default TOTP time period in seconds.
+const DEFAULT_PERIOD: u32 = 30;
+/// Default number of digits in an OTP code.
+#[allow(dead_code)]
+const DEFAULT_DIGITS: u8 = 6;
+/// Default initial moving factor for HOTP.
+#[allow(dead_code)]
+const DEFAULT_IMF: u32 = 0;
+/// Length of the HMAC challenge in bytes.
+#[allow(dead_code)]
+const CHALLENGE_LEN: usize = 8;
+/// Minimum HMAC key size in bytes; shorter keys are zero-padded.
+const HMAC_MINIMUM_KEY_SIZE: usize = 14;
+
+const PROP_REQUIRE_TOUCH: u8 = 0x02;
+
+/// Access key length in bytes.
+const ACCESS_KEY_LEN: usize = 16;
+
+type HmacSha1 = Hmac<Sha1>;
+
+// ---------------------------------------------------------------------------
+// Secret newtypes
+// ---------------------------------------------------------------------------
+
+/// A 16-byte access key for protecting the OATH application.
+///
+/// Derived from a password using PBKDF2, or provided directly as raw bytes.
+/// The key is automatically zeroized when dropped.
+///
+/// # Examples
+///
+/// ```
+/// use yubikit::oath::OathAccessKey;
+///
+/// let key = OathAccessKey::new(&[0u8; 16]).unwrap();
+/// ```
+#[derive(Clone)]
+pub struct OathAccessKey(crate::__internal::SecretValue<[u8; ACCESS_KEY_LEN]>);
+
+impl OathAccessKey {
+    /// Create an access key from a 16-byte slice.
+    ///
+    /// Returns an error if the slice is not exactly 16 bytes.
+    pub fn new(key: &[u8]) -> Result<Self, OathError> {
+        let arr: [u8; ACCESS_KEY_LEN] = key.try_into().map_err(|_| {
+            OathError::InvalidData(format!("Access key must be {ACCESS_KEY_LEN} bytes"))
+        })?;
+        Ok(Self(crate::__internal::SecretValue::new(arr)))
+    }
+
+    /// Create an access key from raw bytes (internal, already validated).
+    fn from_array(key: [u8; ACCESS_KEY_LEN]) -> Self {
+        Self(crate::__internal::SecretValue::new(key))
+    }
+
+    /// Access the raw key bytes.
+    pub fn expose_secret(&self) -> &[u8] {
+        self.0.expose_secret()
+    }
+}
+
+impl std::fmt::Debug for OathAccessKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OathAccessKey([REDACTED])")
+    }
+}
+
+/// Hash algorithm used for OATH credential computation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[repr(u8)]
+pub enum HashAlgorithm {
+    /// SHA-1 (20-byte digest).
+    Sha1 = 0x01,
+    /// SHA-256 (32-byte digest).
+    Sha256 = 0x02,
+    /// SHA-512 (64-byte digest).
+    Sha512 = 0x03,
+}
+
+impl HashAlgorithm {
+    /// Convert a raw byte value to a [`HashAlgorithm`], returning `None` if unknown.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0x01 => Some(Self::Sha1),
+            0x02 => Some(Self::Sha256),
+            0x03 => Some(Self::Sha512),
+            _ => None,
+        }
+    }
+
+    /// Returns the HMAC block size in bytes for this algorithm.
+    pub fn block_size(self) -> usize {
+        match self {
+            HashAlgorithm::Sha1 => 64,
+            HashAlgorithm::Sha256 => 64,
+            HashAlgorithm::Sha512 => 128,
+        }
+    }
+
+    /// Returns the digest output size in bytes for this algorithm.
+    pub fn digest_size(self) -> usize {
+        match self {
+            HashAlgorithm::Sha1 => 20,
+            HashAlgorithm::Sha256 => 32,
+            HashAlgorithm::Sha512 => 64,
+        }
+    }
+}
+
+/// The type of OATH credential.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum OathType {
+    /// HMAC-based One-Time Password (event-based).
+    Hotp = 0x10,
+    /// Time-based One-Time Password.
+    Totp = 0x20,
+}
+
+impl OathType {
+    /// Convert a raw byte value to an [`OathType`], returning `None` if unknown.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0x10 => Some(Self::Hotp),
+            0x20 => Some(Self::Totp),
+            _ => None,
+        }
+    }
+}
+
+/// Errors that can occur during OATH operations.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum OathError {
+    /// The requested operation or feature is not supported by this YubiKey.
+    #[error("Not supported: {0}")]
+    NotSupported(String),
+    /// The data received from the device was invalid or malformed.
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
+    /// The HMAC response from the device did not match the expected value.
+    #[error("Wrong response MAC")]
+    WrongMac,
+    /// The credential does not belong to the currently connected YubiKey.
+    #[error("Credential does not belong to this YubiKey")]
+    WrongDevice,
+    /// A low-level smart card communication error occurred.
+    #[error("Connection error: {0}")]
+    Connection(SmartCardError),
+}
+
+impl From<SmartCardError> for OathError {
+    fn from(e: SmartCardError) -> Self {
+        match e {
+            SmartCardError::NotSupported(msg) => OathError::NotSupported(msg),
+            SmartCardError::InvalidData(msg) => OathError::InvalidData(msg),
+            other => OathError::Connection(other),
+        }
+    }
+}
+
+impl From<TlvError> for OathError {
+    fn from(e: TlvError) -> Self {
+        OathError::InvalidData(e.to_string())
+    }
+}
+
+/// Format a credential ID from its components.
+pub fn format_cred_id(
+    issuer: Option<&str>,
+    name: &str,
+    oath_type: OathType,
+    period: u32,
+) -> Vec<u8> {
+    let mut cred_id = String::new();
+    if oath_type == OathType::Totp && period != DEFAULT_PERIOD {
+        cred_id.push_str(&format!("{}/", period));
+    }
+    if let Some(issuer) = issuer {
+        cred_id.push_str(issuer);
+        cred_id.push(':');
+    }
+    cred_id.push_str(name);
+    cred_id.into_bytes()
+}
+
+/// Parse a credential ID into (issuer, name, period).
+fn parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, String, u32) {
+    let data = String::from_utf8_lossy(cred_id);
+    if oath_type == OathType::Totp {
+        // Pattern: [<period>/][[issuer]:]name
+        if let Some((prefix, rest)) = data.split_once('/')
+            && let Ok(period) = prefix.parse::<u32>()
+        {
+            let (issuer, name) = split_issuer_name(rest);
+            return (issuer, name, period);
+        }
+        let (issuer, name) = split_issuer_name(&data);
+        return (issuer, name, DEFAULT_PERIOD);
+    }
+    let (issuer, name) = split_issuer_name(&data);
+    (issuer, name, 0)
+}
+
+fn split_issuer_name(data: &str) -> (Option<String>, String) {
+    if let Some(idx) = data.find(':')
+        && idx > 0
+    {
+        return (Some(data[..idx].to_string()), data[idx + 1..].to_string());
+    }
+    (None, data.to_string())
+}
+
+/// Get device ID from salt (SHA-256, base64 without padding).
+fn get_device_id(salt: &[u8]) -> String {
+    let hash = Sha256::digest(salt);
+    let b64 = base64_encode(&hash[..16]);
+    b64.trim_end_matches('=').to_string()
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
+
+/// Compute HMAC-SHA1.
+fn hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
+    let mut mac = HmacSha1::new_from_slice(key).expect("HMAC accepts any key size");
+    mac.update(message);
+    mac.finalize().into_bytes().to_vec()
+}
+
+/// Constant-time HMAC comparison.
+fn hmac_verify(key: &[u8], message: &[u8], expected: &[u8]) -> bool {
+    let computed = hmac_sha1(key, message);
+    subtle::ConstantTimeEq::ct_eq(computed.as_slice(), expected).into()
+}
+
+/// Derive OATH access key from password and salt.
+pub fn derive_key(salt: &[u8], passphrase: &str) -> OathAccessKey {
+    let mut key = [0u8; ACCESS_KEY_LEN];
+    pbkdf2::pbkdf2_hmac::<Sha1>(passphrase.as_bytes(), salt, 1000, &mut key);
+    OathAccessKey::from_array(key)
+}
+
+/// Shorten HMAC key per RFC 2104.
+fn hmac_shorten_key(key: &[u8], algo: HashAlgorithm) -> Zeroizing<Vec<u8>> {
+    if key.len() > algo.block_size() {
+        Zeroizing::new(match algo {
+            HashAlgorithm::Sha1 => Sha1::digest(key).to_vec(),
+            HashAlgorithm::Sha256 => Sha256::digest(key).to_vec(),
+            HashAlgorithm::Sha512 => {
+                use sha2::Sha512;
+                Sha512::digest(key).to_vec()
+            }
+        })
+    } else {
+        Zeroizing::new(key.to_vec())
+    }
+}
+
+/// Get TOTP challenge from timestamp and period.
+pub fn get_challenge(timestamp: u64, period: u32) -> [u8; 8] {
+    let time_step = timestamp / period as u64;
+    time_step.to_be_bytes()
+}
+
+/// Format an OATH code from truncated response.
+fn format_code(
+    oath_type: OathType,
+    period: u32,
+    timestamp: u64,
+    truncated: &[u8],
+) -> (String, u64, u64) {
+    let (valid_from, valid_to) = if oath_type == OathType::Totp {
+        let time_step = timestamp / period as u64;
+        (time_step * period as u64, (time_step + 1) * period as u64)
+    } else {
+        (timestamp, 0x7FFFFFFFFFFFFFFF)
+    };
+
+    let digits = truncated[0] as u32;
+    let raw = u32::from_be_bytes([truncated[1], truncated[2], truncated[3], truncated[4]]);
+    let code_val = (raw & 0x7FFFFFFF) % 10u32.pow(digits);
+    let code = format!("{:0>width$}", code_val, width = digits as usize);
+
+    (code, valid_from, valid_to)
+}
+
+/// Build APDU data for put_credential command.
+fn build_put_data(
+    cred_id: &[u8],
+    oath_type: OathType,
+    hash_algorithm: HashAlgorithm,
+    digits: u8,
+    secret: &[u8],
+    touch_required: bool,
+    counter: u32,
+) -> Zeroizing<Vec<u8>> {
+    let mut short_secret = hmac_shorten_key(secret, hash_algorithm);
+    if short_secret.len() < HMAC_MINIMUM_KEY_SIZE {
+        short_secret.resize(HMAC_MINIMUM_KEY_SIZE, 0);
+    }
+
+    let mut key_val = Zeroizing::new(vec![oath_type as u8 | hash_algorithm as u8, digits]);
+    key_val.extend_from_slice(&short_secret);
+
+    let mut data = Zeroizing::new(tlv_encode(TAG_NAME, cred_id));
+    tlv_append(&mut data, TAG_KEY, &key_val);
+
+    if touch_required {
+        data.extend_from_slice(&[TAG_PROPERTY as u8, PROP_REQUIRE_TOUCH]);
+    }
+
+    if counter > 0 {
+        data.extend_from_slice(&tlv_encode(TAG_IMF, &counter.to_be_bytes()));
+    }
+
+    data
+}
+
+/// Build APDU data for set_key command.
+fn build_set_key_data(key: &[u8], challenge: &[u8]) -> Zeroizing<Vec<u8>> {
+    let response = hmac_sha1(key, challenge);
+    let mut key_val = Zeroizing::new(vec![OathType::Totp as u8 | HashAlgorithm::Sha1 as u8]);
+    key_val.extend_from_slice(key);
+
+    let mut data = Zeroizing::new(Vec::new());
+    tlv_append(&mut data, TAG_KEY, &key_val);
+    tlv_append(&mut data, TAG_CHALLENGE, challenge);
+    tlv_append(&mut data, TAG_RESPONSE, &response);
+    data
+}
+
+/// Build APDU data for validate command.
+fn build_validate_data(
+    key: &[u8],
+    device_challenge: &[u8],
+    host_challenge: &[u8],
+) -> Zeroizing<Vec<u8>> {
+    let response = hmac_sha1(key, device_challenge);
+    let mut data = Zeroizing::new(Vec::new());
+    tlv_append(&mut data, TAG_RESPONSE, &response);
+    tlv_append(&mut data, TAG_CHALLENGE, host_challenge);
+    data
+}
+
+/// Parse a credential entry from LIST response.
+#[allow(dead_code)]
+fn parse_list_entry(data: &[u8]) -> Result<(OathType, Vec<u8>), OathError> {
+    let oath_type = OathType::from_u8(MASK_TYPE & data[0])
+        .ok_or_else(|| OathError::InvalidData(format!("0x{:02x}", data[0] & MASK_TYPE)))?;
+    Ok((oath_type, data[1..].to_vec()))
+}
+
+/// Parse base32-encoded key (supports unpadded).
+pub fn parse_b32_key(key: &str) -> Result<Vec<u8>, OathError> {
+    let cleaned = key.to_uppercase().replace(' ', "");
+    let padded = {
+        let pad = (8 - cleaned.len() % 8) % 8;
+        let mut s = cleaned;
+        for _ in 0..pad {
+            s.push('=');
+        }
+        s
+    };
+    base32::decode(base32::Alphabet::Rfc4648 { padding: true }, &padded)
+        .ok_or(OathError::InvalidData("Invalid base32 key".into()))
+}
+
+// ---------------------------------------------------------------------------
+// Credential / Code types
+// ---------------------------------------------------------------------------
+
+/// An OATH credential on the device.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Credential {
+    /// Identifier of the YubiKey this credential belongs to.
+    pub device_id: String,
+    /// Raw credential ID as stored on the device.
+    pub id: Vec<u8>,
+    /// Optional issuer (e.g., service name) parsed from the credential ID.
+    pub issuer: Option<String>,
+    /// Account name for this credential.
+    pub name: String,
+    /// Whether this is a TOTP or HOTP credential.
+    pub oath_type: OathType,
+    /// Time period in seconds (only meaningful for TOTP).
+    pub period: u32,
+    /// Whether touch is required to compute a code, if known.
+    pub touch_required: Option<bool>,
+}
+
+/// A computed OATH code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Code {
+    /// The formatted OTP code string (e.g., `"123456"`).
+    pub value: String,
+    /// Start of the validity window as a Unix timestamp (seconds).
+    pub valid_from: u64,
+    /// End of the validity window as a Unix timestamp (seconds).
+    pub valid_to: u64,
+}
+
+/// Data needed to create a credential.
+pub struct CredentialData {
+    /// Account name for the credential.
+    pub name: String,
+    /// Whether this is a TOTP or HOTP credential.
+    pub oath_type: OathType,
+    /// Hash algorithm to use for code computation.
+    pub hash_algorithm: HashAlgorithm,
+    /// Shared secret key (zeroized on drop).
+    pub secret: Vec<u8>,
+    /// Number of digits in the generated OTP code.
+    pub digits: u8,
+    /// Time period in seconds for TOTP credentials.
+    pub period: u32,
+    /// Initial counter value for HOTP credentials.
+    pub counter: u32,
+    /// Optional issuer (e.g., service name).
+    pub issuer: Option<String>,
+}
+
+impl Drop for CredentialData {
+    fn drop(&mut self) {
+        self.secret.zeroize();
+    }
+}
+
+impl CredentialData {
+    /// Get the credential ID for this data.
+    pub fn get_id(&self) -> Vec<u8> {
+        format_cred_id(
+            self.issuer.as_deref(),
+            &self.name,
+            self.oath_type,
+            self.period,
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Parse SELECT response
+// ---------------------------------------------------------------------------
+
+fn parse_select(response: &[u8]) -> Result<(Version, Vec<u8>, Option<Vec<u8>>), OathError> {
+    let tlvs = parse_tlv_list(response)?;
+    let version_data = tlv_get(&tlvs, TAG_VERSION)
+        .ok_or_else(|| OathError::InvalidData("Missing version in SELECT".into()))?;
+    let version = Version::from_bytes(version_data);
+
+    let salt = tlv_get(&tlvs, TAG_NAME)
+        .ok_or_else(|| OathError::InvalidData("Missing salt in SELECT".into()))?
+        .to_vec();
+
+    let challenge = tlv_get(&tlvs, TAG_CHALLENGE).map(|c| c.to_vec());
+
+    Ok((version, salt, challenge))
+}
+
+// ---------------------------------------------------------------------------
+// OathSession — full session over SmartCardProtocol
+// ---------------------------------------------------------------------------
+
+/// A session with the OATH application on a YubiKey.
+pub struct OathSession<C: SmartCardConnection> {
+    protocol: SmartCardProtocol<C>,
+    version: Version,
+    salt: Vec<u8>,
+    challenge: Option<Vec<u8>>,
+    device_id: String,
+    has_key: bool,
+}
+
+impl<C: SmartCardConnection> OathSession<C> {
+    /// Open an OATH session on the given connection.
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new(connection: C) -> Result<Self, (SmartCardError, C)> {
+        let mut protocol =
+            SmartCardProtocol::new(connection).with_ins_send_remaining(INS_SEND_REMAINING);
+        let resp = match protocol.select(Aid::OATH) {
+            Ok(resp) => resp,
+            Err(e) => return Err((e, protocol.into_connection())),
+        };
+        Self::init(protocol, &resp)
+    }
+
+    /// Open an OATH session with SCP (Secure Channel Protocol).
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new_with_scp(
+        connection: C,
+        scp_key_params: &crate::smartcard::ScpKeyParams,
+    ) -> Result<Self, (SmartCardError, C)> {
+        let mut protocol =
+            SmartCardProtocol::new(connection).with_ins_send_remaining(INS_SEND_REMAINING);
+        let resp = match protocol.select(Aid::OATH) {
+            Ok(resp) => resp,
+            Err(e) => return Err((e, protocol.into_connection())),
+        };
+        if let Err(e) = protocol.init_scp(scp_key_params) {
+            return Err((e, protocol.into_connection()));
+        }
+        Self::init(protocol, &resp)
+    }
+
+    fn init(
+        mut protocol: SmartCardProtocol<C>,
+        select_response: &[u8],
+    ) -> Result<Self, (SmartCardError, C)> {
+        log::debug!("Opening OathSession");
+        let (version, salt, challenge) = match parse_select(select_response) {
+            Ok(v) => v,
+            Err(e) => {
+                return Err((
+                    SmartCardError::InvalidData(e.to_string()),
+                    protocol.into_connection(),
+                ));
+            }
+        };
+        let version = patch_version(version);
+        protocol.configure(version);
+
+        let has_key = challenge.is_some();
+        let device_id = get_device_id(&salt);
+
+        Ok(Self {
+            protocol,
+            version,
+            salt,
+            challenge,
+            device_id,
+            has_key,
+        })
+    }
+
+    /// The OATH application version.
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
+    /// A random static identifier, re-generated on reset.
+    pub fn device_id(&self) -> &str {
+        &self.device_id
+    }
+
+    /// Whether an access key is configured.
+    pub fn has_key(&self) -> bool {
+        self.has_key
+    }
+
+    /// Whether the session is currently locked.
+    pub fn locked(&self) -> bool {
+        self.challenge.is_some()
+    }
+
+    /// Get a reference to the underlying protocol.
+    pub fn protocol(&self) -> &SmartCardProtocol<C> {
+        &self.protocol
+    }
+
+    /// Get a mutable reference to the underlying protocol.
+    pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
+        &mut self.protocol
+    }
+
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> C {
+        self.protocol.into_connection()
+    }
+
+    /// Factory reset the OATH application, consuming this session.
+    ///
+    /// Returns the connection on success or alongside the error on failure.
+    /// A failed exchange can leave the device's reset state uncertain, so the
+    /// session is consumed even on error. No SELECT or subsequent commands are sent.
+    /// Open a new session to continue, explicitly re-establishing SCP if needed.
+    ///
+    /// ```compile_fail
+    /// # use yubikit::{oath::OathSession, smartcard::SmartCardConnection};
+    /// # fn cannot_reuse<C: SmartCardConnection>(session: OathSession<C>) {
+    /// let _ = session.reset();
+    /// let _ = session.device_id(); // The session has been consumed.
+    /// # }
+    /// ```
+    pub fn reset(mut self) -> Result<C, (OathError, C)> {
+        log::debug!("Resetting OATH application");
+        let result = self.protocol.send_apdu(0, INS_RESET, 0xDE, 0xAD, &[]);
+        let connection = self.into_connection();
+        match result {
+            Ok(_) => {
+                log::info!("OATH application reset");
+                Ok(connection)
+            }
+            Err(error) => Err((error.into(), connection)),
+        }
+    }
+
+    /// Derive an access key from a password.
+    pub fn derive_key(&self, password: &str) -> OathAccessKey {
+        derive_key(&self.salt, password)
+    }
+
+    /// Validate (unlock) the session with an access key.
+    pub fn validate(&mut self, key: &OathAccessKey) -> Result<(), OathError> {
+        log::debug!("Validating OATH session");
+        let challenge = self
+            .challenge
+            .as_ref()
+            .ok_or_else(|| OathError::InvalidData("Session is not locked".into()))?;
+
+        let host_challenge: [u8; 8] = rand_bytes();
+        let data = build_validate_data(key.expose_secret(), challenge, &host_challenge);
+        let resp = self.protocol.send_apdu(0, INS_VALIDATE, 0, 0, &data)?;
+
+        let resp_value = tlv_unpack(TAG_RESPONSE, &resp)?;
+        if !hmac_verify(key.expose_secret(), &host_challenge, &resp_value) {
+            return Err(OathError::InvalidData(
+                "Response from validation does not match verification".into(),
+            ));
+        }
+
+        self.challenge = None;
+        Ok(())
+    }
+
+    /// Set an access key.
+    pub fn set_key(&mut self, key: &OathAccessKey) -> Result<(), OathError> {
+        log::debug!("Setting OATH access key");
+        let challenge: [u8; 8] = rand_bytes();
+        let data = build_set_key_data(key.expose_secret(), &challenge);
+        self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, &data)?;
+        self.has_key = true;
+        log::info!("OATH access key set");
+        Ok(())
+    }
+
+    /// Remove the access key.
+    pub fn unset_key(&mut self) -> Result<(), OathError> {
+        log::debug!("Removing OATH access key");
+        let data = tlv_encode(TAG_KEY, &[]);
+        self.protocol.send_apdu(0, INS_SET_CODE, 0, 0, &data)?;
+        self.has_key = false;
+        log::info!("OATH access key removed");
+        Ok(())
+    }
+
+    /// Add a credential.
+    pub fn put_credential(
+        &mut self,
+        cred_data: &CredentialData,
+        touch_required: bool,
+    ) -> Result<Credential, OathError> {
+        log::debug!("Adding OATH credential");
+        let cred_id = cred_data.get_id();
+        let data = build_put_data(
+            &cred_id,
+            cred_data.oath_type,
+            cred_data.hash_algorithm,
+            cred_data.digits,
+            &cred_data.secret,
+            touch_required,
+            cred_data.counter,
+        );
+        self.protocol.send_apdu(0, INS_PUT, 0, 0, &data)?;
+        log::info!("OATH credential added");
+
+        Ok(Credential {
+            device_id: self.device_id.clone(),
+            id: cred_id,
+            issuer: cred_data.issuer.clone(),
+            name: cred_data.name.clone(),
+            oath_type: cred_data.oath_type,
+            period: cred_data.period,
+            touch_required: Some(touch_required),
+        })
+    }
+
+    /// Rename a credential (requires YubiKey 5.3.1+).
+    pub fn rename_credential(
+        &mut self,
+        credential_id: &[u8],
+        name: &str,
+        issuer: Option<&str>,
+    ) -> Result<Vec<u8>, OathError> {
+        log::debug!("Renaming OATH credential");
+        if self.version < Version(5, 3, 1) {
+            return Err(OathError::NotSupported(
+                "Rename requires YubiKey 5.3.1 or later".into(),
+            ));
+        }
+        let (_, _, period) = parse_cred_id(credential_id, OathType::Totp);
+        let new_id = format_cred_id(issuer, name, OathType::Totp, period);
+        let mut data = tlv_encode(TAG_NAME, credential_id);
+        data.extend_from_slice(&tlv_encode(TAG_NAME, &new_id));
+        self.protocol.send_apdu(0, INS_RENAME, 0, 0, &data)?;
+        log::info!("OATH credential renamed");
+        Ok(new_id)
+    }
+
+    /// List all credentials.
+    pub fn list_credentials(&mut self) -> Result<Vec<Credential>, OathError> {
+        log::debug!("Listing OATH credentials");
+        let resp = self.protocol.send_apdu(0, INS_LIST, 0, 0, &[])?;
+        let tlvs = parse_tlv_list(&resp)?;
+
+        let mut creds = Vec::new();
+        for (tag, value) in &tlvs {
+            if *tag != TAG_NAME_LIST {
+                continue;
+            }
+            let oath_type = OathType::from_u8(MASK_TYPE & value[0])
+                .ok_or_else(|| OathError::InvalidData("Invalid OATH type".into()))?;
+            let cred_id = &value[1..];
+            let (issuer, name, period) = parse_cred_id(cred_id, oath_type);
+            creds.push(Credential {
+                device_id: self.device_id.clone(),
+                id: cred_id.to_vec(),
+                issuer,
+                name,
+                oath_type,
+                period,
+                touch_required: None,
+            });
+        }
+        Ok(creds)
+    }
+
+    /// Perform a raw calculate for a credential.
+    pub fn calculate(
+        &mut self,
+        credential_id: &[u8],
+        challenge: &[u8],
+    ) -> Result<Vec<u8>, OathError> {
+        log::debug!("Calculating OATH code");
+        let mut data = tlv_encode(TAG_NAME, credential_id);
+        data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, challenge));
+        let resp = self.protocol.send_apdu(0, INS_CALCULATE, 0, 0, &data)?;
+        let value = tlv_unpack(TAG_RESPONSE, &resp)?;
+        // Skip the first byte (digits indicator)
+        Ok(value[1..].to_vec())
+    }
+
+    /// Delete a credential.
+    pub fn delete_credential(&mut self, credential_id: &[u8]) -> Result<(), OathError> {
+        log::debug!("Deleting OATH credential");
+        let data = tlv_encode(TAG_NAME, credential_id);
+        self.protocol.send_apdu(0, INS_DELETE, 0, 0, &data)?;
+        log::info!("OATH credential deleted");
+        Ok(())
+    }
+
+    /// Calculate codes for all credentials. Returns (credential, optional code) pairs.
+    pub fn calculate_all(
+        &mut self,
+        timestamp: u64,
+    ) -> Result<Vec<(Credential, Option<Code>)>, OathError> {
+        log::debug!("Calculating all OATH codes");
+        let challenge = get_challenge(timestamp, DEFAULT_PERIOD);
+        let data = tlv_encode(TAG_CHALLENGE, &challenge);
+        let data = self
+            .protocol
+            .send_apdu(0, INS_CALCULATE_ALL, 0, 0x01, &data)?;
+
+        let tlvs = parse_tlv_list(&data)?;
+
+        let mut entries = Vec::new();
+        let mut iter = tlvs.into_iter();
+        while let Some((tag, value)) = iter.next() {
+            if tag != TAG_NAME {
+                continue;
+            }
+            let cred_id = value;
+            let (resp_tag, resp_value) = iter
+                .next()
+                .ok_or_else(|| OathError::InvalidData("Missing response TLV".into()))?;
+
+            let oath_type = if resp_tag == TAG_HOTP {
+                OathType::Hotp
+            } else {
+                OathType::Totp
+            };
+            let touch = resp_tag == TAG_TOUCH;
+            let (issuer, name, period) = parse_cred_id(&cred_id, oath_type);
+
+            let credential = Credential {
+                device_id: self.device_id.clone(),
+                id: cred_id,
+                issuer,
+                name,
+                oath_type,
+                period,
+                touch_required: Some(touch),
+            };
+
+            let code = if resp_tag == TAG_TRUNCATED {
+                if period == DEFAULT_PERIOD {
+                    let (val, vf, vt) = format_code(oath_type, period, timestamp, &resp_value);
+                    Some(Code {
+                        value: val,
+                        valid_from: vf,
+                        valid_to: vt,
+                    })
+                } else {
+                    // Non-standard period: recalculate
+                    Some(self.calculate_code(&credential, timestamp)?)
+                }
+            } else {
+                None
+            };
+
+            entries.push((credential, code));
+        }
+
+        Ok(entries)
+    }
+
+    /// Calculate code for a specific credential.
+    pub fn calculate_code(
+        &mut self,
+        credential: &Credential,
+        timestamp: u64,
+    ) -> Result<Code, OathError> {
+        if credential.device_id != self.device_id {
+            return Err(OathError::InvalidData(
+                "Credential does not belong to this YubiKey".into(),
+            ));
+        }
+
+        let challenge = if credential.oath_type == OathType::Totp {
+            get_challenge(timestamp, credential.period).to_vec()
+        } else {
+            Vec::new()
+        };
+
+        let mut data = tlv_encode(TAG_NAME, &credential.id);
+        data.extend_from_slice(&tlv_encode(TAG_CHALLENGE, &challenge));
+        let resp = self.protocol.send_apdu(0, INS_CALCULATE, 0, 0x01, &data)?;
+
+        let response = tlv_unpack(TAG_TRUNCATED, &resp)?;
+
+        let (val, vf, vt) = format_code(
+            credential.oath_type,
+            credential.period,
+            timestamp,
+            &response,
+        );
+        Ok(Code {
+            value: val,
+            valid_from: vf,
+            valid_to: vt,
+        })
+    }
+}
+
+/// Generate random bytes (uses getrandom for cross-platform support).
+fn rand_bytes<const N: usize>() -> [u8; N] {
+    let mut buf = [0u8; N];
+    getrandom::fill(&mut buf).expect("getrandom failed");
+    buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct ResetConnection {
+        sent: Vec<Vec<u8>>,
+        reset_sw: Option<u16>,
+        reset: bool,
+    }
+
+    impl crate::core::Connection for ResetConnection {
+        type Error = SmartCardError;
+
+        fn close(&mut self) {}
+    }
+
+    impl SmartCardConnection for ResetConnection {
+        fn transport(&self) -> crate::core::Transport {
+            crate::core::Transport::Usb
+        }
+
+        fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+            self.sent.push(apdu.to_vec());
+            match apdu[1] {
+                0xa4 => Ok((
+                    [
+                        tlv_encode(TAG_VERSION, &[5, 7, 2]),
+                        tlv_encode(TAG_NAME, if self.reset { b"new salt" } else { b"old salt" }),
+                    ]
+                    .concat(),
+                    0x9000,
+                )),
+                INS_RESET => {
+                    assert_eq!(&apdu[..4], &[0, INS_RESET, 0xde, 0xad]);
+                    let sw = self.reset_sw.ok_or_else(|| {
+                        SmartCardError::Transport(Box::new(std::io::Error::other(
+                            "Reset transport failure",
+                        )))
+                    })?;
+                    self.reset = sw == 0x9000;
+                    Ok((Vec::new(), sw))
+                }
+                INS_LIST => Ok((Vec::new(), 0x9000)),
+                _ => panic!("Unexpected APDU"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_reset_returns_connection_without_reselecting_on_success_or_failure() {
+        for sw in [Some(0x9000), Some(0x6982), None] {
+            let connection = ResetConnection {
+                sent: Vec::new(),
+                reset_sw: sw,
+                reset: false,
+            };
+            let session = OathSession::new(connection).unwrap();
+            let old_id = session.device_id().to_owned();
+            let connection = match (sw, session.reset()) {
+                (Some(0x9000), Ok(connection)) => connection,
+                (
+                    Some(0x6982),
+                    Err((
+                        OathError::Connection(SmartCardError::Apdu { sw: 0x6982, .. }),
+                        connection,
+                    )),
+                ) => connection,
+                (None, Err((OathError::Connection(SmartCardError::Transport(_)), connection))) => {
+                    connection
+                }
+                (_, result) => panic!("Unexpected reset result: {result:?}"),
+            };
+            assert_eq!(connection.sent.len(), 2);
+            let mut reopened = OathSession::new(connection).unwrap();
+            assert_eq!(reopened.device_id() != old_id, sw == Some(0x9000));
+            assert!(reopened.list_credentials().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_format_parse_cred_id_totp() {
+        let id = format_cred_id(Some("GitHub"), "user@example.com", OathType::Totp, 30);
+        let (issuer, name, period) = parse_cred_id(&id, OathType::Totp);
+        assert_eq!(issuer.as_deref(), Some("GitHub"));
+        assert_eq!(name, "user@example.com");
+        assert_eq!(period, 30);
+    }
+
+    #[test]
+    fn test_format_parse_cred_id_totp_custom_period() {
+        let id = format_cred_id(Some("Test"), "acct", OathType::Totp, 60);
+        assert_eq!(id, b"60/Test:acct");
+        let (issuer, name, period) = parse_cred_id(&id, OathType::Totp);
+        assert_eq!(issuer.as_deref(), Some("Test"));
+        assert_eq!(name, "acct");
+        assert_eq!(period, 60);
+    }
+
+    #[test]
+    fn test_format_parse_cred_id_hotp() {
+        let id = format_cred_id(None, "myaccount", OathType::Hotp, 0);
+        let (issuer, name, period) = parse_cred_id(&id, OathType::Hotp);
+        assert_eq!(issuer, None);
+        assert_eq!(name, "myaccount");
+        assert_eq!(period, 0);
+    }
+
+    #[test]
+    fn test_hmac_sha1() {
+        let key = [0x0b; 20];
+        let data = b"Hi There";
+        let result = hmac_sha1(&key, data);
+        // RFC 2202 test vector 1.
+        assert_eq!(
+            result,
+            [
+                0xb6, 0x17, 0x31, 0x86, 0x55, 0x05, 0x72, 0x64, 0xe2, 0x8b, 0xc0, 0xb6, 0xfb, 0x37,
+                0x8c, 0x8e, 0xf1, 0x46, 0xbe, 0x00,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_derive_key() {
+        let salt = b"test_salt";
+        let key = derive_key(salt, "password");
+        assert_eq!(
+            key.expose_secret(),
+            &[
+                0xe9, 0x82, 0x15, 0xa3, 0x2e, 0x1a, 0x3f, 0x06, 0x5e, 0xe5, 0x98, 0x32, 0x1a, 0x7f,
+                0xaf, 0x0b,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_get_challenge() {
+        let challenge = get_challenge(1234567890, 30);
+        let time_step = 1234567890u64 / 30;
+        assert_eq!(challenge, time_step.to_be_bytes());
+    }
+
+    #[test]
+    fn test_format_code() {
+        let truncated = [6, 0x7F, 0xFF, 0xFF, 0xFF]; // 6 digits, max value
+        let (code, _, _) = format_code(OathType::Totp, 30, 1000, &truncated);
+        assert_eq!(code.len(), 6);
+    }
+
+    #[test]
+    fn test_parse_b32_key() {
+        let key = parse_b32_key("JBSWY3DPEHPK3PXP").unwrap();
+        assert_eq!(key, b"Hello!\xDE\xAD\xBE\xEF");
+    }
+
+    #[test]
+    fn test_device_id() {
+        let id = get_device_id(b"some_salt");
+        assert!(!id.is_empty());
+        assert!(!id.contains('='));
+    }
+}

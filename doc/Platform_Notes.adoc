@@ -1,0 +1,41 @@
+= Platform notes
+
+== macOS
+
+=== Input Monitoring access
+
+When running a `ykman otp` command, an error such as
+`Failed to open device for communication: -536870174` can indicate that access
+to the OTP (keyboard) USB interface is not permitted.
+
+The terminal application running `ykman` needs the _Input Monitoring_
+permission, not the `ykman` executable itself. If macOS does not prompt you,
+add your terminal under _System Settings -> Privacy & Security -> Input
+Monitoring_. On older macOS versions, use _System Preferences -> Security &
+Privacy -> Privacy -> Input Monitoring_.
+
+=== Uninstalling the .pkg installation
+
+To remove the executable symlink and installation directory created by the
+Yubico .pkg installer:
+
+[source,sh]
+----
+sudo rm /usr/local/bin/ykman
+sudo rm -r /usr/local/ykman
+----
+
+These paths apply only to the .pkg installation. Use the corresponding package
+manager to uninstall a Homebrew, MacPorts, Cargo, or Python installation.
+
+== FreeBSD
+
+FreeBSD is not officially supported or maintained by Yubico. Third-party ports
+and packages may still provide the Python-based 5.x release; their availability
+does not establish support for the Rust rewrite. Version 6 installation and
+device access on FreeBSD have not been verified here.
+
+For package and ports information, see the
+https://docs.freebsd.org/en/books/handbook/ports[FreeBSD Handbook].
+Consult your package maintainer's instructions for the packaged version and
+its USB driver requirements.

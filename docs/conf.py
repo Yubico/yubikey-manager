@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 #
 # Configuration file for the Sphinx documentation builder.
 #
@@ -12,17 +11,11 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
+import importlib.metadata
 import os
-import re
 import sys
 
-sys.path.insert(0, os.path.abspath("../"))
-
-
-def get_version():
-    with open("../ykman/__init__.py", "r") as f:
-        match = re.search(r"(?m)^__version__\s*=\s*['\"](.+)['\"]$", f.read())
-        return match.group(1)
+sys.path.insert(0, os.path.abspath("../packages/yubikit"))
 
 
 # -- Project information -----------------------------------------------------
@@ -32,7 +25,7 @@ copyright = "2023, Yubico"
 author = "Yubico"
 
 # The full version, including alpha/beta/rc tags
-release = get_version()
+release = importlib.metadata.version("yubikit")
 
 # The short X.Y version
 version = ".".join(release.split(".")[:2])
@@ -102,7 +95,7 @@ html_favicon = "favicon.ico"
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ["_static"]
+html_static_path = []
 
 # Don't show a "View page source" link on each page.
 html_show_sourcelink = False
@@ -176,7 +169,7 @@ texinfo_documents = [
         "yubikey-manager Documentation",
         author,
         "yubikey-manager",
-        "One line description of project.",
+        "Library and CLI for managing your YubiKey configuration.",
         "Miscellaneous",
     )
 ]
@@ -194,7 +187,7 @@ intersphinx_mapping = {
 
 
 # Custom config
-autoapi_dirs = ["../yubikit", "../ykman"]
+autoapi_dirs = ["../packages/yubikit/yubikit"]
 autoapi_options = [
     "members",
     "undoc-members",

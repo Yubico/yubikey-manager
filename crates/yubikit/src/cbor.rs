@@ -1,0 +1,745 @@
+// Copyright 2026 Yubico AB
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Minimal CBOR implementation supporting the subset of types required for
+//! FIDO2 CTAP.
+//!
+//! Supported types: unsigned/negative integers, byte strings, text strings,
+//! arrays, maps, and booleans. Maps are encoded using CTAP2 canonical ordering.
+//! Decoding rejects maps with duplicate keys.
+
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
+use std::fmt;
+
+use zeroize::{Zeroize, Zeroizing};
+
+/// CBOR value type supporting the subset used by CTAP2.
+#[derive(Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Value {
+    /// Signed or unsigned integer (CBOR major types 0 and 1).
+    Int(i64),
+    /// Byte string (CBOR major type 2).
+    Bytes(Vec<u8>),
+    /// UTF-8 text string (CBOR major type 3).
+    Text(String),
+    /// Boolean (`true` / `false`, CBOR simple values 20/21).
+    Bool(bool),
+    /// Ordered array of values (CBOR major type 4).
+    Array(Vec<Value>),
+    /// Ordered list of key-value pairs (CBOR major type 5).
+    Map(Vec<(Value, Value)>),
+}
+
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Int(n) => write!(f, "{n}"),
+            Value::Bytes(b) => write!(f, "h'{}'", crate::logging::hex_encode(b)),
+            Value::Text(s) => write!(f, "{s:?}"),
+            Value::Bool(b) => write!(f, "{b}"),
+            Value::Array(arr) => f.debug_list().entries(arr).finish(),
+            Value::Map(entries) => {
+                let mut m = f.debug_map();
+                for (k, v) in entries {
+                    m.entry(k, v);
+                }
+                m.finish()
+            }
+        }
+    }
+}
+
+impl Drop for Value {
+    fn drop(&mut self) {
+        match self {
+            Value::Bytes(data) => data.zeroize(),
+            Value::Text(text) => text.zeroize(),
+            Value::Int(_) | Value::Bool(_) | Value::Array(_) | Value::Map(_) => {}
+        }
+    }
+}
+
+/// Error type for CBOR encoding and decoding operations.
+#[derive(Debug, thiserror::Error)]
+pub enum CborError {
+    /// Input data ended before a complete CBOR value could be read.
+    #[error("Unexpected end of input")]
+    UnexpectedEof,
+    /// The additional information field contains a reserved value.
+    #[error("Invalid additional information: {0}")]
+    InvalidAdditionalInfo(u8),
+    /// The CBOR major type is not supported by this implementation.
+    #[error("Unsupported major type: {0}")]
+    UnsupportedMajorType(u8),
+    /// A text string contains invalid UTF-8 data.
+    #[error("Invalid UTF-8 in text string")]
+    InvalidUtf8,
+    /// Trailing bytes remain after decoding a complete CBOR value.
+    #[error("Extraneous data after CBOR value")]
+    ExtraneousData,
+    /// A map contains multiple entries with the same key.
+    #[error("Duplicate map key")]
+    DuplicateKey,
+    /// An integer value exceeds the representable range.
+    #[error("Integer overflow")]
+    IntegerOverflow,
+    /// The input exceeds the maximum allowed CBOR message size.
+    #[error("Input exceeds maximum CBOR message size")]
+    InputTooLarge,
+    /// Nested arrays/maps exceed the maximum allowed depth.
+    #[error("Nesting depth exceeds maximum of {MAX_DEPTH}")]
+    MaxDepthExceeded,
+}
+
+/// Maximum allowed input size for CBOR decoding (1 MB).
+const MAX_CBOR_SIZE: usize = 1_048_576;
+
+/// Maximum nesting depth for arrays and maps.
+const MAX_DEPTH: usize = 32;
+
+// --- Encoding ---
+
+fn encode_head(mt: u8, val: u64) -> Vec<u8> {
+    let mt = mt << 5;
+    if val <= 23 {
+        vec![mt | val as u8]
+    } else if val <= 0xFF {
+        vec![mt | 24, val as u8]
+    } else if val <= 0xFFFF {
+        let mut buf = vec![mt | 25, 0, 0];
+        buf[1..3].copy_from_slice(&(val as u16).to_be_bytes());
+        buf
+    } else if val <= 0xFFFF_FFFF {
+        let mut buf = vec![mt | 26, 0, 0, 0, 0];
+        buf[1..5].copy_from_slice(&(val as u32).to_be_bytes());
+        buf
+    } else {
+        let mut buf = vec![mt | 27, 0, 0, 0, 0, 0, 0, 0, 0];
+        buf[1..9].copy_from_slice(&val.to_be_bytes());
+        buf
+    }
+}
+
+/// CTAP2 canonical key ordering: sort by (first_byte, length, raw_bytes).
+fn canonical_cmp(a: &[u8], b: &[u8]) -> Ordering {
+    a.first()
+        .cmp(&b.first())
+        .then_with(|| a.len().cmp(&b.len()))
+        .then_with(|| a.cmp(b))
+}
+
+impl Value {
+    /// Encode this value to CBOR bytes.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        self.encode_to(&mut buf);
+        buf
+    }
+
+    /// Encode this value, appending to the given buffer.
+    pub fn encode_to(&self, buf: &mut Vec<u8>) {
+        match self {
+            Value::Int(n) => {
+                if *n >= 0 {
+                    buf.extend_from_slice(&encode_head(0, *n as u64));
+                } else {
+                    let encoded = (-1i128 - i128::from(*n)) as u64;
+                    buf.extend_from_slice(&encode_head(1, encoded));
+                }
+            }
+            Value::Bytes(data) => {
+                buf.extend_from_slice(&encode_head(2, data.len() as u64));
+                buf.extend_from_slice(data);
+            }
+            Value::Text(s) => {
+                let data = s.as_bytes();
+                buf.extend_from_slice(&encode_head(3, data.len() as u64));
+                buf.extend_from_slice(data);
+            }
+            Value::Bool(b) => {
+                buf.push(if *b { 0xF5 } else { 0xF4 });
+            }
+            Value::Array(arr) => {
+                buf.extend_from_slice(&encode_head(4, arr.len() as u64));
+                for item in arr {
+                    item.encode_to(buf);
+                }
+            }
+            Value::Map(entries) => {
+                buf.extend_from_slice(&encode_head(5, entries.len() as u64));
+                let mut encoded: Vec<(Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>)> = entries
+                    .iter()
+                    .map(|(k, v)| (Zeroizing::new(k.encode()), Zeroizing::new(v.encode())))
+                    .collect();
+                encoded.sort_by(|(a, _), (b, _)| canonical_cmp(a, b));
+                for (k, v) in &encoded {
+                    buf.extend_from_slice(k);
+                    buf.extend_from_slice(v);
+                }
+            }
+        }
+    }
+}
+
+// --- Decoding ---
+
+fn decode_head(data: &[u8]) -> Result<(u8, u64, &[u8]), CborError> {
+    if data.is_empty() {
+        return Err(CborError::UnexpectedEof);
+    }
+    let fb = data[0];
+    let mt = fb >> 5;
+    let ai = fb & 0x1F;
+    let rest = &data[1..];
+
+    let (val, rest) = decode_int(ai, rest)?;
+    Ok((mt, val, rest))
+}
+
+fn decode_int(ai: u8, data: &[u8]) -> Result<(u64, &[u8]), CborError> {
+    if ai < 24 {
+        Ok((ai as u64, data))
+    } else if ai == 24 {
+        if data.is_empty() {
+            return Err(CborError::UnexpectedEof);
+        }
+        Ok((data[0] as u64, &data[1..]))
+    } else if ai == 25 {
+        if data.len() < 2 {
+            return Err(CborError::UnexpectedEof);
+        }
+        Ok((u16::from_be_bytes([data[0], data[1]]) as u64, &data[2..]))
+    } else if ai == 26 {
+        if data.len() < 4 {
+            return Err(CborError::UnexpectedEof);
+        }
+        Ok((
+            u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as u64,
+            &data[4..],
+        ))
+    } else if ai == 27 {
+        if data.len() < 8 {
+            return Err(CborError::UnexpectedEof);
+        }
+        Ok((
+            u64::from_be_bytes([
+                data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+            ]),
+            &data[8..],
+        ))
+    } else {
+        Err(CborError::InvalidAdditionalInfo(ai))
+    }
+}
+
+/// Decode a CBOR value from the start of a byte slice, returning the value
+/// and any remaining bytes.
+pub fn decode_from(data: &[u8]) -> Result<(Value, &[u8]), CborError> {
+    if data.len() > MAX_CBOR_SIZE {
+        return Err(CborError::InputTooLarge);
+    }
+    decode_from_depth(data, 0)
+}
+
+fn decode_from_depth(data: &[u8], depth: usize) -> Result<(Value, &[u8]), CborError> {
+    let (mt, val, rest) = decode_head(data)?;
+    match mt {
+        0 => {
+            // Unsigned integer
+            let n: i64 = val.try_into().map_err(|_| CborError::IntegerOverflow)?;
+            Ok((Value::Int(n), rest))
+        }
+        1 => {
+            // Negative integer
+            let n: i64 = val.try_into().map_err(|_| CborError::IntegerOverflow)?;
+            Ok((Value::Int(-1 - n), rest))
+        }
+        2 => {
+            // Byte string
+            let len = val as usize;
+            if rest.len() < len {
+                return Err(CborError::UnexpectedEof);
+            }
+            Ok((Value::Bytes(rest[..len].to_vec()), &rest[len..]))
+        }
+        3 => {
+            // Text string
+            let len = val as usize;
+            if rest.len() < len {
+                return Err(CborError::UnexpectedEof);
+            }
+            let s = std::str::from_utf8(&rest[..len]).map_err(|_| CborError::InvalidUtf8)?;
+            Ok((Value::Text(s.to_string()), &rest[len..]))
+        }
+        4 => {
+            // Array
+            if depth >= MAX_DEPTH {
+                return Err(CborError::MaxDepthExceeded);
+            }
+            let count = val as usize;
+            let mut items = Vec::with_capacity(count.min(rest.len()));
+            let mut remaining = rest;
+            for _ in 0..count {
+                let (item, r) = decode_from_depth(remaining, depth + 1)?;
+                items.push(item);
+                remaining = r;
+            }
+            Ok((Value::Array(items), remaining))
+        }
+        5 => {
+            // Map
+            if depth >= MAX_DEPTH {
+                return Err(CborError::MaxDepthExceeded);
+            }
+            let count = val as usize;
+            let mut entries = Vec::with_capacity(count.min(rest.len()));
+            let mut remaining = rest;
+            for _ in 0..count {
+                let (k, r) = decode_from_depth(remaining, depth + 1)?;
+                let (v, r) = decode_from_depth(r, depth + 1)?;
+                entries.push((k, v));
+                remaining = r;
+            }
+            // Canonical encodings also identify equivalent non-minimal encodings
+            // and map keys whose entries are in different orders.
+            let mut keys: Vec<_> = entries
+                .iter()
+                .map(|(k, _)| Zeroizing::new(k.encode()))
+                .collect();
+            keys.sort_unstable_by(|a, b| a.as_slice().cmp(b.as_slice()));
+            if keys.windows(2).any(|pair| pair[0] == pair[1]) {
+                return Err(CborError::DuplicateKey);
+            }
+            Ok((Value::Map(entries), remaining))
+        }
+        7 => {
+            // Only the exact boolean encodings are supported, not float payloads.
+            match data[0] {
+                0xf4 => Ok((Value::Bool(false), rest)),
+                0xf5 => Ok((Value::Bool(true), rest)),
+                _ => Err(CborError::UnsupportedMajorType(7)),
+            }
+        }
+        _ => Err(CborError::UnsupportedMajorType(mt)),
+    }
+}
+
+/// Decode a single CBOR value from a byte slice.
+///
+/// Returns an error if there is extra data after the value.
+pub fn decode(data: &[u8]) -> Result<Value, CborError> {
+    if data.len() > MAX_CBOR_SIZE {
+        return Err(CborError::InputTooLarge);
+    }
+    let (value, rest) = decode_from_depth(data, 0)?;
+    if !rest.is_empty() {
+        return Err(CborError::ExtraneousData);
+    }
+    Ok(value)
+}
+
+/// Encode a CBOR value to bytes.
+pub fn encode(value: &Value) -> Vec<u8> {
+    value.encode()
+}
+
+// --- Convenience conversions ---
+
+impl From<i64> for Value {
+    fn from(n: i64) -> Self {
+        Value::Int(n)
+    }
+}
+
+impl From<i32> for Value {
+    fn from(n: i32) -> Self {
+        Value::Int(n as i64)
+    }
+}
+
+impl From<u32> for Value {
+    fn from(n: u32) -> Self {
+        Value::Int(n as i64)
+    }
+}
+
+impl From<bool> for Value {
+    fn from(b: bool) -> Self {
+        Value::Bool(b)
+    }
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::Text(s.to_string())
+    }
+}
+
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Value::Text(s)
+    }
+}
+
+impl From<&[u8]> for Value {
+    fn from(b: &[u8]) -> Self {
+        Value::Bytes(b.to_vec())
+    }
+}
+
+impl From<Vec<u8>> for Value {
+    fn from(b: Vec<u8>) -> Self {
+        Value::Bytes(b)
+    }
+}
+
+impl<V: Into<Value>> From<Vec<V>> for Value {
+    fn from(arr: Vec<V>) -> Self {
+        Value::Array(arr.into_iter().map(Into::into).collect())
+    }
+}
+
+impl<K: Into<Value>, V: Into<Value>> From<BTreeMap<K, V>> for Value {
+    fn from(map: BTreeMap<K, V>) -> Self {
+        Value::Map(map.into_iter().map(|(k, v)| (k.into(), v.into())).collect())
+    }
+}
+
+impl Value {
+    /// Get as integer, if this value is an Int.
+    pub fn as_int(&self) -> Option<i64> {
+        match self {
+            Value::Int(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// Get as byte slice, if this value is Bytes.
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Value::Bytes(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    /// Get as string slice, if this value is Text.
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Value::Text(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Get as bool, if this value is Bool.
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Value::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    /// Get as array slice, if this value is an Array.
+    pub fn as_array(&self) -> Option<&[Value]> {
+        match self {
+            Value::Array(arr) => Some(arr),
+            _ => None,
+        }
+    }
+
+    /// Get as map entries, if this value is a Map.
+    pub fn as_map(&self) -> Option<&[(Value, Value)]> {
+        match self {
+            Value::Map(entries) => Some(entries),
+            _ => None,
+        }
+    }
+
+    /// Look up a value in a Map by key.
+    pub fn map_get(&self, key: &Value) -> Option<&Value> {
+        self.as_map()
+            .and_then(|entries| entries.iter().find(|(k, _)| k == key).map(|(_, v)| v))
+    }
+
+    /// Look up a value in a Map by integer key.
+    pub fn map_get_int(&self, key: i64) -> Option<&Value> {
+        self.map_get(&Value::Int(key))
+    }
+
+    /// Look up a value in a Map by text key.
+    pub fn map_get_text(&self, key: &str) -> Option<&Value> {
+        self.map_get(&Value::Text(key.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_encode_decode_int() {
+        for n in [0i64, 1, 23, 24, 255, 256, 65535, 65536, 0x1_0000_0000] {
+            let encoded = Value::Int(n).encode();
+            let decoded = decode(&encoded).unwrap();
+            assert_eq!(decoded, Value::Int(n));
+        }
+    }
+
+    #[test]
+    fn test_encode_decode_negative_int() {
+        for n in [-1i64, -24, -25, -256, -257, -65536, -65537, i64::MIN] {
+            let encoded = Value::Int(n).encode();
+            let decoded = decode(&encoded).unwrap();
+            assert_eq!(decoded, Value::Int(n));
+        }
+    }
+
+    #[test]
+    fn test_encode_decode_bool() {
+        let t = Value::Bool(true).encode();
+        let f = Value::Bool(false).encode();
+        assert_eq!(t, vec![0xF5]);
+        assert_eq!(f, vec![0xF4]);
+        assert_eq!(decode(&t).unwrap(), Value::Bool(true));
+        assert_eq!(decode(&f).unwrap(), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_reject_float_and_extended_simple_values() {
+        for (header, width) in [(0xf8, 1), (0xf9, 2), (0xfa, 4), (0xfb, 8)] {
+            for bits in [0u64, 20, 21] {
+                let mut encoded = vec![header];
+                encoded.extend_from_slice(&bits.to_be_bytes()[8 - width..]);
+                assert!(matches!(
+                    decode(&encoded),
+                    Err(CborError::UnsupportedMajorType(7))
+                ));
+                assert!(matches!(
+                    decode_from(&encoded),
+                    Err(CborError::UnsupportedMajorType(7))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn test_decode_from_bool_preserves_remaining_bytes() {
+        for (header, value) in [(0xf4, false), (0xf5, true)] {
+            let encoded = [header, 0x01];
+            let (decoded, remaining) = decode_from(&encoded).unwrap();
+            assert_eq!(decoded, Value::Bool(value));
+            assert_eq!(remaining, &[0x01]);
+        }
+    }
+
+    #[test]
+    fn test_encode_decode_bytes() {
+        let data = b"hello";
+        let encoded = Value::Bytes(data.to_vec()).encode();
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!(decoded, Value::Bytes(data.to_vec()));
+    }
+
+    #[test]
+    fn test_encode_decode_text() {
+        let encoded = Value::Text("hello".into()).encode();
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!(decoded, Value::Text("hello".into()));
+    }
+
+    #[test]
+    fn test_encode_decode_array() {
+        let arr = Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+        let encoded = arr.encode();
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!(decoded, arr);
+    }
+
+    #[test]
+    fn test_encode_decode_map() {
+        let map = Value::Map(vec![
+            (Value::Int(1), Value::Text("one".into())),
+            (Value::Int(2), Value::Text("two".into())),
+        ]);
+        let encoded = map.encode();
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!(decoded, map);
+    }
+
+    #[test]
+    fn test_duplicate_map_keys() {
+        for key in [
+            Value::Int(1),
+            Value::Int(-1),
+            Value::Text("key".into()),
+            Value::Bytes(vec![1, 2]),
+            Value::Bool(true),
+            Value::Array(vec![Value::Int(1)]),
+            Value::Map(vec![(Value::Int(1), Value::Int(2))]),
+        ] {
+            let map = Value::Map(vec![
+                (key.clone(), Value::Int(1)),
+                (Value::Text("other".into()), Value::Int(2)),
+                (key, Value::Int(3)),
+            ]);
+            let encoded = map.encode();
+            assert!(matches!(decode(&encoded), Err(CborError::DuplicateKey)));
+            assert!(matches!(
+                decode_from(&encoded),
+                Err(CborError::DuplicateKey)
+            ));
+        }
+    }
+
+    #[test]
+    fn test_duplicate_map_keys_non_minimal_encoding() {
+        // Both 0x01 and 0x18 0x01 decode to Int(1).
+        let encoded = [0xa2, 0x01, 0x00, 0x18, 0x01, 0x01];
+        assert!(matches!(decode(&encoded), Err(CborError::DuplicateKey)));
+    }
+
+    #[test]
+    fn test_duplicate_map_keys_different_map_order() {
+        // The two map keys have identical entries in opposite orders.
+        let encoded = [
+            0xa2, 0xa2, 0x01, 0x02, 0x03, 0x04, 0x00, 0xa2, 0x03, 0x04, 0x01, 0x02, 0x01,
+        ];
+        assert!(matches!(decode(&encoded), Err(CborError::DuplicateKey)));
+    }
+
+    #[test]
+    fn test_duplicate_map_keys_nested() {
+        let duplicate = Value::Map(vec![
+            (Value::Int(1), Value::Bool(true)),
+            (Value::Int(1), Value::Bool(false)),
+        ]);
+        for value in [
+            Value::Array(vec![duplicate.clone()]),
+            Value::Map(vec![(Value::Int(1), duplicate.clone())]),
+            Value::Map(vec![(duplicate, Value::Int(1))]),
+        ] {
+            assert!(matches!(
+                decode(&value.encode()),
+                Err(CborError::DuplicateKey)
+            ));
+        }
+    }
+
+    #[test]
+    fn test_distinct_map_keys() {
+        let map = Value::Map(vec![
+            (Value::Int(1), Value::Int(0)),
+            (Value::Int(-1), Value::Int(0)),
+            (Value::Bool(true), Value::Int(0)),
+            (Value::Bytes(b"1".to_vec()), Value::Int(0)),
+            (Value::Text("1".into()), Value::Int(0)),
+            (Value::Array(vec![Value::Int(1)]), Value::Int(0)),
+        ]);
+        let encoded = map.encode();
+        assert_eq!(decode(&encoded).unwrap().as_map().unwrap().len(), 6);
+    }
+
+    #[test]
+    fn test_canonical_key_order() {
+        // Keys should be sorted by (first_byte, length, raw_bytes)
+        let map = Value::Map(vec![
+            (Value::Int(10), Value::Bool(true)),
+            (Value::Int(1), Value::Bool(false)),
+            (Value::Text("z".into()), Value::Int(3)),
+        ]);
+        let encoded = map.encode();
+        let decoded = decode(&encoded).unwrap();
+        let entries = decoded.as_map().unwrap();
+        // Int(1) encodes as 0x01, Int(10) as 0x0A, Text("z") as 0x61 0x7A
+        assert_eq!(entries[0].0, Value::Int(1));
+        assert_eq!(entries[1].0, Value::Int(10));
+        assert_eq!(entries[2].0, Value::Text("z".into()));
+    }
+
+    #[test]
+    fn test_canonical_key_order_empty_keys() {
+        let map = Value::Map(vec![
+            (Value::Text("a".into()), Value::Int(1)),
+            (Value::Bytes(vec![]), Value::Int(2)),
+            (Value::Text(String::new()), Value::Int(3)),
+        ]);
+        let encoded = map.encode();
+        let decoded = decode(&encoded).unwrap();
+        let entries = decoded.as_map().unwrap();
+        assert_eq!(entries[0].0, Value::Bytes(vec![]));
+        assert_eq!(entries[1].0, Value::Text(String::new()));
+        assert_eq!(entries[2].0, Value::Text("a".into()));
+    }
+
+    #[test]
+    fn test_decode_from() {
+        let mut buf = Value::Int(42).encode();
+        buf.extend_from_slice(&Value::Bool(true).encode());
+        let (val, rest) = decode_from(&buf).unwrap();
+        assert_eq!(val, Value::Int(42));
+        let (val2, rest2) = decode_from(rest).unwrap();
+        assert_eq!(val2, Value::Bool(true));
+        assert!(rest2.is_empty());
+    }
+
+    #[test]
+    fn test_extraneous_data() {
+        let mut buf = Value::Int(1).encode();
+        buf.push(0xFF);
+        assert!(matches!(decode(&buf), Err(CborError::ExtraneousData)));
+    }
+
+    #[test]
+    fn test_empty_input() {
+        assert!(matches!(decode(b""), Err(CborError::UnexpectedEof)));
+    }
+
+    #[test]
+    fn test_nested_structure() {
+        let val = Value::Map(vec![(
+            Value::Int(1),
+            Value::Array(vec![
+                Value::Bytes(vec![0xDE, 0xAD]),
+                Value::Map(vec![(Value::Text("key".into()), Value::Bool(true))]),
+            ]),
+        )]);
+        let encoded = val.encode();
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!(decoded, val);
+    }
+
+    #[test]
+    fn test_map_get() {
+        let map = Value::Map(vec![
+            (Value::Int(1), Value::Text("one".into())),
+            (Value::Text("key".into()), Value::Bool(true)),
+        ]);
+        assert_eq!(map.map_get_int(1), Some(&Value::Text("one".into())));
+        assert_eq!(map.map_get_text("key"), Some(&Value::Bool(true)));
+        assert_eq!(map.map_get_int(2), None);
+    }
+
+    #[test]
+    fn test_from_conversions() {
+        assert_eq!(Value::from(42i32), Value::Int(42));
+        assert_eq!(Value::from(42u32), Value::Int(42));
+        assert_eq!(Value::from(true), Value::Bool(true));
+        assert_eq!(Value::from("hello"), Value::Text("hello".into()));
+        assert_eq!(
+            Value::from(b"\x01\x02".as_slice()),
+            Value::Bytes(vec![1, 2])
+        );
+    }
+}

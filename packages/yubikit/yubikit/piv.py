@@ -1,0 +1,1452 @@
+# Copyright (c) 2020 Yubico AB
+# All rights reserved.
+#
+#   Redistribution and use in source and binary forms, with or
+#   without modification, are permitted provided that the following
+#   conditions are met:
+#
+#    1. Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#    2. Redistributions in binary form must reproduce the above
+#       copyright notice, this list of conditions and the following
+#       disclaimer in the documentation and/or other materials provided
+#       with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+from __future__ import annotations
+
+import gzip
+import logging
+import os
+import re
+import zlib
+from dataclasses import astuple, dataclass
+from datetime import date, datetime
+from enum import Enum, IntEnum, unique
+from typing import TYPE_CHECKING, TypeAlias, cast
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa, x25519
+from cryptography.hazmat.primitives.asymmetric.padding import (
+    MGF1,
+    OAEP,
+    PSS,
+    AsymmetricPadding,
+    PKCS1v15,
+)
+from cryptography.hazmat.primitives.asymmetric.types import (
+    CertificatePublicKeyTypes,
+    PublicKeyTypes,
+)
+from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    PublicFormat,
+    load_der_public_key,
+)
+
+from .core import (
+    BadResponseError,
+    InvalidPinError,  # noqa: F401 - re-exported
+    NotSupportedError,
+    Session,
+    Tlv,
+    Version,
+    bytes2int,
+    int2bytes,
+)
+from .core.smartcard import (
+    ScpKeyParams,
+    SmartCardConnection,
+)
+
+if TYPE_CHECKING:
+    # These aren't available before cryptography 48.
+    from cryptography.hazmat.primitives.asymmetric import mldsa, mlkem
+
+from _yubikit_native import padding as _native_padding
+from _yubikit_native.sessions import PivSession as _NativePivSession
+from _yubikit_native.sessions import generate_chuid as _native_generate_chuid
+
+logger = logging.getLogger(__name__)
+
+
+# String aliases, since ML-DSA and ML-KEM need cryptography >= 48. ML-KEM-512 is
+# not supported by cryptography.
+PublicKey: TypeAlias = """
+    rsa.RSAPublicKey
+    | ec.EllipticCurvePublicKey
+    | ed25519.Ed25519PublicKey
+    | x25519.X25519PublicKey
+    | mldsa.MLDSA44PublicKey
+    | mldsa.MLDSA65PublicKey
+    | mldsa.MLDSA87PublicKey
+    | mlkem.MLKEM768PublicKey
+    | mlkem.MLKEM1024PublicKey
+"""
+PrivateKey: TypeAlias = """
+    rsa.RSAPrivateKeyWithSerialization
+    | ec.EllipticCurvePrivateKeyWithSerialization
+    | ed25519.Ed25519PrivateKey
+    | x25519.X25519PrivateKey
+    | mldsa.MLDSA44PrivateKey
+    | mldsa.MLDSA65PrivateKey
+    | mldsa.MLDSA87PrivateKey
+    | mlkem.MLKEM768PrivateKey
+    | mlkem.MLKEM1024PrivateKey
+"""
+
+
+@unique
+class ALGORITHM(str, Enum):
+    EC = "ec"
+    RSA = "rsa"
+    MLDSA = "mldsa"
+    MLKEM = "mlkem"
+
+
+@unique
+class KEY_TYPE(IntEnum):
+    RSA1024 = 0x06
+    RSA2048 = 0x07
+    RSA3072 = 0x05
+    RSA4096 = 0x16
+    ECCP256 = 0x11
+    ECCP384 = 0x14
+    ED25519 = 0xE0
+    X25519 = 0xE1
+    MLDSA44 = 0xE2
+    MLDSA65 = 0xE3
+    MLDSA87 = 0xE4
+    MLKEM512 = 0xE5
+    MLKEM768 = 0xE6
+    MLKEM1024 = 0xE7
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def algorithm(self) -> ALGORITHM:
+        if self.name.startswith("RSA"):
+            return ALGORITHM.RSA
+        if self.name.startswith("MLDSA"):
+            return ALGORITHM.MLDSA
+        if self.name.startswith("MLKEM"):
+            return ALGORITHM.MLKEM
+        return ALGORITHM.EC
+
+    @property
+    def bit_len(self) -> int:
+        if self in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+            return 256
+        if self.algorithm in (ALGORITHM.MLDSA, ALGORITHM.MLKEM):
+            raise ValueError("No bit_len")
+        match = re.search(r"\d+$", self.name)
+        if match:
+            return int(match.group())
+        raise ValueError("No bit_len")
+
+    @classmethod
+    def from_public_key(cls, key: PublicKeyTypes) -> KEY_TYPE:
+        if isinstance(key, rsa.RSAPublicKey):
+            try:
+                return getattr(cls, f"RSA{key.key_size}")
+            except AttributeError:
+                raise ValueError(f"Unsupported RSA key size: {key.key_size}")
+        elif isinstance(key, ec.EllipticCurvePublicKey):
+            curve_name = key.curve.name
+            if curve_name == "secp256r1":
+                return cls.ECCP256
+            elif curve_name == "secp384r1":
+                return cls.ECCP384
+            raise ValueError(f"Unsupported EC curve: {curve_name}")
+        elif isinstance(key, ed25519.Ed25519PublicKey):
+            return cls.ED25519
+        elif isinstance(key, x25519.X25519PublicKey):
+            return cls.X25519
+        for key_class, key_type in _PQC_PUBLIC_KEY_TYPES.items():
+            if isinstance(key, key_class):
+                return cls(key_type)
+        raise ValueError(f"Unsupported key type: {type(key).__name__}")
+
+
+_PQC_PUBLIC_KEY_TYPES: dict[type, KEY_TYPE] = {}
+try:
+    from cryptography.hazmat.primitives.asymmetric import mldsa as _mldsa
+
+    _PQC_PUBLIC_KEY_TYPES.update(
+        {
+            _mldsa.MLDSA44PublicKey: KEY_TYPE.MLDSA44,
+            _mldsa.MLDSA65PublicKey: KEY_TYPE.MLDSA65,
+            _mldsa.MLDSA87PublicKey: KEY_TYPE.MLDSA87,
+        }
+    )
+except ImportError:  # Not available in older versions of cryptography
+    pass
+try:
+    from cryptography.hazmat.primitives.asymmetric import mlkem as _mlkem
+
+    _PQC_PUBLIC_KEY_TYPES.update(
+        {
+            _mlkem.MLKEM768PublicKey: KEY_TYPE.MLKEM768,
+            _mlkem.MLKEM1024PublicKey: KEY_TYPE.MLKEM1024,
+        }
+    )
+except ImportError:  # Not available in older versions of cryptography
+    pass
+
+# ML-KEM ciphertext lengths, which are unique per parameter set (FIPS 203).
+_ML_KEM_CIPHERTEXT_KEY_TYPES = {
+    768: KEY_TYPE.MLKEM512,
+    1088: KEY_TYPE.MLKEM768,
+    1568: KEY_TYPE.MLKEM1024,
+}
+
+
+@unique
+class MANAGEMENT_KEY_TYPE(IntEnum):
+    TDES = 0x03
+    AES128 = 0x08
+    AES192 = 0x0A
+    AES256 = 0x0C
+
+    @property
+    def key_len(self) -> int:
+        if self.name == "TDES":
+            return 24
+        # AES
+        return int(self.name[3:]) // 8
+
+    @property
+    def challenge_len(self) -> int:
+        if self.name == "TDES":
+            return 8
+        return 16
+
+
+# The following slots are special, we don't include it in SLOT below
+SLOT_CARD_MANAGEMENT = 0x9B
+SLOT_OCC_AUTH = 0x96
+
+
+@unique
+class SLOT(IntEnum):
+    AUTHENTICATION = 0x9A
+    SIGNATURE = 0x9C
+    KEY_MANAGEMENT = 0x9D
+    CARD_AUTH = 0x9E
+
+    RETIRED1 = 0x82
+    RETIRED2 = 0x83
+    RETIRED3 = 0x84
+    RETIRED4 = 0x85
+    RETIRED5 = 0x86
+    RETIRED6 = 0x87
+    RETIRED7 = 0x88
+    RETIRED8 = 0x89
+    RETIRED9 = 0x8A
+    RETIRED10 = 0x8B
+    RETIRED11 = 0x8C
+    RETIRED12 = 0x8D
+    RETIRED13 = 0x8E
+    RETIRED14 = 0x8F
+    RETIRED15 = 0x90
+    RETIRED16 = 0x91
+    RETIRED17 = 0x92
+    RETIRED18 = 0x93
+    RETIRED19 = 0x94
+    RETIRED20 = 0x95
+
+    ATTESTATION = 0xF9
+
+    def __str__(self) -> str:
+        return f"{int(self):02X} ({self.name})"
+
+
+@unique
+class OBJECT_ID(IntEnum):
+    CAPABILITY = 0x5FC107
+    CHUID = 0x5FC102
+    AUTHENTICATION = 0x5FC105  # cert for 9a key
+    FINGERPRINTS = 0x5FC103
+    SECURITY = 0x5FC106
+    FACIAL = 0x5FC108
+    PRINTED = 0x5FC109
+    SIGNATURE = 0x5FC10A  # cert for 9c key
+    KEY_MANAGEMENT = 0x5FC10B  # cert for 9d key
+    CARD_AUTH = 0x5FC101  # cert for 9e key
+    DISCOVERY = 0x7E
+    KEY_HISTORY = 0x5FC10C
+    IRIS = 0x5FC121
+
+    RETIRED1 = 0x5FC10D
+    RETIRED2 = 0x5FC10E
+    RETIRED3 = 0x5FC10F
+    RETIRED4 = 0x5FC110
+    RETIRED5 = 0x5FC111
+    RETIRED6 = 0x5FC112
+    RETIRED7 = 0x5FC113
+    RETIRED8 = 0x5FC114
+    RETIRED9 = 0x5FC115
+    RETIRED10 = 0x5FC116
+    RETIRED11 = 0x5FC117
+    RETIRED12 = 0x5FC118
+    RETIRED13 = 0x5FC119
+    RETIRED14 = 0x5FC11A
+    RETIRED15 = 0x5FC11B
+    RETIRED16 = 0x5FC11C
+    RETIRED17 = 0x5FC11D
+    RETIRED18 = 0x5FC11E
+    RETIRED19 = 0x5FC11F
+    RETIRED20 = 0x5FC120
+
+    ATTESTATION = 0x5FFF01
+
+    @classmethod
+    def from_slot(cls, slot: SLOT) -> OBJECT_ID:
+        return getattr(cls, SLOT(slot).name)
+
+
+@unique
+class PIN_POLICY(IntEnum):
+    DEFAULT = 0x0
+    NEVER = 0x1
+    ONCE = 0x2
+    ALWAYS = 0x3
+    MATCH_ONCE = 0x4
+    MATCH_ALWAYS = 0x5
+
+
+@unique
+class TOUCH_POLICY(IntEnum):
+    DEFAULT = 0x0
+    NEVER = 0x1
+    ALWAYS = 0x2
+    CACHED = 0x3
+
+
+# 010203040506070801020304050607080102030405060708
+DEFAULT_MANAGEMENT_KEY = (
+    b"\x01\x02\x03\x04\x05\x06\x07\x08"
+    + b"\x01\x02\x03\x04\x05\x06\x07\x08"
+    + b"\x01\x02\x03\x04\x05\x06\x07\x08"
+)
+
+PIN_LEN = 8
+TEMPORARY_PIN_LEN = 16
+
+# Instruction set
+INS_VERIFY = 0x20
+INS_CHANGE_REFERENCE = 0x24
+INS_RESET_RETRY = 0x2C
+INS_GENERATE_ASYMMETRIC = 0x47
+INS_AUTHENTICATE = 0x87
+INS_GET_DATA = 0xCB
+INS_PUT_DATA = 0xDB
+INS_MOVE_KEY = 0xF6
+INS_GET_METADATA = 0xF7
+INS_GET_SERIAL = 0xF8
+INS_ATTEST = 0xF9
+INS_SET_PIN_RETRIES = 0xFA
+INS_RESET = 0xFB
+INS_GET_VERSION = 0xFD
+INS_IMPORT_KEY = 0xFE
+INS_SET_MGMKEY = 0xFF
+
+# Tags for parsing responses and preparing requests
+TAG_AUTH_WITNESS = 0x80
+TAG_AUTH_CHALLENGE = 0x81
+TAG_AUTH_RESPONSE = 0x82
+TAG_AUTH_EXPONENTIATION = 0x85
+TAG_GEN_ALGORITHM = 0x80
+TAG_OBJ_DATA = 0x53
+TAG_OBJ_ID = 0x5C
+TAG_CERTIFICATE = 0x70
+TAG_CERT_INFO = 0x71
+TAG_DYN_AUTH = 0x7C
+TAG_LRC = 0xFE
+TAG_PIN_POLICY = 0xAA
+TAG_TOUCH_POLICY = 0xAB
+
+# Metadata tags
+TAG_METADATA_ALGO = 0x01
+TAG_METADATA_POLICY = 0x02
+TAG_METADATA_ORIGIN = 0x03
+TAG_METADATA_PUBLIC_KEY = 0x04
+TAG_METADATA_IS_DEFAULT = 0x05
+TAG_METADATA_RETRIES = 0x06
+TAG_METADATA_BIO_CONFIGURED = 0x07
+TAG_METADATA_TEMPORARY_PIN = 0x08
+
+ORIGIN_GENERATED = 1
+ORIGIN_IMPORTED = 2
+
+INDEX_PIN_POLICY = 0
+INDEX_TOUCH_POLICY = 1
+INDEX_RETRIES_TOTAL = 0
+INDEX_RETRIES_REMAINING = 1
+
+PIN_P2 = 0x80
+PUK_P2 = 0x81
+UV_P2 = 0x96
+
+
+@dataclass
+class PinMetadata:
+    default_value: bool
+    total_attempts: int
+    attempts_remaining: int
+
+
+@dataclass
+class ManagementKeyMetadata:
+    key_type: MANAGEMENT_KEY_TYPE
+    default_value: bool
+    touch_policy: TOUCH_POLICY
+
+
+@dataclass
+class SlotMetadata:
+    key_type: KEY_TYPE
+    pin_policy: PIN_POLICY
+    touch_policy: TOUCH_POLICY
+    generated: bool
+    public_key_encoded: bytes
+
+    @property
+    def public_key(self) -> PublicKey:
+        return cast(PublicKey, load_der_public_key(self.public_key_encoded))
+
+
+@dataclass
+class BioMetadata:
+    configured: bool
+    attempts_remaining: int
+    temporary_pin: bool
+
+
+def _bcd(val, ln=1):
+    bits = f"{val % 10:04b}"[::-1]
+    bits += str((bits.count("1") + 1) % 2)
+    return bits if ln == 1 else _bcd(val // 10, ln - 1) + bits
+
+
+def _dump_tlv_dict(values: dict[int, bytes | None]) -> bytes:
+    return b"".join(
+        Tlv(tag, value) for tag, value in values.items() if value is not None
+    )
+
+
+BCD_SS = "11010"
+BCD_FS = "10110"
+BCD_ES = "11111"
+
+_FASCN_LENS = (4, 4, 6, 1, 1, 10, 1, 4, 1)
+
+
+@dataclass
+class FascN:
+    """FASC-N data structure
+
+    https://www.idmanagement.gov/docs/pacs-tig-scepacs.pdf
+    """
+
+    agency_code: int  # 4 digits
+    system_code: int  # 4 digits
+    credential_number: int  # 6 digits
+    credential_series: int  # 1 digit
+    individual_credential_issue: int  # 1 digit
+    person_identifier: int  # 10 digits
+    organizational_category: int  # 1 digit
+    organizational_identifier: int  # 4 digits
+    organization_association_category: int  # 1 digit
+
+    def __bytes__(self):
+        # Convert values to BCD
+        vs = iter(_bcd(v, ln) for v, ln in zip(astuple(self), _FASCN_LENS))
+
+        # Add separators
+        bs = (
+            BCD_SS
+            + next(vs)
+            + BCD_FS
+            + next(vs)
+            + BCD_FS
+            + next(vs)
+            + BCD_FS
+            + next(vs)
+            + BCD_FS
+            + next(vs)
+            + BCD_FS
+            + next(vs)
+            + next(vs)
+            + next(vs)
+            + next(vs)
+            + BCD_ES
+        )
+
+        # Calculate LRC
+        lrc = 0
+        for i in range(0, len(bs), 5):
+            lrc ^= int(bs[i : i + 5], 2)
+
+        return int2bytes(int(bs, 2) << 5 | lrc)
+
+    @classmethod
+    def from_bytes(cls, value: bytes) -> FascN:
+        bs = f"{bytes2int(value):0200b}"
+        ds = [int(bs[i : i + 4][::-1], 2) for i in range(0, 200, 5)]
+        args = (
+            int("".join(str(d) for d in ds[offs : offs + ln]))
+            # offsets considering separators
+            for offs, ln in zip((1, 6, 11, 18, 20, 22, 32, 33, 37), _FASCN_LENS)
+        )
+        return cls(*args)
+
+    def __str__(self):
+        return "[{:04d}-{:04d}-{:06d}-{:d}-{:d}-{:010d}{:d}{:04d}{:d}]".format(
+            *astuple(self)
+        )
+
+
+@dataclass(kw_only=True)
+class Chuid:
+    buffer_length: int | None = None
+    fasc_n: FascN
+    agency_code: bytes | None = None
+    organizational_identifier: bytes | None = None
+    duns: bytes | None = None
+    guid: bytes
+    expiration_date: date
+    authentication_key_map: bytes | None = None
+    asymmetric_signature: bytes
+    lrc: int | None = None
+
+    def _get_bytes(self, include_signature: bool = True) -> bytes:
+        return _dump_tlv_dict(
+            {
+                0xEE: int2bytes(self.buffer_length)
+                if self.buffer_length is not None
+                else None,
+                0x30: bytes(self.fasc_n),
+                0x31: self.agency_code,
+                0x32: self.organizational_identifier,
+                0x33: self.duns,
+                0x34: self.guid,
+                0x35: self.expiration_date.isoformat().replace("-", "").encode(),
+                0x3D: self.authentication_key_map,
+                0x3E: self.asymmetric_signature if include_signature else None,
+                TAG_LRC: bytes([self.lrc]) if self.lrc is not None else b"",
+            }
+        )
+
+    @property
+    def tbs_bytes(self) -> bytes:
+        return self._get_bytes(include_signature=False)
+
+    def __bytes__(self):
+        return self._get_bytes()
+
+    @classmethod
+    def from_bytes(cls, value: bytes) -> Chuid:
+        data = Tlv.parse_dict(value)
+        buffer_length = data.get(0xEE)
+        lrc = data.get(TAG_LRC)
+        # From Python 3.11: date.fromisoformat(data[0x35])
+        d = data[0x35]
+        expiration_date = date(int(d[:4]), int(d[4:6]), int(d[6:8]))
+        return cls(
+            buffer_length=bytes2int(buffer_length) if buffer_length else None,
+            fasc_n=FascN.from_bytes(data[0x30]),
+            agency_code=data.get(0x31),
+            organizational_identifier=data.get(0x32),
+            duns=data.get(0x33),
+            guid=data[0x34],
+            expiration_date=expiration_date,
+            authentication_key_map=data.get(0x3D),
+            asymmetric_signature=data[0x3E],
+            lrc=lrc[0] if lrc else None,
+        )
+
+
+def _mgf1_hash_name(mgf) -> str:
+    if not isinstance(mgf, MGF1):
+        raise TypeError(f"Unsupported mask generation function: {mgf}")
+    return mgf._algorithm.name
+
+
+def _pad_message(key_type, message, hash_algorithm, padding):
+    if key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
+        return message
+    if key_type.algorithm == ALGORITHM.MLDSA:
+        if isinstance(hash_algorithm, Prehashed):
+            raise ValueError("ML-DSA does not support prehashed messages")
+        return message
+    if key_type.algorithm not in (ALGORITHM.EC, ALGORITHM.RSA):
+        raise ValueError(f"Unsupported algorithm {key_type.algorithm}")
+    if isinstance(hash_algorithm, Prehashed):
+        if len(message) != hash_algorithm.digest_size:
+            raise ValueError("The provided data must be the same length as the hash")
+        hashed = message
+        hash_name = hash_algorithm._algorithm.name
+    else:
+        h = hashes.Hash(hash_algorithm)
+        h.update(message)
+        hashed = h.finalize()
+        hash_name = hash_algorithm.name
+    if key_type.algorithm == ALGORITHM.EC:
+        return hashed[: key_type.bit_len // 8]
+
+    if isinstance(padding, PKCS1v15):
+        return _native_padding.pkcs1v15_sign_pad(key_type.bit_len, hash_name, hashed)
+    if isinstance(padding, PSS):
+        salt_length = padding._salt_length
+        if isinstance(salt_length, int):
+            salt_len: int | None = salt_length
+        elif salt_length is PSS.MAX_LENGTH:
+            salt_len = None
+        elif salt_length is PSS.DIGEST_LENGTH:
+            salt_len = len(hashed)
+        else:
+            raise ValueError(f"Unsupported PSS salt length for signing: {salt_length}")
+        return _native_padding.pss_sign_pad(
+            key_type.bit_len,
+            hash_name,
+            hashed,
+            salt_len,
+            _mgf1_hash_name(padding._mgf),
+        )
+    raise ValueError(f"Unsupported padding: {padding}")
+
+
+def _unpad_message(padded, padding):
+    if isinstance(padding, PKCS1v15):
+        return _native_padding.pkcs1v15_decrypt_unpad(padded)
+    if isinstance(padding, OAEP):
+        return _native_padding.oaep_decrypt_unpad(
+            padded,
+            padding._algorithm.name,
+            _mgf1_hash_name(padding._mgf),
+            padding._label or b"",
+        )
+    raise ValueError(f"Unsupported padding: {padding}")
+
+
+def calculate_ml_dsa_mu(
+    public_key: (
+        mldsa.MLDSA44PublicKey | mldsa.MLDSA65PublicKey | mldsa.MLDSA87PublicKey | bytes
+    ),
+    message: bytes,
+    context: bytes = b"",
+) -> bytes:
+    """Calculate the ML-DSA message representative (mu) for external mu signing.
+
+    With cryptography >= 50, mldsa.MLDSAMuHasher can be used instead to
+    calculate mu incrementally.
+
+    :param public_key: The ML-DSA public key, or its raw encoding.
+    :param message: The message to sign.
+    :param context: An optional context string (at most 255 bytes).
+    """
+    if not isinstance(public_key, bytes):
+        public_key = public_key.public_bytes_raw()
+    return _native_padding.ml_dsa_mu(public_key, context, message)
+
+
+def decompress_certificate(cert_data: bytes) -> bytes:
+    """
+    Decompress a compressed certificate using various methods.
+    """
+    logger.debug("Certificate is compressed, decompressing...")
+
+    match tuple(cert_data[:2]):
+        case (0x1F, 0x8B):  # Gzip (most commonly used)
+            logger.debug("Decompressing certificate using gzip")
+            try:
+                return gzip.decompress(cert_data)
+            except (zlib.error, gzip.BadGzipFile):
+                logger.warning("Failed to decompressed with gzip")
+        case (0x01, 0x00):  # Net iD zlib format
+            logger.debug("Decompressing certificate using zlib")
+            expected_length = int.from_bytes(cert_data[2:4], "little")
+            try:
+                decompressed = zlib.decompress(cert_data[4:])
+                if len(decompressed) != expected_length:
+                    logger.error(
+                        "Unexpected decompressed length, expected %d, got %d",
+                        expected_length,
+                        len(decompressed),
+                    )
+                    raise BadResponseError(
+                        "Decompressed length does not match expected length"
+                    )
+
+                return decompressed
+            except (zlib.error, ValueError):
+                logger.warning("Failed to decompress with zlib")
+        case _:
+            logger.warning("Unknown compression type")
+
+    raise BadResponseError("Failed to decompress certificate")
+
+
+def generate_chuid() -> Chuid:
+    """Generate a CHUID (Cardholder Unique Identifier).
+
+    The CHUID has a Non-Federal Issuer FASC-N, a random version 4 UUID
+    as its GUID, and an expiration date of 2030-01-01.
+    """
+    return Chuid.from_bytes(_native_generate_chuid())
+
+
+def generate_ccc() -> bytes:
+    """Generate a CCC (Card Capability Container)."""
+    return (
+        Tlv(0xF0, b"\xa0\x00\x00\x01\x16\xff\x02" + os.urandom(14))
+        + Tlv(0xF1, b"\x21")
+        + Tlv(0xF2, b"\x21")
+        + Tlv(0xF3)
+        + Tlv(0xF4, b"\x00")
+        + Tlv(0xF5, b"\x10")
+        + Tlv(0xF6)
+        + Tlv(0xF7)
+        + Tlv(0xFA)
+        + Tlv(0xFB)
+        + Tlv(0xFC)
+        + Tlv(0xFD)
+        + Tlv(TAG_LRC)
+    )
+
+
+_AllowedHashTypes: TypeAlias = (
+    hashes.SHA224
+    | hashes.SHA256
+    | hashes.SHA384
+    | hashes.SHA512
+    | hashes.SHA3_224
+    | hashes.SHA3_256
+    | hashes.SHA3_384
+    | hashes.SHA3_512
+)
+
+
+def _dummy_key(key_type):
+    if key_type.algorithm == ALGORITHM.RSA:
+        return rsa.generate_private_key(65537, key_type.bit_len)
+    if key_type == KEY_TYPE.ECCP256:
+        return ec.generate_private_key(ec.SECP256R1())
+    if key_type == KEY_TYPE.ECCP384:
+        return ec.generate_private_key(ec.SECP384R1())
+    if key_type == KEY_TYPE.ED25519:
+        return ed25519.Ed25519PrivateKey.generate()
+    if key_type == KEY_TYPE.X25519:
+        return x25519.X25519PrivateKey.generate()
+    if key_type.algorithm == ALGORITHM.MLDSA:
+        try:
+            # ML-DSA certificates and CSRs require cryptography >= 49.
+            from cryptography.hazmat.primitives.asymmetric import mldsa
+        except ImportError:
+            raise NotSupportedError("ML-DSA requires a newer version of cryptography")
+        return getattr(mldsa, f"{key_type.name}PrivateKey").generate()
+    raise ValueError("Invalid algorithm")
+
+
+def _hash(key_type, hash_algorithm):
+    if (
+        key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519)
+        or key_type.algorithm == ALGORITHM.MLDSA
+    ):
+        return None
+    return hash_algorithm()
+
+
+def sign_certificate_builder(
+    session: PivSession,
+    slot: SLOT,
+    key_type: KEY_TYPE,
+    builder: x509.CertificateBuilder,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
+) -> x509.Certificate:
+    """Sign a Certificate.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param key_type: The key type.
+    :param builder: The x509 certificate builder object.
+    :param hash_algorithm: The hash algorithm, ignored for Curve 25519 and ML-DSA.
+    """
+    logger.debug("Signing a certificate")
+    dummy_key = _dummy_key(key_type)
+    assert not isinstance(dummy_key, x25519.X25519PrivateKey)  # noqa: S101
+    cert = builder.sign(dummy_key, _hash(key_type, hash_algorithm))
+
+    sig = session.sign(
+        slot,
+        key_type,
+        cert.tbs_certificate_bytes,
+        _hash(key_type, hash_algorithm),
+        PKCS1v15(),  # Only used for RSA
+    )
+
+    seq = Tlv.parse_list(Tlv.unpack(0x30, cert.public_bytes(Encoding.DER)))
+    # Replace signature, add unused bits = 0
+    seq[2] = Tlv(seq[2].tag, b"\0" + sig)
+    # Re-assemble sequence
+    der = Tlv(0x30, b"".join(seq))
+
+    return x509.load_der_x509_certificate(der)
+
+
+def sign_csr_builder(
+    session: PivSession,
+    slot: SLOT,
+    public_key: PublicKeyTypes,
+    builder: x509.CertificateSigningRequestBuilder,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
+) -> x509.CertificateSigningRequest:
+    """Sign a CSR.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
+    :param builder: The x509 certificate signing request builder
+        object.
+    :param hash_algorithm: The hash algorithm, ignored for Curve 25519 and ML-DSA.
+    """
+    logger.debug("Signing a CSR")
+    key_type = KEY_TYPE.from_public_key(public_key)
+    dummy_key = _dummy_key(key_type)
+    assert not isinstance(dummy_key, x25519.X25519PrivateKey)  # noqa: S101
+
+    csr = builder.sign(dummy_key, _hash(key_type, hash_algorithm))
+    seq = Tlv.parse_list(Tlv.unpack(0x30, csr.public_bytes(Encoding.DER)))
+
+    # Replace public key
+    pub_format = (
+        PublicFormat.PKCS1
+        if key_type.algorithm == ALGORITHM.RSA
+        else PublicFormat.SubjectPublicKeyInfo
+    )
+    dummy_bytes = dummy_key.public_key().public_bytes(Encoding.DER, pub_format)
+    pub_bytes = public_key.public_bytes(Encoding.DER, pub_format)
+    seq[0] = Tlv(seq[0].replace(dummy_bytes, pub_bytes))
+
+    sig = session.sign(
+        slot,
+        key_type,
+        seq[0],
+        _hash(key_type, hash_algorithm),
+        PKCS1v15(),  # Only used for RSA
+    )
+
+    # Replace signature, add unused bits = 0
+    seq[2] = Tlv(seq[2].tag, b"\0" + sig)
+    # Re-assemble sequence
+    der = Tlv(0x30, b"".join(seq))
+
+    return x509.load_der_x509_csr(der)
+
+
+def generate_self_signed_certificate(
+    session: PivSession,
+    slot: SLOT,
+    public_key: PublicKeyTypes,
+    subject_str: str,
+    valid_from: datetime,
+    valid_to: datetime,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
+) -> x509.Certificate:
+    """Generate a self-signed certificate using a private key in a slot.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
+    :param subject_str: The subject RFC 4514 string.
+    :param valid_from: The date from when the certificate is valid.
+    :param valid_to: The date when the certificate expires.
+    :param hash_algorithm: The hash algorithm.
+    """
+    logger.debug("Generating a self-signed certificate")
+    key_type = KEY_TYPE.from_public_key(public_key)
+    if TYPE_CHECKING:
+        public_key = cast(CertificatePublicKeyTypes, public_key)
+
+    subject = x509.Name.from_rfc4514_string(subject_str)
+    builder = (
+        x509.CertificateBuilder()
+        .public_key(public_key)
+        .subject_name(subject)
+        .issuer_name(subject)  # Same as subject on self-signed certificate.
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(valid_from)
+        .not_valid_after(valid_to)
+    )
+
+    return sign_certificate_builder(session, slot, key_type, builder, hash_algorithm)
+
+
+def generate_csr(
+    session: PivSession,
+    slot: SLOT,
+    public_key: PublicKeyTypes,
+    subject_str: str,
+    hash_algorithm: type[_AllowedHashTypes] = hashes.SHA256,
+) -> x509.CertificateSigningRequest:
+    """Generate a CSR using a private key in a slot.
+
+    :param session: The PIV session.
+    :param slot: The slot.
+    :param public_key: The public key.
+    :param subject_str: The subject RFC 4514 string.
+    :param hash_algorithm: The hash algorithm.
+    """
+    logger.debug("Generating a CSR")
+    builder = x509.CertificateSigningRequestBuilder().subject_name(
+        x509.Name.from_rfc4514_string(subject_str)
+    )
+
+    return sign_csr_builder(session, slot, public_key, builder, hash_algorithm)
+
+
+class PivSession(Session):
+    """A session with the PIV application."""
+
+    def __init__(
+        self,
+        connection: SmartCardConnection,
+        scp_key_params: ScpKeyParams | None = None,
+    ):
+        super().__init__(connection)
+        native = _NativePivSession(connection, scp_key_params)
+        self._native = native
+        self.connection = connection
+        self._version = Version(*native.version)
+        self._management_key_type = MANAGEMENT_KEY_TYPE(native.management_key_type)
+        self._current_pin_retries = 3
+        self._max_pin_retries = 3
+
+        logger.debug(f"PIV session initialized (version={self.version})")
+
+    @property
+    def version(self) -> Version:
+        """The version of the PIV application,
+        typically the same as the YubiKey firmware."""
+        return self._version
+
+    @property
+    def management_key_type(self) -> MANAGEMENT_KEY_TYPE:
+        """The algorithm of the management key currently in use."""
+        return self._management_key_type
+
+    def reset(self) -> None:
+        """Factory reset the PIV application data.
+
+        This deletes all user-data from the PIV application, and resets the default
+        values for PIN, PUK, and management key.
+        """
+        logger.debug("Performing PIV reset (native)")
+        self._native.reset()
+        self._current_pin_retries = 3
+        self._max_pin_retries = 3
+        try:
+            key_type, _, _ = self._native.get_management_key_metadata()
+            self._management_key_type = MANAGEMENT_KEY_TYPE(key_type)
+        except Exception:  # noqa: BLE001 - fall back if metadata cannot be read
+            self._management_key_type = MANAGEMENT_KEY_TYPE(
+                self._native.management_key_type
+            )
+
+    def get_serial(self) -> int:
+        """Get the serial number of the YubiKey."""
+        return self._native.get_serial()
+
+    def authenticate(self, management_key: bytes) -> None:
+        """Authenticate to PIV with management key.
+
+        :param bytes management_key: The management key in raw bytes.
+        """
+        self._native.authenticate(management_key)
+
+    def set_management_key(
+        self,
+        key_type: MANAGEMENT_KEY_TYPE,
+        management_key: bytes,
+        require_touch: bool = False,
+    ) -> None:
+        """Set a new management key.
+
+        :param key_type: The management key type.
+        :param management_key: The management key in raw bytes.
+        :param require_touch: The touch policy.
+        """
+        key_type = MANAGEMENT_KEY_TYPE(key_type)
+
+        self._native.set_management_key(int(key_type), management_key, require_touch)
+        self._management_key_type = key_type
+
+    def verify_pin(self, pin: str) -> None:
+        """Verify the user by PIN.
+
+        NOTE: InvalidPinError raised from this method will cap remaining_attempts
+        at 15, even if the true number of remaining attempts is higher.
+
+        :param pin: The PIN.
+        """
+        self._native.verify_pin(pin)
+        self._current_pin_retries = self._max_pin_retries
+
+    def verify_uv(
+        self, temporary_pin: bool = False, check_only: bool = False
+    ) -> bytes | None:
+        """Verify the user by fingerprint (YubiKey Bio only).
+
+        Fingerprint verification will allow usage of private keys which have a PIN
+        policy allowing MATCH. For those using MATCH_ALWAYS, the fingerprint must be
+        verified just prior to using the key, or by first requesting a temporary PIN
+        and then later verifying the PIN just prior to key use.
+
+        :param temporary_pin: Request a temporary PIN for later use within the session.
+        :param check_only: Do not verify the user, instead immediately throw an
+            InvalidPinException containing the number of remaining attempts.
+        """
+        result = self._native.verify_uv(temporary_pin, check_only)
+        if result is not None:
+            return result
+        return None
+
+    def verify_temporary_pin(self, pin: bytes) -> None:
+        """Verify the user via temporary PIN.
+
+        :param pin: A temporary PIN previously requested via verify_uv.
+        """
+        self._native.verify_temporary_pin(pin)
+
+    def get_pin_attempts(self) -> int:
+        """Get remaining PIN attempts."""
+        return self._native.get_pin_attempts()
+
+    def change_pin(self, old_pin: str, new_pin: str) -> None:
+        """Change the PIN.
+
+        NOTE: InvalidPinError raised from this method will cap remaining_attempts
+        at 15, even if the true number of remaining attempts is higher.
+
+        :param old_pin: The current PIN.
+        :param new_pin: The new PIN.
+        """
+        self._native.change_pin(old_pin, new_pin)
+
+    def change_puk(self, old_puk: str, new_puk: str) -> None:
+        """Change the PUK.
+
+        NOTE: InvalidPinError raised from this method will cap remaining_attempts
+        at 15, even if the true number of remaining attempts is higher.
+
+        :param old_puk: The current PUK.
+        :param new_puk: The new PUK.
+        """
+        self._native.change_puk(old_puk, new_puk)
+
+    def unblock_pin(self, puk: str, new_pin: str) -> None:
+        """Reset PIN with PUK.
+
+        NOTE: InvalidPinError raised from this method will cap remaining_attempts
+        at 15, even if the true number of remaining attempts is higher.
+
+        :param puk: The PUK.
+        :param new_pin: The new PIN.
+        """
+        self._native.unblock_pin(puk, new_pin)
+
+    def set_pin_attempts(self, pin_attempts: int, puk_attempts: int) -> None:
+        """Set PIN retries for PIN and PUK.
+
+        Both PIN and PUK will be reset to default values when this is executed.
+
+        Requires authentication with management key and PIN verification.
+
+        :param pin_attempts: The PIN attempts.
+        :param puk_attempts: The PUK attempts.
+        """
+        self._native.set_pin_attempts(pin_attempts, puk_attempts)
+        self._max_pin_retries = pin_attempts
+        self._current_pin_retries = pin_attempts
+
+    def get_pin_metadata(self) -> PinMetadata:
+        """Get PIN metadata."""
+        default_value, total_attempts, attempts_remaining = (
+            self._native.get_pin_metadata()
+        )
+        return PinMetadata(default_value, total_attempts, attempts_remaining)
+
+    def get_puk_metadata(self) -> PinMetadata:
+        """Get PUK metadata."""
+        default_value, total_attempts, attempts_remaining = (
+            self._native.get_puk_metadata()
+        )
+        return PinMetadata(default_value, total_attempts, attempts_remaining)
+
+    def get_management_key_metadata(self) -> ManagementKeyMetadata:
+        """Get management key metadata."""
+        key_type, default_value, touch_policy = (
+            self._native.get_management_key_metadata()
+        )
+        return ManagementKeyMetadata(
+            MANAGEMENT_KEY_TYPE(key_type),
+            default_value,
+            TOUCH_POLICY(touch_policy),
+        )
+
+    def get_slot_metadata(self, slot: SLOT) -> SlotMetadata:
+        """Get slot metadata.
+
+        :param slot: The slot to get metadata from.
+        """
+        slot = SLOT(slot)
+        key_type, pin_policy, touch_policy, generated, public_key_encoded = (
+            self._native.get_slot_metadata(int(slot))
+        )
+        return SlotMetadata(
+            KEY_TYPE(key_type),
+            PIN_POLICY(pin_policy),
+            TOUCH_POLICY(touch_policy),
+            generated,
+            public_key_encoded,
+        )
+
+    def get_bio_metadata(self) -> BioMetadata:
+        """Get YubiKey Bio metadata.
+
+        This tells you if fingerprints are enrolled or not, how many fingerprint
+        verification attempts remain, and whether or not a temporary PIN is currently
+        active.
+        """
+        configured, attempts_remaining, temporary_pin = self._native.get_bio_metadata()
+        return BioMetadata(configured, attempts_remaining, temporary_pin)
+
+    def sign(
+        self,
+        slot: SLOT,
+        key_type: KEY_TYPE,
+        message: bytes,
+        hash_algorithm: hashes.HashAlgorithm | None,
+        padding: AsymmetricPadding | None = None,
+        context: bytes | None = None,
+    ) -> bytes:
+        """Sign message with key.
+
+        Requires PIN verification.
+
+        Ed25519 and ML-DSA keys sign the message directly, and ignore
+        hash_algorithm and padding. The YubiKey limits the size of messages it
+        can sign with ML-DSA; use :meth:`sign_external_mu` for larger messages.
+
+        :param slot: The slot of the key to use.
+        :param key_type: The type of the key to sign with.
+        :param message: The message to sign.
+        :param hash_algorithm: The pre-signature hash algorithm to use.
+        :param padding: The pre-signature padding.
+        :param context: An ML-DSA context string (at most 255 bytes).
+        """
+        slot = SLOT(slot)
+        key_type = KEY_TYPE(key_type)
+        if context is not None:
+            if key_type.algorithm != ALGORITHM.MLDSA:
+                raise ValueError("A context can only be used with ML-DSA keys")
+            if len(context) > 255:
+                raise ValueError("ML-DSA context must be at most 255 bytes")
+            return self._native.sign_with_context(
+                int(slot), int(key_type), message, context
+            )
+        padded = _pad_message(key_type, message, hash_algorithm, padding)
+        return self._native.sign(int(slot), int(key_type), padded)
+
+    def sign_external_mu(self, slot: SLOT, key_type: KEY_TYPE, mu: bytes) -> bytes:
+        """Sign a precomputed ML-DSA message representative (external mu).
+
+        The resulting signature verifies against the original message. Use
+        :func:`calculate_ml_dsa_mu` to compute mu.
+
+        Requires PIN verification.
+
+        :param slot: The slot of the key to use.
+        :param key_type: The ML-DSA type of the key to sign with.
+        :param mu: The 64 byte message representative.
+        """
+        slot = SLOT(slot)
+        key_type = KEY_TYPE(key_type)
+        if key_type.algorithm != ALGORITHM.MLDSA:
+            raise ValueError("External mu can only be used with ML-DSA keys")
+        if len(mu) != 64:
+            raise ValueError("ML-DSA mu must be exactly 64 bytes")
+        return self._native.sign_external_mu(int(slot), int(key_type), mu)
+
+    def decrypt(
+        self, slot: SLOT, cipher_text: bytes, padding: AsymmetricPadding
+    ) -> bytes:
+        """Decrypt cipher text.
+
+        Requires PIN verification.
+
+        :param slot: The slot.
+        :param cipher_text: The cipher text to decrypt.
+        :param padding: The padding of the plain text.
+        """
+        slot = SLOT(slot)
+        padded = self._native.decrypt(int(slot), cipher_text)
+        return _unpad_message(padded, padding)
+
+    def calculate_secret(
+        self,
+        slot: SLOT,
+        peer_public_key: (
+            ec.EllipticCurvePublicKeyWithSerialization | x25519.X25519PublicKey
+        ),
+    ) -> bytes:
+        """Calculate shared secret using ECDH.
+
+        Requires PIN verification.
+
+        :param slot: The slot.
+        :param peer_public_key: The peer's public key.
+        """
+        slot = SLOT(slot)
+        key_type = KEY_TYPE.from_public_key(peer_public_key)
+        if key_type == KEY_TYPE.X25519:
+            data = peer_public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
+        else:
+            data = peer_public_key.public_bytes(
+                Encoding.X962, PublicFormat.UncompressedPoint
+            )
+        return self._native.calculate_secret(int(slot), int(key_type), data)
+
+    def decapsulate(self, slot: SLOT, cipher_text: bytes) -> bytes:
+        """Decapsulate an ML-KEM ciphertext, recovering the shared secret.
+
+        Requires PIN verification.
+
+        :param slot: The slot of the ML-KEM key.
+        :param cipher_text: The ML-KEM ciphertext.
+        """
+        slot = SLOT(slot)
+        key_type = _ML_KEM_CIPHERTEXT_KEY_TYPES.get(len(cipher_text))
+        if key_type is None:
+            raise ValueError(f"Invalid ML-KEM ciphertext length: {len(cipher_text)}")
+        return self._native.calculate_secret(int(slot), int(key_type), cipher_text)
+
+    def get_object(self, object_id: int) -> bytes:
+        """Get object by ID.
+
+        Requires PIN verification for protected objects.
+
+        :param object_id: The object identifier.
+        """
+        return self._native.get_object(object_id)
+
+    def put_object(self, object_id: int, data: bytes | None = None) -> None:
+        """Write data to PIV object.
+
+        Requires authentication with management key.
+
+        :param object_id: The object identifier.
+        :param data: The object data.
+        """
+        self._native.put_object(object_id, data)
+
+    def get_certificate(self, slot: SLOT) -> x509.Certificate:
+        """Get certificate from slot.
+
+        :param slot: The slot to get the certificate from.
+        """
+        slot = SLOT(slot)
+        der_bytes = self._native.get_certificate(int(slot))
+        try:
+            return x509.load_der_x509_certificate(der_bytes)
+        except Exception as e:  # noqa: BLE001 - normalize certificate parsing errors
+            raise BadResponseError("Invalid certificate", e)
+
+    def put_certificate(
+        self, slot: SLOT, certificate: x509.Certificate, compress: bool = False
+    ) -> None:
+        """Import certificate to slot.
+
+        Requires authentication with management key.
+
+        :param slot: The slot to import the certificate to.
+        :param certificate: The certificate to import.
+        :param compress: If the certificate should be compressed or not.
+        """
+        slot = SLOT(slot)
+        cert_der = certificate.public_bytes(Encoding.DER)
+        self._native.put_certificate(int(slot), cert_der, compress)
+
+    def delete_certificate(self, slot: SLOT) -> None:
+        """Delete certificate.
+
+        Requires authentication with management key.
+
+        :param slot: The slot to delete the certificate from.
+        """
+        slot = SLOT(slot)
+        self._native.delete_certificate(int(slot))
+
+    def put_key(
+        self,
+        slot: SLOT,
+        private_key: PrivateKey,
+        pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
+        touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
+    ) -> KEY_TYPE:
+        """Import a private key to slot.
+
+        Requires authentication with management key.
+
+        :param slot: The slot to import the key to.
+        :param private_key: The private key to import.
+        :param pin_policy: The PIN policy.
+        :param touch_policy: The touch policy.
+        """
+        slot = SLOT(slot)
+        key_type = KEY_TYPE.from_public_key(private_key.public_key())
+        if key_type.algorithm == ALGORITHM.RSA:
+            key_der = private_key.private_bytes(
+                Encoding.DER, PrivateFormat.TraditionalOpenSSL, NoEncryption()
+            )
+        elif key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519) or key_type.algorithm in (
+            ALGORITHM.MLDSA,
+            ALGORITHM.MLKEM,
+        ):
+            # For ML-DSA and ML-KEM, this is the seed.
+            key_der = private_key.private_bytes(
+                Encoding.Raw, PrivateFormat.Raw, NoEncryption()
+            )
+        else:
+            assert isinstance(  # noqa: S101
+                private_key, ec.EllipticCurvePrivateKey
+            )
+            key_der = int2bytes(
+                private_key.private_numbers().private_value,
+                key_type.bit_len // 8,
+            )
+        self._native.put_key(
+            int(slot),
+            int(key_type),
+            key_der,
+            int(pin_policy),
+            int(touch_policy),
+        )
+        return key_type
+
+    def generate_key(
+        self,
+        slot: SLOT,
+        key_type: KEY_TYPE,
+        pin_policy: PIN_POLICY = PIN_POLICY.DEFAULT,
+        touch_policy: TOUCH_POLICY = TOUCH_POLICY.DEFAULT,
+    ) -> PublicKey:
+        """Generate private key in slot.
+
+        Requires authentication with management key.
+
+        :param slot: The slot to generate the private key in.
+        :param key_type: The key type.
+        :param pin_policy: The PIN policy.
+        :param touch_policy: The touch policy.
+        """
+        slot = SLOT(slot)
+        key_type = KEY_TYPE(key_type)
+        if (
+            key_type.algorithm in (ALGORITHM.MLDSA, ALGORITHM.MLKEM)
+            and key_type not in _PQC_PUBLIC_KEY_TYPES.values()
+        ):
+            # Fail before generating, since the public key couldn't be returned.
+            raise NotSupportedError(
+                f"{key_type} public keys are not supported by cryptography"
+            )
+        logger.debug(
+            f"Generating key with pin_policy={pin_policy}, touch_policy={touch_policy}"
+        )
+        spki_der = self._native.generate_key(
+            int(slot),
+            int(key_type),
+            int(pin_policy),
+            int(touch_policy),
+        )
+
+        return cast(PublicKey, load_der_public_key(spki_der))
+
+    def attest_key(self, slot: SLOT) -> x509.Certificate:
+        """Attest key in slot.
+
+        :param slot: The slot where the key has been generated.
+        :return: A X.509 certificate.
+        """
+        slot = SLOT(slot)
+        der_bytes = self._native.attest_key(int(slot))
+        return x509.load_der_x509_certificate(der_bytes)
+
+    def move_key(self, from_slot: SLOT, to_slot: SLOT) -> None:
+        """Move key from one slot to another.
+
+        Requires authentication with management key.
+
+        :param from_slot: The slot containing the key to move.
+        :param to_slot: The new slot to move the key to.
+        """
+        from_slot = SLOT(from_slot)
+        to_slot = SLOT(to_slot)
+        self._native.move_key(int(from_slot), int(to_slot))
+
+    def delete_key(self, slot: SLOT) -> None:
+        """Delete a key in a slot.
+
+        Requires authentication with management key.
+
+        :param slot: The slot containing the key to delete.
+        """
+        slot = SLOT(slot)
+        self._native.delete_key(int(slot))
+
+    def check_key_support(
+        self,
+        key_type: KEY_TYPE,
+        pin_policy: PIN_POLICY,
+        touch_policy: TOUCH_POLICY,
+        generate: bool,
+        fips_restrictions: bool = False,
+    ) -> None:
+        """Check if a key type is supported by this YubiKey.
+
+        This method will return None if the key (with PIN and touch policies) is
+        supported, or it will raise a NotSupportedError if it is not.
+
+        Set the generate parameter to True to check if generating the key is supported
+        (in addition to importing).
+
+        Set fips_restrictions to True to apply restrictions based on FIPS status.
+        """
+
+        self._native.check_key_support(
+            int(key_type),
+            int(pin_policy),
+            int(touch_policy),
+            generate,
+            fips_restrictions,
+        )
+        if pin_policy in (PIN_POLICY.MATCH_ONCE, PIN_POLICY.MATCH_ALWAYS):
+            self.get_bio_metadata()

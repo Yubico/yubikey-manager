@@ -1,0 +1,53 @@
+use std::env;
+use std::fs;
+use std::io::Write;
+use std::path::Path;
+
+use flate2::Compression;
+use flate2::write::DeflateEncoder;
+
+const WINDOWS_BUILD: u16 = 0;
+
+fn main() {
+    embed_licenses();
+
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let mut res = winresource::WindowsResource::new();
+        res.set("CompanyName", "Yubico");
+        res.set("FileDescription", "YubiKey Manager CLI");
+        res.set("LegalCopyright", "Copyright 2024 Yubico AB. Apache-2.0");
+        res.set("OriginalFilename", "ykman.exe");
+        res.set("ProductName", "YubiKey Manager");
+        let major = env!("CARGO_PKG_VERSION_MAJOR")
+            .parse::<u8>()
+            .expect("Cargo major version must fit MSI's 0..=255 range");
+        let minor = env!("CARGO_PKG_VERSION_MINOR")
+            .parse::<u8>()
+            .expect("Cargo minor version must fit MSI's 0..=255 range");
+        let version =
+            (u64::from(major) << 48) | (u64::from(minor) << 32) | (u64::from(WINDOWS_BUILD) << 16);
+        res.set_version_info(winresource::VersionInfo::FILEVERSION, version);
+        res.set_version_info(winresource::VersionInfo::PRODUCTVERSION, version);
+        res.set_manifest_file("ykman.exe.manifest");
+        res.compile().expect("Failed to compile Windows resources");
+    }
+
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        // Resolve statically linked DLLs from System32 only (LOAD_LIBRARY_SEARCH_SYSTEM32)
+        println!("cargo:rustc-link-arg-bins=/DEPENDENTLOADFLAG:0x800");
+    }
+}
+
+fn compress(data: &[u8]) -> Vec<u8> {
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(data).expect("Failed to compress");
+    encoder.finish().expect("Failed to finish compression")
+}
+
+fn embed_licenses() {
+    let out_dir = env::var("OUT_DIR").unwrap();
+    let dest = Path::new(&out_dir).join("licenses.deflate");
+    println!("cargo:rerun-if-changed=licenses.txt");
+    fs::write(&dest, compress(include_bytes!("licenses.txt")))
+        .expect("Failed to write licenses.deflate");
+}

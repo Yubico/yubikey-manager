@@ -3,12 +3,10 @@ import os
 import pytest
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-
-from yubikit.core import TRANSPORT, Tlv
-from yubikit.core.smartcard import ApduError
+from yubikit.core import TRANSPORT, NotSupportedError, Tlv
+from yubikit.core.smartcard import AID, SW, ApduError, SmartCardProtocol
 from yubikit.core.smartcard.scp import (
     KeyRef,
     Scp03KeyParams,
@@ -16,7 +14,7 @@ from yubikit.core.smartcard.scp import (
     ScpKid,
     StaticKeys,
 )
-from yubikit.securitydomain import SecurityDomainSession
+from yubikit.securitydomain import Curve, SecurityDomainSession
 
 from ..util import open_file
 from . import condition
@@ -25,12 +23,12 @@ from . import condition
 @pytest.fixture
 @condition.min_version(5, 7, 2)
 def session(ccid_connection):
-    sd = SecurityDomainSession(ccid_connection)
-    # Check for the default keyset and only reset if not present, to save time
-    default_key = KeyRef(0x1, 0xFF)
-    if default_key not in sd.get_key_information():
-        sd.reset()
-    return sd
+    with SecurityDomainSession(ccid_connection) as sd:
+        # Check for the default keyset and only reset if not present, to save time
+        default_key = KeyRef(0x1, 0xFF)
+        if default_key not in sd.get_key_information():
+            sd.reset()
+        yield sd
 
 
 def test_card_recognition_data(session):
@@ -64,20 +62,23 @@ class TestScp03:
             _verify_auth(session)
 
     def test_change_key(self, ccid_connection, session):
-        session.authenticate(Scp03KeyParams())
-        ref = KeyRef(0x1, 0x2)
-        keys = StaticKeys(os.urandom(16), os.urandom(16), os.urandom(16))
-        session.put_key(ref, keys)
+        with session:
+            session.authenticate(Scp03KeyParams())
+            ref = KeyRef(0x1, 0x2)
+            keys = StaticKeys(os.urandom(16), os.urandom(16), os.urandom(16))
+            session.put_key(ref, keys)
 
         # Test new key
-        session = SecurityDomainSession(ccid_connection)
-        session.authenticate(Scp03KeyParams(keys=keys))
-        _verify_auth(session)
+        with SecurityDomainSession(ccid_connection) as new_session:
+            new_session.authenticate(Scp03KeyParams(keys=keys))
+            _verify_auth(new_session)
 
         # Verify default key is removed
-        session = SecurityDomainSession(ccid_connection)
-        with pytest.raises(ValueError):
-            session.authenticate(Scp03KeyParams())
+        with (
+            SecurityDomainSession(ccid_connection) as new_session,
+            pytest.raises(ValueError),
+        ):
+            new_session.authenticate(Scp03KeyParams())
 
 
 def _load_scp11_keys(session, kid, kvn):
@@ -117,6 +118,103 @@ class TestScp11:
         if info.is_fips and transport != TRANSPORT.USB:
             pytest.skip("SCP management on YK FIPS over NFC")
 
+    @pytest.fixture
+    def curve_session(self, session):
+        # Provisioning removes factory SCP03 keys; the session fixture restores them.
+        session.authenticate(Scp03KeyParams())
+        return session
+
+    @pytest.fixture
+    def curve_key(self, curve_session, operation):
+        kid = 0x10 if operation == "import_public" else 0x13
+        keys = curve_session.get_key_information()
+        ref = next(
+            (
+                KeyRef(kid, kvn)
+                for kvn in range(0x70, 0x80)
+                if KeyRef(kid, kvn) not in keys
+            ),
+            None,
+        )
+        if ref is None:
+            pytest.skip("No unused temporary SCP key reference available")
+        try:
+            yield ref
+        finally:
+            if ref in curve_session.get_key_information():
+                curve_session.delete_key(ref.kid, ref.kvn)
+
+    @pytest.mark.parametrize("curve", Curve, ids=lambda curve: curve.name)
+    @pytest.mark.parametrize(
+        "operation", ("generate", "import_private", "import_public")
+    )
+    def test_curve_support(self, curve_session, curve_key, operation, curve):
+        def provision():
+            if operation == "generate":
+                return curve_session.generate_ec_key(curve_key, curve)
+            private_key = ec.generate_private_key(curve._curve)
+            key = (
+                private_key.public_key()
+                if operation == "import_public"
+                else private_key
+            )
+            curve_session.put_key(curve_key, key)
+
+        if curve == Curve.SECP256R1:
+            public_key = provision()
+            if operation == "generate":
+                assert isinstance(public_key.curve, ec.SECP256R1)
+            assert curve_key in curve_session.get_key_information()
+        else:
+            with pytest.raises(NotSupportedError, match="Only P-256 EC keys"):
+                provision()
+            assert curve_key not in curve_session.get_key_information()
+
+    @pytest.mark.parametrize(
+        "curve",
+        [curve for curve in Curve if curve != Curve.SECP256R1],
+        ids=lambda curve: curve.name,
+    )
+    def test_other_curve_generation_rejected_by_device(
+        self, session, ccid_connection, curve
+    ):
+        keys = session.get_key_information()
+        ref = next(
+            (
+                KeyRef(0x13, kvn)
+                for kvn in range(0x70, 0x80)
+                if KeyRef(0x13, kvn) not in keys
+            ),
+            None,
+        )
+        if ref is None:
+            pytest.skip("No unused temporary SCP key reference available")
+        session.close()
+        with SmartCardProtocol(ccid_connection) as protocol:
+            protocol.select(AID.SECURE_DOMAIN)
+            protocol.init_scp(Scp03KeyParams())
+            try:
+                # Probe the device directly, bypassing host curve restrictions.
+                with pytest.raises(ApduError) as exc:
+                    protocol.send_apdu(
+                        0x80,
+                        0xF1,
+                        0,
+                        ref.kid,
+                        bytes([ref.kvn]) + Tlv(0xF0, bytes([curve])),
+                    )
+                assert exc.value.sw == SW.INCORRECT_PARAMETERS
+            finally:
+                keys = Tlv.parse_list(protocol.send_apdu(0, 0xCA, 0, 0xE0))
+                if any(key.tag == 0xC0 and key.value[:2] == ref for key in keys):
+                    protocol.send_apdu(
+                        0x80,
+                        0xE4,
+                        0,
+                        0,
+                        Tlv(0xD0, bytes([ref.kid])) + Tlv(0xD2, bytes([ref.kvn])),
+                    )
+
     def test_scp11b_ok(self, session):
         ref = KeyRef(0x13, 0x1)
         chain = session.get_certificate_bundle(ref)
@@ -132,78 +230,85 @@ class TestScp11:
             session.authenticate(Scp11KeyParams(ref, chain[0].public_key()))
 
     def test_scp11b_import(self, ccid_connection, session):
-        session.authenticate(Scp03KeyParams())
+        with session:
+            session.authenticate(Scp03KeyParams())
 
-        ref = KeyRef(0x13, 0x2)
-        sk = ec.generate_private_key(ec.SECP256R1(), default_backend())
-        session.put_key(ref, sk)
+            ref = KeyRef(0x13, 0x2)
+            sk = ec.generate_private_key(ec.SECP256R1())
+            session.put_key(ref, sk)
 
-        params = Scp11KeyParams(ref, sk.public_key())
+            params = Scp11KeyParams(ref, sk.public_key())
 
         # Authenticate
-        session = SecurityDomainSession(ccid_connection)
-        session.authenticate(params)
+        with SecurityDomainSession(ccid_connection) as new_session:
+            new_session.authenticate(params)
 
     def test_scp11a_ok(self, ccid_connection, session):
-        session.authenticate(Scp03KeyParams())
-        kvn = 0x3
-        params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
-        # Authenticate
-        session = SecurityDomainSession(ccid_connection)
-        session.authenticate(params)
+        with session:
+            session.authenticate(Scp03KeyParams())
+            kvn = 0x3
+            params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
 
-        # Verify by deleting keys
-        session.delete_key(kvn=kvn)
+        # Authenticate
+        with SecurityDomainSession(ccid_connection) as new_session:
+            new_session.authenticate(params)
+
+            # Verify by deleting keys
+            new_session.delete_key(kvn=kvn)
 
     def test_scp11a_allowlist(self, ccid_connection, session):
-        session.authenticate(Scp03KeyParams())
-        kvn = 0x3
-        params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
-        serials = [c.serial_number for c in params.certificates]
-        session.store_allowlist(params.oce_ref, serials)
+        with session:
+            session.authenticate(Scp03KeyParams())
+            kvn = 0x3
+            params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
+            serials = [c.serial_number for c in params.certificates]
+            session.store_allowlist(params.oce_ref, serials)
 
         # Authenticate
-        session = SecurityDomainSession(ccid_connection)
-        session.authenticate(params)
+        with SecurityDomainSession(ccid_connection) as new_session:
+            new_session.authenticate(params)
 
-        # Verify by deleting keys
-        session.delete_key(kvn=kvn)
+            # Verify by deleting keys
+            new_session.delete_key(kvn=kvn)
 
     def test_scp11a_allowlist_blocked(self, ccid_connection, session):
-        session.authenticate(Scp03KeyParams())
+        with session:
+            session.authenticate(Scp03KeyParams())
 
-        # Replace default SCP03 keys
-        ref = KeyRef(0x1, 0x2)
-        keys = StaticKeys(os.urandom(16), os.urandom(16), os.urandom(16))
-        session.put_key(ref, keys)
-        session.delete_key(kid=ScpKid.SCP11b)
+            # Replace default SCP03 keys
+            ref = KeyRef(0x1, 0x2)
+            keys = StaticKeys(os.urandom(16), os.urandom(16), os.urandom(16))
+            session.put_key(ref, keys)
+            session.delete_key(kid=ScpKid.SCP11b)
 
-        kvn = 0x3
-        params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
-        serials = [1, 2, 3, 4, 5]
-        session.store_allowlist(params.oce_ref, serials)
+            kvn = 0x3
+            params = _load_scp11_keys(session, ScpKid.SCP11a, kvn)
+            serials = [1, 2, 3, 4, 5]
+            session.store_allowlist(params.oce_ref, serials)
 
         # Fail authentication
-        session = SecurityDomainSession(ccid_connection)
-        with pytest.raises(ApduError):
-            session.authenticate(params)
+        with SecurityDomainSession(ccid_connection) as new_session:
+            with pytest.raises(ApduError):
+                new_session.authenticate(params)
 
-        # Remove allowlist
-        session.authenticate(Scp03KeyParams(keys=keys))
-        session.store_allowlist(params.oce_ref, [])
+            # Remove allowlist
+            new_session.authenticate(Scp03KeyParams(keys=keys))
+            new_session.store_allowlist(params.oce_ref, [])
 
         # Authenticate
-        session = SecurityDomainSession(ccid_connection)
-        session.authenticate(params)
+        with SecurityDomainSession(ccid_connection) as new_session:
+            new_session.authenticate(params)
 
     def test_scp11c_ok(self, ccid_connection, session):
-        session.authenticate(Scp03KeyParams())
-        kvn = 0x3
-        params = _load_scp11_keys(session, ScpKid.SCP11c, kvn)
-        # Authenticate
-        session = SecurityDomainSession(ccid_connection)
-        session.authenticate(params)
+        with session:
+            session.authenticate(Scp03KeyParams())
+            kvn = 0x3
+            params = _load_scp11_keys(session, ScpKid.SCP11c, kvn)
 
-        # Verify not authenticated
-        with pytest.raises(ApduError):
-            session.delete_key(kvn=kvn)
+        # Authenticate
+        with SecurityDomainSession(ccid_connection) as new_session:
+            new_session.authenticate(params)
+
+            # Verify not authenticated
+            with pytest.raises(ApduError):
+                new_session.delete_key(kvn=kvn)

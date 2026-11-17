@@ -1,0 +1,3573 @@
+// Copyright 2026 Yubico AB
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! PIV (Personal Identity Verification) smart card application.
+//!
+//! This module implements the PIV standard (NIST SP 800-73) for managing
+//! certificates, keys, and PINs on a YubiKey. The main entry point is
+//! [`PivSession`](crate::piv::PivSession), which wraps a
+//! [`SmartCardConnection`](crate::smartcard::SmartCardConnection).
+//!
+//! # Example
+//!
+//! ```no_run
+//! use yubikit::platform::device::list_devices;
+//! use yubikit::management::UsbInterface;
+//! use yubikit::piv::{PivSession, Slot};
+//!
+//! let devices = list_devices(UsbInterface::CCID)?;
+//! let dev = devices.first().expect("no YubiKey found");
+//! let conn = dev.open_smartcard()?;
+//! let mut session = PivSession::new(conn).map_err(|(e, _)| e)?;
+//!
+//! let cert = session.get_certificate(Slot::Authentication)?;
+//! println!("Certificate: {} bytes", cert.len());
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+
+use std::cell::RefCell;
+use std::fmt;
+use std::io::{Read, Write};
+
+use aes::Aes128;
+use aes::Aes192;
+use aes::Aes256;
+use cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
+use des::TdesEde3;
+use flate2::Compression;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+use subtle::ConstantTimeEq;
+use thiserror::Error;
+use x509_cert::der;
+use x509_cert::der::Decode;
+use x509_cert::der::asn1::BitString;
+use x509_cert::spki::{
+    self, AlgorithmIdentifierOwned, DynSignatureAlgorithmIdentifier, EncodePublicKey,
+    ObjectIdentifier, SignatureBitStringEncoding,
+};
+use zeroize::Zeroizing;
+
+use crate::__internal::tlv::{parse_tlv_dict, tlv_append, tlv_encode, tlv_parse, tlv_unpack};
+use crate::core::{Version, bytes2int, int2bytes, patch_version};
+use crate::keys::{
+    EcCurve, EcPublicKey, Ed25519PublicKey, KeyAlgorithm, KeyError, MlDsaParameterSet,
+    MlDsaPublicKey, MlKemParameterSet, MlKemPublicKey, PrivateKey, PublicKey, RsaKeySize,
+    RsaPublicKey, X25519PublicKey,
+};
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/// Errors that can occur during PIV operations.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum PivError {
+    /// The requested operation is not supported.
+    #[error("Not supported: {0}")]
+    NotSupported(String),
+    /// The provided data is malformed or invalid.
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
+    /// The PIN was incorrect; contains the number of remaining attempts.
+    #[error("Invalid PIN, {0} attempts remaining")]
+    InvalidPin(u32),
+    /// An error occurred in the underlying smart card transport.
+    #[error("Connection error: {0}")]
+    Connection(SmartCardError),
+}
+
+impl From<SmartCardError> for PivError {
+    fn from(e: SmartCardError) -> Self {
+        match e {
+            SmartCardError::NotSupported(msg) => PivError::NotSupported(msg),
+            SmartCardError::InvalidData(msg) => PivError::InvalidData(msg),
+            other => PivError::Connection(other),
+        }
+    }
+}
+
+impl From<crate::__internal::tlv::TlvError> for PivError {
+    fn from(e: crate::__internal::tlv::TlvError) -> Self {
+        PivError::InvalidData(e.to_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Algorithm enum (str-like)
+// ---------------------------------------------------------------------------
+
+/// High-level cryptographic algorithm family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Algorithm {
+    /// Elliptic-curve cryptography (NIST P-curves, Ed25519, X25519).
+    Ec,
+    /// RSA public-key cryptography.
+    Rsa,
+    /// ML-DSA post-quantum signature algorithm (requires firmware ≥ 6.0.0).
+    MlDsa,
+    /// ML-KEM post-quantum key-encapsulation algorithm (requires firmware ≥ 6.0.0).
+    MlKem,
+}
+
+impl fmt::Display for Algorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Algorithm::Ec => write!(f, "ec"),
+            Algorithm::Rsa => write!(f, "rsa"),
+            Algorithm::MlDsa => write!(f, "mldsa"),
+            Algorithm::MlKem => write!(f, "mlkem"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// KeyType
+// ---------------------------------------------------------------------------
+
+/// Specific key algorithm and size used in a PIV slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[repr(u8)]
+pub enum KeyType {
+    /// RSA 1024-bit key.
+    Rsa1024 = 0x06,
+    /// RSA 2048-bit key.
+    Rsa2048 = 0x07,
+    /// RSA 3072-bit key (requires firmware ≥ 5.7.0).
+    Rsa3072 = 0x05,
+    /// RSA 4096-bit key (requires firmware ≥ 5.7.0).
+    Rsa4096 = 0x16,
+    /// NIST P-256 elliptic-curve key.
+    EccP256 = 0x11,
+    /// NIST P-384 elliptic-curve key.
+    EccP384 = 0x14,
+    /// Ed25519 signing key (requires firmware ≥ 5.7.0).
+    Ed25519 = 0xE0,
+    /// X25519 key-agreement key (requires firmware ≥ 5.7.0).
+    X25519 = 0xE1,
+    /// ML-DSA-44 signing key (requires firmware ≥ 6.0.0).
+    MlDsa44 = 0xE2,
+    /// ML-DSA-65 signing key (requires firmware ≥ 6.0.0).
+    MlDsa65 = 0xE3,
+    /// ML-DSA-87 signing key (requires firmware ≥ 6.0.0).
+    MlDsa87 = 0xE4,
+    /// ML-KEM-512 key-encapsulation key (requires firmware ≥ 6.0.0).
+    MlKem512 = 0xE5,
+    /// ML-KEM-768 key-encapsulation key (requires firmware ≥ 6.0.0).
+    MlKem768 = 0xE6,
+    /// ML-KEM-1024 key-encapsulation key (requires firmware ≥ 6.0.0).
+    MlKem1024 = 0xE7,
+}
+
+impl KeyType {
+    /// Convert a raw byte to a [`KeyType`], returning `None` if unrecognized.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0x06 => Some(Self::Rsa1024),
+            0x07 => Some(Self::Rsa2048),
+            0x05 => Some(Self::Rsa3072),
+            0x16 => Some(Self::Rsa4096),
+            0x11 => Some(Self::EccP256),
+            0x14 => Some(Self::EccP384),
+            0xE0 => Some(Self::Ed25519),
+            0xE1 => Some(Self::X25519),
+            0xE2 => Some(Self::MlDsa44),
+            0xE3 => Some(Self::MlDsa65),
+            0xE4 => Some(Self::MlDsa87),
+            0xE5 => Some(Self::MlKem512),
+            0xE6 => Some(Self::MlKem768),
+            0xE7 => Some(Self::MlKem1024),
+            _ => None,
+        }
+    }
+
+    /// Returns the high-level [`Algorithm`] family for this key type.
+    pub fn algorithm(self) -> Algorithm {
+        match self {
+            Self::Rsa1024 | Self::Rsa2048 | Self::Rsa3072 | Self::Rsa4096 => Algorithm::Rsa,
+            Self::MlDsa44 | Self::MlDsa65 | Self::MlDsa87 => Algorithm::MlDsa,
+            Self::MlKem512 | Self::MlKem768 | Self::MlKem1024 => Algorithm::MlKem,
+            _ => Algorithm::Ec,
+        }
+    }
+
+    /// Returns the key size in bits (0 for ML-DSA/ML-KEM key types).
+    pub fn bit_len(self) -> u32 {
+        match self {
+            Self::Rsa1024 => 1024,
+            Self::Rsa2048 => 2048,
+            Self::Rsa3072 => 3072,
+            Self::Rsa4096 => 4096,
+            Self::EccP256 => 256,
+            Self::EccP384 => 384,
+            Self::Ed25519 | Self::X25519 => 256,
+            Self::MlDsa44
+            | Self::MlDsa65
+            | Self::MlDsa87
+            | Self::MlKem512
+            | Self::MlKem768
+            | Self::MlKem1024 => 0,
+        }
+    }
+
+    /// Determine the key type from a [`PublicKey`].
+    pub fn from_public_key(public_key: &PublicKey) -> Result<Self, PivError> {
+        Self::try_from(&public_key.algorithm())
+    }
+}
+
+impl fmt::Display for KeyType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Rsa1024 => write!(f, "RSA1024"),
+            Self::Rsa2048 => write!(f, "RSA2048"),
+            Self::Rsa3072 => write!(f, "RSA3072"),
+            Self::Rsa4096 => write!(f, "RSA4096"),
+            Self::EccP256 => write!(f, "ECCP256"),
+            Self::EccP384 => write!(f, "ECCP384"),
+            Self::Ed25519 => write!(f, "ED25519"),
+            Self::X25519 => write!(f, "X25519"),
+            Self::MlDsa44 => write!(f, "MLDSA44"),
+            Self::MlDsa65 => write!(f, "MLDSA65"),
+            Self::MlDsa87 => write!(f, "MLDSA87"),
+            Self::MlKem512 => write!(f, "MLKEM512"),
+            Self::MlKem768 => write!(f, "MLKEM768"),
+            Self::MlKem1024 => write!(f, "MLKEM1024"),
+        }
+    }
+}
+
+impl TryFrom<&KeyAlgorithm> for KeyType {
+    type Error = PivError;
+
+    fn try_from(algo: &KeyAlgorithm) -> Result<Self, Self::Error> {
+        #[allow(unreachable_patterns)]
+        match algo {
+            KeyAlgorithm::Rsa(RsaKeySize::Rsa1024) => Ok(Self::Rsa1024),
+            KeyAlgorithm::Rsa(RsaKeySize::Rsa2048) => Ok(Self::Rsa2048),
+            KeyAlgorithm::Rsa(RsaKeySize::Rsa3072) => Ok(Self::Rsa3072),
+            KeyAlgorithm::Rsa(RsaKeySize::Rsa4096) => Ok(Self::Rsa4096),
+            KeyAlgorithm::Ec(EcCurve::P256) => Ok(Self::EccP256),
+            KeyAlgorithm::Ec(EcCurve::P384) => Ok(Self::EccP384),
+            KeyAlgorithm::Ec(curve) => Err(PivError::NotSupported(format!(
+                "Unsupported EC curve for PIV: {curve:?}"
+            ))),
+            KeyAlgorithm::Ed25519 => Ok(Self::Ed25519),
+            KeyAlgorithm::X25519 => Ok(Self::X25519),
+            KeyAlgorithm::MlDsa(MlDsaParameterSet::MlDsa44) => Ok(Self::MlDsa44),
+            KeyAlgorithm::MlDsa(MlDsaParameterSet::MlDsa65) => Ok(Self::MlDsa65),
+            KeyAlgorithm::MlDsa(MlDsaParameterSet::MlDsa87) => Ok(Self::MlDsa87),
+            KeyAlgorithm::MlKem(MlKemParameterSet::MlKem512) => Ok(Self::MlKem512),
+            KeyAlgorithm::MlKem(MlKemParameterSet::MlKem768) => Ok(Self::MlKem768),
+            KeyAlgorithm::MlKem(MlKemParameterSet::MlKem1024) => Ok(Self::MlKem1024),
+        }
+    }
+}
+
+impl From<&KeyError> for PivError {
+    fn from(e: &KeyError) -> Self {
+        PivError::InvalidData(e.to_string())
+    }
+}
+
+/// Algorithm used for the PIV management key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[repr(u8)]
+pub enum ManagementKeyType {
+    /// Triple-DES (3DES / TDES) — 24-byte key, legacy default.
+    Tdes = 0x03,
+    /// AES-128 — 16-byte key.
+    Aes128 = 0x08,
+    /// AES-192 — 24-byte key.
+    Aes192 = 0x0A,
+    /// AES-256 — 32-byte key.
+    Aes256 = 0x0C,
+}
+
+impl ManagementKeyType {
+    /// Convert a raw byte to a [`ManagementKeyType`], returning `None` if unrecognized.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0x03 => Some(Self::Tdes),
+            0x08 => Some(Self::Aes128),
+            0x0A => Some(Self::Aes192),
+            0x0C => Some(Self::Aes256),
+            _ => None,
+        }
+    }
+
+    /// Returns the required key length in bytes.
+    pub fn key_len(self) -> usize {
+        match self {
+            Self::Tdes => 24,
+            Self::Aes128 => 16,
+            Self::Aes192 => 24,
+            Self::Aes256 => 32,
+        }
+    }
+
+    /// Returns the challenge block size in bytes (8 for TDES, 16 for AES).
+    pub fn challenge_len(self) -> usize {
+        match self {
+            Self::Tdes => 8,
+            _ => 16,
+        }
+    }
+}
+
+impl fmt::Display for ManagementKeyType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Tdes => write!(f, "TDES"),
+            Self::Aes128 => write!(f, "AES128"),
+            Self::Aes192 => write!(f, "AES192"),
+            Self::Aes256 => write!(f, "AES256"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Slot
+// ---------------------------------------------------------------------------
+
+/// A PIV key slot on the YubiKey.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[repr(u8)]
+pub enum Slot {
+    /// Slot 9A — PIV Authentication.
+    Authentication = 0x9A,
+    /// Slot 9C — Digital Signature.
+    Signature = 0x9C,
+    /// Slot 9D — Key Management (encryption / key agreement).
+    KeyManagement = 0x9D,
+    /// Slot 9E — Card Authentication.
+    CardAuth = 0x9E,
+    /// Retired Key Management slot 1 (0x82).
+    Retired1 = 0x82,
+    /// Retired Key Management slot 2 (0x83).
+    Retired2 = 0x83,
+    /// Retired Key Management slot 3 (0x84).
+    Retired3 = 0x84,
+    /// Retired Key Management slot 4 (0x85).
+    Retired4 = 0x85,
+    /// Retired Key Management slot 5 (0x86).
+    Retired5 = 0x86,
+    /// Retired Key Management slot 6 (0x87).
+    Retired6 = 0x87,
+    /// Retired Key Management slot 7 (0x88).
+    Retired7 = 0x88,
+    /// Retired Key Management slot 8 (0x89).
+    Retired8 = 0x89,
+    /// Retired Key Management slot 9 (0x8A).
+    Retired9 = 0x8A,
+    /// Retired Key Management slot 10 (0x8B).
+    Retired10 = 0x8B,
+    /// Retired Key Management slot 11 (0x8C).
+    Retired11 = 0x8C,
+    /// Retired Key Management slot 12 (0x8D).
+    Retired12 = 0x8D,
+    /// Retired Key Management slot 13 (0x8E).
+    Retired13 = 0x8E,
+    /// Retired Key Management slot 14 (0x8F).
+    Retired14 = 0x8F,
+    /// Retired Key Management slot 15 (0x90).
+    Retired15 = 0x90,
+    /// Retired Key Management slot 16 (0x91).
+    Retired16 = 0x91,
+    /// Retired Key Management slot 17 (0x92).
+    Retired17 = 0x92,
+    /// Retired Key Management slot 18 (0x93).
+    Retired18 = 0x93,
+    /// Retired Key Management slot 19 (0x94).
+    Retired19 = 0x94,
+    /// Retired Key Management slot 20 (0x95).
+    Retired20 = 0x95,
+    /// Attestation slot (0xF9).
+    Attestation = 0xF9,
+}
+
+impl Slot {
+    /// Key slots reported by PIV info, excluding the attestation slot.
+    pub fn key_slots() -> impl Iterator<Item = Self> {
+        [
+            Self::Authentication,
+            Self::Signature,
+            Self::KeyManagement,
+            Self::CardAuth,
+        ]
+        .into_iter()
+        .chain(
+            (Self::Retired1 as u8..=Self::Retired20 as u8)
+                .map(|id| Self::from_u8(id).expect("retired key slot IDs are contiguous")),
+        )
+    }
+
+    /// Convert a raw byte to a [`Slot`], returning `None` if unrecognized.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0x9A => Some(Self::Authentication),
+            0x9C => Some(Self::Signature),
+            0x9D => Some(Self::KeyManagement),
+            0x9E => Some(Self::CardAuth),
+            0x82 => Some(Self::Retired1),
+            0x83 => Some(Self::Retired2),
+            0x84 => Some(Self::Retired3),
+            0x85 => Some(Self::Retired4),
+            0x86 => Some(Self::Retired5),
+            0x87 => Some(Self::Retired6),
+            0x88 => Some(Self::Retired7),
+            0x89 => Some(Self::Retired8),
+            0x8A => Some(Self::Retired9),
+            0x8B => Some(Self::Retired10),
+            0x8C => Some(Self::Retired11),
+            0x8D => Some(Self::Retired12),
+            0x8E => Some(Self::Retired13),
+            0x8F => Some(Self::Retired14),
+            0x90 => Some(Self::Retired15),
+            0x91 => Some(Self::Retired16),
+            0x92 => Some(Self::Retired17),
+            0x93 => Some(Self::Retired18),
+            0x94 => Some(Self::Retired19),
+            0x95 => Some(Self::Retired20),
+            0xF9 => Some(Self::Attestation),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Slot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:02X} ({:?})", *self as u8, self)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ObjectId
+// ---------------------------------------------------------------------------
+
+/// PIV data-object identifiers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[repr(u32)]
+pub enum ObjectId {
+    /// Card Capability Container.
+    Capability = 0x5FC107,
+    /// Card Holder Unique Identifier (CHUID).
+    Chuid = 0x5FC102,
+    /// X.509 Certificate for PIV Authentication.
+    Authentication = 0x5FC105,
+    /// Cardholder Fingerprints.
+    Fingerprints = 0x5FC103,
+    /// Security Object.
+    Security = 0x5FC106,
+    /// Cardholder Facial Image.
+    Facial = 0x5FC108,
+    /// Printed Information.
+    Printed = 0x5FC109,
+    /// X.509 Certificate for Digital Signature.
+    Signature = 0x5FC10A,
+    /// X.509 Certificate for Key Management.
+    KeyManagement = 0x5FC10B,
+    /// X.509 Certificate for Card Authentication.
+    CardAuth = 0x5FC101,
+    /// Discovery Object.
+    Discovery = 0x7E,
+    /// Key History Object.
+    KeyHistory = 0x5FC10C,
+    /// Cardholder Iris Images.
+    Iris = 0x5FC121,
+    /// Retired X.509 Certificate 1.
+    Retired1 = 0x5FC10D,
+    /// Retired X.509 Certificate 2.
+    Retired2 = 0x5FC10E,
+    /// Retired X.509 Certificate 3.
+    Retired3 = 0x5FC10F,
+    /// Retired X.509 Certificate 4.
+    Retired4 = 0x5FC110,
+    /// Retired X.509 Certificate 5.
+    Retired5 = 0x5FC111,
+    /// Retired X.509 Certificate 6.
+    Retired6 = 0x5FC112,
+    /// Retired X.509 Certificate 7.
+    Retired7 = 0x5FC113,
+    /// Retired X.509 Certificate 8.
+    Retired8 = 0x5FC114,
+    /// Retired X.509 Certificate 9.
+    Retired9 = 0x5FC115,
+    /// Retired X.509 Certificate 10.
+    Retired10 = 0x5FC116,
+    /// Retired X.509 Certificate 11.
+    Retired11 = 0x5FC117,
+    /// Retired X.509 Certificate 12.
+    Retired12 = 0x5FC118,
+    /// Retired X.509 Certificate 13.
+    Retired13 = 0x5FC119,
+    /// Retired X.509 Certificate 14.
+    Retired14 = 0x5FC11A,
+    /// Retired X.509 Certificate 15.
+    Retired15 = 0x5FC11B,
+    /// Retired X.509 Certificate 16.
+    Retired16 = 0x5FC11C,
+    /// Retired X.509 Certificate 17.
+    Retired17 = 0x5FC11D,
+    /// Retired X.509 Certificate 18.
+    Retired18 = 0x5FC11E,
+    /// Retired X.509 Certificate 19.
+    Retired19 = 0x5FC11F,
+    /// Retired X.509 Certificate 20.
+    Retired20 = 0x5FC120,
+    /// Attestation certificate data object.
+    Attestation = 0x5FFF01,
+}
+
+impl ObjectId {
+    /// Returns the [`ObjectId`] that holds the certificate for the given [`Slot`].
+    pub fn from_slot(slot: Slot) -> Self {
+        match slot {
+            Slot::Authentication => Self::Authentication,
+            Slot::Signature => Self::Signature,
+            Slot::KeyManagement => Self::KeyManagement,
+            Slot::CardAuth => Self::CardAuth,
+            Slot::Retired1 => Self::Retired1,
+            Slot::Retired2 => Self::Retired2,
+            Slot::Retired3 => Self::Retired3,
+            Slot::Retired4 => Self::Retired4,
+            Slot::Retired5 => Self::Retired5,
+            Slot::Retired6 => Self::Retired6,
+            Slot::Retired7 => Self::Retired7,
+            Slot::Retired8 => Self::Retired8,
+            Slot::Retired9 => Self::Retired9,
+            Slot::Retired10 => Self::Retired10,
+            Slot::Retired11 => Self::Retired11,
+            Slot::Retired12 => Self::Retired12,
+            Slot::Retired13 => Self::Retired13,
+            Slot::Retired14 => Self::Retired14,
+            Slot::Retired15 => Self::Retired15,
+            Slot::Retired16 => Self::Retired16,
+            Slot::Retired17 => Self::Retired17,
+            Slot::Retired18 => Self::Retired18,
+            Slot::Retired19 => Self::Retired19,
+            Slot::Retired20 => Self::Retired20,
+            Slot::Attestation => Self::Attestation,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PinPolicy / TouchPolicy
+// ---------------------------------------------------------------------------
+
+/// PIN verification policy for a PIV key slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[repr(u8)]
+pub enum PinPolicy {
+    /// Use the slot's default PIN policy.
+    Default = 0x00,
+    /// PIN is never required.
+    Never = 0x01,
+    /// PIN is required once per session.
+    Once = 0x02,
+    /// PIN is required for every use.
+    Always = 0x03,
+    /// Biometric match required once per session.
+    MatchOnce = 0x04,
+    /// Biometric match required for every use.
+    MatchAlways = 0x05,
+}
+
+impl PinPolicy {
+    /// Convert a raw byte to a [`PinPolicy`], returning `None` if unrecognized.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0x00 => Some(Self::Default),
+            0x01 => Some(Self::Never),
+            0x02 => Some(Self::Once),
+            0x03 => Some(Self::Always),
+            0x04 => Some(Self::MatchOnce),
+            0x05 => Some(Self::MatchAlways),
+            _ => None,
+        }
+    }
+}
+
+/// Physical touch policy for a PIV key slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[repr(u8)]
+pub enum TouchPolicy {
+    /// Use the slot's default touch policy.
+    Default = 0x00,
+    /// Touch is never required.
+    Never = 0x01,
+    /// Touch is required for every operation.
+    Always = 0x02,
+    /// Touch is cached for 15 seconds after first tap.
+    Cached = 0x03,
+}
+
+impl TouchPolicy {
+    /// Convert a raw byte to a [`TouchPolicy`], returning `None` if unrecognized.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0x00 => Some(Self::Default),
+            0x01 => Some(Self::Never),
+            0x02 => Some(Self::Always),
+            0x03 => Some(Self::Cached),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Data structures
+// ---------------------------------------------------------------------------
+
+const FASCN_LENS: [usize; 9] = [4, 4, 6, 1, 1, 10, 1, 4, 1];
+const BCD_SS: [u8; 5] = [1, 1, 0, 1, 0];
+const BCD_FS: [u8; 5] = [1, 0, 1, 1, 0];
+const BCD_ES: [u8; 5] = [1, 1, 1, 1, 1];
+
+/// Encode `val` as `ln` BCD digits (most-significant first), each digit being
+/// 4 data bits (least-significant first) followed by an odd-parity bit.
+fn bcd(val: u64, ln: usize) -> Vec<u8> {
+    let mut digits = Vec::with_capacity(ln);
+    let mut v = val;
+    for _ in 0..ln {
+        digits.push((v % 10) as u8);
+        v /= 10;
+    }
+    digits.reverse();
+    let mut bits = Vec::with_capacity(ln * 5);
+    for d in digits {
+        let data = [d & 1, (d >> 1) & 1, (d >> 2) & 1, (d >> 3) & 1];
+        let ones = data.iter().filter(|&&b| b == 1).count();
+        let parity = ((ones + 1) % 2) as u8;
+        bits.extend_from_slice(&data);
+        bits.push(parity);
+    }
+    bits
+}
+
+/// FASC-N (Federal Agency Smart Credential Number) data structure.
+///
+/// See <https://www.idmanagement.gov/docs/pacs-tig-scepacs.pdf>.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FascN {
+    /// Agency code (4 digits).
+    pub agency_code: u32,
+    /// System code (4 digits).
+    pub system_code: u32,
+    /// Credential number (6 digits).
+    pub credential_number: u32,
+    /// Credential series (1 digit).
+    pub credential_series: u32,
+    /// Individual credential issue (1 digit).
+    pub individual_credential_issue: u32,
+    /// Person identifier (10 digits).
+    pub person_identifier: u64,
+    /// Organizational category (1 digit).
+    pub organizational_category: u32,
+    /// Organizational identifier (4 digits).
+    pub organizational_identifier: u32,
+    /// Organization association category (1 digit).
+    pub organization_association_category: u32,
+}
+
+impl FascN {
+    /// Serialize the FASC-N to its 25-byte packed BCD representation.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let vals: [u64; 9] = [
+            self.agency_code as u64,
+            self.system_code as u64,
+            self.credential_number as u64,
+            self.credential_series as u64,
+            self.individual_credential_issue as u64,
+            self.person_identifier,
+            self.organizational_category as u64,
+            self.organizational_identifier as u64,
+            self.organization_association_category as u64,
+        ];
+        let f: Vec<Vec<u8>> = vals
+            .iter()
+            .zip(FASCN_LENS)
+            .map(|(v, ln)| bcd(*v, ln))
+            .collect();
+
+        let mut bits: Vec<u8> = Vec::new();
+        bits.extend_from_slice(&BCD_SS);
+        bits.extend_from_slice(&f[0]);
+        bits.extend_from_slice(&BCD_FS);
+        bits.extend_from_slice(&f[1]);
+        bits.extend_from_slice(&BCD_FS);
+        bits.extend_from_slice(&f[2]);
+        bits.extend_from_slice(&BCD_FS);
+        bits.extend_from_slice(&f[3]);
+        bits.extend_from_slice(&BCD_FS);
+        bits.extend_from_slice(&f[4]);
+        bits.extend_from_slice(&BCD_FS);
+        bits.extend_from_slice(&f[5]);
+        bits.extend_from_slice(&f[6]);
+        bits.extend_from_slice(&f[7]);
+        bits.extend_from_slice(&f[8]);
+        bits.extend_from_slice(&BCD_ES);
+
+        // Longitudinal redundancy check over each 5-bit group.
+        let mut lrc: u8 = 0;
+        for chunk in bits.chunks(5) {
+            let mut g = 0u8;
+            for &b in chunk {
+                g = (g << 1) | b;
+            }
+            lrc ^= g;
+        }
+        for i in (0..5).rev() {
+            bits.push((lrc >> i) & 1);
+        }
+
+        // Pack the 200 bits big-endian into 25 bytes.
+        bits.chunks(8)
+            .map(|c| c.iter().fold(0u8, |acc, &b| (acc << 1) | b))
+            .collect()
+    }
+
+    /// Parse a FASC-N from its 25-byte packed BCD representation.
+    pub fn from_bytes(value: &[u8]) -> Result<Self, PivError> {
+        if value.len() != 25 {
+            return Err(PivError::InvalidData(format!(
+                "FASC-N must be 25 bytes, got {}",
+                value.len()
+            )));
+        }
+        let mut bits = Vec::with_capacity(200);
+        for &byte in value {
+            for i in (0..8).rev() {
+                bits.push((byte >> i) & 1);
+            }
+        }
+        // Decode the 4 data bits of each 5-bit group into a digit.
+        let mut ds = Vec::with_capacity(40);
+        for i in (0..200).step_by(5) {
+            let d = bits[i] as u32
+                + (bits[i + 1] as u32) * 2
+                + (bits[i + 2] as u32) * 4
+                + (bits[i + 3] as u32) * 8;
+            ds.push(d as u64);
+        }
+        let offsets = [1usize, 6, 11, 18, 20, 22, 32, 33, 37];
+        let mut fields = [0u64; 9];
+        for (fi, (&offs, &ln)) in offsets.iter().zip(FASCN_LENS.iter()).enumerate() {
+            let mut val = 0u64;
+            for j in 0..ln {
+                val = val * 10 + ds[offs + j];
+            }
+            fields[fi] = val;
+        }
+        Ok(FascN {
+            agency_code: fields[0] as u32,
+            system_code: fields[1] as u32,
+            credential_number: fields[2] as u32,
+            credential_series: fields[3] as u32,
+            individual_credential_issue: fields[4] as u32,
+            person_identifier: fields[5],
+            organizational_category: fields[6] as u32,
+            organizational_identifier: fields[7] as u32,
+            organization_association_category: fields[8] as u32,
+        })
+    }
+}
+
+impl fmt::Display for FascN {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "[{:04}-{:04}-{:06}-{}-{}-{:010}{}{:04}{}]",
+            self.agency_code,
+            self.system_code,
+            self.credential_number,
+            self.credential_series,
+            self.individual_credential_issue,
+            self.person_identifier,
+            self.organizational_category,
+            self.organizational_identifier,
+            self.organization_association_category,
+        )
+    }
+}
+
+/// CHUID (Cardholder Unique Identifier) data structure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chuid {
+    /// Optional buffer length (tag `0xEE`).
+    pub buffer_length: Option<u64>,
+    /// FASC-N (tag `0x30`).
+    pub fasc_n: FascN,
+    /// Optional agency code (tag `0x31`).
+    pub agency_code: Option<Vec<u8>>,
+    /// Optional organizational identifier (tag `0x32`).
+    pub organizational_identifier: Option<Vec<u8>>,
+    /// Optional DUNS (tag `0x33`).
+    pub duns: Option<Vec<u8>>,
+    /// GUID (tag `0x34`).
+    pub guid: Vec<u8>,
+    /// Expiration date as `(year, month, day)` (tag `0x35`).
+    pub expiration_date: (u16, u8, u8),
+    /// Optional authentication key map (tag `0x3D`).
+    pub authentication_key_map: Option<Vec<u8>>,
+    /// Asymmetric signature (tag `0x3E`).
+    pub asymmetric_signature: Vec<u8>,
+    /// Optional LRC byte (tag `0xFE`).
+    pub lrc: Option<u8>,
+}
+
+impl Chuid {
+    fn get_bytes(&self, include_signature: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        if let Some(bl) = self.buffer_length {
+            out.extend_from_slice(&tlv_encode(0xEE, &int2bytes(bl)));
+        }
+        out.extend_from_slice(&tlv_encode(0x30, &self.fasc_n.to_bytes()));
+        if let Some(v) = &self.agency_code {
+            out.extend_from_slice(&tlv_encode(0x31, v));
+        }
+        if let Some(v) = &self.organizational_identifier {
+            out.extend_from_slice(&tlv_encode(0x32, v));
+        }
+        if let Some(v) = &self.duns {
+            out.extend_from_slice(&tlv_encode(0x33, v));
+        }
+        out.extend_from_slice(&tlv_encode(0x34, &self.guid));
+        let (y, m, d) = self.expiration_date;
+        let exp = format!("{:04}{:02}{:02}", y, m, d);
+        out.extend_from_slice(&tlv_encode(0x35, exp.as_bytes()));
+        if let Some(v) = &self.authentication_key_map {
+            out.extend_from_slice(&tlv_encode(0x3D, v));
+        }
+        if include_signature {
+            out.extend_from_slice(&tlv_encode(0x3E, &self.asymmetric_signature));
+        }
+        // The LRC tag is always emitted, as an empty TLV when no LRC is set.
+        let lrc_val = match self.lrc {
+            Some(l) => vec![l],
+            None => Vec::new(),
+        };
+        out.extend_from_slice(&tlv_encode(TAG_LRC, &lrc_val));
+        out
+    }
+
+    /// Serialize the full CHUID, including the asymmetric signature.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.get_bytes(true)
+    }
+
+    /// Serialize the "to-be-signed" bytes, omitting the asymmetric signature.
+    pub fn tbs_bytes(&self) -> Vec<u8> {
+        self.get_bytes(false)
+    }
+
+    /// Parse a CHUID from its TLV representation.
+    pub fn from_bytes(value: &[u8]) -> Result<Self, PivError> {
+        let data = parse_tlv_dict(value)
+            .map_err(|e| PivError::InvalidData(format!("Invalid CHUID: {e}")))?;
+        let buffer_length = data.get(&0xEE).map(|v| bytes2int(v));
+        let lrc = data.get(&TAG_LRC).and_then(|v| v.first().copied());
+        let fasc_n = FascN::from_bytes(
+            data.get(&0x30)
+                .ok_or_else(|| PivError::InvalidData("CHUID missing FASC-N".into()))?,
+        )?;
+        let d = data
+            .get(&0x35)
+            .ok_or_else(|| PivError::InvalidData("CHUID missing expiration date".into()))?;
+        if d.len() != 8 {
+            return Err(PivError::InvalidData(
+                "CHUID expiration date must be 8 bytes".into(),
+            ));
+        }
+        let parse = |s: &[u8]| -> Result<u32, PivError> {
+            std::str::from_utf8(s)
+                .ok()
+                .and_then(|t| t.parse::<u32>().ok())
+                .ok_or_else(|| PivError::InvalidData("Invalid CHUID expiration date".into()))
+        };
+        let expiration_date = (
+            parse(&d[0..4])? as u16,
+            parse(&d[4..6])? as u8,
+            parse(&d[6..8])? as u8,
+        );
+        Ok(Chuid {
+            buffer_length,
+            fasc_n,
+            agency_code: data.get(&0x31).cloned(),
+            organizational_identifier: data.get(&0x32).cloned(),
+            duns: data.get(&0x33).cloned(),
+            guid: data
+                .get(&0x34)
+                .cloned()
+                .ok_or_else(|| PivError::InvalidData("CHUID missing GUID".into()))?,
+            expiration_date,
+            authentication_key_map: data.get(&0x3D).cloned(),
+            asymmetric_signature: data.get(&0x3E).cloned().unwrap_or_default(),
+            lrc,
+        })
+    }
+}
+
+/// Metadata about the PIV PIN or PUK.
+#[derive(Debug, Clone)]
+pub struct PinMetadata {
+    /// Whether the PIN/PUK is still set to its factory default value.
+    pub default_value: bool,
+    /// Total number of allowed attempts before lockout.
+    pub total_attempts: u32,
+    /// Number of remaining attempts before lockout.
+    pub attempts_remaining: u32,
+}
+
+/// Metadata about the PIV management key.
+#[derive(Debug, Clone)]
+pub struct ManagementKeyMetadata {
+    /// Algorithm type of the management key.
+    pub key_type: ManagementKeyType,
+    /// Whether the management key is still the factory default.
+    pub default_value: bool,
+    /// Touch policy applied to the management key.
+    pub touch_policy: TouchPolicy,
+}
+
+/// Metadata about a key in a PIV slot.
+#[derive(Debug, Clone)]
+pub struct SlotMetadata {
+    /// Algorithm type of the key stored in the slot.
+    pub key_type: KeyType,
+    /// PIN policy configured for this slot.
+    pub pin_policy: PinPolicy,
+    /// Touch policy configured for this slot.
+    pub touch_policy: TouchPolicy,
+    /// Whether the key was generated on-device (vs. imported).
+    pub generated: bool,
+    /// The public key stored in the slot.
+    pub public_key: PublicKey,
+}
+
+/// Metadata about biometric (on-card comparison) verification.
+#[derive(Debug, Clone)]
+pub struct BioMetadata {
+    /// Whether biometric templates are enrolled on the YubiKey.
+    pub configured: bool,
+    /// Number of remaining biometric verification attempts.
+    pub attempts_remaining: u32,
+    /// Whether a temporary PIN has been generated from biometric auth.
+    pub temporary_pin: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Secret value types
+// ---------------------------------------------------------------------------
+
+/// A PIV PIN or PUK value.
+///
+/// PIV PINs and PUKs are 1-8 byte ASCII strings. The value is automatically
+/// zeroized when dropped.
+///
+/// # Examples
+///
+/// ```
+/// use yubikit::piv::PivPin;
+///
+/// let pin = PivPin::new("123456").unwrap();
+/// ```
+#[derive(Clone)]
+pub struct PivPin(crate::__internal::SecretValue<Vec<u8>>);
+
+impl PivPin {
+    /// Create a new PIV PIN/PUK from a string value.
+    ///
+    /// Returns an error if the PIN is empty or longer than 8 bytes.
+    pub fn new(pin: &str) -> Result<Self, PivError> {
+        let bytes = pin.as_bytes();
+        if bytes.is_empty() || bytes.len() > PIN_LEN {
+            return Err(PivError::InvalidData("PIN/PUK must be 1-8 bytes".into()));
+        }
+        Ok(Self(crate::__internal::SecretValue::new(bytes.to_vec())))
+    }
+
+    /// Returns the PIN bytes, padded to 8 bytes with 0xFF.
+    pub(crate) fn padded(&self) -> Zeroizing<Vec<u8>> {
+        let mut padded = Zeroizing::new(vec![0xff; PIN_LEN]);
+        let bytes = self.0.expose_secret();
+        padded[..bytes.len()].copy_from_slice(bytes);
+        padded
+    }
+
+    /// Create from raw bytes without validation (internal use only).
+    fn from_raw(bytes: Vec<u8>) -> Self {
+        Self(crate::__internal::SecretValue::new(bytes))
+    }
+}
+
+impl fmt::Debug for PivPin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("PivPin([REDACTED])")
+    }
+}
+
+/// A PIV management key.
+///
+/// The management key is used to authenticate administrative operations.
+/// Its length depends on the algorithm: 24 bytes for Triple-DES, 16/24/32 bytes
+/// for AES-128/192/256.
+///
+/// The value is automatically zeroized when dropped.
+///
+/// # Examples
+///
+/// ```
+/// use yubikit::piv::{ManagementKey, ManagementKeyType, DEFAULT_MANAGEMENT_KEY};
+///
+/// let key = ManagementKey::new(ManagementKeyType::Tdes, DEFAULT_MANAGEMENT_KEY).unwrap();
+/// ```
+#[derive(Clone)]
+pub struct ManagementKey {
+    inner: crate::__internal::SecretValue<Vec<u8>>,
+    key_type: ManagementKeyType,
+}
+
+impl ManagementKey {
+    /// Create a new management key with the given type and raw bytes.
+    ///
+    /// Returns an error if the key length doesn't match the expected length for the key type.
+    pub fn new(key_type: ManagementKeyType, key: &[u8]) -> Result<Self, PivError> {
+        if key.len() != key_type.key_len() {
+            return Err(PivError::InvalidData(format!(
+                "Management key must be {} bytes for {:?}",
+                key_type.key_len(),
+                key_type
+            )));
+        }
+        Ok(Self {
+            inner: crate::__internal::SecretValue::new(key.to_vec()),
+            key_type,
+        })
+    }
+
+    /// Returns the key type (algorithm).
+    pub fn key_type(&self) -> ManagementKeyType {
+        self.key_type
+    }
+
+    /// Access the raw key bytes.
+    pub(crate) fn expose_secret(&self) -> &[u8] {
+        self.inner.expose_secret()
+    }
+}
+
+impl fmt::Debug for ManagementKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ManagementKey")
+            .field("key_type", &self.key_type)
+            .field("value", &"[REDACTED]")
+            .finish()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/// The factory-default 24-byte Triple-DES or AES-192 PIV management key.
+pub const DEFAULT_MANAGEMENT_KEY: &[u8] = &[
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+];
+
+const PIN_LEN: usize = 8;
+const TEMPORARY_PIN_LEN: usize = 16;
+
+// Special slots not in the Slot enum
+const SLOT_CARD_MANAGEMENT: u8 = 0x9B;
+const SLOT_OCC_AUTH: u8 = 0x96;
+
+// Instruction set
+const INS_VERIFY: u8 = 0x20;
+const INS_CHANGE_REFERENCE: u8 = 0x24;
+const INS_RESET_RETRY: u8 = 0x2C;
+const INS_GENERATE_ASYMMETRIC: u8 = 0x47;
+const INS_AUTHENTICATE: u8 = 0x87;
+const INS_GET_DATA: u8 = 0xCB;
+const INS_PUT_DATA: u8 = 0xDB;
+const INS_MOVE_KEY: u8 = 0xF6;
+const INS_GET_METADATA: u8 = 0xF7;
+const INS_GET_SERIAL: u8 = 0xF8;
+const INS_ATTEST: u8 = 0xF9;
+const INS_SET_PIN_RETRIES: u8 = 0xFA;
+const INS_RESET: u8 = 0xFB;
+const INS_GET_VERSION: u8 = 0xFD;
+const INS_IMPORT_KEY: u8 = 0xFE;
+const INS_SET_MGMKEY: u8 = 0xFF;
+
+// Tags
+const TAG_AUTH_WITNESS: u32 = 0x80;
+const TAG_AUTH_CHALLENGE: u32 = 0x81;
+const TAG_AUTH_RESPONSE: u32 = 0x82;
+const TAG_AUTH_EXPONENTIATION: u32 = 0x85;
+const TAG_AUTH_KEM: u32 = 0x86;
+const TAG_AUTH_CONTEXT: u32 = 0x87;
+const TAG_AUTH_MU: u32 = 0x88;
+const TAG_GEN_ALGORITHM: u32 = 0x80;
+const TAG_OBJ_DATA: u32 = 0x53;
+const TAG_OBJ_ID: u32 = 0x5C;
+const TAG_CERTIFICATE: u32 = 0x70;
+const TAG_CERT_INFO: u32 = 0x71;
+const TAG_DYN_AUTH: u32 = 0x7C;
+const TAG_LRC: u32 = 0xFE;
+const TAG_PIN_POLICY: u32 = 0xAA;
+const TAG_TOUCH_POLICY: u32 = 0xAB;
+
+// Metadata tags
+const TAG_METADATA_ALGO: u32 = 0x01;
+const TAG_METADATA_POLICY: u32 = 0x02;
+const TAG_METADATA_ORIGIN: u32 = 0x03;
+const TAG_METADATA_PUBLIC_KEY: u32 = 0x04;
+const TAG_METADATA_IS_DEFAULT: u32 = 0x05;
+const TAG_METADATA_RETRIES: u32 = 0x06;
+const TAG_METADATA_BIO_CONFIGURED: u32 = 0x07;
+const TAG_METADATA_TEMPORARY_PIN: u32 = 0x08;
+
+const ORIGIN_GENERATED: u8 = 1;
+
+const INDEX_PIN_POLICY: usize = 0;
+const INDEX_TOUCH_POLICY: usize = 1;
+const INDEX_RETRIES_TOTAL: usize = 0;
+const INDEX_RETRIES_REMAINING: usize = 1;
+
+const PIN_P2: u8 = 0x80;
+const PUK_P2: u8 = 0x81;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn retries_from_sw(sw: u16) -> Option<u32> {
+    if sw == Sw::AuthMethodBlocked as u16 {
+        return Some(0);
+    }
+    if sw & 0xFFF0 == 0x63C0 {
+        return Some((sw & 0x0F) as u32);
+    }
+    if sw & 0xFF00 == 0x6300 {
+        return Some((sw & 0xFF) as u32);
+    }
+    None
+}
+
+/// The maximum command APDU size advertised by a PIV SELECT response via the
+/// ISO 7816-4 "extended length information" DO (tag `0x7F66`).
+///
+/// The first nested `0x02` field is the maximum *command APDU* size — the
+/// whole APDU, header included, not just the data field. Returns `0` when the
+/// DO is absent or cannot be parsed.
+///
+/// The whole response is walked, recursing into constructed templates: some
+/// cards (e.g. IDEMIA ID-One PIV) emit `7F66` as a sibling after the `0x61`
+/// Application Property Template rather than nested inside it.
+fn select_advertised_max_apdu_length(select_resp: &[u8]) -> usize {
+    const TAG_EXTENDED_LENGTH: u32 = 0x7F66;
+
+    fn walk(buf: &[u8]) -> Option<u16> {
+        let mut offset = 0;
+        while offset < buf.len() {
+            let t0 = buf[offset];
+            let (tag, value_offset, value_len, end) = tlv_parse(buf, offset).ok()?;
+            let value = &buf[value_offset..value_offset + value_len];
+            if tag == TAG_EXTENDED_LENGTH {
+                // Value is a sequence of `02 LL <size>` DOs; the first is the
+                // maximum command APDU size.
+                if let Ok((0x02, max_offset, max_len, _)) = tlv_parse(value, 0)
+                    && max_len > 0
+                {
+                    let mut max_cmd = 0u32;
+                    for &b in &value[max_offset..max_offset + max_len] {
+                        max_cmd = (max_cmd << 8) | b as u32;
+                    }
+                    return Some(max_cmd.min(u16::MAX as u32) as u16);
+                }
+                return Some(0);
+            }
+            // Recurse into constructed templates (bit 6 of the first tag byte).
+            if (t0 & 0x20) != 0
+                && let Some(m) = walk(value)
+            {
+                return Some(m);
+            }
+            offset = end;
+        }
+        None
+    }
+    walk(select_resp).unwrap_or(0) as usize
+}
+
+/// Encode an integer value as big-endian bytes with a specific length (zero-padded).
+fn int_to_bytes(value: &[u8], len: usize) -> Vec<u8> {
+    if value.len() >= len {
+        return value[value.len() - len..].to_vec();
+    }
+    let mut buf = vec![0u8; len];
+    buf[len - value.len()..].copy_from_slice(value);
+    buf
+}
+
+/// Encode an arbitrary-precision integer (big-endian) into `len` bytes.
+fn bigint_to_bytes(value: &[u8], len: usize) -> Vec<u8> {
+    // Strip leading zeros
+    let stripped = strip_leading_zeros(value);
+    int_to_bytes(stripped, len)
+}
+
+fn strip_leading_zeros(data: &[u8]) -> &[u8] {
+    let start = data.iter().position(|&b| b != 0).unwrap_or(data.len());
+    &data[start..]
+}
+
+fn bytes_to_u32(data: &[u8]) -> u32 {
+    let mut result: u32 = 0;
+    for &b in data {
+        result = (result << 8) | b as u32;
+    }
+    result
+}
+
+/// Encode u32 as minimal big-endian bytes.
+fn u32_to_bytes(value: u32) -> Vec<u8> {
+    int2bytes(value as u64)
+}
+
+fn require_version(version: Version, required: Version, feature: &str) -> Result<(), PivError> {
+    crate::core::require_version(version, required, feature).map_err(PivError::NotSupported)
+}
+
+fn mgmt_key_block_op(
+    management_key: &ManagementKey,
+    data: &[u8],
+    encrypt: bool,
+) -> Result<Vec<u8>, PivError> {
+    let key = management_key.expose_secret();
+    match management_key.key_type() {
+        ManagementKeyType::Tdes => {
+            let cipher = TdesEde3::new_from_slice(key)
+                .map_err(|_| PivError::InvalidData("Invalid TDES key".into()))?;
+            let mut block = cipher::Block::<TdesEde3>::clone_from_slice(data);
+            if encrypt {
+                cipher.encrypt_block(&mut block)
+            } else {
+                cipher.decrypt_block(&mut block)
+            }
+            Ok(block.to_vec())
+        }
+        ManagementKeyType::Aes128 => {
+            let cipher = Aes128::new_from_slice(key)
+                .map_err(|_| PivError::InvalidData("Invalid AES-128 key".into()))?;
+            let mut block = aes::Block::clone_from_slice(data);
+            if encrypt {
+                cipher.encrypt_block(&mut block)
+            } else {
+                cipher.decrypt_block(&mut block)
+            }
+            Ok(block.to_vec())
+        }
+        ManagementKeyType::Aes192 => {
+            let cipher = Aes192::new_from_slice(key)
+                .map_err(|_| PivError::InvalidData("Invalid AES-192 key".into()))?;
+            let mut block = aes::Block::clone_from_slice(data);
+            if encrypt {
+                cipher.encrypt_block(&mut block)
+            } else {
+                cipher.decrypt_block(&mut block)
+            }
+            Ok(block.to_vec())
+        }
+        ManagementKeyType::Aes256 => {
+            let cipher = Aes256::new_from_slice(key)
+                .map_err(|_| PivError::InvalidData("Invalid AES-256 key".into()))?;
+            let mut block = aes::Block::clone_from_slice(data);
+            if encrypt {
+                cipher.encrypt_block(&mut block)
+            } else {
+                cipher.decrypt_block(&mut block)
+            }
+            Ok(block.to_vec())
+        }
+    }
+}
+
+fn mgmt_key_encrypt(management_key: &ManagementKey, data: &[u8]) -> Result<Vec<u8>, PivError> {
+    mgmt_key_block_op(management_key, data, true)
+}
+
+fn mgmt_key_decrypt(management_key: &ManagementKey, data: &[u8]) -> Result<Vec<u8>, PivError> {
+    mgmt_key_block_op(management_key, data, false)
+}
+
+/// Decompress a compressed certificate using various methods.
+fn decompress_certificate(cert_data: &[u8]) -> Result<Vec<u8>, PivError> {
+    if cert_data.len() >= 2 {
+        match (cert_data[0], cert_data[1]) {
+            (0x1F, 0x8B) => {
+                // Gzip
+                let mut decoder = GzDecoder::new(cert_data);
+                let mut decompressed = Vec::new();
+                decoder
+                    .read_to_end(&mut decompressed)
+                    .map_err(|_| PivError::InvalidData("Failed to decompress gzip".into()))?;
+                return Ok(decompressed);
+            }
+            (0x01, 0x00) if cert_data.len() >= 4 => {
+                // Net iD zlib format
+                let expected_len = u16::from_le_bytes([cert_data[2], cert_data[3]]) as usize;
+                let mut decoder = flate2::read::ZlibDecoder::new(&cert_data[4..]);
+                let mut decompressed = Vec::new();
+                decoder
+                    .read_to_end(&mut decompressed)
+                    .map_err(|_| PivError::InvalidData("Failed to decompress zlib".into()))?;
+                if decompressed.len() != expected_len {
+                    return Err(PivError::InvalidData(
+                        "Decompressed length does not match expected length".into(),
+                    ));
+                }
+                return Ok(decompressed);
+            }
+            _ => {}
+        }
+    }
+    Err(PivError::InvalidData(
+        "Failed to decompress certificate".into(),
+    ))
+}
+
+/// Check if a key type is supported by a specific YubiKey firmware version.
+pub fn check_key_support(
+    version: Version,
+    key_type: KeyType,
+    pin_policy: PinPolicy,
+    touch_policy: TouchPolicy,
+    generate: bool,
+    fips_restrictions: bool,
+) -> Result<(), PivError> {
+    if key_type == KeyType::EccP384 {
+        require_version(version, Version(4, 0, 0), "ECC P-384")?;
+    }
+    if touch_policy != TouchPolicy::Default || pin_policy != PinPolicy::Default {
+        require_version(version, Version(4, 0, 0), "PIN/touch policy")?;
+    }
+    if touch_policy == TouchPolicy::Cached {
+        require_version(version, Version(4, 3, 0), "cached touch policy")?;
+    }
+
+    // ROCA
+    if version >= Version(4, 2, 0)
+        && version < Version(4, 3, 5)
+        && generate
+        && key_type.algorithm() == Algorithm::Rsa
+    {
+        return Err(PivError::NotSupported(
+            "RSA key generation not supported on this YubiKey".into(),
+        ));
+    }
+
+    // FIPS
+    if fips_restrictions || (version >= Version(4, 4, 0) && version < Version(4, 5, 0)) {
+        if key_type == KeyType::Rsa1024 || key_type == KeyType::X25519 {
+            return Err(PivError::NotSupported(
+                "RSA 1024 not supported on YubiKey FIPS".into(),
+            ));
+        }
+        if pin_policy == PinPolicy::Never {
+            return Err(PivError::NotSupported(
+                "PIN_POLICY.NEVER not allowed on YubiKey FIPS".into(),
+            ));
+        }
+    }
+
+    if key_type == KeyType::Rsa1024 && version >= Version(6, 0, 0) {
+        return Err(PivError::NotSupported(
+            "RSA 1024 not supported on YubiKey 6 or later".into(),
+        ));
+    }
+
+    // New key types
+    if matches!(
+        key_type,
+        KeyType::Rsa3072 | KeyType::Rsa4096 | KeyType::Ed25519 | KeyType::X25519
+    ) {
+        require_version(version, Version(5, 7, 0), &format!("{key_type:?}"))?;
+    }
+    if matches!(
+        key_type,
+        KeyType::MlDsa44
+            | KeyType::MlDsa65
+            | KeyType::MlDsa87
+            | KeyType::MlKem512
+            | KeyType::MlKem768
+            | KeyType::MlKem1024
+    ) {
+        require_version(version, Version(6, 0, 0), &format!("{key_type:?}"))?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// PivSession
+// ---------------------------------------------------------------------------
+
+/// An active PIV application session on a YubiKey.
+pub struct PivSession<C: SmartCardConnection> {
+    protocol: SmartCardProtocol<C>,
+    version: Version,
+    mgmt_key_type: ManagementKeyType,
+}
+
+impl<C: SmartCardConnection> PivSession<C> {
+    /// Open a PIV session on the given connection.
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new(connection: C) -> Result<Self, (PivError, C)> {
+        let mut protocol = SmartCardProtocol::new(connection);
+        if let Err(e) = protocol.select(Aid::PIV) {
+            return Err((e.into(), protocol.into_connection()));
+        }
+        Self::init(protocol)
+    }
+
+    /// Open a PIV session on a card that is not (necessarily) a YubiKey.
+    ///
+    /// Identical to [`Self::new`] except that it never sends the Yubico-proprietary
+    /// `INS_GET_VERSION` (`0xFD`) or the YubiKey management-key metadata probe.
+    /// Use this for standards-conformant PIV cards that share the PIV AID but
+    /// don't implement Yubico's instructions.
+    ///
+    /// This matters beyond returning a clean error: some such cards are
+    /// actively harmed by the probe. The HID Global / Oberthur "ID-One PIV"
+    /// (NIST SP 800-73 Test Card 3) answers `INS_GET_VERSION` with `SW=0x6D00`
+    /// and then poisons the applet's access-control state, after which every
+    /// GET DATA / VERIFY returns `SW=0x6982` — even for PIN-free objects, and
+    /// even after a re-SELECT. Avoiding the instruction entirely is the only
+    /// reliable fix, so callers that may encounter non-YubiKey cards must use
+    /// this constructor rather than [`Self::new`].
+    ///
+    /// The session reports [`Version`] `0.0.0`, so every `require_version` gate
+    /// degrades to [`PivError::NotSupported`], and the management key type
+    /// defaults to Triple-DES. Standards-defined PIV operations (SELECT, GET
+    /// DATA, VERIFY, GENERAL AUTHENTICATE) work normally.
+    pub fn new_generic(connection: C) -> Result<Self, (PivError, C)> {
+        let mut protocol = SmartCardProtocol::new(connection);
+        let select_resp = match protocol.select(Aid::PIV) {
+            Ok(fci) => fci,
+            Err(e) => return Err((e.into(), protocol.into_connection())),
+        };
+
+        // Pick APDU framing by capability. The version heuristic in
+        // `configure` can't help here (the version is unknown), so use the
+        // ISO 7816-4 extended-length information DO (tag 0x7F66) if the card
+        // advertises it in the SELECT response. The advertised maximum is the
+        // whole command APDU length; `set_max_apdu_size` chooses extended
+        // framing only when that exceeds the largest short APDU. The
+        // capability comes from the SELECT response already in hand, so there
+        // is no extra round-trip; a card that doesn't advertise it keeps the
+        // universally-safe short framing.
+        protocol.set_max_apdu_size(select_advertised_max_apdu_length(&select_resp));
+
+        Ok(Self {
+            protocol,
+            version: Version(0, 0, 0),
+            mgmt_key_type: ManagementKeyType::Tdes,
+        })
+    }
+
+    /// Open a PIV session with SCP (Secure Channel Protocol).
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new_with_scp(
+        connection: C,
+        scp_key_params: &crate::smartcard::ScpKeyParams,
+    ) -> Result<Self, (PivError, C)> {
+        let mut protocol = SmartCardProtocol::new(connection);
+        if let Err(e) = protocol.select(Aid::PIV) {
+            return Err((e.into(), protocol.into_connection()));
+        }
+        if let Err(e) = protocol.init_scp(scp_key_params) {
+            return Err((e.into(), protocol.into_connection()));
+        }
+        Self::init(protocol)
+    }
+
+    fn init(mut protocol: SmartCardProtocol<C>) -> Result<Self, (PivError, C)> {
+        log::debug!("Opening PivSession");
+        let version_data = match protocol.send_apdu(0, INS_GET_VERSION, 0, 0, &[]) {
+            Ok(v) => v,
+            Err(e) => return Err((e.into(), protocol.into_connection())),
+        };
+        let version = patch_version(Version::from_bytes(&version_data));
+        protocol.configure(version);
+
+        let mut session = Self {
+            protocol,
+            version,
+            mgmt_key_type: ManagementKeyType::Tdes,
+        };
+
+        session.mgmt_key_type = match session.get_management_key_metadata() {
+            Ok(meta) => meta.key_type,
+            Err(PivError::NotSupported(_)) => ManagementKeyType::Tdes,
+            Err(e) => return Err((e, session.protocol.into_connection())),
+        };
+
+        Ok(session)
+    }
+
+    /// Returns the firmware version of the connected YubiKey.
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
+    /// Returns the algorithm type of the current management key.
+    pub fn management_key_type(&self) -> ManagementKeyType {
+        self.mgmt_key_type
+    }
+
+    /// Consume the session and return the underlying protocol.
+    pub fn into_protocol(self) -> SmartCardProtocol<C> {
+        self.protocol
+    }
+
+    /// Consume the session, returning the underlying connection.
+    pub fn into_connection(self) -> C {
+        self.protocol.into_connection()
+    }
+
+    /// Get a mutable reference to the underlying protocol.
+    pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
+        &mut self.protocol
+    }
+
+    // -----------------------------------------------------------------------
+    // Reset
+    // -----------------------------------------------------------------------
+
+    /// Reset the PIV application to factory defaults, blocking PIN and PUK first.
+    pub fn reset(&mut self) -> Result<(), PivError> {
+        log::debug!("Resetting PIV application");
+        // Check biometrics
+        match self.get_bio_metadata() {
+            Ok(bio) if bio.configured => {
+                return Err(PivError::InvalidData(
+                    "Cannot perform PIV reset when biometrics are configured".into(),
+                ));
+            }
+            _ => {}
+        }
+
+        // Block PIN
+        let invalid_pin = PivPin::from_raw(vec![]);
+        let mut counter = self.get_pin_attempts()?;
+        while counter > 0 {
+            match self.verify_pin(&invalid_pin) {
+                Ok(()) => break,
+                Err(PivError::InvalidPin(r)) => counter = r,
+                Err(e) => return Err(e),
+            }
+        }
+
+        // Block PUK
+        counter = match self.get_puk_metadata() {
+            Ok(meta) => meta.attempts_remaining,
+            Err(_) => 1,
+        };
+        while counter > 0 {
+            match self.change_reference(INS_RESET_RETRY, PIN_P2, &invalid_pin, &invalid_pin) {
+                Ok(()) => break,
+                Err(PivError::InvalidPin(r)) => counter = r,
+                Err(e) => return Err(e),
+            }
+        }
+
+        // Reset
+        self.protocol.send_apdu(0, INS_RESET, 0, 0, &[])?;
+
+        // Update management key type
+        self.mgmt_key_type = match self.get_management_key_metadata() {
+            Ok(meta) => meta.key_type,
+            Err(_) => ManagementKeyType::Tdes,
+        };
+
+        log::info!("PIV application reset");
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Serial
+    // -----------------------------------------------------------------------
+
+    /// Returns the serial number of the YubiKey. Requires firmware ≥ 5.0.3.
+    pub fn get_serial(&mut self) -> Result<u32, PivError> {
+        log::debug!("Reading PIV serial number");
+        require_version(self.version, Version(5, 0, 3), "get_serial")?;
+        let response = self.protocol.send_apdu(0, INS_GET_SERIAL, 0, 0, &[])?;
+        Ok(bytes_to_u32(&response))
+    }
+
+    // -----------------------------------------------------------------------
+    // Management key authentication
+    // -----------------------------------------------------------------------
+
+    /// Authenticate with the management key using a mutual-authentication protocol.
+    pub fn authenticate(&mut self, management_key: &ManagementKey) -> Result<(), PivError> {
+        log::debug!("Authenticating with management key");
+        let key_type = self.mgmt_key_type;
+
+        if management_key.key_type() != key_type {
+            return Err(PivError::InvalidData(format!(
+                "Management key type mismatch: expected {key_type}, got {}",
+                management_key.key_type()
+            )));
+        }
+
+        // Step 1: Request witness from card
+        let witness_request = tlv_encode(TAG_DYN_AUTH, &tlv_encode(TAG_AUTH_WITNESS, &[]));
+        let response = self.protocol.send_apdu(
+            0,
+            INS_AUTHENTICATE,
+            key_type as u8,
+            SLOT_CARD_MANAGEMENT,
+            &witness_request,
+        )?;
+
+        let dyn_auth = tlv_unpack(TAG_DYN_AUTH, &response)?;
+        let witness = tlv_unpack(TAG_AUTH_WITNESS, &dyn_auth)?;
+
+        // Step 2: Decrypt witness, send back with our challenge
+        let decrypted = Zeroizing::new(mgmt_key_decrypt(management_key, &witness)?);
+
+        let challenge_len = key_type.challenge_len();
+        let mut challenge = Zeroizing::new(vec![0u8; challenge_len]);
+        getrandom::fill(challenge.as_mut_slice())
+            .map_err(|_| PivError::InvalidData("Failed to generate random bytes".into()))?;
+
+        let mut auth_data = tlv_encode(TAG_AUTH_WITNESS, &decrypted);
+        auth_data.extend_from_slice(&tlv_encode(TAG_AUTH_CHALLENGE, &challenge));
+        let request = tlv_encode(TAG_DYN_AUTH, &auth_data);
+
+        let response = self.protocol.send_apdu(
+            0,
+            INS_AUTHENTICATE,
+            key_type as u8,
+            SLOT_CARD_MANAGEMENT,
+            &request,
+        )?;
+
+        // Step 3: Verify card's response
+        let dyn_auth = tlv_unpack(TAG_DYN_AUTH, &response)?;
+        let encrypted = tlv_unpack(TAG_AUTH_RESPONSE, &dyn_auth)?;
+
+        let expected = Zeroizing::new(mgmt_key_encrypt(management_key, &challenge)?);
+        if expected.ct_eq(&encrypted).into() {
+            Ok(())
+        } else {
+            Err(PivError::InvalidData("Device response is incorrect".into()))
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Management key
+    // -----------------------------------------------------------------------
+
+    /// Set a new management key, optionally requiring touch.
+    pub fn set_management_key(
+        &mut self,
+        management_key: &ManagementKey,
+        require_touch: bool,
+    ) -> Result<(), PivError> {
+        log::debug!("Setting management key");
+        let key_type = management_key.key_type();
+        if key_type == ManagementKeyType::Tdes {
+            if self.version >= Version(6, 0, 0) {
+                return Err(PivError::NotSupported(
+                    "TDES management key not supported on YubiKey 6 or later".into(),
+                ));
+            }
+        } else {
+            require_version(self.version, Version(5, 4, 0), "AES management key")?;
+        }
+
+        let mut data = Zeroizing::new(vec![key_type as u8]);
+        tlv_append(
+            &mut data,
+            SLOT_CARD_MANAGEMENT as u32,
+            management_key.expose_secret(),
+        );
+
+        let p2 = if require_touch { 0xFE } else { 0xFF };
+        self.protocol
+            .send_apdu(0, INS_SET_MGMKEY, 0xFF, p2, &data)?;
+        self.mgmt_key_type = key_type;
+        log::info!("Management key updated");
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // PIN / PUK
+    // -----------------------------------------------------------------------
+
+    /// Verify the PIV PIN. On failure, returns [`PivError::InvalidPin`] with remaining attempts.
+    pub fn verify_pin(&mut self, pin: &PivPin) -> Result<(), PivError> {
+        self.verify_pin_at_ref(PIN_P2, pin)
+    }
+
+    /// Verify reference data at an arbitrary PIV key reference.
+    ///
+    /// Same VERIFY command as [`Self::verify_pin`], parameterised on the key
+    /// reference (P2) rather than hard-coded to the PIV Card Application
+    /// PIN. Per SP 800-73-5 Pt 1 Table 4, useful references include:
+    ///
+    /// - `0x00` — Global PIN.
+    /// - `0x80` — PIV Card Application PIN (what [`Self::verify_pin`] uses).
+    ///
+    /// `pin` is padded to 8 bytes with `0xFF` before transmission. On
+    /// failure, returns [`PivError::InvalidPin`] with the remaining attempts
+    /// reported by the card.
+    pub fn verify_pin_at_ref(&mut self, pin_ref: u8, pin: &PivPin) -> Result<(), PivError> {
+        log::debug!("Verifying PIN at ref 0x{pin_ref:02X}");
+        let data = pin.padded();
+        match self.protocol.send_apdu(0, INS_VERIFY, 0, pin_ref, &data) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if let SmartCardError::Apdu { sw, .. } = &e
+                    && let Some(retries) = retries_from_sw(*sw)
+                {
+                    return Err(PivError::InvalidPin(retries));
+                }
+                Err(PivError::Connection(e))
+            }
+        }
+    }
+
+    /// Perform biometric (user verification) authentication, optionally returning a temporary PIN.
+    pub fn verify_uv(
+        &mut self,
+        temporary_pin: bool,
+        check_only: bool,
+    ) -> Result<Option<Vec<u8>>, PivError> {
+        log::debug!("Verifying UV");
+        if temporary_pin && check_only {
+            return Err(PivError::InvalidData(
+                "Cannot request temporary PIN when doing check-only verification".into(),
+            ));
+        }
+
+        let data = if check_only {
+            vec![]
+        } else if temporary_pin {
+            tlv_encode(0x02, &[])
+        } else {
+            tlv_encode(0x03, &[])
+        };
+
+        match self
+            .protocol
+            .send_apdu(0, INS_VERIFY, 0, SLOT_OCC_AUTH, &data)
+        {
+            Ok(response) => {
+                if temporary_pin {
+                    Ok(Some(response))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(SmartCardError::Apdu { sw, .. })
+                if Sw::from_u16(sw) == Some(Sw::ReferenceDataNotFound) =>
+            {
+                Err(PivError::NotSupported(
+                    "Biometric verification not supported by this YubiKey".into(),
+                ))
+            }
+            Err(e) => {
+                if let SmartCardError::Apdu { sw, .. } = &e
+                    && let Some(retries) = retries_from_sw(*sw)
+                {
+                    return Err(PivError::InvalidPin(retries));
+                }
+                Err(PivError::Connection(e))
+            }
+        }
+    }
+
+    /// Verify a temporary PIN obtained from biometric authentication.
+    pub fn verify_temporary_pin(&mut self, pin: &[u8]) -> Result<(), PivError> {
+        log::debug!("Verifying temporary PIN");
+        if pin.len() != TEMPORARY_PIN_LEN {
+            return Err(PivError::InvalidData(format!(
+                "Temporary PIN must be exactly {TEMPORARY_PIN_LEN} bytes"
+            )));
+        }
+        let data = tlv_encode(0x01, pin);
+        match self
+            .protocol
+            .send_apdu(0, INS_VERIFY, 0, SLOT_OCC_AUTH, &data)
+        {
+            Ok(_) => Ok(()),
+            Err(SmartCardError::Apdu { sw, .. })
+                if Sw::from_u16(sw) == Some(Sw::ReferenceDataNotFound) =>
+            {
+                Err(PivError::NotSupported(
+                    "Biometric verification not supported by this YubiKey".into(),
+                ))
+            }
+            Err(e) => {
+                if let SmartCardError::Apdu { sw, .. } = &e
+                    && let Some(retries) = retries_from_sw(*sw)
+                {
+                    return Err(PivError::InvalidPin(retries));
+                }
+                Err(PivError::Connection(e))
+            }
+        }
+    }
+
+    /// Returns the number of remaining PIN attempts.
+    ///
+    /// Older keys (firmware < 5.3.0) will return NotSupported if the PIN
+    /// has already been verified in this session.
+    pub fn get_pin_attempts(&mut self) -> Result<u32, PivError> {
+        log::debug!("Getting PIN attempts");
+        match self.get_pin_metadata() {
+            Ok(meta) => return Ok(meta.attempts_remaining),
+            Err(PivError::NotSupported(_)) => {}
+            Err(e) => return Err(e),
+        }
+
+        // Fallback: empty-Lc VERIFY probe at the App PIN reference.
+        self.get_pin_attempts_at_ref(PIN_P2)
+    }
+
+    /// Returns the number of remaining attempts at an arbitrary PIV
+    /// authentication-data reference (per SP 800-73-5 Pt 1 Table 4).
+    ///
+    /// Sends the SP 800-73-5 Pt 2 §3.2.1 empty-Lc VERIFY probe
+    /// (`00 20 00 <ref>` with no data), which reports the retry counter
+    /// without consuming an attempt:
+    ///
+    /// - `SW=63CX` — `X` attempts remain.
+    /// - `SW=6983` (auth method blocked) — `0`.
+    /// - `SW=9000` — the reference is already verified this session;
+    ///   returns NotSupported.
+    pub fn get_pin_attempts_at_ref(&mut self, pin_ref: u8) -> Result<u32, PivError> {
+        log::debug!("Probing retry counter at ref 0x{pin_ref:02X}");
+        match self.protocol.send_apdu(0, INS_VERIFY, 0, pin_ref, &[]) {
+            Ok(_) => Err(PivError::NotSupported(
+                "Cannot get PIN attempts after PIN has been verified in this session".into(),
+            )),
+            Err(SmartCardError::Apdu { sw, .. }) => {
+                if let Some(retries) = retries_from_sw(sw) {
+                    Ok(retries)
+                } else {
+                    Err(PivError::Connection(SmartCardError::Apdu {
+                        data: vec![],
+                        sw,
+                    }))
+                }
+            }
+            Err(e) => Err(PivError::Connection(e)),
+        }
+    }
+
+    /// Change the PIV PIN from `old_pin` to `new_pin`.
+    pub fn change_pin(&mut self, old_pin: &PivPin, new_pin: &PivPin) -> Result<(), PivError> {
+        log::debug!("Changing PIN");
+        self.change_reference(INS_CHANGE_REFERENCE, PIN_P2, old_pin, new_pin)?;
+        log::info!("PIN changed");
+        Ok(())
+    }
+
+    /// Change the PUK from `old_puk` to `new_puk`.
+    pub fn change_puk(&mut self, old_puk: &PivPin, new_puk: &PivPin) -> Result<(), PivError> {
+        log::debug!("Changing PUK");
+        match self.change_reference(INS_CHANGE_REFERENCE, PUK_P2, old_puk, new_puk) {
+            Err(PivError::Connection(SmartCardError::Apdu { sw, .. }))
+                if Sw::from_u16(sw) == Some(Sw::InvalidInstruction) =>
+            {
+                Err(PivError::NotSupported(
+                    "Setting PUK is not supported on this YubiKey".into(),
+                ))
+            }
+            Ok(()) => {
+                log::info!("PUK changed");
+                Ok(())
+            }
+            other => other,
+        }
+    }
+
+    /// Unblock a locked PIN using the PUK and set a new PIN.
+    pub fn unblock_pin(&mut self, puk: &PivPin, new_pin: &PivPin) -> Result<(), PivError> {
+        log::debug!("Unblocking PIN");
+        match self.change_reference(INS_RESET_RETRY, PIN_P2, puk, new_pin) {
+            Err(PivError::Connection(SmartCardError::Apdu { sw, .. }))
+                if Sw::from_u16(sw) == Some(Sw::InvalidInstruction) =>
+            {
+                Err(PivError::NotSupported(
+                    "Unblocking PIN is not supported on this YubiKey".into(),
+                ))
+            }
+            Ok(()) => {
+                log::info!("PIN unblocked");
+                Ok(())
+            }
+            other => other,
+        }
+    }
+
+    /// Set the maximum retry counts for PIN and PUK. Requires prior management-key authentication.
+    pub fn set_pin_attempts(&mut self, pin_attempts: u8, puk_attempts: u8) -> Result<(), PivError> {
+        log::debug!("Setting PIN/PUK attempts");
+        match self
+            .protocol
+            .send_apdu(0, INS_SET_PIN_RETRIES, pin_attempts, puk_attempts, &[])
+        {
+            Ok(_) => {
+                log::info!(
+                    "PIN attempts set to {pin_attempts}, PUK attempts set to {puk_attempts}"
+                );
+                Ok(())
+            }
+            Err(SmartCardError::Apdu { sw, .. })
+                if Sw::from_u16(sw) == Some(Sw::InvalidInstruction) =>
+            {
+                Err(PivError::NotSupported(
+                    "Setting PIN attempts not supported on this YubiKey".into(),
+                ))
+            }
+            Err(e) => Err(PivError::Connection(e)),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Metadata
+    // -----------------------------------------------------------------------
+
+    /// Retrieve metadata about the PIV PIN. Requires firmware ≥ 5.3.0.
+    pub fn get_pin_metadata(&mut self) -> Result<PinMetadata, PivError> {
+        log::debug!("Reading PIN metadata");
+        self.get_pin_puk_metadata(PIN_P2)
+    }
+
+    /// Retrieve metadata about the PUK. Requires firmware ≥ 5.3.0.
+    pub fn get_puk_metadata(&mut self) -> Result<PinMetadata, PivError> {
+        log::debug!("Reading PUK metadata");
+        self.get_pin_puk_metadata(PUK_P2)
+    }
+
+    /// Retrieve metadata about the management key. Requires firmware ≥ 5.3.0.
+    pub fn get_management_key_metadata(&mut self) -> Result<ManagementKeyMetadata, PivError> {
+        log::debug!("Reading management key metadata");
+        require_version(
+            self.version,
+            Version(5, 3, 0),
+            "get_management_key_metadata",
+        )?;
+        let response =
+            self.protocol
+                .send_apdu(0, INS_GET_METADATA, 0, SLOT_CARD_MANAGEMENT, &[])?;
+        let data = parse_tlv_dict(&response)?;
+
+        let algo_byte = data
+            .get(&TAG_METADATA_ALGO)
+            .and_then(|v| v.first().copied())
+            .unwrap_or(0x03);
+        let key_type = ManagementKeyType::from_u8(algo_byte).ok_or_else(|| {
+            PivError::InvalidData(format!("Unknown management key type: 0x{algo_byte:02X}"))
+        })?;
+
+        let default_value = data
+            .get(&TAG_METADATA_IS_DEFAULT)
+            .map(|v| v != &[0])
+            .unwrap_or(false);
+
+        let policy = data
+            .get(&TAG_METADATA_POLICY)
+            .ok_or_else(|| PivError::InvalidData("Missing policy in metadata".into()))?;
+        let touch_policy = TouchPolicy::from_u8(
+            *policy
+                .get(INDEX_TOUCH_POLICY)
+                .ok_or_else(|| PivError::InvalidData("Missing touch policy".into()))?,
+        )
+        .ok_or_else(|| PivError::InvalidData("Invalid touch policy".into()))?;
+
+        Ok(ManagementKeyMetadata {
+            key_type,
+            default_value,
+            touch_policy,
+        })
+    }
+
+    /// Retrieve metadata about the key in a given slot. Requires firmware ≥ 5.3.0.
+    pub fn get_slot_metadata(&mut self, slot: Slot) -> Result<SlotMetadata, PivError> {
+        log::debug!("Reading slot metadata for {:?}", slot);
+        require_version(self.version, Version(5, 3, 0), "get_slot_metadata")?;
+        let response = self
+            .protocol
+            .send_apdu(0, INS_GET_METADATA, 0, slot as u8, &[])?;
+        let data = parse_tlv_dict(&response)?;
+
+        let algo_byte = data
+            .get(&TAG_METADATA_ALGO)
+            .and_then(|v| v.first().copied())
+            .ok_or_else(|| PivError::InvalidData("Missing algorithm in metadata".into()))?;
+        let key_type = KeyType::from_u8(algo_byte)
+            .ok_or_else(|| PivError::InvalidData(format!("Unknown key type: 0x{algo_byte:02X}")))?;
+
+        let policy = data
+            .get(&TAG_METADATA_POLICY)
+            .ok_or_else(|| PivError::InvalidData("Missing policy in metadata".into()))?;
+        let pin_policy = PinPolicy::from_u8(policy[INDEX_PIN_POLICY])
+            .ok_or_else(|| PivError::InvalidData("Invalid pin policy".into()))?;
+        let touch_policy = TouchPolicy::from_u8(policy[INDEX_TOUCH_POLICY])
+            .ok_or_else(|| PivError::InvalidData("Invalid touch policy".into()))?;
+
+        let origin = data
+            .get(&TAG_METADATA_ORIGIN)
+            .and_then(|v| v.first().copied())
+            .ok_or_else(|| PivError::InvalidData("Missing origin in metadata".into()))?;
+
+        let device_bytes = data
+            .get(&TAG_METADATA_PUBLIC_KEY)
+            .ok_or_else(|| PivError::InvalidData("Missing public key in metadata".into()))?;
+
+        let public_key = device_pubkey_to_public_key(key_type, device_bytes)?;
+
+        Ok(SlotMetadata {
+            key_type,
+            pin_policy,
+            touch_policy,
+            generated: origin == ORIGIN_GENERATED,
+            public_key,
+        })
+    }
+
+    /// Retrieve biometric verification metadata from the YubiKey.
+    pub fn get_bio_metadata(&mut self) -> Result<BioMetadata, PivError> {
+        log::debug!("Reading bio metadata");
+        let response = match self
+            .protocol
+            .send_apdu(0, INS_GET_METADATA, 0, SLOT_OCC_AUTH, &[])
+        {
+            Ok(r) => r,
+            Err(SmartCardError::Apdu { sw, .. })
+                if matches!(
+                    Sw::from_u16(sw),
+                    Some(Sw::ReferenceDataNotFound | Sw::InvalidInstruction)
+                ) =>
+            {
+                return Err(PivError::NotSupported(
+                    "Biometric verification not supported by this YubiKey".into(),
+                ));
+            }
+            Err(e) => return Err(PivError::Connection(e)),
+        };
+
+        let data = parse_tlv_dict(&response)?;
+
+        let configured = data
+            .get(&TAG_METADATA_BIO_CONFIGURED)
+            .and_then(|v| v.first().copied())
+            .unwrap_or(0)
+            == 1;
+
+        let attempts_remaining = data
+            .get(&TAG_METADATA_RETRIES)
+            .and_then(|v| v.first().copied())
+            .ok_or_else(|| PivError::InvalidData("Missing retries in bio metadata".into()))?
+            as u32;
+
+        let temporary_pin = data
+            .get(&TAG_METADATA_TEMPORARY_PIN)
+            .and_then(|v| v.first().copied())
+            .unwrap_or(0)
+            == 1;
+
+        Ok(BioMetadata {
+            configured,
+            attempts_remaining,
+            temporary_pin,
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Signing / Decryption / Key Agreement
+    // -----------------------------------------------------------------------
+
+    /// Sign data with a private key in a slot.
+    /// The `message` should be the pre-padded/pre-hashed data appropriate for the key type.
+    pub fn sign(
+        &mut self,
+        slot: Slot,
+        key_type: KeyType,
+        message: &[u8],
+    ) -> Result<Vec<u8>, PivError> {
+        log::debug!("Signing with key in slot {:?}", slot);
+        let message_tlv = tlv_encode(TAG_AUTH_CHALLENGE, message);
+        self.use_private_key(slot, key_type, &message_tlv)
+    }
+
+    /// Sign a message with an ML-DSA key and a context string (FIPS 204, at
+    /// most 255 bytes). An empty context is the same as [`sign`](Self::sign).
+    pub fn sign_with_context(
+        &mut self,
+        slot: Slot,
+        key_type: KeyType,
+        message: &[u8],
+        context: &[u8],
+    ) -> Result<Vec<u8>, PivError> {
+        log::debug!("Signing with context with key in slot {:?}", slot);
+        if key_type.algorithm() != Algorithm::MlDsa {
+            return Err(PivError::InvalidData(
+                "A signature context is only supported for ML-DSA".into(),
+            ));
+        }
+        if context.len() > 255 {
+            return Err(PivError::InvalidData(
+                "ML-DSA context must be at most 255 bytes".into(),
+            ));
+        }
+        let mut data = Vec::new();
+        if !context.is_empty() {
+            data = tlv_encode(TAG_AUTH_CONTEXT, context);
+        }
+        data.extend_from_slice(&tlv_encode(TAG_AUTH_CHALLENGE, message));
+        self.use_private_key(slot, key_type, &data)
+    }
+
+    /// Sign an externally computed ML-DSA message representative μ (64 bytes,
+    /// FIPS 204 "external μ"). The signature verifies against the message and
+    /// context that μ was computed from.
+    pub fn sign_external_mu(
+        &mut self,
+        slot: Slot,
+        key_type: KeyType,
+        mu: &[u8],
+    ) -> Result<Vec<u8>, PivError> {
+        log::debug!("Signing external mu with key in slot {:?}", slot);
+        if key_type.algorithm() != Algorithm::MlDsa {
+            return Err(PivError::InvalidData(
+                "External mu is only supported for ML-DSA".into(),
+            ));
+        }
+        if mu.len() != 64 {
+            return Err(PivError::InvalidData(
+                "ML-DSA mu must be exactly 64 bytes".into(),
+            ));
+        }
+        self.use_private_key(slot, key_type, &tlv_encode(TAG_AUTH_MU, mu))
+    }
+
+    /// Decrypt ciphertext with an RSA private key in a slot.
+    pub fn decrypt(&mut self, slot: Slot, cipher_text: &[u8]) -> Result<Vec<u8>, PivError> {
+        log::debug!("Decrypting with slot {:?}", slot);
+        let key_type = match cipher_text.len() * 8 {
+            1024 => KeyType::Rsa1024,
+            2048 => KeyType::Rsa2048,
+            3072 => KeyType::Rsa3072,
+            4096 => KeyType::Rsa4096,
+            _ => {
+                return Err(PivError::InvalidData("Invalid length of ciphertext".into()));
+            }
+        };
+        let message_tlv = tlv_encode(TAG_AUTH_CHALLENGE, cipher_text);
+        self.use_private_key(slot, key_type, &message_tlv)
+    }
+
+    /// Calculate shared secret using ECDH (EC/X25519) or ML-KEM decapsulation.
+    /// For EC: `peer_public_key` should be the uncompressed EC point (X9.62) or raw X25519 bytes.
+    /// For ML-KEM: `peer_public_key` should be the ML-KEM ciphertext.
+    pub fn calculate_secret(
+        &mut self,
+        slot: Slot,
+        key_type: KeyType,
+        peer_public_key: &[u8],
+    ) -> Result<Vec<u8>, PivError> {
+        log::debug!("Calculating shared secret with slot {:?}", slot);
+        let message_tlv = match key_type.algorithm() {
+            Algorithm::Ec => tlv_encode(TAG_AUTH_EXPONENTIATION, peer_public_key),
+            Algorithm::MlKem => tlv_encode(TAG_AUTH_KEM, peer_public_key),
+            _ => {
+                return Err(PivError::InvalidData(
+                    "Unsupported key type for key agreement".into(),
+                ));
+            }
+        };
+        self.use_private_key(slot, key_type, &message_tlv)
+    }
+
+    // -----------------------------------------------------------------------
+    // Objects
+    // -----------------------------------------------------------------------
+
+    /// Read a PIV data object by its [`ObjectId`].
+    pub fn get_object(&mut self, object_id: ObjectId) -> Result<Vec<u8>, PivError> {
+        self.get_object_raw(object_id as u32)
+    }
+
+    /// Write (or delete) a PIV data object by its [`ObjectId`].
+    pub fn put_object(&mut self, object_id: ObjectId, data: Option<&[u8]>) -> Result<(), PivError> {
+        self.put_object_raw(object_id as u32, data)
+    }
+
+    /// Read a PIV data object by raw numeric object identifier.
+    pub fn get_object_raw(&mut self, object_id: u32) -> Result<Vec<u8>, PivError> {
+        let expected = if object_id == ObjectId::Discovery as u32 {
+            ObjectId::Discovery as u32
+        } else {
+            TAG_OBJ_DATA
+        };
+
+        let id_bytes = u32_to_bytes(object_id);
+        let request = tlv_encode(TAG_OBJ_ID, &id_bytes);
+        let response = self
+            .protocol
+            .send_apdu(0, INS_GET_DATA, 0x3F, 0xFF, &request)?;
+
+        tlv_unpack(expected, &response)
+            .map_err(|_| PivError::InvalidData("Malformed object data".into()))
+    }
+
+    /// Write (or delete) a PIV data object by raw numeric object identifier.
+    pub fn put_object_raw(&mut self, object_id: u32, data: Option<&[u8]>) -> Result<(), PivError> {
+        let id_bytes = u32_to_bytes(object_id);
+        let obj_data = data.unwrap_or(&[]);
+        let mut request = tlv_encode(TAG_OBJ_ID, &id_bytes);
+        request.extend_from_slice(&tlv_encode(TAG_OBJ_DATA, obj_data));
+        self.protocol
+            .send_apdu(0, INS_PUT_DATA, 0x3F, 0xFF, &request)?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Certificates
+    // -----------------------------------------------------------------------
+
+    /// Get certificate from slot as DER bytes.
+    pub fn get_certificate(&mut self, slot: Slot) -> Result<Vec<u8>, PivError> {
+        log::debug!("Reading certificate from slot {:?}", slot);
+        let obj_data = self.get_object(ObjectId::from_slot(slot))?;
+        let entries = parse_tlv_dict(&obj_data)
+            .map_err(|_| PivError::InvalidData("Malformed certificate data object".into()))?;
+
+        let cert_data = entries
+            .get(&TAG_CERTIFICATE)
+            .ok_or_else(|| PivError::InvalidData("Malformed certificate data object".into()))?;
+
+        let cert_info = entries
+            .get(&TAG_CERT_INFO)
+            .and_then(|v| v.first().copied())
+            .unwrap_or(0);
+
+        if cert_info == 1 {
+            decompress_certificate(cert_data)
+        } else if cert_info == 0 {
+            Ok(cert_data.clone())
+        } else {
+            Err(PivError::NotSupported(
+                "Unsupported value in CertInfo".into(),
+            ))
+        }
+    }
+
+    /// Import a certificate (DER bytes) to a slot.
+    pub fn put_certificate(
+        &mut self,
+        slot: Slot,
+        cert_der: &[u8],
+        compress: bool,
+    ) -> Result<(), PivError> {
+        log::debug!("Importing certificate to slot {:?}", slot);
+        let (cert_info, cert_data) = if compress {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder
+                .write_all(cert_der)
+                .map_err(|_| PivError::InvalidData("Failed to compress certificate".into()))?;
+            let compressed = encoder
+                .finish()
+                .map_err(|_| PivError::InvalidData("Failed to finish compression".into()))?;
+            (1u8, compressed)
+        } else {
+            (0u8, cert_der.to_vec())
+        };
+
+        let mut data = tlv_encode(TAG_CERTIFICATE, &cert_data);
+        data.extend_from_slice(&tlv_encode(TAG_CERT_INFO, &[cert_info]));
+        data.extend_from_slice(&tlv_encode(TAG_LRC, &[]));
+
+        self.put_object(ObjectId::from_slot(slot), Some(&data))?;
+        log::info!("Certificate imported to slot {:?}", slot);
+        Ok(())
+    }
+
+    /// Delete the certificate stored in the given slot.
+    pub fn delete_certificate(&mut self, slot: Slot) -> Result<(), PivError> {
+        log::debug!("Deleting certificate from slot {:?}", slot);
+        self.put_object(ObjectId::from_slot(slot), None)?;
+        log::info!("Certificate deleted from slot {:?}", slot);
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Key management
+    // -----------------------------------------------------------------------
+
+    /// Import a private key into a slot.
+    ///
+    /// The key algorithm is determined from the [`PrivateKey`] variant.
+    /// Only algorithms supported by PIV are accepted (RSA 1024–4096, P-256/P-384,
+    /// Ed25519, X25519, ML-DSA, ML-KEM).
+    pub fn put_key(
+        &mut self,
+        slot: Slot,
+        private_key: &PrivateKey,
+        pin_policy: PinPolicy,
+        touch_policy: TouchPolicy,
+    ) -> Result<(), PivError> {
+        let key_type = KeyType::try_from(&private_key.algorithm())?;
+        log::debug!("Importing key to slot {:?}", slot);
+        check_key_support(
+            self.version,
+            key_type,
+            pin_policy,
+            touch_policy,
+            false,
+            false,
+        )?;
+
+        let mut data = build_put_key_data(key_type, private_key)?;
+
+        if pin_policy != PinPolicy::Default {
+            data.extend_from_slice(&tlv_encode(
+                TAG_PIN_POLICY,
+                &u32_to_bytes(pin_policy as u32),
+            ));
+        }
+        if touch_policy != TouchPolicy::Default {
+            data.extend_from_slice(&tlv_encode(
+                TAG_TOUCH_POLICY,
+                &u32_to_bytes(touch_policy as u32),
+            ));
+        }
+
+        self.protocol
+            .send_apdu(0, INS_IMPORT_KEY, key_type as u8, slot as u8, &data)?;
+        log::info!("Key imported to slot {:?}", slot);
+        Ok(())
+    }
+
+    /// Generate a key pair in a slot. Returns the public key.
+    pub fn generate_key(
+        &mut self,
+        slot: Slot,
+        key_type: KeyType,
+        pin_policy: PinPolicy,
+        touch_policy: TouchPolicy,
+    ) -> Result<PublicKey, PivError> {
+        log::debug!("Generating {:?} key in slot {:?}", key_type, slot);
+        check_key_support(
+            self.version,
+            key_type,
+            pin_policy,
+            touch_policy,
+            true,
+            false,
+        )?;
+
+        let mut inner = tlv_encode(TAG_GEN_ALGORITHM, &u32_to_bytes(key_type as u32));
+        if pin_policy != PinPolicy::Default {
+            inner.extend_from_slice(&tlv_encode(
+                TAG_PIN_POLICY,
+                &u32_to_bytes(pin_policy as u32),
+            ));
+        }
+        if touch_policy != TouchPolicy::Default {
+            inner.extend_from_slice(&tlv_encode(
+                TAG_TOUCH_POLICY,
+                &u32_to_bytes(touch_policy as u32),
+            ));
+        }
+
+        let request = tlv_encode(0xAC, &inner);
+        let response =
+            self.protocol
+                .send_apdu(0, INS_GENERATE_ASYMMETRIC, 0, slot as u8, &request)?;
+
+        // Convert device encoding to PublicKey
+        let device_bytes = tlv_unpack(0x7F49, &response)?;
+        let result = device_pubkey_to_public_key(key_type, &device_bytes)?;
+        log::info!("Key generated in slot {:?}", slot);
+        Ok(result)
+    }
+
+    /// Attest key in slot. Returns DER-encoded X.509 certificate.
+    pub fn attest_key(&mut self, slot: Slot) -> Result<Vec<u8>, PivError> {
+        log::debug!("Attesting key in slot {:?}", slot);
+        require_version(self.version, Version(4, 3, 0), "attest_key")?;
+        let response = self.protocol.send_apdu(0, INS_ATTEST, slot as u8, 0, &[])?;
+        Ok(response)
+    }
+
+    /// Move key from one slot to another. Requires firmware >= 5.7.0.
+    pub fn move_key(&mut self, from_slot: Slot, to_slot: Slot) -> Result<(), PivError> {
+        log::debug!("Moving key from slot {:?} to {:?}", from_slot, to_slot);
+        require_version(self.version, Version(5, 7, 0), "move_key")?;
+        self.protocol
+            .send_apdu(0, INS_MOVE_KEY, to_slot as u8, from_slot as u8, &[])?;
+        log::info!("Key moved from slot {:?} to {:?}", from_slot, to_slot);
+        Ok(())
+    }
+
+    /// Delete a key in a slot. Requires firmware >= 5.7.0.
+    pub fn delete_key(&mut self, slot: Slot) -> Result<(), PivError> {
+        log::debug!("Deleting key in slot {:?}", slot);
+        require_version(self.version, Version(5, 7, 0), "delete_key")?;
+        self.protocol
+            .send_apdu(0, INS_MOVE_KEY, 0xFF, slot as u8, &[])?;
+        log::info!("Key deleted from slot {:?}", slot);
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Check key support (instance method)
+    // -----------------------------------------------------------------------
+
+    /// Check whether the given key parameters are supported by this YubiKey.
+    pub fn check_key_support(
+        &mut self,
+        key_type: KeyType,
+        pin_policy: PinPolicy,
+        touch_policy: TouchPolicy,
+        generate: bool,
+        fips_restrictions: bool,
+    ) -> Result<(), PivError> {
+        check_key_support(
+            self.version,
+            key_type,
+            pin_policy,
+            touch_policy,
+            generate,
+            fips_restrictions,
+        )?;
+
+        if pin_policy == PinPolicy::MatchOnce || pin_policy == PinPolicy::MatchAlways {
+            self.get_bio_metadata()?;
+        }
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Private helpers
+    // -----------------------------------------------------------------------
+
+    fn change_reference(
+        &mut self,
+        ins: u8,
+        p2: u8,
+        value1: &PivPin,
+        value2: &PivPin,
+    ) -> Result<(), PivError> {
+        let mut data = Zeroizing::new(value1.padded().to_vec());
+        data.extend_from_slice(&value2.padded());
+        match self.protocol.send_apdu(0, ins, 0, p2, &data) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if let SmartCardError::Apdu { sw, .. } = &e
+                    && let Some(retries) = retries_from_sw(*sw)
+                {
+                    return Err(PivError::InvalidPin(retries));
+                }
+                Err(PivError::Connection(e))
+            }
+        }
+    }
+
+    fn get_pin_puk_metadata(&mut self, p2: u8) -> Result<PinMetadata, PivError> {
+        require_version(self.version, Version(5, 3, 0), "get_pin_puk_metadata")?;
+        let response = self.protocol.send_apdu(0, INS_GET_METADATA, 0, p2, &[])?;
+        let data = parse_tlv_dict(&response)?;
+
+        let default_value = data
+            .get(&TAG_METADATA_IS_DEFAULT)
+            .map(|v| v != &[0])
+            .unwrap_or(false);
+
+        let attempts = data
+            .get(&TAG_METADATA_RETRIES)
+            .ok_or_else(|| PivError::InvalidData("Missing retries in metadata".into()))?;
+
+        Ok(PinMetadata {
+            default_value,
+            total_attempts: attempts[INDEX_RETRIES_TOTAL] as u32,
+            attempts_remaining: attempts[INDEX_RETRIES_REMAINING] as u32,
+        })
+    }
+
+    fn use_private_key(
+        &mut self,
+        slot: Slot,
+        key_type: KeyType,
+        message_tlv: &[u8],
+    ) -> Result<Vec<u8>, PivError> {
+        let mut inner = tlv_encode(TAG_AUTH_RESPONSE, &[]);
+        inner.extend_from_slice(message_tlv);
+        let request = tlv_encode(TAG_DYN_AUTH, &inner);
+
+        match self
+            .protocol
+            .send_apdu(0, INS_AUTHENTICATE, key_type as u8, slot as u8, &request)
+        {
+            Ok(response) => {
+                let dyn_auth = tlv_unpack(TAG_DYN_AUTH, &response)?;
+                tlv_unpack(TAG_AUTH_RESPONSE, &dyn_auth).map_err(PivError::from)
+            }
+            Err(SmartCardError::Apdu { sw, .. })
+                if Sw::from_u16(sw) == Some(Sw::IncorrectParameters) =>
+            {
+                Err(PivError::Connection(SmartCardError::Apdu {
+                    data: vec![],
+                    sw,
+                }))
+            }
+            Err(e) => Err(PivError::Connection(e)),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Key import helper
+// ---------------------------------------------------------------------------
+
+/// Build the TLV data payload for INS_IMPORT_KEY from a PrivateKey.
+fn build_put_key_data(
+    key_type: KeyType,
+    private_key: &PrivateKey,
+) -> Result<Zeroizing<Vec<u8>>, PivError> {
+    match private_key {
+        PrivateKey::Rsa(rsa) => {
+            let ln = (key_type.bit_len() / 16) as usize; // half-prime length in bytes
+
+            // Verify exponent is 65537
+            let e_val = bytes_to_u32(strip_leading_zeros(&rsa.e));
+            if e_val != 65537 {
+                return Err(PivError::NotSupported("RSA exponent must be 65537".into()));
+            }
+
+            let p = Zeroizing::new(bigint_to_bytes(rsa.p.expose_secret(), ln));
+            let q = Zeroizing::new(bigint_to_bytes(rsa.q.expose_secret(), ln));
+            let dp = Zeroizing::new(bigint_to_bytes(rsa.dp.expose_secret(), ln));
+            let dq = Zeroizing::new(bigint_to_bytes(rsa.dq.expose_secret(), ln));
+            let qinv = Zeroizing::new(bigint_to_bytes(rsa.qinv.expose_secret(), ln));
+
+            let mut data = Zeroizing::new(Vec::new());
+            tlv_append(&mut data, 0x01, &p);
+            tlv_append(&mut data, 0x02, &q);
+            tlv_append(&mut data, 0x03, &dp);
+            tlv_append(&mut data, 0x04, &dq);
+            tlv_append(&mut data, 0x05, &qinv);
+            Ok(data)
+        }
+        PrivateKey::Ec(ec) => {
+            let scalar_len = ec.curve.scalar_len();
+            let scalar = Zeroizing::new(bigint_to_bytes(ec.scalar.expose_secret(), scalar_len));
+            Ok(Zeroizing::new(tlv_encode(0x06, &scalar)))
+        }
+        PrivateKey::Ed25519(k) => {
+            if k.secret.expose_secret().len() != 32 {
+                return Err(PivError::InvalidData(
+                    "Ed25519 secret key must be 32 bytes".into(),
+                ));
+            }
+            Ok(Zeroizing::new(tlv_encode(0x07, k.secret.expose_secret())))
+        }
+        PrivateKey::X25519(k) => {
+            if k.secret.expose_secret().len() != 32 {
+                return Err(PivError::InvalidData(
+                    "X25519 secret key must be 32 bytes".into(),
+                ));
+            }
+            Ok(Zeroizing::new(tlv_encode(0x08, k.secret.expose_secret())))
+        }
+        PrivateKey::MlDsa(k) => Ok(Zeroizing::new(tlv_encode(
+            0x09,
+            k.private_key.expose_secret(),
+        ))),
+        PrivateKey::MlKem(k) => Ok(Zeroizing::new(tlv_encode(
+            0x0A,
+            k.private_key.expose_secret(),
+        ))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hash algorithm
+// ---------------------------------------------------------------------------
+
+/// Hash algorithm used for signing operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HashAlgorithm {
+    /// SHA-256 (256-bit digest).
+    Sha256,
+    /// SHA-384 (384-bit digest).
+    Sha384,
+    /// SHA-512 (512-bit digest).
+    Sha512,
+}
+
+// ---------------------------------------------------------------------------
+// Device public key → PublicKey conversion
+// ---------------------------------------------------------------------------
+
+// Well-known OIDs (used by PivSigner)
+const OID_ML_DSA_44: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.17");
+const OID_ML_DSA_65: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.18");
+const OID_ML_DSA_87: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.3.19");
+#[cfg(test)]
+const OID_ML_KEM_1024: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.4.3");
+
+/// Parse a single TLV from PIV device-encoded public key data.
+fn parse_device_tlv(data: &[u8], offset: usize) -> Result<(u8, Vec<u8>, usize), PivError> {
+    if offset >= data.len() {
+        return Err(PivError::InvalidData(
+            "Unexpected end of device public key data".into(),
+        ));
+    }
+    let tag = data[offset];
+    let mut pos = offset + 1;
+    if pos >= data.len() {
+        return Err(PivError::InvalidData("Truncated TLV length".into()));
+    }
+    let len = if data[pos] < 0x80 {
+        let l = data[pos] as usize;
+        pos += 1;
+        l
+    } else if data[pos] == 0x81 {
+        pos += 1;
+        let l = data[pos] as usize;
+        pos += 1;
+        l
+    } else if data[pos] == 0x82 {
+        pos += 1;
+        let l = ((data[pos] as usize) << 8) | (data[pos + 1] as usize);
+        pos += 2;
+        l
+    } else {
+        return Err(PivError::InvalidData(
+            "Unsupported TLV length encoding".into(),
+        ));
+    };
+    if pos + len > data.len() {
+        return Err(PivError::InvalidData("TLV value extends past data".into()));
+    }
+    Ok((tag, data[pos..pos + len].to_vec(), pos + len))
+}
+
+/// Convert PIV device-encoded public key bytes to a [`PublicKey`].
+///
+/// PIV device encoding (from `generate_key`/`get_slot_metadata`):
+/// - EC keys: `86 <len> <uncompressed_point>`
+/// - RSA keys: `81 <len> <modulus> 82 <len> <exponent>`
+/// - Ed25519/X25519: `86 <len> <32_bytes>`
+/// - ML-DSA: `87 <len> <raw_public_key>`
+/// - ML-KEM: `88 <len> <raw_public_key>`
+fn device_pubkey_to_public_key(
+    key_type: KeyType,
+    device_bytes: &[u8],
+) -> Result<PublicKey, PivError> {
+    match key_type {
+        KeyType::EccP256 | KeyType::EccP384 => {
+            let (tag, ec_point, _) = parse_device_tlv(device_bytes, 0)?;
+            if tag != 0x86 {
+                return Err(PivError::InvalidData(format!(
+                    "Expected tag 0x86 for EC point, got 0x{tag:02X}"
+                )));
+            }
+            let curve = if key_type == KeyType::EccP256 {
+                EcCurve::P256
+            } else {
+                EcCurve::P384
+            };
+            Ok(EcPublicKey::new(curve, ec_point)
+                .map_err(|e| PivError::from(&e))?
+                .into())
+        }
+        KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
+            let (tag1, modulus, end1) = parse_device_tlv(device_bytes, 0)?;
+            if tag1 != 0x81 {
+                return Err(PivError::InvalidData(format!(
+                    "Expected tag 0x81 for RSA modulus, got 0x{tag1:02X}"
+                )));
+            }
+            let (tag2, exponent, _) = parse_device_tlv(device_bytes, end1)?;
+            if tag2 != 0x82 {
+                return Err(PivError::InvalidData(format!(
+                    "Expected tag 0x82 for RSA exponent, got 0x{tag2:02X}"
+                )));
+            }
+            let key_size = match key_type {
+                KeyType::Rsa1024 => RsaKeySize::Rsa1024,
+                KeyType::Rsa2048 => RsaKeySize::Rsa2048,
+                KeyType::Rsa3072 => RsaKeySize::Rsa3072,
+                KeyType::Rsa4096 => RsaKeySize::Rsa4096,
+                _ => unreachable!(),
+            };
+            let public_key =
+                RsaPublicKey::new(modulus, exponent).map_err(|e| PivError::from(&e))?;
+            if public_key.key_size != key_size {
+                return Err(PivError::InvalidData("RSA public key size mismatch".into()));
+            }
+            Ok(public_key.into())
+        }
+        KeyType::Ed25519 => {
+            let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
+            if tag != 0x86 {
+                return Err(PivError::InvalidData(format!(
+                    "Expected tag 0x86 for Ed25519 key, got 0x{tag:02X}"
+                )));
+            }
+            Ok(Ed25519PublicKey::new(raw_key)
+                .map_err(|e| PivError::from(&e))?
+                .into())
+        }
+        KeyType::X25519 => {
+            let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
+            if tag != 0x86 {
+                return Err(PivError::InvalidData(format!(
+                    "Expected tag 0x86 for X25519 key, got 0x{tag:02X}"
+                )));
+            }
+            Ok(X25519PublicKey::new(raw_key)
+                .map_err(|e| PivError::from(&e))?
+                .into())
+        }
+        KeyType::MlDsa44 | KeyType::MlDsa65 | KeyType::MlDsa87 => {
+            let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
+            if tag != 0x87 {
+                return Err(PivError::InvalidData(format!(
+                    "Expected tag 0x87 for ML-DSA key, got 0x{tag:02X}"
+                )));
+            }
+            let parameter_set = match key_type {
+                KeyType::MlDsa44 => MlDsaParameterSet::MlDsa44,
+                KeyType::MlDsa65 => MlDsaParameterSet::MlDsa65,
+                KeyType::MlDsa87 => MlDsaParameterSet::MlDsa87,
+                _ => unreachable!(),
+            };
+            Ok(MlDsaPublicKey::new(parameter_set, raw_key)
+                .map_err(|e| PivError::from(&e))?
+                .into())
+        }
+        KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
+            let (tag, raw_key, _) = parse_device_tlv(device_bytes, 0)?;
+            if tag != 0x88 {
+                return Err(PivError::InvalidData(format!(
+                    "Expected tag 0x88 for ML-KEM key, got 0x{tag:02X}"
+                )));
+            }
+            let parameter_set = match key_type {
+                KeyType::MlKem512 => MlKemParameterSet::MlKem512,
+                KeyType::MlKem768 => MlKemParameterSet::MlKem768,
+                KeyType::MlKem1024 => MlKemParameterSet::MlKem1024,
+                _ => unreachable!(),
+            };
+            Ok(MlKemPublicKey::new(parameter_set, raw_key)
+                .map_err(|e| PivError::from(&e))?
+                .into())
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PivSignature
+// ---------------------------------------------------------------------------
+
+/// Signature output from the PIV device, suitable for use with `x509-cert` builders.
+#[derive(Clone, Debug)]
+pub struct PivSignature(Vec<u8>);
+
+impl AsRef<[u8]> for PivSignature {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl TryFrom<&[u8]> for PivSignature {
+    type Error = signature::Error;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Ok(PivSignature(bytes.to_vec()))
+    }
+}
+
+impl TryInto<Box<[u8]>> for PivSignature {
+    type Error = signature::Error;
+
+    fn try_into(self) -> Result<Box<[u8]>, Self::Error> {
+        Ok(self.0.into_boxed_slice())
+    }
+}
+
+impl signature::SignatureEncoding for PivSignature {
+    type Repr = Box<[u8]>;
+}
+
+impl SignatureBitStringEncoding for PivSignature {
+    fn to_bitstring(&self) -> der::Result<BitString> {
+        BitString::from_bytes(&self.0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PivVerifyingKey — wraps SPKI DER bytes for EncodePublicKey
+// ---------------------------------------------------------------------------
+
+/// A verifying key backed by raw SPKI DER bytes, for use with `x509-cert` builders.
+#[derive(Clone, Debug)]
+pub struct PivVerifyingKey(Vec<u8>);
+
+impl EncodePublicKey for PivVerifyingKey {
+    fn to_public_key_der(&self) -> spki::Result<der::Document> {
+        der::Document::from_der(&self.0).map_err(|_| spki::Error::KeyMalformed)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PivSigner
+// ---------------------------------------------------------------------------
+
+// Signature algorithm OIDs
+const OID_ECDSA_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
+const OID_ECDSA_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3");
+const OID_ECDSA_SHA512: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.4");
+const OID_RSA_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.11");
+const OID_RSA_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.12");
+const OID_RSA_SHA512: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.13");
+const OID_ED25519_SIG: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
+
+/// A signer that delegates to a PIV session's on-device signing.
+///
+/// Uses `RefCell` for interior mutability since `Signer::try_sign` takes `&self`
+/// but `PivSession::sign` needs `&mut self`.
+pub struct PivSigner<'a, C: SmartCardConnection> {
+    session: RefCell<&'a mut PivSession<C>>,
+    slot: Slot,
+    key_type: KeyType,
+    hash_alg: HashAlgorithm,
+    spki_der: Vec<u8>,
+}
+
+impl<'a, C: SmartCardConnection> PivSigner<'a, C> {
+    /// Create a new signer for the given session, slot, key type, hash algorithm, and SPKI DER.
+    pub fn new(
+        session: &'a mut PivSession<C>,
+        slot: Slot,
+        key_type: KeyType,
+        hash_alg: HashAlgorithm,
+        spki_der: &[u8],
+    ) -> Self {
+        Self {
+            session: RefCell::new(session),
+            slot,
+            key_type,
+            hash_alg,
+            spki_der: spki_der.to_vec(),
+        }
+    }
+}
+
+impl<C: SmartCardConnection> signature::Keypair for PivSigner<'_, C> {
+    type VerifyingKey = PivVerifyingKey;
+
+    fn verifying_key(&self) -> Self::VerifyingKey {
+        PivVerifyingKey(self.spki_der.clone())
+    }
+}
+
+impl<C: SmartCardConnection> DynSignatureAlgorithmIdentifier for PivSigner<'_, C> {
+    fn signature_algorithm_identifier(&self) -> spki::Result<AlgorithmIdentifierOwned> {
+        let (oid, params) = match self.key_type {
+            KeyType::EccP256 | KeyType::EccP384 => {
+                let oid = match self.hash_alg {
+                    HashAlgorithm::Sha256 => OID_ECDSA_SHA256,
+                    HashAlgorithm::Sha384 => OID_ECDSA_SHA384,
+                    HashAlgorithm::Sha512 => OID_ECDSA_SHA512,
+                };
+                (oid, None)
+            }
+            KeyType::Rsa1024 | KeyType::Rsa2048 | KeyType::Rsa3072 | KeyType::Rsa4096 => {
+                let oid = match self.hash_alg {
+                    HashAlgorithm::Sha256 => OID_RSA_SHA256,
+                    HashAlgorithm::Sha384 => OID_RSA_SHA384,
+                    HashAlgorithm::Sha512 => OID_RSA_SHA512,
+                };
+                (oid, Some(der::Any::from(der::asn1::Null)))
+            }
+            KeyType::Ed25519 => (OID_ED25519_SIG, None),
+            KeyType::MlDsa44 => (OID_ML_DSA_44, None),
+            KeyType::MlDsa65 => (OID_ML_DSA_65, None),
+            KeyType::MlDsa87 => (OID_ML_DSA_87, None),
+            KeyType::X25519 | KeyType::MlKem512 | KeyType::MlKem768 | KeyType::MlKem1024 => {
+                return Err(spki::Error::KeyMalformed);
+            }
+        };
+        Ok(AlgorithmIdentifierOwned {
+            oid,
+            parameters: params,
+        })
+    }
+}
+
+impl<C: SmartCardConnection> signature::Signer<PivSignature> for PivSigner<'_, C> {
+    fn try_sign(&self, msg: &[u8]) -> Result<PivSignature, signature::Error> {
+        let hash_alg = match self.key_type.algorithm() {
+            Algorithm::Ec if matches!(self.key_type, KeyType::EccP256 | KeyType::EccP384) => {
+                Some(self.hash_alg)
+            }
+            Algorithm::Rsa => Some(self.hash_alg),
+            _ => None,
+        };
+        let message = crate::__internal::padding::prepare_signature(
+            self.key_type,
+            msg,
+            hash_alg,
+            false,
+            None,
+        )
+        .map_err(signature::Error::from_source)?;
+
+        let mut session = self.session.borrow_mut();
+        let raw_sig = session
+            .sign(self.slot, self.key_type, &message)
+            .map_err(|_| signature::Error::new())?;
+
+        // EC signatures from the device are DER-encoded (SEQUENCE { INTEGER r, INTEGER s }).
+        // Pass them through directly.
+        let sig_bytes = raw_sig;
+
+        Ok(PivSignature(sig_bytes))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::prelude::*;
+
+    #[test]
+    fn openssl_pqc_private_key_files_import_as_seed() {
+        for (algorithm, key_type, tag, seed_len) in [
+            ("ml-dsa-44", KeyType::MlDsa44, 0x09, 32),
+            ("ml-dsa-65", KeyType::MlDsa65, 0x09, 32),
+            ("ml-dsa-87", KeyType::MlDsa87, 0x09, 32),
+            ("ml-kem-512", KeyType::MlKem512, 0x0A, 64),
+            ("ml-kem-768", KeyType::MlKem768, 0x0A, 64),
+            ("ml-kem-1024", KeyType::MlKem1024, 0x0A, 64),
+        ] {
+            let mut payloads = Vec::new();
+            for (format, inner_tag) in [("full", 0x30), ("seed", 0x80)] {
+                let path = format!(
+                    "{}/tests/fixtures/pqc/{algorithm}-{format}.pem",
+                    env!("CARGO_MANIFEST_DIR")
+                );
+                let pem = std::fs::read_to_string(&path).expect("read OpenSSL key fixture");
+                assert!(pem.starts_with("-----BEGIN PRIVATE KEY-----"));
+                assert!(pem.trim_end().ends_with("-----END PRIVATE KEY-----"));
+                let encoded: String = pem
+                    .lines()
+                    .filter(|line| !line.starts_with("-----"))
+                    .collect();
+                let der = BASE64_STANDARD
+                    .decode(encoded)
+                    .expect("decode OpenSSL key fixture");
+
+                let (_, seq_off, seq_len, _) = tlv_parse(&der, 0).unwrap();
+                let seq = &der[seq_off..seq_off + seq_len];
+                let (_, _, _, version_end) = tlv_parse(seq, 0).unwrap();
+                let (_, _, _, algorithm_end) = tlv_parse(seq, version_end).unwrap();
+                let (_, key_off, key_len, _) = tlv_parse(seq, algorithm_end).unwrap();
+                let key_data = &seq[key_off..key_off + key_len];
+                assert_eq!(tlv_parse(key_data, 0).unwrap().0, inner_tag, "{path}");
+
+                let private_key = PrivateKey::from_pkcs8(&der).expect("parse OpenSSL key fixture");
+                assert_eq!(
+                    KeyType::try_from(&private_key.algorithm()).unwrap(),
+                    key_type
+                );
+                let payload = build_put_key_data(key_type, &private_key).unwrap();
+                let (payload_tag, _, payload_len, end) = tlv_parse(&payload, 0).unwrap();
+                assert_eq!(
+                    (payload_tag, payload_len, end),
+                    (tag, seed_len, payload.len())
+                );
+                payloads.push(payload);
+            }
+            assert_eq!(
+                payloads[0].as_slice(),
+                payloads[1].as_slice(),
+                "{algorithm}"
+            );
+        }
+    }
+
+    #[test]
+    fn fascn_matches_python_reference() {
+        fn to_hex(b: &[u8]) -> String {
+            b.iter().map(|x| format!("{x:02x}")).collect()
+        }
+        let f = FascN {
+            agency_code: 9999,
+            system_code: 9999,
+            credential_number: 999999,
+            credential_series: 0,
+            individual_credential_issue: 1,
+            person_identifier: 0,
+            organizational_category: 3,
+            organizational_identifier: 0,
+            organization_association_category: 1,
+        };
+        let bytes = f.to_bytes();
+        assert_eq!(
+            to_hex(&bytes),
+            "d4e739da739ced39ce739d836858210842108421c84210c3eb"
+        );
+        assert_eq!(FascN::from_bytes(&bytes).unwrap(), f);
+        assert_eq!(f.to_string(), "[9999-9999-999999-0-1-0000000000300001]");
+    }
+
+    #[test]
+    fn chuid_matches_python_reference() {
+        fn to_hex(b: &[u8]) -> String {
+            b.iter().map(|x| format!("{x:02x}")).collect()
+        }
+        let f = FascN {
+            agency_code: 9999,
+            system_code: 9999,
+            credential_number: 999999,
+            credential_series: 0,
+            individual_credential_issue: 1,
+            person_identifier: 0,
+            organizational_category: 3,
+            organizational_identifier: 0,
+            organization_association_category: 1,
+        };
+        let guid: Vec<u8> = (0u8..16).collect();
+        let c = Chuid {
+            buffer_length: None,
+            fasc_n: f,
+            agency_code: None,
+            organizational_identifier: None,
+            duns: None,
+            guid,
+            expiration_date: (2030, 1, 1),
+            authentication_key_map: None,
+            asymmetric_signature: Vec::new(),
+            lrc: None,
+        };
+        let bytes = c.to_bytes();
+        assert_eq!(
+            to_hex(&bytes),
+            "3019d4e739da739ced39ce739d836858210842108421c84210c3eb3410000102030405060708090a0b0c0d0e0f350832303330303130313e00fe00"
+        );
+        assert_eq!(Chuid::from_bytes(&bytes).unwrap(), c);
+    }
+
+    #[test]
+    fn extended_length_detected_in_idone_select() {
+        // Real IDEMIA ID-One PIV SELECT response: the 0x61 APT, then a sibling
+        // 0x7F66 extended-length DO (max command 0x03F8, max response 0x7FFF).
+        let resp: &[u8] = &[
+            0x61, 0x2a, 0x4f, 0x0b, 0xa0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x10, 0x00, 0x01,
+            0x00, 0x79, 0x07, 0x4f, 0x05, 0xa0, 0x00, 0x00, 0x03, 0x08, 0x50, 0x0a, 0x49, 0x44,
+            0x2d, 0x4f, 0x6e, 0x65, 0x20, 0x50, 0x49, 0x56, 0xac, 0x06, 0x80, 0x01, 0x27, 0x06,
+            0x01, 0x00, 0x7f, 0x66, 0x08, 0x02, 0x02, 0x03, 0xf8, 0x02, 0x02, 0x7f, 0xff,
+        ];
+        assert!(select_advertised_max_apdu_length(resp) == 0x03F8);
+    }
+
+    #[test]
+    fn extended_length_detected_when_nested() {
+        // Same DO nested inside the 0x61 template (constructed-tag recursion).
+        let nested: &[u8] = &[
+            0x61, 0x09, 0x7f, 0x66, 0x06, 0x02, 0x02, 0x03, 0xf8, 0x02, 0x00,
+        ];
+        assert!(select_advertised_max_apdu_length(nested) == 0x03F8);
+    }
+
+    #[test]
+    fn extended_length_absent_in_minimal_select() {
+        // Minimal APT (e.g. a YubiKey): 4F + 79, no 7F66.
+        let minimal: &[u8] = &[
+            0x61, 0x11, 0x4f, 0x06, 0x00, 0x00, 0x10, 0x00, 0x01, 0x00, 0x79, 0x07, 0x4f, 0x05,
+            0xa0, 0x00, 0x00, 0x03, 0x08,
+        ];
+        assert!(select_advertised_max_apdu_length(minimal) == 0);
+        assert!(select_advertised_max_apdu_length(&[]) == 0);
+        // Small advertised maxima are still returned; framing selection decides
+        // whether the value is large enough to use extended APDUs.
+        assert!(select_advertised_max_apdu_length(&[0x7f, 0x66, 0x03, 0x02, 0x01, 0x40]) == 0x40);
+    }
+
+    #[test]
+    fn test_key_type_algorithm() {
+        assert_eq!(KeyType::Rsa1024.algorithm(), Algorithm::Rsa);
+        assert_eq!(KeyType::Rsa2048.algorithm(), Algorithm::Rsa);
+        assert_eq!(KeyType::Rsa3072.algorithm(), Algorithm::Rsa);
+        assert_eq!(KeyType::Rsa4096.algorithm(), Algorithm::Rsa);
+        assert_eq!(KeyType::EccP256.algorithm(), Algorithm::Ec);
+        assert_eq!(KeyType::EccP384.algorithm(), Algorithm::Ec);
+        assert_eq!(KeyType::Ed25519.algorithm(), Algorithm::Ec);
+        assert_eq!(KeyType::X25519.algorithm(), Algorithm::Ec);
+    }
+
+    #[test]
+    fn test_key_type_bit_len() {
+        assert_eq!(KeyType::Rsa1024.bit_len(), 1024);
+        assert_eq!(KeyType::Rsa2048.bit_len(), 2048);
+        assert_eq!(KeyType::Rsa3072.bit_len(), 3072);
+        assert_eq!(KeyType::Rsa4096.bit_len(), 4096);
+        assert_eq!(KeyType::EccP256.bit_len(), 256);
+        assert_eq!(KeyType::EccP384.bit_len(), 384);
+        assert_eq!(KeyType::Ed25519.bit_len(), 256);
+        assert_eq!(KeyType::X25519.bit_len(), 256);
+    }
+
+    #[test]
+    fn test_key_type_from_u8() {
+        assert_eq!(KeyType::from_u8(0x06), Some(KeyType::Rsa1024));
+        assert_eq!(KeyType::from_u8(0x07), Some(KeyType::Rsa2048));
+        assert_eq!(KeyType::from_u8(0x05), Some(KeyType::Rsa3072));
+        assert_eq!(KeyType::from_u8(0x16), Some(KeyType::Rsa4096));
+        assert_eq!(KeyType::from_u8(0x11), Some(KeyType::EccP256));
+        assert_eq!(KeyType::from_u8(0x14), Some(KeyType::EccP384));
+        assert_eq!(KeyType::from_u8(0xE0), Some(KeyType::Ed25519));
+        assert_eq!(KeyType::from_u8(0xE1), Some(KeyType::X25519));
+        assert_eq!(KeyType::from_u8(0xFF), None);
+    }
+
+    #[test]
+    fn test_management_key_type_properties() {
+        assert_eq!(ManagementKeyType::Tdes.key_len(), 24);
+        assert_eq!(ManagementKeyType::Aes128.key_len(), 16);
+        assert_eq!(ManagementKeyType::Aes192.key_len(), 24);
+        assert_eq!(ManagementKeyType::Aes256.key_len(), 32);
+
+        assert_eq!(ManagementKeyType::Tdes.challenge_len(), 8);
+        assert_eq!(ManagementKeyType::Aes128.challenge_len(), 16);
+        assert_eq!(ManagementKeyType::Aes192.challenge_len(), 16);
+        assert_eq!(ManagementKeyType::Aes256.challenge_len(), 16);
+    }
+
+    #[test]
+    fn test_management_key_type_from_u8() {
+        assert_eq!(
+            ManagementKeyType::from_u8(0x03),
+            Some(ManagementKeyType::Tdes)
+        );
+        assert_eq!(
+            ManagementKeyType::from_u8(0x08),
+            Some(ManagementKeyType::Aes128)
+        );
+        assert_eq!(
+            ManagementKeyType::from_u8(0x0A),
+            Some(ManagementKeyType::Aes192)
+        );
+        assert_eq!(
+            ManagementKeyType::from_u8(0x0C),
+            Some(ManagementKeyType::Aes256)
+        );
+        assert_eq!(ManagementKeyType::from_u8(0xFF), None);
+    }
+
+    #[test]
+    fn test_key_slots_include_all_retired_slots_without_attestation() {
+        let slots: Vec<_> = Slot::key_slots().collect();
+        assert_eq!(slots.len(), 24);
+        assert_eq!(
+            &slots[..4],
+            &[
+                Slot::Authentication,
+                Slot::Signature,
+                Slot::KeyManagement,
+                Slot::CardAuth
+            ]
+        );
+        for (index, slot) in slots[4..].iter().enumerate() {
+            assert_eq!(*slot as u8, 0x82 + index as u8);
+            assert_eq!(Slot::from_u8(*slot as u8), Some(*slot));
+        }
+        assert_eq!(slots[4], Slot::Retired1);
+        assert_eq!(slots[23], Slot::Retired20);
+        assert!(!slots.contains(&Slot::Attestation));
+    }
+
+    #[test]
+    fn test_slot_to_object_id() {
+        assert_eq!(
+            ObjectId::from_slot(Slot::Authentication),
+            ObjectId::Authentication
+        );
+        assert_eq!(ObjectId::from_slot(Slot::Signature), ObjectId::Signature);
+        assert_eq!(
+            ObjectId::from_slot(Slot::KeyManagement),
+            ObjectId::KeyManagement
+        );
+        assert_eq!(ObjectId::from_slot(Slot::CardAuth), ObjectId::CardAuth);
+        assert_eq!(ObjectId::from_slot(Slot::Retired1), ObjectId::Retired1);
+        assert_eq!(ObjectId::from_slot(Slot::Retired10), ObjectId::Retired10);
+        assert_eq!(ObjectId::from_slot(Slot::Retired20), ObjectId::Retired20);
+        assert_eq!(
+            ObjectId::from_slot(Slot::Attestation),
+            ObjectId::Attestation
+        );
+    }
+
+    #[test]
+    fn test_pin_policy_values() {
+        assert_eq!(PinPolicy::Default as u8, 0x00);
+        assert_eq!(PinPolicy::Never as u8, 0x01);
+        assert_eq!(PinPolicy::Once as u8, 0x02);
+        assert_eq!(PinPolicy::Always as u8, 0x03);
+        assert_eq!(PinPolicy::MatchOnce as u8, 0x04);
+        assert_eq!(PinPolicy::MatchAlways as u8, 0x05);
+    }
+
+    #[test]
+    fn test_touch_policy_values() {
+        assert_eq!(TouchPolicy::Default as u8, 0x00);
+        assert_eq!(TouchPolicy::Never as u8, 0x01);
+        assert_eq!(TouchPolicy::Always as u8, 0x02);
+        assert_eq!(TouchPolicy::Cached as u8, 0x03);
+    }
+
+    #[test]
+    fn test_pin_padding() {
+        let pin = PivPin::new("123456").unwrap();
+        assert_eq!(
+            *pin.padded(),
+            [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0xFF, 0xFF]
+        );
+
+        let pin = PivPin::new("12345678").unwrap();
+        assert_eq!(
+            *pin.padded(),
+            [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38]
+        );
+
+        // Empty PIN is invalid
+        assert!(PivPin::new("").is_err());
+
+        // Too-long PIN is invalid
+        assert!(PivPin::new("123456789").is_err());
+    }
+
+    #[test]
+    fn test_retries_from_sw() {
+        assert_eq!(retries_from_sw(0x6983), Some(0)); // AUTH_METHOD_BLOCKED
+        assert_eq!(retries_from_sw(0x63C3), Some(3));
+        assert_eq!(retries_from_sw(0x63CF), Some(15));
+        assert_eq!(retries_from_sw(0x63C0), Some(0));
+        assert_eq!(retries_from_sw(0x9000), None);
+        assert_eq!(retries_from_sw(0x6A80), None);
+    }
+
+    #[test]
+    fn test_slot_display() {
+        assert_eq!(format!("{}", Slot::Authentication), "9A (Authentication)");
+        assert_eq!(format!("{}", Slot::Attestation), "F9 (Attestation)");
+    }
+
+    #[test]
+    fn test_default_management_key() {
+        assert_eq!(DEFAULT_MANAGEMENT_KEY.len(), 24);
+    }
+
+    #[test]
+    fn test_object_id_values() {
+        assert_eq!(ObjectId::Chuid as u32, 0x5FC102);
+        assert_eq!(ObjectId::Capability as u32, 0x5FC107);
+        assert_eq!(ObjectId::Discovery as u32, 0x7E);
+        assert_eq!(ObjectId::Attestation as u32, 0x5FFF01);
+    }
+
+    #[test]
+    fn test_mgmt_key_encrypt_decrypt_tdes() {
+        let key = ManagementKey::new(ManagementKeyType::Tdes, DEFAULT_MANAGEMENT_KEY).unwrap();
+        let data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        let encrypted = mgmt_key_encrypt(&key, &data).unwrap();
+        let decrypted = mgmt_key_decrypt(&key, &encrypted).unwrap();
+        assert_eq!(decrypted, data);
+    }
+
+    #[test]
+    fn test_mgmt_key_encrypt_decrypt_aes128() {
+        let key = ManagementKey::new(ManagementKeyType::Aes128, &[0u8; 16]).unwrap();
+        let data = [0u8; 16];
+        let encrypted = mgmt_key_encrypt(&key, &data).unwrap();
+        let decrypted = mgmt_key_decrypt(&key, &encrypted).unwrap();
+        assert_eq!(decrypted, data);
+    }
+
+    #[test]
+    fn test_check_key_support_basic() {
+        let v5_7 = Version(5, 7, 0);
+        assert!(
+            check_key_support(
+                v5_7,
+                KeyType::EccP256,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_ok()
+        );
+
+        // Ed25519 needs 5.7.0
+        assert!(
+            check_key_support(
+                Version(5, 6, 0),
+                KeyType::Ed25519,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_err()
+        );
+
+        assert!(
+            check_key_support(
+                v5_7,
+                KeyType::Ed25519,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_check_key_support_rsa1024() {
+        for (version, ok) in [(Version(5, 7, 0), true), (Version(6, 0, 0), false)] {
+            for generate in [true, false] {
+                let result = check_key_support(
+                    version,
+                    KeyType::Rsa1024,
+                    PinPolicy::Default,
+                    TouchPolicy::Default,
+                    generate,
+                    false,
+                );
+                assert_eq!(result.is_ok(), ok, "{version:?} generate={generate}");
+            }
+        }
+        assert!(
+            check_key_support(
+                Version(6, 0, 0),
+                KeyType::Rsa2048,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                true,
+                false
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_check_key_support_roca() {
+        // ROCA-affected range: 4.2.0 <= v < 4.3.5
+        assert!(
+            check_key_support(
+                Version(4, 2, 0),
+                KeyType::Rsa2048,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                true, // generate
+                false
+            )
+            .is_err()
+        );
+
+        // Import should still work
+        assert!(
+            check_key_support(
+                Version(4, 2, 0),
+                KeyType::Rsa2048,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_check_key_support_fips() {
+        assert!(
+            check_key_support(
+                Version(4, 4, 0),
+                KeyType::Rsa1024,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_err()
+        );
+
+        assert!(
+            check_key_support(
+                Version(4, 4, 0),
+                KeyType::Rsa2048,
+                PinPolicy::Never,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn test_ml_key_types_round_trip_and_support() {
+        assert_eq!(KeyType::from_u8(0xE2), Some(KeyType::MlDsa44));
+        assert_eq!(KeyType::from_u8(0xE7), Some(KeyType::MlKem1024));
+        assert_eq!(KeyType::MlDsa44.algorithm(), Algorithm::MlDsa);
+        assert_eq!(KeyType::MlKem768.algorithm(), Algorithm::MlKem);
+        assert_eq!(KeyType::MlDsa65.bit_len(), 0);
+        assert_eq!(KeyType::MlKem512.bit_len(), 0);
+        assert_eq!(format!("{}", KeyType::MlKem1024), "MLKEM1024");
+        assert!(
+            check_key_support(
+                Version(5, 9, 9),
+                KeyType::MlDsa44,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_err()
+        );
+        assert!(
+            check_key_support(
+                Version(6, 0, 0),
+                KeyType::MlKem768,
+                PinPolicy::Default,
+                TouchPolicy::Default,
+                false,
+                false
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_ml_public_key_der_detection_and_spki() {
+        let ml_dsa_pk =
+            device_pubkey_to_public_key(KeyType::MlDsa44, &tlv_encode(0x87, &[0xAA; 16]))
+                .expect("parse ML-DSA public key");
+        let ml_dsa_spki = ml_dsa_pk.to_spki().expect("encode ML-DSA SPKI");
+        let parsed = PublicKey::from_spki(&ml_dsa_spki).expect("parse ML-DSA SPKI");
+        assert_eq!(
+            KeyType::from_public_key(&parsed).expect("detect ML-DSA public key"),
+            KeyType::MlDsa44
+        );
+
+        let ml_kem_pk =
+            device_pubkey_to_public_key(KeyType::MlKem768, &tlv_encode(0x88, &[0xBB; 24]))
+                .expect("parse ML-KEM public key");
+        let ml_kem_spki = ml_kem_pk.to_spki().expect("encode ML-KEM SPKI");
+        let parsed = PublicKey::from_spki(&ml_kem_spki).expect("parse ML-KEM SPKI");
+        assert_eq!(
+            KeyType::from_public_key(&parsed).expect("detect ML-KEM public key"),
+            KeyType::MlKem768
+        );
+    }
+
+    #[test]
+    fn test_ml_private_key_der_detection_and_extraction() {
+        fn pkcs8_der(oid: &[u8], inner_key: &[u8]) -> Vec<u8> {
+            let mut algorithm_identifier = Vec::new();
+            algorithm_identifier.extend_from_slice(&tlv_encode(0x06, oid));
+            let algorithm_identifier = tlv_encode(0x30, &algorithm_identifier);
+
+            let private_key = tlv_encode(0x04, inner_key);
+
+            let mut pkcs8 = Vec::new();
+            pkcs8.extend_from_slice(&tlv_encode(0x02, &[0x00]));
+            pkcs8.extend_from_slice(&algorithm_identifier);
+            pkcs8.extend_from_slice(&private_key);
+            tlv_encode(0x30, &pkcs8)
+        }
+
+        let ml_dsa_key = vec![0x11; 32];
+        let mut ml_dsa_fields = tlv_encode(0x04, &ml_dsa_key);
+        ml_dsa_fields.extend_from_slice(&tlv_encode(0x04, &vec![0x33; 4032]));
+        let ml_dsa_pkcs8 = pkcs8_der(OID_ML_DSA_65.as_bytes(), &tlv_encode(0x30, &ml_dsa_fields));
+        let ml_dsa_priv = PrivateKey::from_pkcs8(&ml_dsa_pkcs8).expect("parse ML-DSA key");
+        assert_eq!(
+            KeyType::try_from(&ml_dsa_priv.algorithm()).expect("convert algorithm"),
+            KeyType::MlDsa65
+        );
+        match &ml_dsa_priv {
+            PrivateKey::MlDsa(k) => assert_eq!(k.private_key.expose_secret(), &ml_dsa_key),
+            _ => panic!("Expected MlDsa variant"),
+        }
+        assert_eq!(
+            *build_put_key_data(KeyType::MlDsa65, &ml_dsa_priv).unwrap(),
+            tlv_encode(0x09, &ml_dsa_key)
+        );
+
+        let ml_kem_key = vec![0x22; 64];
+        let ml_kem_pkcs8 = pkcs8_der(OID_ML_KEM_1024.as_bytes(), &tlv_encode(0x80, &ml_kem_key));
+        let ml_kem_priv = PrivateKey::from_pkcs8(&ml_kem_pkcs8).expect("parse ML-KEM key");
+        assert_eq!(
+            KeyType::try_from(&ml_kem_priv.algorithm()).expect("convert algorithm"),
+            KeyType::MlKem1024
+        );
+        match &ml_kem_priv {
+            PrivateKey::MlKem(k) => assert_eq!(k.private_key.expose_secret(), &ml_kem_key),
+            _ => panic!("Expected MlKem variant"),
+        }
+        assert_eq!(
+            *build_put_key_data(KeyType::MlKem1024, &ml_kem_priv).unwrap(),
+            tlv_encode(0x0A, &ml_kem_key)
+        );
+    }
+}

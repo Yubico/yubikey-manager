@@ -1,0 +1,528 @@
+// Copyright 2026 Yubico AB
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! PC/SC smart card transport for YubiKey CCID communication.
+//!
+//! Provides access to YubiKeys through the PC/SC (Personal Computer/Smart Card)
+//! interface, used by CCID applications such as PIV, OpenPGP, and OATH.
+
+use ::pcsc::{Card, Context, Protocols, Scope, ShareMode};
+use std::cell::Cell;
+use std::ffi::CString;
+use std::thread;
+use std::time::Duration;
+
+use crate::core::Transport;
+use crate::log_traffic;
+use crate::smartcard::{SmartCardConnection, SmartCardError};
+
+/// Errors that can occur during PC/SC communication.
+#[derive(Debug, thiserror::Error)]
+pub enum PcscError {
+    /// Low-level PC/SC subsystem error.
+    #[error("PC/SC error: {0}")]
+    Pcsc(#[from] ::pcsc::Error),
+    /// The reader name contains a null byte and cannot be converted to a C string.
+    #[error("Invalid reader name")]
+    InvalidReaderName,
+    /// The connection has already been closed.
+    #[error("Connection is closed")]
+    ConnectionClosed,
+}
+
+impl PcscError {
+    /// Returns true if this error indicates the card is temporarily absent.
+    pub fn is_no_card(&self) -> bool {
+        matches!(
+            self,
+            PcscError::Pcsc(::pcsc::Error::NoSmartcard | ::pcsc::Error::RemovedCard)
+        )
+    }
+
+    /// Returns true if this error indicates that a USB reader or card is
+    /// temporarily unavailable while the device is being removed or reinserted.
+    pub fn is_unavailable(&self) -> bool {
+        self.is_no_card()
+            || matches!(
+                self,
+                PcscError::Pcsc(
+                    ::pcsc::Error::ReaderUnavailable
+                        | ::pcsc::Error::UnknownReader
+                        | ::pcsc::Error::NoReadersAvailable
+                )
+            )
+    }
+
+    /// Returns true if this error indicates another process holds an exclusive
+    /// lock on the card (e.g. scdaemon, yubikey-agent).
+    pub fn is_sharing_violation(&self) -> bool {
+        matches!(self, PcscError::Pcsc(::pcsc::Error::SharingViolation))
+    }
+}
+
+impl From<PcscError> for SmartCardError {
+    fn from(e: PcscError) -> Self {
+        SmartCardError::Transport(Box::new(e))
+    }
+}
+
+thread_local! {
+    static PCSC_GUARD_ACTIVE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The Windows PC/SC stack can return an unrecognised raw status (notably
+/// `ERROR_ACCESS_DENIED` during device removal), which makes `pcsc` panic.
+/// Suppress its panic message only when a guarded operation will recover it.
+fn install_pcsc_panic_filter() {
+    use std::sync::Once;
+    static HOOK: Once = Once::new();
+    HOOK.call_once(|| {
+        let default = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let is_pcsc_code = info
+                .payload()
+                .downcast_ref::<String>()
+                .is_some_and(|s| s.starts_with("unknown PCSC error code:"));
+            if !is_pcsc_code || !PCSC_GUARD_ACTIVE.with(Cell::get) {
+                default(info);
+            }
+        }));
+    });
+}
+
+/// Convert the crate's panic on an unrecognised status into an unavailable
+/// reader error, while preserving unexpected panics.
+fn guard_pcsc<T>(f: impl FnOnce() -> Result<T, ::pcsc::Error>) -> Result<T, PcscError> {
+    install_pcsc_panic_filter();
+    let result = PCSC_GUARD_ACTIVE.with(|active| {
+        let previous = active.replace(true);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        active.set(previous);
+        result
+    });
+    match result {
+        Ok(result) => result.map_err(PcscError::from),
+        Err(payload)
+            if payload
+                .downcast_ref::<String>()
+                .is_some_and(|s| s.starts_with("unknown PCSC error code:")) =>
+        {
+            Err(PcscError::Pcsc(::pcsc::Error::NoReadersAvailable))
+        }
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+/// List available PC/SC reader names.
+pub fn list_readers() -> Result<Vec<String>, PcscError> {
+    let result = guard_pcsc(|| {
+        let ctx = Context::establish(Scope::User)?;
+        let len = ctx.list_readers_len()?;
+        let mut buf = vec![0u8; len];
+        let names: Vec<String> = ctx
+            .list_readers(&mut buf)?
+            .map(|r| r.to_string_lossy().into_owned())
+            .collect();
+        Ok(names)
+    });
+    match result {
+        Ok(names) => Ok(names),
+        Err(e) if e.is_unavailable() => Ok(vec![]),
+        Err(e) => Err(e),
+    }
+}
+
+/// Snapshot of a PC/SC reader's state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReaderStatus {
+    /// Reader name.
+    pub name: String,
+    /// Whether a card is currently present.
+    pub card_present: bool,
+    /// Counts card insertions/removals on the reader, so a card swapped
+    /// between two snapshots can be told apart from the same card.
+    pub event_count: u32,
+}
+
+/// List PC/SC readers together with their current card-present state.
+///
+/// Each entry is `(reader_name, card_is_present)`. Uses `get_status_change`
+/// with a zero timeout so it returns the current snapshot immediately.
+pub fn list_readers_with_state() -> Result<Vec<(String, bool)>, PcscError> {
+    list_reader_statuses().map(|readers| {
+        readers
+            .into_iter()
+            .map(|r| (r.name, r.card_present))
+            .collect()
+    })
+}
+
+/// Like [`list_readers_with_state`], but also reports the event counter used
+/// to detect a card being replaced between two snapshots.
+pub fn list_reader_statuses() -> Result<Vec<ReaderStatus>, PcscError> {
+    let result = guard_pcsc(|| {
+        let ctx = Context::establish(Scope::User)?;
+        let len = ctx.list_readers_len()?;
+        let mut buf = vec![0u8; len];
+        let names: Vec<String> = ctx
+            .list_readers(&mut buf)?
+            .map(|r| r.to_string_lossy().into_owned())
+            .collect();
+
+        if names.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut reader_states: Vec<::pcsc::ReaderState> = names
+            .iter()
+            .filter_map(|name| std::ffi::CString::new(name.as_str()).ok())
+            .map(|cname| ::pcsc::ReaderState::new(cname, ::pcsc::State::UNAWARE))
+            .collect();
+
+        // Zero timeout → return immediately with current state; ignore timeout errors.
+        let _ = ctx.get_status_change(Some(std::time::Duration::ZERO), &mut reader_states);
+
+        Ok(names
+            .into_iter()
+            .zip(reader_states.iter())
+            .map(|(name, rs)| ReaderStatus {
+                name,
+                card_present: rs.event_state().contains(::pcsc::State::PRESENT),
+                event_count: rs.event_count(),
+            })
+            .collect())
+    });
+    match result {
+        Ok(readers) => Ok(readers),
+        Err(e) if e.is_unavailable() => Ok(vec![]),
+        Err(e) => Err(e),
+    }
+}
+
+/// Try to kill `scdaemon` (GPG smart card daemon) which may hold an exclusive
+/// lock on PC/SC readers. Returns `true` if a process was killed.
+fn kill_scdaemon() -> bool {
+    #[cfg(windows)]
+    {
+        kill_scdaemon_windows()
+    }
+    #[cfg(not(windows))]
+    {
+        kill_process_unix("scdaemon", Some(9))
+    }
+}
+
+/// Try to kill `yubikey-agent` which may hold an exclusive lock on PC/SC
+/// readers. Returns `true` if a process was signalled.
+fn kill_yubikey_agent() -> bool {
+    #[cfg(windows)]
+    {
+        false
+    }
+    #[cfg(not(windows))]
+    {
+        kill_process_unix("yubikey-agent", Some(1)) // SIGHUP
+    }
+}
+
+#[cfg(not(windows))]
+fn kill_process_unix(name: &str, signal: Option<i32>) -> bool {
+    use std::process::Command;
+    let mut cmd = Command::new("pkill");
+    if let Some(sig) = signal {
+        cmd.arg(format!("-{sig}"));
+    }
+    cmd.arg(name);
+    let killed = cmd.status().is_ok_and(|s| s.success());
+    if killed {
+        log::debug!("Killed {name}");
+        thread::sleep(Duration::from_millis(100));
+    }
+    killed
+}
+
+#[cfg(windows)]
+fn kill_scdaemon_windows() -> bool {
+    use std::process::Command;
+    // Use taskkill on Windows to terminate scdaemon.exe.
+    // /F = force, /IM = image name.
+    let killed = Command::new("taskkill")
+        .args(["/F", "/IM", "scdaemon.exe"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if killed {
+        log::debug!("Killed scdaemon.exe");
+        thread::sleep(Duration::from_millis(100));
+    }
+    killed
+}
+
+/// Try to kill processes that may hold exclusive locks on PC/SC readers.
+///
+/// Tries scdaemon first, then yubikey-agent. Returns `true` if any process
+/// was killed.
+fn kill_pcsc_blockers() -> bool {
+    kill_scdaemon() || kill_yubikey_agent()
+}
+
+/// Name of the env var that disables exclusive PC/SC access attempts.
+const YKMAN_NO_EXCLUSIVE: &str = "YKMAN_NO_EXLUSIVE"; // Intentional typo for compat
+const EXCLUSIVE_ATTEMPTS: u32 = 10;
+const EXCLUSIVE_RETRY_DELAY: Duration = Duration::from_millis(100);
+
+/// PC/SC reader name prefix for USB-connected YubiKeys.
+const YUBICO_READER_PREFIX: &str = "yubico yubikey";
+
+/// Check whether a PC/SC reader name refers to a USB-connected YubiKey.
+pub fn is_reader_usb(reader_name: &str) -> bool {
+    reader_name
+        .to_ascii_lowercase()
+        .contains(YUBICO_READER_PREFIX)
+}
+
+/// A connection to a smart card via PC/SC.
+pub struct PcscSmartCardConnection {
+    card: Option<Card>,
+    reader_name: String,
+    transport: Transport,
+}
+
+impl std::fmt::Debug for PcscSmartCardConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PcscSmartCardConnection")
+            .field("reader_name", &self.reader_name)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PcscSmartCardConnection {
+    /// Connect to a reader, optionally using exclusive mode.
+    pub fn new(reader_name: &str, exclusive: bool) -> Result<Self, PcscError> {
+        log_traffic!("Opening PCSC connection to '{}'", reader_name);
+        let reader = CString::new(reader_name).map_err(|_| PcscError::InvalidReaderName)?;
+        let share_mode = if exclusive {
+            ShareMode::Exclusive
+        } else {
+            ShareMode::Shared
+        };
+        let card = guard_pcsc(|| {
+            let ctx = Context::establish(Scope::User)?;
+            ctx.connect(&reader, share_mode, Protocols::ANY)
+        })?;
+        log_traffic!("PCSC connection opened to '{}'", reader_name);
+
+        // Detect transport from ATR: USB YubiKeys have 0xFx as the second byte
+        let transport = match guard_pcsc(|| card.get_attribute_owned(::pcsc::Attribute::AtrString))
+        {
+            Ok(atr) if atr.len() > 1 && atr[1] & 0xF0 == 0xF0 => Transport::Usb,
+            _ => Transport::Nfc,
+        };
+
+        Ok(Self {
+            card: Some(card),
+            reader_name: reader_name.to_owned(),
+            transport,
+        })
+    }
+
+    /// Open a connection with automatic fallback and retry logic.
+    ///
+    /// 1. Try exclusive access (unless `YKMAN_NO_EXLUSIVE` env var is set).
+    /// 2. Fall back to shared access.
+    /// 3. If both fail, try killing `scdaemon` or `yubikey-agent` and retry.
+    /// 4. For USB devices (YubiKey Neo), retry up to 8 times on "no card"
+    ///    errors since the card may not be ready immediately after insertion.
+    pub fn open(reader_name: &str) -> Result<Self, PcscError> {
+        let is_usb = is_reader_usb(reader_name);
+        let max_attempts = if is_usb { 9 } else { 1 };
+        let mut last_err = None;
+
+        for attempt in 0..max_attempts {
+            match Self::open_inner(reader_name, true) {
+                Ok(conn) => return Ok(conn),
+                Err(e) if is_usb && e.is_no_card() && attempt + 1 < max_attempts => {
+                    log::debug!(
+                        "SmartCard not ready (attempt {}), retrying in 500ms...",
+                        attempt + 1
+                    );
+                    thread::sleep(Duration::from_millis(500));
+                    last_err = Some(e);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.unwrap())
+    }
+
+    fn open_inner(reader_name: &str, retry: bool) -> Result<Self, PcscError> {
+        // Try exclusive unless disabled. Other processes (e.g. Windows smart
+        // card services) often hold the card briefly right after insertion, so
+        // retry on sharing violations before falling back to shared access.
+        if std::env::var_os(YKMAN_NO_EXCLUSIVE).is_none() {
+            for attempt in 0..EXCLUSIVE_ATTEMPTS {
+                match Self::new(reader_name, true) {
+                    Ok(conn) => {
+                        log::debug!("Using exclusive CCID connection");
+                        return Ok(conn);
+                    }
+                    Err(e) if e.is_sharing_violation() && attempt + 1 < EXCLUSIVE_ATTEMPTS => {
+                        log::debug!(
+                            "Card busy (attempt {}), retrying exclusive access in {:?}",
+                            attempt + 1,
+                            EXCLUSIVE_RETRY_DELAY
+                        );
+                        thread::sleep(EXCLUSIVE_RETRY_DELAY);
+                    }
+                    Err(e) => {
+                        log::info!("Failed to get exclusive CCID access: {e}");
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Try shared
+        match Self::new(reader_name, false) {
+            Ok(conn) => Ok(conn),
+            Err(e) => {
+                if retry && kill_pcsc_blockers() {
+                    Self::open_inner(reader_name, false)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Get the ATR (Answer-To-Reset) of the connected card.
+    pub fn get_atr(&self) -> Result<Vec<u8>, PcscError> {
+        let card = self.card.as_ref().ok_or(PcscError::ConnectionClosed)?;
+        guard_pcsc(|| card.get_attribute_owned(::pcsc::Attribute::AtrString))
+    }
+
+    /// Transmit an APDU command and return the response bytes.
+    pub fn transmit(&self, apdu: &[u8]) -> Result<Vec<u8>, PcscError> {
+        let card = self.card.as_ref().ok_or(PcscError::ConnectionClosed)?;
+        let mut resp_buf = vec![0u8; 65538];
+        let resp = guard_pcsc(|| card.transmit(apdu, &mut resp_buf))?;
+        Ok(resp.to_vec())
+    }
+
+    /// Disconnect from the card.
+    pub fn disconnect(&mut self) -> Result<(), PcscError> {
+        if let Some(card) = self.card.take() {
+            log_traffic!("Closing PCSC connection to '{}'", self.reader_name);
+            guard_pcsc(|| {
+                card.disconnect(::pcsc::Disposition::ResetCard)
+                    .map_err(|(_, e)| e)
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Connect (or reconnect) to the card.
+    pub fn connect(&mut self, exclusive: bool) -> Result<(), PcscError> {
+        let share_mode = if exclusive {
+            ShareMode::Exclusive
+        } else {
+            ShareMode::Shared
+        };
+        if let Some(card) = self.card.as_mut() {
+            guard_pcsc(|| {
+                card.reconnect(share_mode, Protocols::ANY, ::pcsc::Disposition::ResetCard)
+            })?;
+        } else {
+            let reader = CString::new(self.reader_name.as_str())
+                .map_err(|_| PcscError::InvalidReaderName)?;
+            let card = guard_pcsc(|| {
+                let ctx = Context::establish(Scope::User)?;
+                ctx.connect(&reader, share_mode, Protocols::ANY)
+            })?;
+            self.card = Some(card);
+        }
+        Ok(())
+    }
+
+    /// Reconnect to the card.
+    pub fn reconnect(&mut self, exclusive: bool) -> Result<(), PcscError> {
+        let card = self.card.as_mut().ok_or(PcscError::ConnectionClosed)?;
+        let share_mode = if exclusive {
+            ShareMode::Exclusive
+        } else {
+            ShareMode::Shared
+        };
+        guard_pcsc(|| card.reconnect(share_mode, Protocols::ANY, ::pcsc::Disposition::ResetCard))?;
+        Ok(())
+    }
+}
+
+impl crate::core::Connection for PcscSmartCardConnection {
+    type Error = SmartCardError;
+
+    fn close(&mut self) {
+        let _ = self.disconnect();
+    }
+}
+
+impl SmartCardConnection for PcscSmartCardConnection {
+    fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+        use crate::logging::hex_encode;
+        log_traffic!("SEND: {}", hex_encode(apdu));
+        let resp = self.transmit(apdu).map_err(SmartCardError::from)?;
+        if resp.len() < 2 {
+            return Err(SmartCardError::InvalidData(
+                "Response too short (no status word)".into(),
+            ));
+        }
+        let sw = ((resp[resp.len() - 2] as u16) << 8) | (resp[resp.len() - 1] as u16);
+        let data = resp[..resp.len() - 2].to_vec();
+        log_traffic!("RECV: {} SW={:04x}", hex_encode(&data), sw);
+        Ok((data, sw))
+    }
+
+    fn transport(&self) -> Transport {
+        self.transport
+    }
+}
+
+impl Drop for PcscSmartCardConnection {
+    fn drop(&mut self) {
+        let _ = self.disconnect();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_pcsc_status_is_recoverable() {
+        let result: Result<(), PcscError> =
+            guard_pcsc(|| std::panic::panic_any(String::from("unknown PCSC error code: 0x5")));
+        assert!(matches!(
+            result,
+            Err(PcscError::Pcsc(::pcsc::Error::NoReadersAvailable))
+        ));
+    }
+
+    #[test]
+    fn unexpected_panic_is_not_hidden() {
+        let result = std::panic::catch_unwind(|| {
+            let _: Result<(), PcscError> = guard_pcsc(|| panic!("unexpected PC/SC failure"));
+        });
+        assert!(result.is_err());
+    }
+}

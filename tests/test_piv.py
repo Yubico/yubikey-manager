@@ -1,111 +1,32 @@
 import gzip
+import hashlib
 import zlib
-from datetime import date
+from datetime import UTC, date, datetime
+from unittest.mock import Mock
 
 import pytest
-
-from ykman.piv import (
-    generate_chuid,
-    generate_random_management_key,
-    _parse_rfc4514_string,
-)
-from yubikit.core import BadResponseError, NotSupportedError, Version
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
+from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
+from yubikit.core import BadResponseError, Tlv
 from yubikit.piv import (
+    ALGORITHM,
     KEY_TYPE,
-    MANAGEMENT_KEY_TYPE,
-    PIN_POLICY,
-    TOUCH_POLICY,
+    SLOT,
+    TAG_LRC,
     Chuid,
     FascN,
-    _do_check_key_support,
+    PivSession,
+    _pad_message,
+    _unpad_message,
+    calculate_ml_dsa_mu,
     decompress_certificate,
+    generate_ccc,
+    generate_chuid,
+    generate_csr,
+    generate_self_signed_certificate,
 )
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        r"UID=jsmith,DC=example,DC=net",
-        r"OU=Sales+CN=J.  Smith,DC=example,DC=net",
-        r"CN=James \"Jim\" Smith\, III,DC=example,DC=net",
-        r"CN=Before\0dAfter,DC=example,DC=net",
-        r"1.3.6.1.4.1.1466.0=#04024869",
-        r"CN=Lu\C4\8Di\C4\87",
-        r"1.2.840.113549.1.9.1=user@example.com",
-    ],
-)
-def test_parse_rfc4514_string(value):
-    name = _parse_rfc4514_string(value)
-    name2 = _parse_rfc4514_string(name.rfc4514_string())
-    assert name == name2
-
-
-class TestPivFunctions:
-    def test_generate_random_management_key(self):
-        output1 = generate_random_management_key(MANAGEMENT_KEY_TYPE.TDES)
-        output2 = generate_random_management_key(MANAGEMENT_KEY_TYPE.TDES)
-        assert isinstance(output1, bytes)
-        assert isinstance(output2, bytes)
-        assert output1 != output2
-
-        assert 24 == len(generate_random_management_key(MANAGEMENT_KEY_TYPE.TDES))
-
-        assert 16 == len(generate_random_management_key(MANAGEMENT_KEY_TYPE.AES128))
-        assert 24 == len(generate_random_management_key(MANAGEMENT_KEY_TYPE.AES192))
-        assert 32 == len(generate_random_management_key(MANAGEMENT_KEY_TYPE.AES256))
-
-    def test_supported_algorithms(self):
-        with pytest.raises(NotSupportedError):
-            _do_check_key_support(
-                Version(3, 1, 1),
-                KEY_TYPE.ECCP384,
-                PIN_POLICY.DEFAULT,
-                TOUCH_POLICY.DEFAULT,
-            )
-
-        with pytest.raises(NotSupportedError):
-            _do_check_key_support(
-                Version(4, 4, 1),
-                KEY_TYPE.RSA1024,
-                PIN_POLICY.DEFAULT,
-                TOUCH_POLICY.DEFAULT,
-            )
-
-        for key_type in (KEY_TYPE.RSA1024, KEY_TYPE.X25519):
-            with pytest.raises(NotSupportedError):
-                _do_check_key_support(
-                    Version(5, 7, 0),
-                    key_type,
-                    PIN_POLICY.DEFAULT,
-                    TOUCH_POLICY.DEFAULT,
-                    fips_restrictions=True,
-                )
-
-        with pytest.raises(NotSupportedError):
-            _do_check_key_support(
-                Version(5, 7, 0),
-                KEY_TYPE.RSA2048,
-                PIN_POLICY.NEVER,
-                TOUCH_POLICY.DEFAULT,
-                fips_restrictions=True,
-            )
-
-        for key_type in (KEY_TYPE.RSA1024, KEY_TYPE.RSA2048):
-            with pytest.raises(NotSupportedError):
-                _do_check_key_support(
-                    Version(4, 3, 4), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
-                )
-
-        for key_type in (KEY_TYPE.ED25519, KEY_TYPE.X25519):
-            with pytest.raises(NotSupportedError):
-                _do_check_key_support(
-                    Version(5, 6, 0), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
-                )
-
-        for key_type in KEY_TYPE:
-            _do_check_key_support(
-                Version(5, 7, 0), key_type, PIN_POLICY.DEFAULT, TOUCH_POLICY.DEFAULT
-            )
 
 
 def test_fascn():
@@ -166,10 +87,88 @@ def test_chuid_deserialize():
     assert Chuid.from_bytes(bytes(chuid)) == chuid
 
 
-def test_chuid_generate():
-    chuid = Chuid.from_bytes(generate_chuid())
+def test_generate_chuid():
+    chuid = generate_chuid()
+    assert isinstance(chuid, Chuid)
+    encoded = bytes(chuid)
+    assert Chuid.from_bytes(encoded) == chuid
+    assert chuid.fasc_n == FascN(9999, 9999, 999999, 0, 1, 0, 3, 0, 1)
     assert chuid.expiration_date == date(2030, 1, 1)
-    assert chuid.fasc_n.agency_code == 9999
+    assert chuid.asymmetric_signature == b""
+    assert len(chuid.guid) == 16
+    assert chuid.guid[6] >> 4 == 4
+    assert chuid.guid[8] & 0xC0 == 0x80
+    assert chuid.guid != generate_chuid().guid
+    assert encoded == bytes(
+        Chuid(
+            fasc_n=FascN(9999, 9999, 999999, 0, 1, 0, 3, 0, 1),
+            guid=chuid.guid,
+            expiration_date=date(2030, 1, 1),
+            asymmetric_signature=b"",
+        )
+    )
+
+
+def test_generate_ccc():
+    ccc = Tlv.parse_dict(generate_ccc())
+    assert ccc[0xF0].startswith(b"\xa0\x00\x00\x01\x16\xff\x02")
+    assert len(ccc[0xF0]) == 21
+    assert ccc[0xF0] != Tlv.parse_dict(generate_ccc())[0xF0]
+    assert ccc[0xF1] == ccc[0xF2] == b"\x21"
+    assert ccc[TAG_LRC] == b""
+
+
+@pytest.mark.parametrize(
+    "key_type",
+    [
+        KEY_TYPE.RSA2048,
+        KEY_TYPE.ECCP256,
+        KEY_TYPE.ECCP384,
+        KEY_TYPE.ED25519,
+        KEY_TYPE.MLDSA44,
+        KEY_TYPE.MLDSA65,
+        KEY_TYPE.MLDSA87,
+    ],
+)
+def test_generate_certificate_and_csr(key_type):
+    if key_type == KEY_TYPE.RSA2048:
+        private_key = rsa.generate_private_key(65537, 2048)
+    elif key_type in (KEY_TYPE.ECCP256, KEY_TYPE.ECCP384):
+        private_key = ec.generate_private_key(
+            ec.SECP256R1() if key_type == KEY_TYPE.ECCP256 else ec.SECP384R1()
+        )
+    elif key_type == KEY_TYPE.ED25519:
+        private_key = ed25519.Ed25519PrivateKey.generate()
+    else:
+        pytest.importorskip("cryptography", minversion="49")
+        mldsa = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.mldsa")
+        private_key = getattr(mldsa, f"{key_type.name}PrivateKey").generate()
+
+    def sign(slot, algorithm, data, hash_algorithm, rsa_padding):
+        assert slot == SLOT.SIGNATURE
+        assert algorithm == key_type
+        if isinstance(private_key, rsa.RSAPrivateKey):
+            return private_key.sign(data, rsa_padding, hash_algorithm)
+        if isinstance(private_key, ec.EllipticCurvePrivateKey):
+            return private_key.sign(data, ec.ECDSA(hash_algorithm))
+        return private_key.sign(data)
+
+    session = Mock(spec=PivSession)
+    session.sign.side_effect = sign
+    public_key = private_key.public_key()
+    now = datetime.now(UTC)
+    certificate = generate_self_signed_certificate(
+        session, SLOT.SIGNATURE, public_key, "CN=alice", now, now
+    )
+    assert certificate.public_key() == public_key
+    assert certificate.subject == x509.Name.from_rfc4514_string("CN=alice")
+    certificate.verify_directly_issued_by(certificate)
+
+    csr = generate_csr(session, SLOT.SIGNATURE, public_key, "CN=alice")
+    assert csr.public_key() == public_key
+    assert csr.subject == certificate.subject
+    assert csr.is_signature_valid
+    assert session.sign.call_count == 2
 
 
 class TestDecompressCertificate:
@@ -236,3 +235,170 @@ class TestDecompressCertificate:
 
         result = decompress_certificate(gzip_data)
         assert result == original_data
+
+
+_RSA_KEY = rsa.generate_private_key(65537, 2048)
+
+
+def _raw_private(data: bytes) -> bytes:
+    numbers = _RSA_KEY.private_numbers()
+    n = numbers.public_numbers.n
+    result = pow(int.from_bytes(data, "big"), numbers.d, n)
+    return result.to_bytes(_RSA_KEY.key_size // 8, "big")
+
+
+@pytest.mark.parametrize(
+    "hash_algorithm",
+    [
+        hashes.SHA1(),
+        hashes.SHA224(),
+        hashes.SHA256(),
+        hashes.SHA384(),
+        hashes.SHA512(),
+        hashes.SHA512_256(),
+        hashes.SHA3_256(),
+        hashes.SHA3_512(),
+    ],
+)
+@pytest.mark.parametrize(
+    "pad",
+    [
+        padding.PKCS1v15(),
+        padding.PSS(padding.MGF1(hashes.SHA256()), padding.PSS.MAX_LENGTH),
+        padding.PSS(padding.MGF1(hashes.SHA1()), padding.PSS.DIGEST_LENGTH),
+        padding.PSS(padding.MGF1(hashes.SHA512()), 0),
+    ],
+)
+def test_rsa_sign_padding(hash_algorithm, pad):
+    message = b"PIV signature padding"
+    public_key = _RSA_KEY.public_key()
+
+    padded = _pad_message(KEY_TYPE.RSA2048, message, hash_algorithm, pad)
+    public_key.verify(_raw_private(padded), message, pad, hash_algorithm)
+
+    h = hashes.Hash(hash_algorithm)
+    h.update(message)
+    prehashed = Prehashed(hash_algorithm)
+    padded = _pad_message(KEY_TYPE.RSA2048, h.finalize(), prehashed, pad)
+    public_key.verify(_raw_private(padded), message, pad, hash_algorithm)
+
+
+def test_rsa_sign_padding_errors():
+    with pytest.raises(ValueError):
+        _pad_message(
+            KEY_TYPE.RSA2048,
+            b"\0" * 31,
+            Prehashed(hashes.SHA256()),
+            padding.PKCS1v15(),
+        )
+    with pytest.raises(ValueError):
+        _pad_message(
+            KEY_TYPE.RSA2048,
+            b"message",
+            hashes.SHA256(),
+            padding.PSS(padding.MGF1(hashes.SHA256()), padding.PSS.AUTO),
+        )
+    with pytest.raises(ValueError):
+        _pad_message(
+            KEY_TYPE.RSA1024,
+            b"message",
+            hashes.SHA512(),
+            padding.PSS(padding.MGF1(hashes.SHA512()), 100),
+        )
+
+
+@pytest.mark.parametrize(
+    "pad",
+    [
+        padding.PKCS1v15(),
+        padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None),
+        padding.OAEP(padding.MGF1(hashes.SHA1()), hashes.SHA1(), None),
+        padding.OAEP(padding.MGF1(hashes.SHA1()), hashes.SHA384(), b"label"),
+    ],
+)
+def test_rsa_decrypt_unpadding(pad):
+    message = b"PIV decryption padding"
+    ciphertext = _RSA_KEY.public_key().encrypt(message, pad)
+    assert _unpad_message(_raw_private(ciphertext), pad) == message
+
+    with pytest.raises(ValueError):
+        _unpad_message(b"\0" * 256, pad)
+
+
+def test_ec_sign_hash_truncation():
+    message = b"message"
+    h = hashes.Hash(hashes.SHA384())
+    h.update(message)
+    digest = h.finalize()
+    assert _pad_message(KEY_TYPE.ECCP256, message, hashes.SHA384(), None) == digest[:32]
+    assert (
+        _pad_message(KEY_TYPE.ECCP256, digest[:32], Prehashed(hashes.SHA256()), None)
+        == digest[:32]
+    )
+    assert _pad_message(KEY_TYPE.ECCP384, message, hashes.SHA384(), None) == digest
+    h = hashes.Hash(hashes.SHA256())
+    h.update(message)
+    assert (
+        _pad_message(KEY_TYPE.ECCP384, message, hashes.SHA256(), None) == h.finalize()
+    )
+
+
+@pytest.mark.parametrize(
+    "key_type, algorithm",
+    [
+        (KEY_TYPE.MLDSA44, ALGORITHM.MLDSA),
+        (KEY_TYPE.MLDSA65, ALGORITHM.MLDSA),
+        (KEY_TYPE.MLDSA87, ALGORITHM.MLDSA),
+        (KEY_TYPE.MLKEM512, ALGORITHM.MLKEM),
+        (KEY_TYPE.MLKEM768, ALGORITHM.MLKEM),
+        (KEY_TYPE.MLKEM1024, ALGORITHM.MLKEM),
+    ],
+)
+def test_pqc_key_types(key_type, algorithm):
+    assert key_type.algorithm == algorithm
+    with pytest.raises(ValueError):
+        _ = key_type.bit_len
+
+
+def test_pqc_from_public_key():
+    mldsa = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.mldsa")
+    mlkem = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.mlkem")
+    for cls, key_type in [
+        (mldsa.MLDSA44PrivateKey, KEY_TYPE.MLDSA44),
+        (mldsa.MLDSA65PrivateKey, KEY_TYPE.MLDSA65),
+        (mldsa.MLDSA87PrivateKey, KEY_TYPE.MLDSA87),
+        (mlkem.MLKEM768PrivateKey, KEY_TYPE.MLKEM768),
+        (mlkem.MLKEM1024PrivateKey, KEY_TYPE.MLKEM1024),
+    ]:
+        assert KEY_TYPE.from_public_key(cls.generate().public_key()) == key_type
+
+
+def test_ml_dsa_sign_message_passthrough():
+    message = b"message"
+    assert _pad_message(KEY_TYPE.MLDSA65, message, None, None) == message
+    with pytest.raises(ValueError):
+        _pad_message(KEY_TYPE.MLDSA65, message, Prehashed(hashes.SHA256()), None)
+
+
+def test_calculate_ml_dsa_mu():
+    public_key = bytes(range(256)) * 5 + bytes(32)  # ML-DSA-44 sized
+    message = b"message"
+    for context in (b"", b"context"):
+        tr = hashlib.shake_256(public_key).digest(64)
+        expected = hashlib.shake_256(
+            tr + bytes([0, len(context)]) + context + message
+        ).digest(64)
+        assert calculate_ml_dsa_mu(public_key, message, context) == expected
+    with pytest.raises(ValueError):
+        calculate_ml_dsa_mu(public_key, message, bytes(256))
+
+
+def test_calculate_ml_dsa_mu_matches_cryptography():
+    mldsa = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.mldsa")
+    if not hasattr(mldsa, "MLDSAMuHasher"):
+        pytest.skip("Requires cryptography >= 50")
+    public_key = mldsa.MLDSA65PrivateKey.generate().public_key()
+    message = b"message"
+    hasher = mldsa.MLDSAMuHasher(public_key, b"context")
+    hasher.update(message)
+    assert calculate_ml_dsa_mu(public_key, message, b"context") == hasher.finalize()

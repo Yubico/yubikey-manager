@@ -6,67 +6,39 @@ permissions: read-all
 
 jobs:
   build:
-
     runs-on: macos-latest
-
+    name: Build (universal)
     env:
-      MACOSX_DEPLOYMENT_TARGET: "11.0"
-      CFLAGS: -arch x86_64 -arch arm64
-      ARCHFLAGS: -arch x86_64 -arch arm64
+      CARGO_PROFILE_DEV_DEBUG: "2"
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - name: Load CI build versions
+        uses: ./.github/actions/build-versions
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          enable-cache: true
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+          target: x86_64-apple-darwin aarch64-apple-darwin
+          build-warnings: ""
+          rustflags: ""
+          cache: true
+          cache-save-if: ${{ github.event_name == 'push' }}
 
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version-file: ".python-version"
-
-      - name: Install the project
-        run: uv sync --locked
-
-      - name: Run pre-commit hooks
+      - name: Build Rust CLI (universal)
         run: |
-          uv tool install pre-commit
-          pre-commit run --all-files --verbose
-
-      # Adapted from https://github.com/sabnzbd/sabnzbd/blob/develop/.github/workflows/build_release.yml#L80
-      - name: Explicitly use universal versions
-        run: |
-          # Cryptography 49 drops support for Intel Macs
-          uv pip install "cryptography<49"
-          # Export exact versions
-          uv pip freeze  > requirements.txt
-          grep cryptography requirements.txt > cryptography.txt
-          grep cffi requirements.txt > source-reqs.txt
-          grep pyscard requirements.txt >> source-reqs.txt
-          # Remove non-universal packages
-          uv pip uninstall cryptography cffi pyscard
-          # Build cffi from source to get universal build
-          uv pip install --upgrade -r source-reqs.txt --no-binary :all:
-          # Explicitly install pre-build universal build of cryptography
-          pip download -r cryptography.txt --platform macosx_10_12_universal2 --only-binary :all: --no-deps --dest .
-          uv pip install -r cryptography.txt --no-cache-dir --no-index --find-links .
-
-      - name: PyInstaller
-        run: |
-          uv run --no-sync pyinstaller ykman.spec
+          cargo build --locked --release -p ykman-cli --target aarch64-apple-darwin
+          cargo build --locked --release -p ykman-cli --target x86_64-apple-darwin
+          mkdir -p dist/ykman
+          lipo -create \
+            target/aarch64-apple-darwin/release/ykman \
+            target/x86_64-apple-darwin/release/ykman \
+            -output dist/ykman/ykman
           dist/ykman/ykman --version
-          [[ -z "$(dist/ykman/ykman --version | grep -E "not found|missing")" ]]
-
-      - name: Simplify Python bundle
-        working-directory: ./dist/ykman/_internal
-        run: |
-          mv $(readlink Python) Python
-          rm -rf Python.framework
 
       - name: Copy scripts
-        shell: bash
         run: cp -r resources/macos dist/scripts
 
       - name: Build installer
@@ -74,7 +46,7 @@ jobs:
         run: ./scripts/make_pkg.sh
 
       - name: Upload build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ykman-builds-macos
           path: dist

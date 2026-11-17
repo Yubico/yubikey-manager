@@ -4,99 +4,157 @@ on: [push, pull_request]
 
 permissions: read-all
 
+env:
+  SCRIBE_IMAGE: ghcr.io/yubico/scribe-ci:v1.6.0@sha256:459bbfb9a267d60072ebbc5fdfa8e5bfd32637177188470eafc3fadd6218c730
+
 jobs:
   build:
+    runs-on: ${{ matrix.os }}
+    name: Build - ${{ matrix.os }}
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "2"
 
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: ykman-builds-windows-x64
+          - os: windows-11-arm
+            artifact: ykman-builds-windows-arm64
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - name: Load CI build versions
+        uses: ./.github/actions/build-versions
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          enable-cache: true
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+          build-warnings: ""
+          rustflags: ""
+          cache: true
+          cache-save-if: ${{ github.event_name == 'push' }}
 
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version-file: ".python-version"
-
-      - name: Install the project
-        run: uv sync --locked
-
-      - name: Run pre-commit hooks
-        run: |
-          uv tool install pre-commit
-          pre-commit run --all-files --verbose
-
-      - name: Run unit tests
-        run: uv run pytest -v
-
-      - name: Build
-        run: uv build
-
-      - name: Install from tar.gz
+      - name: Build Rust CLI
         shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install dist/*.tar.gz
-          ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-          pip uninstall -y yubikey-manager
-
-      - name: Install from wheel
-        shell: bash
-        run: |
-          pip install dist/*.whl
-          ykman --version
-          [[ -z "$(ykman --version | grep -E "not found|missing")" ]]
-          pip uninstall -y yubikey-manager
-
-      - name: PyInstaller
-        shell: bash
-        run: |
-          uv run pyinstaller ykman.spec
+          cargo build --locked --release -p ykman-cli -p ykman-svc
+          mkdir -p dist/ykman
+          cp target/release/ykman.exe dist/ykman/
+          cp target/release/ykman-svc.exe dist/ykman/
           dist/ykman/ykman.exe --version
-          [[ -z "$(dist/ykman/ykman.exe --version | grep -E "not found|missing")" ]]
+
+      - name: Verify DLL search hardening
+        shell: bash
+        run: |
+          python -m pip install --quiet pefile
+          python - dist/ykman/ykman.exe dist/ykman/ykman-svc.exe <<'EOF'
+          import sys
+          import pefile
+
+          for path in sys.argv[1:]:
+              pe = pefile.PE(path, fast_load=True)
+              pe.parse_data_directories(
+                  [pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG"]]
+              )
+              flags = pe.DIRECTORY_ENTRY_LOAD_CONFIG.struct.DependentLoadFlags
+              if flags != 0x800:
+                  sys.exit(f"{path}: DependentLoadFlags is {flags:#x}, expected 0x800")
+              print(f"{path}: DependentLoadFlags {flags:#x}")
+          EOF
+      - name: Test MSI version extraction
+        run: .\resources\win\test_msi_version.ps1
+
+      - name: Verify executable versions
+        run: |
+          $packages = (cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json).packages
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read Cargo package versions' }
+          foreach ($expected in @(
+            @{ File = 'ykman.exe'; Package = 'ykman-cli'; Build = 0 },
+            @{ File = 'ykman-svc.exe'; Package = 'ykman-svc'; Build = 0 }
+          )) {
+            $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path "dist/ykman/$($expected.File)").Path)
+            $file = "$($version.FileMajorPart).$($version.FileMinorPart).$($version.FileBuildPart).$($version.FilePrivatePart)"
+            $product = "$($version.ProductMajorPart).$($version.ProductMinorPart).$($version.ProductBuildPart).$($version.ProductPrivatePart)"
+            $text = ($packages | Where-Object name -eq $expected.Package).version
+            $cargoVersion = [version]$text.Split('-')[0]
+            $numeric = "$($cargoVersion.Major).$($cargoVersion.Minor).$($expected.Build).0"
+            if ($file -ne $numeric -or $product -ne $numeric) {
+              throw "$($expected.File) has unexpected numeric versions: file=$file, product=$product"
+            }
+            if ($version.FileVersion -ne $text -or $version.ProductVersion -ne $text) {
+              throw "$($expected.File) must retain its Cargo version text: $text"
+            }
+          }
 
       - name: Copy scripts
         shell: bash
         run: cp -r resources/win dist/scripts
 
+      - name: Install WiX
+        run: .\.github\scripts\install_wix.ps1
+
+      - name: Test shared service lifecycle
+        run: |
+          $arch = if ('${{ matrix.os }}' -eq 'windows-11-arm') { 'arm64' } else { 'x64' }
+          .\resources\win\test_service_msm.ps1 -Architecture $arch -WixBin $env:WIX_BIN
+
       - name: Build installer
+        if: matrix.os == 'windows-latest'
         working-directory: ./dist
-        run: .\scripts\make_msi.ps1
+        run: .\scripts\make_msi.ps1 -SourceDir .\ykman -WixBin $env:WIX_BIN
+
+      - name: Verify installer and service module versions
+        if: matrix.os == 'windows-latest'
+        run: .\resources\win\test_installer_versions.ps1 -BuildDir .\dist
 
       - name: Upload build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ykman-builds-windows
+          name: ${{ matrix.artifact }}
           path: dist
+          if-no-files-found: error
 
-  sign-exe-dll:
-    if: startsWith(github.ref, 'refs/tags/')
+  sign-exe:
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') && needs.build.result != 'skipped' }}
     needs: [build]
+    outputs:
+      architectures: ${{ steps.prepare.outputs.architectures }}
+    # Scribe's job events can cross submissions for the same tag.
+    concurrency:
+      group: windows-scribe-${{ github.ref }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - name: Check tag format
         run: |
-          if [[ "${GITHUB_REF}" =~ ^refs/tags/[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
+          if [[ "${GITHUB_REF}" =~ ^refs/tags/[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+$ ]]; then
             echo "Tag matches format"
           else
             echo "Invalid tag format"
             exit 1
           fi
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Test signing artifact handling
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+
+      - name: Download successful builds
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: ykman-builds-windows
+          pattern: ykman-builds-windows-*
+          path: artifacts
+
+      - name: Prepare available architectures for signing
+        id: prepare
+        run: python3 .github/scripts/windows_signing.py prepare binaries artifacts signing-input >> "$GITHUB_OUTPUT"
 
       - name: docker login
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ci@yubico.com
@@ -109,13 +167,17 @@ jobs:
           echo "${GAC}" > scribe_sa.json
           echo "GOOGLE_APPLICATION_CREDENTIALS=/scribe/scribe_sa.json" >> $GITHUB_ENV
 
-      - name: run scribe sign exe and dlls
+      - name: Sign executables and DLLs for all available architectures
         run: >
           docker run
           --user $(id -u):$(id -g)
           --volume $(pwd):/scribe
-          --env-file <(env)
-          ghcr.io/yubico/scribe-ci:v1
+          --env GOOGLE_APPLICATION_CREDENTIALS
+          --env CI
+          --env GITHUB_EVENT_NAME
+          --env GITHUB_REF
+          --env GITHUB_REPOSITORY
+          "$SCRIBE_IMAGE"
           --project-id scribe-prod-987134
           --bucket scribe-u-pub-ykman-fqj0hy
           --config /scribe/.github/scribe-sign-exe-dll.yml
@@ -123,113 +185,171 @@ jobs:
           --synchronous
           --download-artifacts
 
-      - name: unpack signed exe and dlls
+      - name: Restore signed binaries to their architecture bundles
         run: |
           mkdir -p signed
           mv scribe-download/*/sign-source/1.zip signed/
-          rm -rf scribe-download
-          cd signed
-          unzip -j 1.zip || true
-          rm 1.zip
-          cd ..
-          cp signed/ykman.exe ykman-builds-windows/ykman/ykman.exe
-          cp signed/pythoncom314.dll ykman-builds-windows/ykman/_internal/pywin32_system32/pythoncom314.dll
-          cp signed/pywintypes314.dll ykman-builds-windows/ykman/_internal/pywin32_system32/pywintypes314.dll
+          python3 .github/scripts/extract_signed_zip.py signed/1.zip signed
+          rm signed/1.zip
+          python3 .github/scripts/windows_signing.py restore artifacts signing-input signed
 
-      - name: upload signed artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload signed x64 binaries
+        if: contains(fromJSON(steps.prepare.outputs.architectures), 'x64')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: signed-files
-          path: ykman-builds-windows
+          path: artifacts/ykman-builds-windows-x64
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload signed ARM64 binaries
+        if: contains(fromJSON(steps.prepare.outputs.architectures), 'arm64')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-files-arm64
+          path: artifacts/ykman-builds-windows-arm64
+          if-no-files-found: error
+          compression-level: 0
 
   build-msi:
-    needs: [sign-exe-dll]
-    runs-on: windows-latest
+    if: ${{ !cancelled() && needs.sign-exe.result == 'success' }}
+    needs: [sign-exe]
+    name: Build MSI - ${{ matrix.arch }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(needs.sign-exe.outputs.architectures) }}
+    env:
+      SUFFIX: ${{ matrix.arch == 'arm64' && '-arm64' || '' }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          name: signed-files${{ env.SUFFIX }}
           path: ykman-builds-windows
 
+      - name: Install WiX
+        run: .\.github\scripts\install_wix.ps1
+
       - name: Build installer
-        working-directory: .\ykman-builds-windows\signed-files\
-        run: .\scripts\make_msi.ps1
+        working-directory: .\ykman-builds-windows
+        run: .\scripts\make_msi.ps1 -SourceDir .\ykman -Architecture ${{ matrix.arch }} -WixBin $env:WIX_BIN
+
+      - name: Verify installer and service module versions
+        run: .\resources\win\test_installer_versions.ps1 -BuildDir .\ykman-builds-windows -Architecture ${{ matrix.arch }}
 
       - name: Upload installer
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ykman-installer-windows
-          path: .\ykman-builds-windows\signed-files\
+          name: ykman-installer-windows${{ env.SUFFIX }}
+          path: .\ykman-builds-windows
+          if-no-files-found: error
 
   sign-msi:
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') && needs.build-msi.result != 'skipped' }}
     needs: [build-msi]
+    outputs:
+      architectures: ${{ steps.prepare.outputs.architectures }}
+    concurrency:
+      group: windows-scribe-${{ github.ref }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
-    - name: checkout repo
-      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    - name: download artifacts
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-      with:
-        path: ykman-builds-windows
+      - name: Download successful MSI builds
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ykman-installer-windows*
+          path: artifacts
 
-    - name: docker login
-      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
-      with:
-        registry: ghcr.io
-        username: ci@yubico.com
-        password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Prepare available installers for signing
+        id: prepare
+        run: python3 .github/scripts/windows_signing.py prepare installers artifacts signing-input >> "$GITHUB_OUTPUT"
 
-    - name: write service account credentials
-      env:
-        GAC: ${{ secrets.SCRIBE_SA }}
-      run: |
-        echo "${GAC}" > scribe_sa.json
-        echo "GOOGLE_APPLICATION_CREDENTIALS=/scribe/scribe_sa.json" >> $GITHUB_ENV
+      - name: Docker login
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ci@yubico.com
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: run scribe sign msi
-      run: >
-        docker run
-        --user $(id -u):$(id -g)
-        --volume $(pwd):/scribe
-        --env-file <(env)
-        ghcr.io/yubico/scribe-ci:v1
-        --project-id scribe-prod-987134
-        --bucket scribe-u-pub-ykman-fqj0hy
-        --config /scribe/.github/scribe-sign-msi.yml
-        submit .
-        --synchronous
-        --download-artifacts
+      - name: Write service account credentials
+        env:
+          GAC: ${{ secrets.SCRIBE_SA }}
+        run: |
+          echo "${GAC}" > scribe_sa.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/scribe/scribe_sa.json" >> $GITHUB_ENV
 
-    - name: unpack signed msi
-      run: |
-        mkdir -p signed
-        mv scribe-download/*/sign-source/1.zip signed/
-        rm -rf scribe-download
-        cd signed
-        unzip -j 1.zip || true
-        rm 1.zip
-        cd ..
-        cp signed/ykman.msi ykman-builds-windows/ykman-installer-windows/ykman.msi
+      - name: Sign all available MSI installers
+        run: >
+          docker run
+          --user $(id -u):$(id -g)
+          --volume $(pwd):/scribe
+          --env GOOGLE_APPLICATION_CREDENTIALS
+          --env CI
+          --env GITHUB_EVENT_NAME
+          --env GITHUB_REF
+          --env GITHUB_REPOSITORY
+          "$SCRIBE_IMAGE"
+          --project-id scribe-prod-987134
+          --bucket scribe-u-pub-ykman-fqj0hy
+          --config /scribe/.github/scribe-sign-msi.yml
+          submit .
+          --synchronous
+          --download-artifacts
 
-    - name: upload signed artifacts
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-      with:
-        name: signed-files-and-msi
-        path: ykman-builds-windows/ykman-installer-windows
+      - name: Restore signed installers
+        run: |
+          mkdir -p signed
+          mv scribe-download/*/sign-source/1.zip signed/
+          python3 .github/scripts/extract_signed_zip.py signed/1.zip signed
+          rm signed/1.zip
+          python3 .github/scripts/windows_signing.py restore artifacts signing-input signed
 
-  verify-signatures:
-    needs: [sign-msi]
-    runs-on: windows-latest
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Upload signed x64 installer
+        if: contains(fromJSON(steps.prepare.outputs.architectures), 'x64')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: signed-files-and-msi
-          path: ykman-builds-windows/ykman-installer-windows
+          path: artifacts/ykman-installer-windows
+          if-no-files-found: error
+          compression-level: 0
 
-      - name: Check for unsigned DLLs
-        working-directory: .\ykman-builds-windows\ykman-installer-windows
-        run: .\scripts\verify_dll.ps1
+      - name: Upload signed ARM64 installer
+        if: contains(fromJSON(steps.prepare.outputs.architectures), 'arm64')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-files-and-msi-arm64
+          path: artifacts/ykman-installer-windows-arm64
+          if-no-files-found: error
+          compression-level: 0
+
+  verify-signatures:
+    if: ${{ !cancelled() && needs.sign-msi.result == 'success' }}
+    needs: [sign-msi]
+    name: Verify signatures - ${{ matrix.arch }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(needs.sign-msi.outputs.architectures) }}
+    env:
+      SUFFIX: ${{ matrix.arch == 'arm64' && '-arm64' || '' }}
+    steps:
+      - name: Download signed installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-files-and-msi${{ env.SUFFIX }}
+          path: signed
+
+      - name: Verify signatures
+        run: |
+          foreach ($file in @('signed\ykman\ykman.exe', 'signed\ykman\ykman-svc.exe', 'signed\ykman${{ env.SUFFIX }}.msi')) {
+            if ((Get-AuthenticodeSignature $file).Status -ne 'Valid') {
+              throw "$file does not have a valid signature"
+            }
+          }

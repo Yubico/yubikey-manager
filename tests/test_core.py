@@ -1,5 +1,5 @@
-from yubikit.core import Tlv, Oid, bytes2int, int2bytes
 import pytest
+from yubikit.core import Oid, Tlv, bytes2int, int2bytes
 
 OID_TESTS = {
     "1.2.840.10045.3.1.7": b"\x2a\x86\x48\xce\x3d\x03\x01\x07",  # SECP256R1

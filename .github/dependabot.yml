@@ -8,3 +8,36 @@ updates:
       github-actions:
         patterns:
           - "*"
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    groups:
+      cargo-patches:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    groups:
+      uv-patches:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    groups:
+      pre-commit-patches:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"

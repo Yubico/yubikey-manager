@@ -30,10 +30,8 @@ echo "Apple user ID for notarization: $1"
 echo ""
 read -p "Press enter to continue..."
 
-# Sign binaries
+# Sign binary
 codesign -f --timestamp --options runtime --entitlements $SCRIPT_DIR/ykman.entitlements --sign 'Application' $SOURCE_DIR/ykman
-codesign -f --timestamp --options runtime --sign 'Application' $(find $SOURCE_DIR/_internal -name "*.dylib" -o -name "*.so")
-codesign -f --timestamp --options runtime --sign 'Application' $SOURCE_DIR/_internal/Python
 
 # Build pkg
 sh $SCRIPT_DIR/make_pkg.sh ykman-unsigned.pkg

@@ -1,0 +1,181 @@
+[package]
+name = "yubikit"
+version = "1.0.0-beta.0.dev.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "YubiKey management library"
+readme = "README.md"
+keywords = ["yubikey", "fido2", "webauthn", "smartcard", "security"]
+categories = ["authentication", "cryptography", "hardware-support"]
+autoexamples = false
+
+[package.metadata.docs.rs]
+all-features = true
+targets = ["x86_64-unknown-linux-gnu"]
+
+[features]
+default = ["pcsc", "hid"]
+pcsc = ["dep:pcsc"]
+hid = ["dep:hidapi", "dep:udev"]
+
+[dependencies]
+aes.workspace = true
+aes-gcm.workspace = true
+base32.workspace = true
+base64.workspace = true
+cbc.workspace = true
+cmac.workspace = true
+cipher.workspace = true
+getrandom.workspace = true
+hkdf.workspace = true
+hmac.workspace = true
+log = { workspace = true, features = ["max_level_trace", "release_max_level_trace"] }
+pbkdf2.workspace = true
+pcsc = { workspace = true, optional = true }
+sha1.workspace = true
+sha2.workspace = true
+sha2-legacy.workspace = true
+sha3.workspace = true
+shake.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+subtle.workspace = true
+elliptic-curve.workspace = true
+p256.workspace = true
+p384.workspace = true
+rsa.workspace = true
+des.workspace = true
+flate2.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+x509-cert.workspace = true
+signature.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+hidapi = { workspace = true, default-features = false, features = ["linux-native"], optional = true }
+udev = { workspace = true, optional = true }
+libc = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+hidapi = { workspace = true, default-features = true, features = ["macos-shared-device"], optional = true }
+core-foundation-sys = { workspace = true }
+
+[target.'cfg(not(any(target_os = "linux", target_os = "macos")))'.dependencies]
+hidapi = { workspace = true, default-features = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_HumanInterfaceDevice",
+] }
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security_Credentials",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Devices_HumanInterfaceDevice",
+] }
+
+[dev-dependencies]
+ecdsa.workspace = true
+elliptic-curve = { workspace = true, features = ["pkcs8", "sec1"] }
+getrandom.workspace = true
+k256.workspace = true
+ml-dsa.workspace = true
+ml-kem.workspace = true
+p256 = { workspace = true, features = ["ecdsa", "group-digest", "pkcs8"] }
+p384.workspace = true
+pcsc.workspace = true
+rsa.workspace = true
+rstest.workspace = true
+sha2 = { workspace = true, features = ["oid"] }
+ureq = "3"
+ed25519-dalek.workspace = true
+x25519-dalek = { workspace = true, features = ["getrandom"] }
+
+[[example]]
+name = "smartcard_serial"
+path = "examples/smartcard_serial.rs"
+required-features = ["pcsc"]
+
+[[example]]
+name = "fido_serial"
+path = "examples/fido_serial.rs"
+required-features = ["hid"]
+
+[[example]]
+name = "otp_serial"
+path = "examples/otp_serial.rs"
+required-features = ["hid"]
+
+[[example]]
+name = "ctap2_selection"
+path = "examples/ctap2_selection.rs"
+required-features = ["pcsc", "hid"]
+
+[[example]]
+name = "device_info"
+path = "examples/device_info.rs"
+required-features = ["pcsc", "hid"]
+
+[[example]]
+name = "list_devices"
+path = "examples/list_devices.rs"
+required-features = ["pcsc", "hid"]
+
+[[example]]
+name = "monitor_device_events"
+path = "examples/monitor_device_events.rs"
+required-features = ["pcsc", "hid"]
+
+[[example]]
+name = "monitor_yubikeys"
+path = "examples/monitor_yubikeys.rs"
+required-features = ["pcsc", "hid"]
+
+[[example]]
+name = "oath_list"
+path = "examples/oath_list.rs"
+required-features = ["pcsc", "hid"]
+
+[[example]]
+name = "reinsert"
+path = "examples/reinsert.rs"
+required-features = ["pcsc", "hid"]
+
+[[example]]
+name = "webauthn"
+path = "examples/webauthn.rs"
+required-features = ["hid"]
+
+[[example]]
+name = "webauthn_cred_blob"
+path = "examples/webauthn_cred_blob.rs"
+required-features = ["hid"]
+
+[[example]]
+name = "webauthn_cred_protect"
+path = "examples/webauthn_cred_protect.rs"
+required-features = ["hid"]
+
+[[example]]
+name = "webauthn_cred_props"
+path = "examples/webauthn_cred_props.rs"
+required-features = ["hid"]
+
+[[example]]
+name = "webauthn_large_blob"
+path = "examples/webauthn_large_blob.rs"
+required-features = ["hid"]
+
+[[example]]
+name = "webauthn_prf"
+path = "examples/webauthn_prf.rs"
+required-features = ["hid"]
+
+[lints]
+workspace = true

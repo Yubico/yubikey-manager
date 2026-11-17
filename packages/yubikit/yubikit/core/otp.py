@@ -1,0 +1,169 @@
+# Copyright (c) 2020 Yubico AB
+# All rights reserved.
+#
+#   Redistribution and use in source and binary forms, with or
+#   without modification, are permitted provided that the following
+#   conditions are met:
+#
+#    1. Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#    2. Redistributions in binary form must reproduce the above
+#       copyright notice, this list of conditions and the following
+#       disclaimer in the documentation and/or other materials provided
+#       with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+import abc
+import logging
+from collections.abc import Callable
+from datetime import datetime
+from threading import Event
+
+from _yubikit_native.core import OtpProtocol as _NativeOtpProtocol
+from _yubikit_native.core import (
+    calculate_crc as _calculate_crc,
+)
+from _yubikit_native.core import (
+    check_crc as _check_crc,
+)
+from _yubikit_native.core import (
+    modhex_decode as _modhex_decode,
+)
+from _yubikit_native.core import (
+    modhex_encode as _modhex_encode,
+)
+
+from . import USB_INTERFACE, Closable, CommandError, Connection, Version
+
+logger = logging.getLogger(__name__)
+
+
+MODHEX_ALPHABET = "cbdefghijklnrtuv"
+
+
+def calculate_crc(data: bytes) -> int:
+    """Calculate the Yubico OTP CRC-16 checksum of a byte string."""
+    return _calculate_crc(data)
+
+
+def check_crc(data: bytes) -> bool:
+    """Check that data including its checksum has the expected CRC-16 residual."""
+    return _check_crc(data)
+
+
+def modhex_encode(data: bytes) -> str:
+    """Encode a byte string using the Yubico modhex alphabet."""
+    return _modhex_encode(data)
+
+
+def modhex_decode(string: str) -> bytes:
+    """Decode a modhex string, raising ValueError for invalid input."""
+    return _modhex_decode(string)
+
+
+class CommandRejectedError(CommandError):
+    """The issues command was rejected by the YubiKey"""
+
+
+class OtpConnection(Connection, metaclass=abc.ABCMeta):
+    usb_interface = USB_INTERFACE.OTP
+
+    @abc.abstractmethod
+    def receive(self) -> bytes:
+        """Reads an 8 byte feature report"""
+
+    @abc.abstractmethod
+    def send(self, data: bytes) -> None:
+        """Writes an 8 byte feature report"""
+
+
+CRC_OK_RESIDUAL = 0xF0B8
+
+STATUS_PROCESSING = 1
+STATUS_UPNEEDED = 2
+
+
+class OtpProtocol(Closable):
+    """OTP protocol backed by a native Rust implementation."""
+
+    def __init__(self, otp_connection: OtpConnection):
+        self.connection = otp_connection
+        self._native = _NativeOtpProtocol(otp_connection)
+        self.version = Version(*self._native.version)
+
+    def close(self) -> None:
+        self._native.close()
+
+    def send_and_receive(
+        self,
+        slot: int,
+        data: bytes | None = None,
+        expected_len: int | None = None,
+        event: Event | None = None,
+        on_keepalive: Callable[[int], None] | None = None,
+    ) -> bytes | None:
+        """Sends a command to the YubiKey, and reads the response.
+
+        :param slot:  The slot to send to.
+        :param data:  The data payload to send.
+        :param expected_len: If >= 0, verify CRC and return exactly this many
+            bytes. If -1, return raw data without CRC validation. If None, no
+            data is expected (status-only).
+        :param event: Optional Event for cancelling a command.
+        :param on_keepalive: Optional callback for touch status.
+        :return: Response data, or None for status-only responses.
+        """
+        result = self._native.send_and_receive(
+            slot, data, expected_len, event, on_keepalive
+        )
+        return bytes(result) if result is not None else None
+
+    def read_status(self) -> bytes:
+        """Receive status bytes from YubiKey.
+
+        :return: Status bytes (first 3 bytes are the firmware version).
+        """
+        return bytes(self._native.read_status())
+
+
+def format_csv(
+    serial: int,
+    public_id: bytes,
+    private_id: bytes,
+    key: bytes,
+    access_code: bytes | None = None,
+    timestamp: datetime | None = None,
+) -> str:
+    """Produce a CSV line in the "Yubico" format for YubiCloud validation servers.
+
+    :param serial: The serial number.
+    :param public_id: The public ID.
+    :param private_id: The private ID.
+    :param key: The secret key.
+    :param access_code: The access code, or ``None``.
+    :param timestamp: The timestamp; defaults to the current local time.
+    """
+    ts = timestamp or datetime.now()
+    return ",".join(
+        [
+            str(serial),
+            modhex_encode(public_id),
+            private_id.hex(),
+            key.hex(),
+            access_code.hex() if access_code else "",
+            ts.isoformat(timespec="seconds"),
+            "",  # trailing comma
+        ]
+    )

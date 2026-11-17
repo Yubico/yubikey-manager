@@ -1,0 +1,382 @@
+= Migrating from yubikey-manager 5.x to 6.x
+
+Version 6 is a complete rewrite of yubikey-manager in Rust, with Python bindings
+provided via PyO3. The Python API surface has been preserved where possible, but
+there are breaking changes. This documents migration steps required when using
+this project as a Python library.
+
+== Architecture
+
+In 5.x the entire stack was pure Python: transport layers (PC/SC, HID) were
+thin wrappers around `pyscard`, `fido2`, and platform HID libraries. In 6.x
+the core logic (transport, session management, device enumeration) is
+implemented in Rust and exposed to Python through a native extension module
+and a Python wrapper that adapt the native API to familiar Python idioms.
+
+In 5.x there were two top-level packages, yubikit and ykman. In 6.x yubikit is
+the main library, with additional functionality provided to replace most of
+that of ykman. The ykman CLI tool is now fully written in Rust.
+
+Note: The `yubikey-manager` Python package still exists, but only provides the
+ykman CLI tool. It does not depend on or install the `yubikit` Python SDK.
+Install `yubikit` separately when using the Python API; neither distribution
+requires the other. The remaining Python helpers from `ykman` have moved into
+`yubikit`:
+
+* The certificate, CSR, CHUID, and CCC generation helpers and the certificate
+  and CSR signing helpers from `ykman.piv` are now in `yubikit.piv`.
+* Pivman data and management-key helpers from `ykman.piv` are now in
+  `yubikit.pivman`.
+* `ykman.scripting` is now `yubikit.scripting` (see
+  link:Scripting.adoc[Scripting]).
+
+=== Package layout
+
+[cols="1,1"]
+|===
+| 5.x | 6.x
+
+| `pip install yubikey-manager`
+| `pip install yubikit`
+
+| Single package providing both `yubikit` and `ykman`
+| `yubikit` library, including the former `ykman.piv` and
+  `ykman.scripting` helpers; `yubikey-manager` only provides the CLI
+
+| Pure Python
+| Rust core + Python wrapper
+|===
+
+=== Upgrading an existing Python environment
+
+Prefer installing into a new virtual environment. When reusing an environment,
+uninstall both distributions before installing 6.x:
+
+[source,sh]
+----
+python -m pip uninstall yubikey-manager yubikit
+python -m pip install --pre "yubikey-manager>=6.0.0b0,<7"
+python -m pip install --pre "yubikit>=1.0.0b0,<2"
+----
+
+The two install commands are independent. For CLI-only use, omit the `yubikit`
+install; for library-only use, omit the `yubikey-manager` install.
+
+The 5.x `yubikey-manager` distribution owns files that now belong to the separate
+`yubikit` distribution. An in-place upgrade can install the new library before
+uninstalling 5.x, which then deletes the shared files. This can leave apparently
+installed packages that fail with errors such as
+`cannot import name 'PID' from 'yubikit.core' (unknown location)`.
+
+If both new distributions are already installed, force-reinstall only `yubikit`
+to restore its files without changing other dependencies. Use your installed
+library version in the command below (shown for the first beta):
+
+[source,sh]
+----
+python -m pip install --no-cache-dir --force-reinstall --no-deps "yubikit==1.0.0b0"
+----
+
+Restart any Python interpreter that was running during the repair.
+
+=== Package versions
+
+`ykman.__version__` has been removed. Use
+`importlib.metadata.version("yubikit")` to read the installed library version
+instead. The `yubikit` library is distributed separately from the
+`yubikey-manager` CLI and has its own version.
+
+.5.x
+[source,python]
+----
+from ykman import __version__
+
+print(__version__)
+----
+
+.6.x
+[source,python]
+----
+from importlib.metadata import version
+
+print(version("yubikit"))
+----
+
+== Device enumeration
+
+=== `list_all_devices()`
+
+[cols="1,1"]
+|===
+| 5.x | 6.x
+
+| Returns `list[tuple[YkmanDevice, DeviceInfo]]`
+| Returns `list[YubiKeyDevice]`
+|===
+
+In 5.x, `DeviceInfo` was returned alongside the device. In 6.x, `DeviceInfo`
+is accessed via the `info` property on `YubiKeyDevice` directly.
+
+.5.x
+[source,python]
+----
+from ykman.device import list_all_devices
+
+for device, info in list_all_devices():
+    print(info.serial)
+----
+
+.6.x
+[source,python]
+----
+from yubikit.device import list_all_devices
+
+for device in list_all_devices():
+    print(device.info.serial)
+----
+
+=== `scan_devices()`
+
+Moved from `ykman.device` to `yubikit.device`. Signature unchanged.
+
+.6.x
+[source,python]
+----
+from yubikit.device import scan_devices
+
+pids, state = scan_devices()
+----
+
+=== Import paths
+
+[cols="1,1"]
+|===
+| 5.x | 6.x
+
+| `from ykman.device import list_all_devices, scan_devices`
+| `from yubikit.device import list_all_devices, scan_devices`
+
+| `from ykman.piv import generate_csr, generate_self_signed_certificate, generate_chuid, generate_ccc, sign_certificate_builder, sign_csr_builder`
+| Import these functions from `yubikit.piv` instead
+
+| `from ykman.piv import PivmanData, get_pivman_data, pivman_set_mgm_key`
+| Import these helpers from `yubikit.pivman` instead
+
+| `from ykman import scripting`
+| `from yubikit import scripting`
+|===
+
+== PIV helpers
+
+=== CHUID generation
+
+`yubikit.piv.generate_chuid()` now returns a `Chuid` object instead of encoded
+bytes. Use `bytes(chuid)` when writing the generated object to a YubiKey or
+otherwise needing its encoded representation:
+
+[source,python]
+----
+from yubikit.piv import OBJECT_ID, generate_chuid
+
+chuid = generate_chuid()
+session.put_object(OBJECT_ID.CHUID, bytes(chuid))
+----
+
+=== Management-key metadata
+
+Legacy PIN-derived management keys are no longer supported. Before upgrading,
+use 5.x to replace a derived key with a random management key, optionally stored
+on the YubiKey in the PIN-protected pivman object.
+
+The `derive_management_key()` helper and the `PivmanData.salt` and
+`PivmanData.has_derived_key` attributes have been removed.
+`PivmanData.pin_timestamp` and `PivmanData.puk_blocked` have also been removed.
+Legacy salt and timestamp fields and the old PUK-blocked flag are preserved as
+unrecognized metadata without being interpreted or updated. Setting PIN/PUK
+retry attempts no longer clears that flag.
+
+`PivmanData.has_protected_key` has also been removed; use
+`PivmanData.has_stored_key` to check whether the management key is stored on the
+YubiKey.
+
+`pivman_change_pin()` has been removed. Call `PivSession.change_pin()` directly;
+changing the PIN no longer derives or updates the management key.
+`pivman_set_pin_attempts()` has also been removed; call
+`PivSession.set_pin_attempts()` directly.
+
+Pivman readers return empty metadata only when the object is missing; other read
+errors are propagated, and malformed metadata raises `ValueError`. The public
+`PivmanData` and `PivmanProtectedData` classes remain available and preserve
+unrecognized metadata fields when serialized.
+
+== YubiKeyDevice
+
+In 5.x, the concrete device class was `YkmanDevice` (from `ykman.base`).
+In 6.x, there is a single abstract `YubiKeyDevice` class in
+`yubikit.core.device`.
+
+=== New properties
+
+* `device.info` — `DeviceInfo` (was returned separately from `list_all_devices`)
+* `device.name` — product name string (e.g. "YubiKey 5 NFC")
+* `device.reader_name` — PC/SC reader name, or `None` for USB-only
+
+=== Changed properties
+
+* `device.pid` — returns `PID | None` (was always set in 5.x `YkmanDevice`)
+* `device.fingerprint` — string (was `Hashable` in 5.x, now a stable string
+  derived from the reader name, HID path, or FIDO path)
+
+=== Removed
+
+* `YkmanDevice` class — use `YubiKeyDevice` directly
+* The `(device, info)` tuple pattern — use `device.info`
+* `ykman.base` module — removed entirely
+
+
+== Connections
+
+Connection types and their abstract base classes are unchanged:
+
+* `yubikit.core.smartcard.SmartCardConnection`
+* `yubikit.core.otp.OtpConnection`
+* `yubikit.core.fido.FidoConnection`
+
+Opening connections still uses `device.open_connection(ConnectionType)`:
+
+[source,python]
+----
+with device.open_connection(SmartCardConnection) as conn:
+    session = PivSession(conn)
+----
+
+=== Transport implementations
+
+In 5.x, platform-specific Python modules in `ykman/hid/` and `ykman/pcsc/`
+implemented the transports. In 6.x, all transports are implemented in Rust.
+The `ykman.hid` and `ykman.pcsc` Python modules no longer exist.
+
+If you were using low-level transport functions directly (e.g.
+`list_otp_devices()`, `list_ctap_devices()`, `open_device()`), use
+`list_all_devices()` instead and filter by `device.supports_connection()`.
+
+
+== Sessions
+
+Session classes (e.g. `OathSession`, `PivSession`, `ManagementSession`) retain
+the same constructor pattern: pass a connection.
+
+[source,python]
+----
+from yubikit.piv import PivSession
+from yubikit.core.smartcard import SmartCardConnection
+
+with device.open_connection(SmartCardConnection) as conn:
+    piv = PivSession(conn)
+----
+
+NOTE: Session classes are now backed by Rust implementations via PyO3.
+The Python-visible API is the same, but internal implementation details
+(private attributes, monkey-patching) will no longer work.
+
+=== OATH reset closes the session
+
+`OathSession.reset()` still returns `None`, but now closes the session on
+every reset attempt, including failures. The underlying connection remains
+open and is restored for reuse. Reset no longer re-selects the application
+or leaves a usable session without its previous secure channel.
+
+Create a new session to continue, supplying SCP parameters again if required:
+
+[source,python]
+----
+oath = OathSession(conn, scp_key_params)
+oath.reset()
+oath = OathSession(conn, scp_key_params)
+----
+
+Native-backed operations and state properties on the old session raise
+`RuntimeError`. Its cached `version` and `device_id` remain pre-reset
+snapshots; obtain the regenerated device ID from the new session.
+
+
+== Core types
+
+Types in `yubikit.core` are largely unchanged:
+
+* `Version`, `TRANSPORT`, `USB_INTERFACE`, `PID`, `CAPABILITY` — same API
+* `Tlv` — encoding/decoding is now backed by Rust (`_yubikit_native.core`)
+* `int2bytes()`, `bytes2int()` — backed by Rust
+* `require_version()` — still available, but sessions perform their own
+  version checks internally
+* `CommandError` and its subclasses (`BadResponseError`, `TimeoutError`,
+  `ApplicationNotAvailableError`, `InvalidPinError`) and `NotSupportedError`
+  — same exception hierarchy, now also raised for errors from the native layer
+
+
+== Dependencies
+
+=== Removed Python dependencies
+
+The following Python packages are no longer required:
+
+* `pyscard` / `smartcard` — replaced by Rust PC/SC
+* `fido2` — replaced by Rust CTAP implementation
+* `keyring` — removed
+* `platformdirs` — replaced by Rust app data handling
+
+=== Remaining Python dependencies
+
+* `cryptography` (>= 42) — still used for key and certificate types in the
+  Python API. ML-DSA and ML-KEM keys in PIV require cryptography >= 48, and
+  ML-DSA certificates and CSRs require cryptography >= 49.
+
+=== New build dependency
+
+Building from source requires Rust (stable) and `maturin`. The latter is handled by uv:
+
+    $ uv sync
+
+
+== Removed modules and APIs
+
+[cols="1,1"]
+|===
+| Removed | Replacement
+
+| `ykman.base`
+| `yubikit.core.device`
+
+| `ykman.device.list_all_devices()`
+| `yubikit.device.list_all_devices()`
+
+| `ykman.device.scan_devices()`
+| `yubikit.device.scan_devices()`
+
+| `ykman.hid` (all platform backends)
+| Native Rust HID (transparent)
+
+| `ykman.pcsc`
+| Native Rust PC/SC (transparent)
+
+| `ykman.util`
+| Functionality moved to Rust core
+
+| `ykman.piv`
+| Generation and signing helpers moved to `yubikit.piv`; Pivman helpers
+  moved to `yubikit.pivman`
+
+| `ykman.piv.check_key()`, `list_certificates()`, `get_piv_info()`,
+  `generate_random_management_key()`
+| Removed; use `PivSession` methods for signing and reading certificates,
+  and `os.urandom(algorithm.key_len)` to generate a management key
+
+| `ykman.scripting`
+| `yubikit.scripting`
+
+| `yubikit.support.read_info()`
+| Use `device.info` instead
+
+| `yubikit.support.get_name()`
+| Use `device.name` instead
+|===

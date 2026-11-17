@@ -1,0 +1,137 @@
+// Copyright 2026 Yubico AB
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#![warn(missing_docs)]
+
+//! Rust SDK for interacting with YubiKey devices.
+//!
+//! **yubikit** provides a complete API for communicating with YubiKeys over
+//! USB (CCID/SmartCard, FIDO HID, OTP HID) and NFC. It covers the full
+//! range of YubiKey applications: OATH, PIV, OpenPGP, FIDO2/CTAP2, WebAuthn,
+//! YubiOTP, HSM Auth, and device management.
+//!
+//! # Getting started
+//!
+//! Most workflows follow the same pattern: discover devices, open a connection
+//! over the desired transport, then create a session for the application you
+//! want to use.
+//!
+//! ```no_run
+//! use yubikit::platform::device::list_devices;
+//! use yubikit::management::UsbInterface;
+//! use yubikit::oath::OathSession;
+//!
+//! // 1. Discover connected YubiKeys
+//! let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
+//! let devices = list_devices(all).expect("enumeration failed");
+//! let dev = devices.first().expect("no YubiKey found");
+//!
+//! // 2. Open a SmartCard (CCID) connection
+//! let conn = dev.open_smartcard().expect("connection failed");
+//!
+//! // 3. Create an OATH session and list accounts
+//! let mut session = OathSession::new(conn).expect("OATH init failed");
+//! let creds = session.list_credentials().expect("list failed");
+//! for cred in &creds {
+//!     println!("{cred:?}");
+//! }
+//! ```
+//!
+//! # Transports and connections
+//!
+//! YubiKeys expose different USB interfaces, each requiring its own
+//! connection type:
+//!
+//! | Interface | Connection | Used by |
+//! |-----------|-----------|---------|
+//! | CCID (SmartCard) | [`smartcard::SmartCardConnection`] | OATH, PIV, OpenPGP, Management, FIDO2, HSM Auth, Security Domain |
+//! | FIDO HID | [`fido::FidoConnection`] | FIDO2/CTAP2, WebAuthn, Management |
+//! | OTP HID | [`otp::OtpConnection`] | YubiOTP, Management |
+//!
+//! All connection types implement [`core::Connection`]. Session types are
+//! generic over their connection type, so the same [`ctap2::Ctap2Session`]
+//! works over both SmartCard and FIDO HID.
+//!
+//! # Module overview
+//!
+//! ## Device discovery and management
+//! - [`device`] — Enumerate connected YubiKeys, open connections
+//! - [`management`] — Read/write device configuration, capabilities, and mode
+//!
+//! ## YubiKey applications
+//! - [`oath`] — OATH TOTP/HOTP credential management and code calculation
+//! - [`piv`] — PIV (FIPS 201) smart card operations (keys, certificates, PIN)
+//! - [`piv_util`] — CHUID generation and pivman management-key metadata helpers
+//! - [`openpgp`] — OpenPGP card operations (keys, certificates, PIN)
+//! - [`hsmauth`] — YubiHSM Auth credential management
+//! - [`yubiotp`] — YubiOTP slot configuration (challenge-response, static passwords, HOTP)
+//! - [`securitydomain`] — GlobalPlatform Security Domain (SCP03 key management)
+//!
+//! ## FIDO2 and WebAuthn
+//! - [`ctap`] — Low-level CTAP transport session (CTAP1/CTAP2 dispatch)
+//! - [`ctap2`] — CTAP2 commands: credentials, assertions, PIN/UV, bio enrollment, large blobs
+//! - [`webauthn`] — High-level WebAuthn client with extension support (PRF, credProtect, largeBlob, etc.)
+//!
+//! ## Transport and protocol infrastructure
+//! - [`platform`] — USB HID (FIDO and OTP) and PC/SC transport implementations (requires `pcsc` or `hid`)
+//! - [`smartcard`] — ISO 7816 SmartCard / CCID connection, APDU handling, and SCP03 secure channel
+//! - [`otp`] — OTP HID framing protocol
+//! - [`core`] — Shared types: [`core::Version`], [`core::Connection`] trait
+//! - [`cbor`] — CBOR encoding/decoding helpers for CTAP2
+
+#[doc(hidden)]
+pub mod __internal;
+/// CBOR encoding and decoding utilities.
+pub mod cbor;
+/// Core types shared across all YubiKey applications.
+pub mod core;
+/// CTAP session management and device communication.
+pub mod ctap;
+/// CTAP2 protocol implementation for FIDO2 authenticator operations.
+pub mod ctap2;
+/// High-level device enumeration and connection management.
+pub mod device;
+/// FIDO connection trait and transport abstraction.
+pub mod fido;
+/// YubiHSM Auth application for symmetric key storage and derivation.
+pub mod hsmauth;
+/// Cryptographic key types, parsing utilities, and OID encoding.
+pub mod keys;
+/// Logging utilities for diagnostic output.
+pub mod logging;
+/// Device management — reading info, configuring interfaces, and settings.
+pub mod management;
+/// OATH (TOTP/HOTP) credential management.
+pub mod oath;
+/// OpenPGP smart card application.
+pub mod openpgp;
+/// OTP (One-Time Password) frame protocol and modhex codec.
+pub mod otp;
+/// PIV (Personal Identity Verification) smart card application.
+pub mod piv;
+/// PIV utilities for CHUID generation and pivman management-key metadata.
+pub mod piv_util;
+/// Platform-specific transport implementations (HID, PC/SC).
+///
+/// This module is available when the `pcsc` and/or `hid` features are enabled.
+#[cfg(any(feature = "pcsc", feature = "hid"))]
+pub mod platform;
+/// Security Domain operations for managing SCP keys and certificates.
+pub mod securitydomain;
+/// Smart card communication primitives — APDUs, status words, ISO 7816-4, and SCP.
+pub mod smartcard;
+/// WebAuthn client — high-level API for credentials and assertions.
+pub mod webauthn;
+/// YubiOTP application — configuring OTP slots and challenge-response.
+pub mod yubiotp;

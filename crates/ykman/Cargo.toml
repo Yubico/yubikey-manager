@@ -1,0 +1,70 @@
+[package]
+name = "ykman"
+version = "1.0.0-beta.0.dev.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "YubiKey Manager library"
+readme = "README.md"
+keywords = ["yubikey", "fido2", "oath", "piv", "security"]
+categories = ["authentication", "cryptography", "hardware-support"]
+
+[package.metadata.docs.rs]
+all-features = true
+targets = ["x86_64-unknown-linux-gnu"]
+
+[lib]
+name = "ykman"
+path = "src/lib.rs"
+
+[features]
+default = ["hardware"]
+hardware = ["yubikit/pcsc", "yubikit/hid"]
+
+[dependencies]
+yubikit.workspace = true
+jiff.workspace = true
+clap.workspace = true
+ctrlc.workspace = true
+hex.workspace = true
+log = { workspace = true, features = ["std"] }
+sha2.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order", "raw_value"] }
+dirs.workspace = true
+fernet.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring-core.workspace = true
+dbus-secret-service-keyring-store.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring-core.workspace = true
+apple-native-keyring-store.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring-core.workspace = true
+windows-native-keyring-store.workspace = true
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_Security_WinTrust",
+    "Win32_Storage_FileSystem",
+    "Win32_Storage_Packaging_Appx",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Services",
+    "Win32_System_Threading",
+] }
+
+[target.'cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))'.dependencies]
+keyring-core = { workspace = true, features = ["sample"] }
+
+[dev-dependencies]
+base64.workspace = true
+
+[lints]
+workspace = true

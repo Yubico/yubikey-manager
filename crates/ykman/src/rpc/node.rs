@@ -1,0 +1,421 @@
+use std::collections::BTreeMap;
+use std::sync::atomic::AtomicBool;
+
+use serde_json::{Value, json};
+
+use super::error::{ChildResetException, RpcError, RpcResponse};
+
+/// Signal callback type.
+pub type SignalFn<'a> = &'a dyn Fn(&str, Value);
+
+/// Trait for an RPC node in the tree.
+pub trait RpcNode {
+    /// Prepare this node before handling or routing a get request.
+    fn prepare_get(&mut self) -> Result<(), RpcError> {
+        Ok(())
+    }
+
+    /// Get node-specific data (returned in the `get` action).
+    fn get_data(&self) -> Value {
+        json!({})
+    }
+
+    /// List available actions on this node.
+    fn list_actions(&self) -> Vec<&'static str> {
+        vec![]
+    }
+
+    /// List available children with their metadata.
+    fn list_children(&mut self) -> BTreeMap<String, Value> {
+        BTreeMap::new()
+    }
+
+    /// Execute an action on this node.
+    fn call_action(
+        &mut self,
+        action: &str,
+        params: &Value,
+        signal: SignalFn,
+        cancel: &AtomicBool,
+    ) -> Result<RpcResponse, RpcError>;
+
+    /// Create a child node by name.
+    fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
+        Err(RpcError::no_such_node(name))
+    }
+
+    /// Close this node and release resources.
+    fn close(&mut self) {}
+
+    /// Whether `closes_child` should be set for a specific action.
+    /// Default is true for all actions.
+    fn action_closes_child(&self, _action: &str) -> bool {
+        true
+    }
+
+    /// Whether this node keeps all children alive when switching between them.
+    /// When true, children are cached in a map and not closed when a different
+    /// child is accessed. Used by RootNode to preserve USB/NFC subtrees.
+    fn retains_children(&self) -> bool {
+        false
+    }
+
+    /// Check if a cached child is still valid. Returns false if the child
+    /// should be closed and recreated (e.g., after device removal/reinsertion).
+    fn is_child_valid(&self, _name: &str) -> bool {
+        true
+    }
+
+    /// Called on this node when one of its child nodes has been closed.
+    /// Allows the parent to release resources (e.g., device locks) eagerly
+    /// rather than waiting until the whole session ends.
+    fn on_child_closed(&mut self, _name: &str) {}
+
+    /// Called on parent nodes when a child action returns a response with flags.
+    /// Allows parent nodes to react to flags (e.g., refresh data on "device_info",
+    /// invalidate state on "device_closed").
+    fn handle_child_response(&mut self, _response: &mut RpcResponse) {}
+}
+
+/// Hosts an RpcNode, managing a single cached child and routing.
+pub struct NodeHost {
+    node: Box<dyn RpcNode>,
+    child: Option<Box<NodeHost>>,
+    child_name: Option<String>,
+    /// Persistent children for nodes that retain children across switches.
+    retained_children: BTreeMap<String, Box<NodeHost>>,
+    closed: bool,
+}
+
+impl NodeHost {
+    pub fn new(node: Box<dyn RpcNode>) -> Self {
+        Self {
+            node,
+            child: None,
+            child_name: None,
+            retained_children: BTreeMap::new(),
+            closed: false,
+        }
+    }
+
+    fn close_child(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let name = self.child_name.take().unwrap_or_default();
+            log::debug!("Closing child: {:?}", name);
+            child.close();
+            self.node.on_child_closed(&name);
+        } else {
+            self.child_name = None;
+        }
+    }
+
+    fn close_named_child(&mut self, name: &str) {
+        if self.node.retains_children() {
+            if let Some(mut child) = self.retained_children.remove(name) {
+                log::debug!("Closing retained child: {name}");
+                child.close();
+                self.node.on_child_closed(name);
+            }
+        } else if self.child_name.as_deref() == Some(name) {
+            self.close_child();
+        }
+    }
+
+    fn close(&mut self) {
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        self.close_child();
+        let retained: Vec<String> = self.retained_children.keys().cloned().collect();
+        for name in &retained {
+            if let Some(mut child) = self.retained_children.remove(name) {
+                log::debug!("Closing retained child: {name}");
+                child.close();
+                self.node.on_child_closed(name);
+            }
+        }
+        self.node.close();
+    }
+
+    fn get_or_create_child(&mut self, name: &str) -> Result<&mut NodeHost, RpcError> {
+        if self.node.retains_children() {
+            // Multi-child mode: keep all children alive in a map
+            if self.retained_children.contains_key(name)
+                && !self.node.is_child_valid(name)
+                && let Some(mut child) = self.retained_children.remove(name)
+            {
+                log::debug!("Closing invalid retained child: {name}");
+                child.close();
+                self.node.on_child_closed(name);
+            }
+            if !self.retained_children.contains_key(name) {
+                let child_node = self.node.create_child(name)?;
+                self.retained_children
+                    .insert(name.to_string(), Box::new(NodeHost::new(child_node)));
+                log::debug!("Created retained child: {name}");
+            }
+            Ok(self.retained_children.get_mut(name).unwrap())
+        } else {
+            // Single-child mode: close old child when switching
+            if self.child_name.as_deref() == Some(name) && !self.node.is_child_valid(name) {
+                log::debug!("Closing invalid child: {name}");
+                self.close_child();
+            } else if self.child_name.as_deref() != Some(name) {
+                self.close_child();
+            }
+
+            if self.child.is_none() {
+                let child_node = self.node.create_child(name)?;
+                self.child = Some(Box::new(NodeHost::new(child_node)));
+                self.child_name = Some(name.to_string());
+                log::debug!("Created child: {name}");
+            }
+
+            Ok(self.child.as_mut().unwrap())
+        }
+    }
+
+    /// Handle an RPC call, routing through the node tree.
+    pub fn call(
+        &mut self,
+        action: &str,
+        target: &[String],
+        params: &Value,
+        signal: SignalFn,
+        cancel: &AtomicBool,
+    ) -> Result<RpcResponse, RpcError> {
+        let mut traversed: Vec<String> = vec![];
+        self.call_inner(action, target, params, signal, cancel, &mut traversed)
+    }
+
+    fn call_inner(
+        &mut self,
+        action: &str,
+        target: &[String],
+        params: &Value,
+        signal: SignalFn,
+        cancel: &AtomicBool,
+        traversed: &mut Vec<String>,
+    ) -> Result<RpcResponse, RpcError> {
+        if action == "get" {
+            self.node.prepare_get()?;
+        }
+        let result = if !target.is_empty() {
+            traversed.push(target[0].clone());
+            match self.get_or_create_child(&target[0]) {
+                Ok(child) => {
+                    let mut result =
+                        child.call_inner(action, &target[1..], params, signal, cancel, traversed);
+                    // Let the current node handle flags from child responses
+                    if let Ok(ref mut response) = result
+                        && !response.flags.is_empty()
+                    {
+                        self.node.handle_child_response(response);
+                    }
+                    result
+                }
+                Err(e) => Err(e),
+            }
+        } else if action == "get" {
+            // Built-in get action
+            let data = self.node.get_data();
+            let mut actions = self.node.list_actions();
+            // Python includes "get" in list_actions (it's an @action on the base class)
+            if !actions.contains(&"get") {
+                actions.insert(0, "get");
+            }
+            if !actions.contains(&"close") {
+                actions.push("close");
+            }
+            actions.sort();
+            let children = self.node.list_children();
+            Ok(RpcResponse::new(json!({
+                "data": data,
+                "actions": actions,
+                "children": children,
+            })))
+        } else if action == "close" {
+            // Built-in close action: close a named child
+            let child_name = params
+                .get("child")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    RpcError::new("invalid-params", "close requires a 'child' parameter")
+                })?;
+            self.close_named_child(child_name);
+            Ok(RpcResponse::new(json!({})))
+        } else if self.node.list_actions().contains(&action) {
+            // Check if action should close child
+            if self.node.action_closes_child(action) {
+                self.close_child();
+            }
+            self.node.call_action(action, params, signal, cancel)
+        } else if self.node.list_children().contains_key(action) {
+            // Action name matches a child — navigate to it and call get
+            traversed.push(action.to_string());
+            match self.get_or_create_child(action) {
+                Ok(child) => child.call_inner("get", &[], params, signal, cancel, traversed),
+                Err(e) => Err(e),
+            }
+        } else {
+            Err(RpcError::no_such_action(action))
+        };
+
+        match result {
+            Err(e) if e.status == "child-reset" => {
+                self.close_child();
+                Err(RpcError::state_reset(&e.message, traversed.clone()))
+            }
+            other => other,
+        }
+    }
+}
+
+impl Drop for NodeHost {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+/// Convert a ChildResetException into an RpcError with status "child-reset"
+/// (internal marker, converted to "state-reset" by the parent).
+impl From<ChildResetException> for RpcError {
+    fn from(e: ChildResetException) -> Self {
+        RpcError::new("child-reset", e.message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
+
+    struct TestNode {
+        name: &'static str,
+        retains_children: bool,
+        fail_get: Arc<AtomicBool>,
+        events: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl RpcNode for TestNode {
+        fn prepare_get(&mut self) -> Result<(), RpcError> {
+            if self.fail_get.load(Ordering::Relaxed) {
+                Err(RpcError::new("device-error", "Metadata unavailable"))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn create_child(&mut self, name: &str) -> Result<Box<dyn RpcNode>, RpcError> {
+            assert_eq!(name, "child");
+            self.events.lock().unwrap().push("open child".into());
+            Ok(Box::new(Self {
+                name: "child",
+                retains_children: false,
+                fail_get: Arc::clone(&self.fail_get),
+                events: Arc::clone(&self.events),
+            }))
+        }
+
+        fn retains_children(&self) -> bool {
+            self.retains_children
+        }
+
+        fn call_action(
+            &mut self,
+            action: &str,
+            _: &Value,
+            _: SignalFn,
+            _: &AtomicBool,
+        ) -> Result<RpcResponse, RpcError> {
+            Err(RpcError::no_such_action(action))
+        }
+
+        fn close(&mut self) {
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("close {}", self.name));
+        }
+
+        fn on_child_closed(&mut self, name: &str) {
+            self.events.lock().unwrap().push(format!("release {name}"));
+        }
+    }
+
+    #[test]
+    fn get_preparation_errors_are_retryable_and_prevent_child_access() {
+        let fail_get = Arc::new(AtomicBool::new(true));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut host = NodeHost::new(Box::new(TestNode {
+            name: "root",
+            retains_children: true,
+            fail_get: Arc::clone(&fail_get),
+            events: Arc::clone(&events),
+        }));
+        for target in [vec![], vec!["child".to_string()]] {
+            let error = host
+                .call(
+                    "get",
+                    &target,
+                    &json!({}),
+                    &|_, _| {},
+                    &AtomicBool::new(false),
+                )
+                .err()
+                .expect("get should fail when metadata preparation fails");
+            assert_eq!(error.status, "device-error");
+        }
+        assert!(events.lock().unwrap().is_empty());
+        fail_get.store(false, Ordering::Relaxed);
+        host.call(
+            "get",
+            &["child".into()],
+            &json!({}),
+            &|_, _| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(*events.lock().unwrap(), ["open child"]);
+    }
+
+    #[test]
+    fn teardown_closes_children_once_before_releasing_parent_resources() {
+        for (retains_children, explicit_close) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let mut host = NodeHost::new(Box::new(TestNode {
+                name: "root",
+                retains_children,
+                fail_get: Arc::new(AtomicBool::new(false)),
+                events: Arc::clone(&events),
+            }));
+            host.call(
+                "get",
+                &["child".into()],
+                &json!({}),
+                &|_, _| {},
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+            if explicit_close {
+                host.call(
+                    "close",
+                    &[],
+                    &json!({"child": "child"}),
+                    &|_, _| {},
+                    &AtomicBool::new(false),
+                )
+                .unwrap();
+            }
+            drop(host);
+            assert_eq!(
+                *events.lock().unwrap(),
+                ["open child", "close child", "release child", "close root"]
+            );
+        }
+    }
+}

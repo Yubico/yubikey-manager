@@ -1,0 +1,716 @@
+use pyo3::prelude::*;
+use yubikit::keys::RsaKeySize;
+use yubikit::openpgp::{
+    self, Do, KeyRef, OpenPgpPin, OpenPgpSession as RustOpenPgpSession, PrehashAlgorithm, Pw,
+    SignHashAlgorithm, Uif,
+};
+
+use crate::py_bridge::{
+    BoxedSmartCardConnection, extract_smartcard_connection, restore_smartcard_connection,
+    scp_key_params_from_py, smartcard_err,
+};
+
+fn openpgp_err(e: openpgp::OpenPgpError) -> PyErr {
+    use pyo3::exceptions::*;
+    match e {
+        openpgp::OpenPgpError::Connection(sc) => smartcard_err(sc),
+        openpgp::OpenPgpError::InvalidPin(retries) => {
+            Python::attach(|py| match py.import("yubikit.core") {
+                Ok(module) => match module.getattr("InvalidPinError") {
+                    Ok(cls) => match cls.call1((retries,)) {
+                        Ok(exc) => PyErr::from_value(exc),
+                        Err(_) => PyValueError::new_err(format!(
+                            "Invalid PIN, {} attempts remaining",
+                            retries
+                        )),
+                    },
+                    Err(_) => PyValueError::new_err(format!(
+                        "Invalid PIN, {} attempts remaining",
+                        retries
+                    )),
+                },
+                Err(_) => {
+                    PyValueError::new_err(format!("Invalid PIN, {} attempts remaining", retries))
+                }
+            })
+        }
+        openpgp::OpenPgpError::PinBlocked => Python::attach(|py| match py.import("yubikit.core") {
+            Ok(module) => match module.getattr("InvalidPinError") {
+                Ok(cls) => match cls.call1((0i32, "PIN blocked")) {
+                    Ok(exc) => PyErr::from_value(exc),
+                    Err(_) => PyRuntimeError::new_err("PIN blocked"),
+                },
+                Err(_) => PyRuntimeError::new_err("PIN blocked"),
+            },
+            Err(_) => PyRuntimeError::new_err("PIN blocked"),
+        }),
+        openpgp::OpenPgpError::NotSupported(msg) => {
+            Python::attach(|py| match py.import("yubikit.core") {
+                Ok(module) => match module.getattr("NotSupportedError") {
+                    Ok(cls) => match cls.call1((msg.clone(),)) {
+                        Ok(exc) => PyErr::from_value(exc),
+                        Err(_) => PyRuntimeError::new_err(msg.clone()),
+                    },
+                    Err(_) => PyRuntimeError::new_err(msg.clone()),
+                },
+                Err(_) => PyRuntimeError::new_err(msg.clone()),
+            })
+        }
+        other => PyRuntimeError::new_err(other.to_string()),
+    }
+}
+
+fn parse_key_ref(v: u8) -> PyResult<KeyRef> {
+    KeyRef::from_u8(v).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("Invalid key ref: 0x{:02X}", v))
+    })
+}
+
+fn parse_do(v: u16) -> PyResult<Do> {
+    match v {
+        0x0101 => Ok(Do::PrivateUse1),
+        0x0102 => Ok(Do::PrivateUse2),
+        0x0103 => Ok(Do::PrivateUse3),
+        0x0104 => Ok(Do::PrivateUse4),
+        0x4F => Ok(Do::Aid),
+        0x5B => Ok(Do::Name),
+        0x5E => Ok(Do::LoginData),
+        0xEF2D => Ok(Do::Language),
+        0x5F35 => Ok(Do::Sex),
+        0x5F50 => Ok(Do::Url),
+        0x5F52 => Ok(Do::HistoricalBytes),
+        0x7F66 => Ok(Do::ExtendedLengthInfo),
+        0x7F74 => Ok(Do::GeneralFeatureManagement),
+        0x65 => Ok(Do::CardholderRelatedData),
+        0x6E => Ok(Do::ApplicationRelatedData),
+        0xC1 => Ok(Do::AlgorithmAttributesSig),
+        0xC2 => Ok(Do::AlgorithmAttributesDec),
+        0xC3 => Ok(Do::AlgorithmAttributesAut),
+        0xDA => Ok(Do::AlgorithmAttributesAtt),
+        0xC4 => Ok(Do::PwStatusBytes),
+        0xC7 => Ok(Do::FingerprintSig),
+        0xC8 => Ok(Do::FingerprintDec),
+        0xC9 => Ok(Do::FingerprintAut),
+        0xDB => Ok(Do::FingerprintAtt),
+        0xCA => Ok(Do::CaFingerprint1),
+        0xCB => Ok(Do::CaFingerprint2),
+        0xCC => Ok(Do::CaFingerprint3),
+        0xDC => Ok(Do::CaFingerprint4),
+        0xCE => Ok(Do::GenerationTimeSig),
+        0xCF => Ok(Do::GenerationTimeDec),
+        0xD0 => Ok(Do::GenerationTimeAut),
+        0xDD => Ok(Do::GenerationTimeAtt),
+        0xD3 => Ok(Do::ResettingCode),
+        0xD6 => Ok(Do::UifSig),
+        0xD7 => Ok(Do::UifDec),
+        0xD8 => Ok(Do::UifAut),
+        0xD9 => Ok(Do::UifAtt),
+        0x7A => Ok(Do::SecuritySupportTemplate),
+        0x7F21 => Ok(Do::CardholderCertificate),
+        0xF9 => Ok(Do::Kdf),
+        0xFA => Ok(Do::AlgorithmInformation),
+        0xFC => Ok(Do::AttCertificate),
+        0xDE => Ok(Do::KeyInformation),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Invalid data object: 0x{:04X}",
+            v
+        ))),
+    }
+}
+
+fn parse_rsa_size(v: u16) -> PyResult<RsaKeySize> {
+    RsaKeySize::from_bit_len(v as usize).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("Invalid RSA key size: {}", v))
+    })
+}
+
+fn parse_prehash_algorithm(v: u8) -> PyResult<PrehashAlgorithm> {
+    match v {
+        1 => Ok(PrehashAlgorithm::Sha1),
+        2 => Ok(PrehashAlgorithm::Sha256),
+        3 => Ok(PrehashAlgorithm::Sha384),
+        4 => Ok(PrehashAlgorithm::Sha512),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Invalid prehash algorithm: {}",
+            v
+        ))),
+    }
+}
+
+fn parse_hash_algorithm(v: u8, prehash: Option<u8>) -> PyResult<SignHashAlgorithm> {
+    match v {
+        0 => Ok(SignHashAlgorithm::None),
+        1 => Ok(SignHashAlgorithm::Sha1),
+        2 => Ok(SignHashAlgorithm::Sha256),
+        3 => Ok(SignHashAlgorithm::Sha384),
+        4 => Ok(SignHashAlgorithm::Sha512),
+        5 => {
+            let inner = prehash.ok_or_else(|| {
+                pyo3::exceptions::PyValueError::new_err(
+                    "Prehashed requires an inner hash algorithm",
+                )
+            })?;
+            Ok(SignHashAlgorithm::Prehashed(parse_prehash_algorithm(
+                inner,
+            )?))
+        }
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Invalid hash algorithm: {}",
+            v
+        ))),
+    }
+}
+
+fn parse_pw(v: u8) -> PyResult<Pw> {
+    match v {
+        0x81 => Ok(Pw::User),
+        0x82 => Ok(Pw::Reset),
+        0x83 => Ok(Pw::Admin),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Invalid PW ref: 0x{:02X}",
+            v
+        ))),
+    }
+}
+
+fn parse_openpgp_pin(pin: &str) -> OpenPgpPin {
+    OpenPgpPin::new(pin)
+}
+
+#[pyclass]
+pub struct OpenPgpSession {
+    inner: Option<RustOpenPgpSession<BoxedSmartCardConnection>>,
+    py_connection: Py<PyAny>,
+}
+
+impl OpenPgpSession {
+    fn session(&self) -> PyResult<&RustOpenPgpSession<BoxedSmartCardConnection>> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
+
+    fn session_mut(&mut self) -> PyResult<&mut RustOpenPgpSession<BoxedSmartCardConnection>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Session is closed"))
+    }
+
+    fn close_inner(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(session) = self.inner.take() {
+            let conn = session.into_connection();
+            restore_smartcard_connection(self.py_connection.bind(py), conn)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for OpenPgpSession {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            if let Err(e) = self.close_inner(py) {
+                e.write_unraisable(py, None);
+            }
+        });
+    }
+}
+
+#[pymethods]
+impl OpenPgpSession {
+    #[new]
+    #[pyo3(signature = (connection, scp_key_params=None))]
+    fn new(
+        connection: &Bound<'_, PyAny>,
+        scp_key_params: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        let scp_params = scp_key_params.map(scp_key_params_from_py).transpose()?;
+        let py_connection: Py<PyAny> = connection.clone().unbind();
+        let conn = extract_smartcard_connection(connection)?;
+        if let Some(scp_params) = scp_params {
+            let inner =
+                RustOpenPgpSession::new_with_scp(conn, &scp_params).map_err(|(e, conn)| {
+                    let _ = restore_smartcard_connection(connection, conn);
+                    openpgp_err(e)
+                })?;
+            Ok(Self {
+                inner: Some(inner),
+                py_connection,
+            })
+        } else {
+            let inner = RustOpenPgpSession::new(conn).map_err(|(e, conn)| {
+                let _ = restore_smartcard_connection(connection, conn);
+                openpgp_err(e)
+            })?;
+            Ok(Self {
+                inner: Some(inner),
+                py_connection,
+            })
+        }
+    }
+
+    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        self.close_inner(py)
+    }
+
+    #[getter]
+    fn version(&self) -> PyResult<(u8, u8, u8)> {
+        let v = self.session()?.version();
+        Ok((v.0, v.1, v.2))
+    }
+
+    #[getter]
+    fn aid(&self) -> PyResult<Vec<u8>> {
+        Ok(self.session()?.aid().raw.clone())
+    }
+
+    fn reset(&mut self) -> PyResult<()> {
+        self.session_mut()?.reset().map_err(openpgp_err)
+    }
+
+    fn get_data(&mut self, data_object: u16) -> PyResult<Vec<u8>> {
+        let do_ = parse_do(data_object)?;
+        self.session_mut()?.get_data(do_).map_err(openpgp_err)
+    }
+
+    fn put_data(&mut self, data_object: u16, data: &[u8]) -> PyResult<()> {
+        let do_ = parse_do(data_object)?;
+        self.session_mut()?.put_data(do_, data).map_err(openpgp_err)
+    }
+
+    /// Returns raw encoded application related data bytes.
+    fn get_application_related_data(&mut self) -> PyResult<Vec<u8>> {
+        // Return the raw DO data so Python can parse it
+        self.session_mut()?
+            .get_data(Do::ApplicationRelatedData)
+            .map_err(openpgp_err)
+    }
+
+    /// Returns (pin_policy_user, max_len_user, max_len_reset, max_len_admin,
+    ///          attempts_user, attempts_reset, attempts_admin).
+    fn get_pin_status(&mut self) -> PyResult<(u8, u8, u8, u8, u8, u8, u8)> {
+        let s = self.session_mut()?.get_pin_status().map_err(openpgp_err)?;
+        Ok((
+            s.pin_policy_user as u8,
+            s.max_len_user,
+            s.max_len_reset,
+            s.max_len_admin,
+            s.attempts_user,
+            s.attempts_reset,
+            s.attempts_admin,
+        ))
+    }
+
+    fn get_signature_counter(&mut self) -> PyResult<u32> {
+        self.session_mut()?
+            .get_signature_counter()
+            .map_err(openpgp_err)
+    }
+
+    /// Returns dict mapping key_ref (u8) to key_status (u8).
+    fn get_key_information(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let info = self
+            .session_mut()?
+            .get_key_information()
+            .map_err(openpgp_err)?;
+        let dict = pyo3::types::PyDict::new(py);
+        for (key_ref, status) in &info {
+            dict.set_item(*key_ref as u8, *status as u8)?;
+        }
+        Ok(dict.into())
+    }
+
+    /// Returns dict mapping key_ref (u8) to generation timestamp (u32).
+    fn get_generation_times(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let times = self
+            .session_mut()?
+            .get_generation_times()
+            .map_err(openpgp_err)?;
+        let dict = pyo3::types::PyDict::new(py);
+        for (key_ref, ts) in &times {
+            dict.set_item(*key_ref as u8, *ts)?;
+        }
+        Ok(dict.into())
+    }
+
+    /// Returns dict mapping key_ref (u8) to fingerprint bytes.
+    fn get_fingerprints(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let fps = self
+            .session_mut()?
+            .get_fingerprints()
+            .map_err(openpgp_err)?;
+        let dict = pyo3::types::PyDict::new(py);
+        for (key_ref, fp) in &fps {
+            dict.set_item(*key_ref as u8, fp.clone())?;
+        }
+        Ok(dict.into())
+    }
+
+    fn verify_pin(&mut self, pin: &str, extended: bool) -> PyResult<()> {
+        let pin = parse_openpgp_pin(pin);
+        self.session_mut()?
+            .verify_pin(&pin, extended)
+            .map_err(openpgp_err)
+    }
+
+    fn verify_admin(&mut self, admin_pin: &str) -> PyResult<()> {
+        let admin_pin = parse_openpgp_pin(admin_pin);
+        self.session_mut()?
+            .verify_admin(&admin_pin)
+            .map_err(openpgp_err)
+    }
+
+    fn unverify_pin(&mut self, pw: u8) -> PyResult<()> {
+        let p = parse_pw(pw)?;
+        self.session_mut()?.unverify_pin(p).map_err(openpgp_err)
+    }
+
+    fn change_pin(&mut self, pin: &str, new_pin: &str) -> PyResult<()> {
+        let pin = parse_openpgp_pin(pin);
+        let new_pin = parse_openpgp_pin(new_pin);
+        self.session_mut()?
+            .change_pin(&pin, &new_pin)
+            .map_err(openpgp_err)
+    }
+
+    fn change_admin(&mut self, admin_pin: &str, new_admin_pin: &str) -> PyResult<()> {
+        let admin_pin = parse_openpgp_pin(admin_pin);
+        let new_admin_pin = parse_openpgp_pin(new_admin_pin);
+        self.session_mut()?
+            .change_admin(&admin_pin, &new_admin_pin)
+            .map_err(openpgp_err)
+    }
+
+    fn set_reset_code(&mut self, reset_code: &str) -> PyResult<()> {
+        let reset_code = parse_openpgp_pin(reset_code);
+        self.session_mut()?
+            .set_reset_code(&reset_code)
+            .map_err(openpgp_err)
+    }
+
+    fn reset_pin(&mut self, new_pin: &str, reset_code: Option<&str>) -> PyResult<()> {
+        let new_pin = parse_openpgp_pin(new_pin);
+        let reset_code = reset_code.map(parse_openpgp_pin);
+        self.session_mut()?
+            .reset_pin(&new_pin, reset_code.as_ref())
+            .map_err(openpgp_err)
+    }
+
+    fn set_signature_pin_policy(&mut self, pin_policy: u8) -> PyResult<()> {
+        let pp = openpgp::PinPolicy::from_u8(pin_policy);
+        self.session_mut()?
+            .set_signature_pin_policy(pp)
+            .map_err(openpgp_err)
+    }
+
+    fn set_pin_attempts(
+        &mut self,
+        user_attempts: u8,
+        reset_attempts: u8,
+        admin_attempts: u8,
+    ) -> PyResult<()> {
+        self.session_mut()?
+            .set_pin_attempts(user_attempts, reset_attempts, admin_attempts)
+            .map_err(openpgp_err)
+    }
+
+    /// Get KDF as raw encoded bytes.
+    fn get_kdf(&mut self) -> PyResult<Vec<u8>> {
+        let kdf = self.session_mut()?.get_kdf().map_err(openpgp_err)?;
+        Ok(kdf.to_bytes())
+    }
+
+    /// Set KDF from raw encoded bytes.
+    fn set_kdf(&mut self, kdf_data: &[u8]) -> PyResult<()> {
+        let kdf = openpgp::Kdf::parse(kdf_data)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        self.session_mut()?.set_kdf(&kdf).map_err(openpgp_err)
+    }
+
+    /// Get algorithm attributes as raw encoded bytes.
+    fn get_algorithm_attributes(&mut self, key_ref: u8) -> PyResult<Vec<u8>> {
+        let kr = parse_key_ref(key_ref)?;
+        let attrs = self
+            .session_mut()?
+            .get_algorithm_attributes(kr)
+            .map_err(openpgp_err)?;
+        Ok(attrs.to_bytes())
+    }
+
+    /// Get supported algorithm information.
+    ///
+    /// Returns dict mapping key_ref (u8) to list of encoded algorithm attribute bytes.
+    fn get_algorithm_information(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let info = self
+            .session_mut()?
+            .get_algorithm_information()
+            .map_err(openpgp_err)?;
+        let dict = pyo3::types::PyDict::new(py);
+        for (key_ref, attrs_list) in &info {
+            let encoded: Vec<Vec<u8>> = attrs_list.iter().map(|a| a.to_bytes()).collect();
+            dict.set_item(*key_ref as u8, encoded)?;
+        }
+        Ok(dict.into())
+    }
+
+    /// Set algorithm attributes from raw encoded bytes.
+    fn set_algorithm_attributes(&mut self, key_ref: u8, attributes: &[u8]) -> PyResult<()> {
+        let kr = parse_key_ref(key_ref)?;
+        let attrs = openpgp::AlgorithmAttributes::parse(attributes)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        self.session_mut()?
+            .set_algorithm_attributes(kr, &attrs)
+            .map_err(openpgp_err)
+    }
+
+    fn get_uif(&mut self, key_ref: u8) -> PyResult<u8> {
+        let kr = parse_key_ref(key_ref)?;
+        let uif = self.session_mut()?.get_uif(kr).map_err(openpgp_err)?;
+        Ok(uif as u8)
+    }
+
+    fn set_uif(&mut self, key_ref: u8, uif: u8) -> PyResult<()> {
+        let kr = parse_key_ref(key_ref)?;
+        let u = Uif::from_u8(uif).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("Invalid UIF value: {}", uif))
+        })?;
+        self.session_mut()?.set_uif(kr, u).map_err(openpgp_err)
+    }
+
+    fn set_generation_time(&mut self, key_ref: u8, timestamp: u32) -> PyResult<()> {
+        let kr = parse_key_ref(key_ref)?;
+        self.session_mut()?
+            .set_generation_time(kr, timestamp)
+            .map_err(openpgp_err)
+    }
+
+    fn set_fingerprint(&mut self, key_ref: u8, fingerprint: &[u8]) -> PyResult<()> {
+        let kr = parse_key_ref(key_ref)?;
+        self.session_mut()?
+            .set_fingerprint(kr, fingerprint)
+            .map_err(openpgp_err)
+    }
+
+    /// Generate an RSA key. Returns SPKI DER bytes.
+    fn generate_rsa_key(&mut self, key_ref: u8, key_size: u16) -> PyResult<Vec<u8>> {
+        let kr = parse_key_ref(key_ref)?;
+        let rs = parse_rsa_size(key_size)?;
+        let pk = self
+            .session_mut()?
+            .generate_rsa_key(kr, rs)
+            .map_err(openpgp_err)?;
+        pk.to_spki()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    }
+
+    /// Generate an EC key. `curve_oid` is the OID as a dotted string (e.g. "1.2.840.10045.3.1.7").
+    /// Returns SPKI DER bytes.
+    fn generate_ec_key(&mut self, key_ref: u8, curve_oid: &str) -> PyResult<Vec<u8>> {
+        let kr = parse_key_ref(key_ref)?;
+        let curve = yubikit::openpgp::OpenPgpCurve::from_oid(curve_oid).map_err(openpgp_err)?;
+        let pk = self
+            .session_mut()?
+            .generate_ec_key(kr, curve)
+            .map_err(openpgp_err)?;
+        pk.to_spki()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    }
+
+    /// Returns SPKI DER bytes.
+    fn get_public_key(&mut self, key_ref: u8) -> PyResult<Vec<u8>> {
+        let kr = parse_key_ref(key_ref)?;
+        let pk = self
+            .session_mut()?
+            .get_public_key(kr)
+            .map_err(openpgp_err)?;
+        pk.to_spki()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    }
+
+    /// Import a private key.
+    ///
+    /// `key_type` selects the variant:
+    ///   0 = RSA (e, p, q)
+    ///   1 = RSA-CRT (e, p, q, iqmp, dmp1, dmq1, n)
+    ///   2 = EC (scalar, optional public_key) — requires `curve_oid`
+    ///   3 = Ed25519 (secret)
+    ///   4 = X25519 (secret)
+    ///
+    /// `curve_oid`: Required for key_type 2. Dotted-string curve OID (e.g. "1.2.840.10045.3.1.7").
+    fn put_key(
+        &mut self,
+        key_ref: u8,
+        key_type: u8,
+        components: Vec<Vec<u8>>,
+        curve_oid: Option<&str>,
+    ) -> PyResult<()> {
+        use yubikit::keys::{EcCurve, EcPrivateKey, RsaKeySize, RsaPrivateKey};
+
+        let kr = parse_key_ref(key_ref)?;
+        let key_err =
+            |e: yubikit::keys::KeyError| pyo3::exceptions::PyValueError::new_err(e.to_string());
+        let private_key = match key_type {
+            0 => {
+                // RSA standard (e, p, q)
+                if components.len() != 3 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "RSA standard key requires [e, p, q]",
+                    ));
+                }
+                let key_size =
+                    RsaKeySize::from_bit_len(components[1].len() * 2 * 8).ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err("Unsupported RSA key size")
+                    })?;
+                RsaPrivateKey::new(
+                    key_size,
+                    Vec::new(),
+                    components[0].clone(),
+                    components[1].clone(),
+                    components[2].clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .map_err(key_err)?
+                .into()
+            }
+            1 => {
+                if components.len() != 7 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "RSA-CRT key requires [e, p, q, iqmp, dmp1, dmq1, n]",
+                    ));
+                }
+                let key_size =
+                    RsaKeySize::from_bit_len(components[6].len() * 8).ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err("Unsupported RSA key size")
+                    })?;
+                RsaPrivateKey::new(
+                    key_size,
+                    components[6].clone(),
+                    components[0].clone(),
+                    components[1].clone(),
+                    components[2].clone(),
+                    components[4].clone(),
+                    components[5].clone(),
+                    components[3].clone(),
+                )
+                .map_err(key_err)?
+                .into()
+            }
+            2 => {
+                if components.is_empty() || components.len() > 2 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "EC key requires [scalar] or [scalar, public_key]",
+                    ));
+                }
+                let oid_str = curve_oid.ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(
+                        "curve_oid is required for EC key import",
+                    )
+                })?;
+                let curve = EcCurve::from_oid_str(oid_str).ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(format!(
+                        "Unsupported EC curve OID: {}",
+                        oid_str
+                    ))
+                })?;
+                EcPrivateKey::new(curve, components[0].clone(), components.get(1).cloned())
+                    .map_err(key_err)?
+                    .into()
+            }
+            3 => {
+                // Ed25519
+                if components.len() != 1 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "Ed25519 key requires [secret]",
+                    ));
+                }
+                yubikit::keys::Ed25519PrivateKey::new(components[0].clone())
+                    .map_err(key_err)?
+                    .into()
+            }
+            4 => {
+                // X25519
+                if components.len() != 1 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "X25519 key requires [secret]",
+                    ));
+                }
+                yubikit::keys::X25519PrivateKey::new(components[0].clone())
+                    .map_err(key_err)?
+                    .into()
+            }
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Invalid key type: {} (expected 0=RSA, 1=RSA-CRT, 2=EC, 3=Ed25519, 4=X25519)",
+                    key_type
+                )));
+            }
+        };
+        self.session_mut()?
+            .put_key(kr, &private_key)
+            .map_err(openpgp_err)
+    }
+
+    fn delete_key(&mut self, key_ref: u8) -> PyResult<()> {
+        let kr = parse_key_ref(key_ref)?;
+        self.session_mut()?.delete_key(kr).map_err(openpgp_err)
+    }
+
+    fn sign(
+        &mut self,
+        message: &[u8],
+        hash_algorithm: u8,
+        prehash: Option<u8>,
+    ) -> PyResult<Vec<u8>> {
+        let ha = parse_hash_algorithm(hash_algorithm, prehash)?;
+        self.session_mut()?.sign(message, ha).map_err(openpgp_err)
+    }
+
+    fn decrypt(&mut self, value: &[u8]) -> PyResult<Vec<u8>> {
+        self.session_mut()?.decrypt(value).map_err(openpgp_err)
+    }
+
+    fn authenticate(
+        &mut self,
+        message: &[u8],
+        hash_algorithm: u8,
+        prehash: Option<u8>,
+    ) -> PyResult<Vec<u8>> {
+        let ha = parse_hash_algorithm(hash_algorithm, prehash)?;
+        self.session_mut()?
+            .authenticate(message, ha)
+            .map_err(openpgp_err)
+    }
+
+    /// Get certificate as DER bytes.
+    fn get_certificate(&mut self, key_ref: u8) -> PyResult<Vec<u8>> {
+        let kr = parse_key_ref(key_ref)?;
+        self.session_mut()?.get_certificate(kr).map_err(openpgp_err)
+    }
+
+    fn put_certificate(&mut self, key_ref: u8, cert_der: &[u8]) -> PyResult<()> {
+        let kr = parse_key_ref(key_ref)?;
+        self.session_mut()?
+            .put_certificate(kr, cert_der)
+            .map_err(openpgp_err)
+    }
+
+    fn delete_certificate(&mut self, key_ref: u8) -> PyResult<()> {
+        let kr = parse_key_ref(key_ref)?;
+        self.session_mut()?
+            .delete_certificate(kr)
+            .map_err(openpgp_err)
+    }
+
+    /// Attest a key. Returns DER certificate.
+    fn attest_key(&mut self, key_ref: u8) -> PyResult<Vec<u8>> {
+        let kr = parse_key_ref(key_ref)?;
+        self.session_mut()?.attest_key(kr).map_err(openpgp_err)
+    }
+
+    fn get_challenge(&mut self, length: u16) -> PyResult<Vec<u8>> {
+        self.session_mut()?
+            .get_challenge(length)
+            .map_err(openpgp_err)
+    }
+}

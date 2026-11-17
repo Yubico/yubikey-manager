@@ -7,6 +7,18 @@ root.
 The YubiKey is accessed in several different ways, depending on which command
 is invoked.
 
+The keyboard (OTP) and FIDO interfaces are both accessed through Linux
+`hidraw` device nodes (`/dev/hidraw*`), which are only accessible by root by
+default. On desktop systems using systemd, access is granted to the logged-in
+user for devices marked as security tokens, via the `uaccess` udev tag. You
+can check which interfaces of a connected YubiKey you have access to with:
+
+    $ getfacl /dev/hidraw*
+
+Devices you can access will have an entry for your user. To see how a device
+was tagged, use `udevadm info /dev/hidrawN` and look for `ID_FIDO_TOKEN`,
+`ID_SECURITY_TOKEN`, and `uaccess` in `TAGS`.
+
 
 === Smart Card Access
 For smart card based applications, or when accessing a YubiKey over NFC, the
@@ -19,7 +31,9 @@ commands, as well as for any command issued over NFC.
 
 === Keyboard Access
 The Yubico OTP application is accessed via the USB keyboard interface.
-Permission is typically granted using udev, via a rules file. You can find an
+This interface is not covered by systemd's default rules, so permission
+must be granted using udev, via a rules file. Many distributions provide this
+in a package (e.g. `libyubikey-udev` on Debian and Ubuntu). You can find an
 example udev rules file which grants access to the keyboard interface
 https://github.com/Yubico/yubikey-personalization/blob/master/69-yubikey.rules[here].
 
@@ -27,9 +41,12 @@ Keyboard access is required for the `otp` command.
 
 
 === FIDO Access
-The FIDO protocols are accessed via a USB HID interface. As with keyboard
-access, permission is granted through udev. You can find an example udev rules
+The FIDO protocols are accessed via a USB HID interface. Since version 244,
+systemd detects FIDO devices itself (using its `fido_id` helper) and grants
+the logged-in user access, so no additional configuration is usually needed.
+On systems without this, permission is granted through udev, as with keyboard
+access. You can find an example udev rules
 file which grants access to a large number (not just YubiKeys) of FIDO devices
-https://github.com/Yubico/libu2f-host/blob/master/70-u2f.rules[here].
+https://github.com/Yubico/libfido2/blob/main/udev/70-u2f.rules[here].
 
 FIDO access is required for the `fido` command.

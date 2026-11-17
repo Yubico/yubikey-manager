@@ -1,0 +1,1164 @@
+// Copyright 2026 Yubico AB
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! YubiKey Security Domain operations.
+//!
+//! Manages SCP (Secure Channel Protocol) keys, certificates, and secure
+//! channel configuration on the YubiKey's Security Domain applet. The main
+//! entry point is [`SecurityDomainSession`](crate::securitydomain::SecurityDomainSession), which wraps a
+//! [`SmartCardConnection`](crate::smartcard::SmartCardConnection).
+//!
+//! # Example
+//!
+//! ```no_run
+//! use yubikit::platform::device::list_devices;
+//! use yubikit::management::UsbInterface;
+//! use yubikit::securitydomain::SecurityDomainSession;
+//!
+//! let devices = list_devices(UsbInterface::CCID)?;
+//! let dev = devices.first().expect("no YubiKey found");
+//! let conn = dev.open_smartcard()?;
+//! let mut session = SecurityDomainSession::new(conn).map_err(|(e, _)| e)?;
+//!
+//! let key_info = session.get_key_information()?;
+//! println!("Keys: {key_info:?}");
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+
+use std::collections::HashMap;
+use std::fmt;
+
+use aes::Aes128;
+use cbc::Encryptor as CbcEncryptor;
+use cipher::{BlockEncryptMut, KeyIvInit};
+use zeroize::Zeroize;
+
+use thiserror::Error;
+
+use crate::__internal::tlv::{parse_tlv_list, tlv_encode, tlv_parse, tlv_unpack};
+use crate::core::Version;
+use crate::core::patch_version;
+use crate::smartcard::{Aid, SmartCardConnection, SmartCardError, SmartCardProtocol, Sw};
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/// Session-level error for Security Domain operations.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum SecurityDomainError {
+    /// The operation is not supported by the device.
+    #[error("Not supported: {0}")]
+    NotSupported(String),
+    /// The provided data is invalid or malformed.
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
+    /// The configuration is invalid.
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(String),
+    /// A SmartCard communication error occurred.
+    #[error("Connection error: {0}")]
+    Connection(SmartCardError),
+}
+
+impl From<SmartCardError> for SecurityDomainError {
+    fn from(e: SmartCardError) -> Self {
+        match e {
+            SmartCardError::NotSupported(msg) => SecurityDomainError::NotSupported(msg),
+            SmartCardError::InvalidData(msg) => SecurityDomainError::InvalidData(msg),
+            other => SecurityDomainError::Connection(other),
+        }
+    }
+}
+
+impl From<crate::__internal::tlv::TlvError> for SecurityDomainError {
+    fn from(e: crate::__internal::tlv::TlvError) -> Self {
+        SecurityDomainError::InvalidData(e.to_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// APDU instruction constants
+// ---------------------------------------------------------------------------
+
+const INS_GET_DATA: u8 = 0xCA;
+const INS_PUT_KEY: u8 = 0xD8;
+const INS_STORE_DATA: u8 = 0xE2;
+const INS_DELETE: u8 = 0xE4;
+const INS_GENERATE_KEY: u8 = 0xF1;
+
+// SCP INS constants used by reset()
+const INS_INITIALIZE_UPDATE: u8 = 0x50;
+const INS_EXTERNAL_AUTHENTICATE: u8 = 0x82;
+const INS_INTERNAL_AUTHENTICATE: u8 = 0x88;
+const INS_PERFORM_SECURITY_OPERATION: u8 = 0x2A;
+
+// ---------------------------------------------------------------------------
+// Tag constants
+// ---------------------------------------------------------------------------
+
+const TAG_KEY_INFORMATION: u32 = 0xE0;
+const TAG_CARD_RECOGNITION_DATA: u32 = 0x66;
+const TAG_CA_KLOC_IDENTIFIERS: u32 = 0xFF33;
+const TAG_CA_KLCC_IDENTIFIERS: u32 = 0xFF34;
+const TAG_CERTIFICATE_STORE: u32 = 0xBF21;
+
+// ---------------------------------------------------------------------------
+// Default KCV IV for AES key check values
+// ---------------------------------------------------------------------------
+
+const DEFAULT_KCV_IV: [u8; 16] = [0x01; 16];
+
+// ---------------------------------------------------------------------------
+// KeyType
+// ---------------------------------------------------------------------------
+
+/// SCP key types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[repr(u8)]
+pub enum KeyType {
+    /// AES symmetric key.
+    Aes = 0x88,
+    /// ECC public key.
+    EccPublicKey = 0xB0,
+    /// ECC private key.
+    EccPrivateKey = 0xB1,
+    /// ECC key parameters.
+    EccKeyParams = 0xF0,
+}
+
+impl KeyType {
+    /// Convert a raw byte to the corresponding [`KeyType`], if recognized.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0x88 => Some(Self::Aes),
+            0xB0 => Some(Self::EccPublicKey),
+            0xB1 => Some(Self::EccPrivateKey),
+            0xF0 => Some(Self::EccKeyParams),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Curve
+// ---------------------------------------------------------------------------
+
+/// Elliptic curve identifiers for SCP11.
+///
+/// Only [`Curve::Secp256r1`] is supported for key generation and import.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[repr(u8)]
+pub enum Curve {
+    /// NIST P-256.
+    Secp256r1 = 0x00,
+    /// NIST P-384.
+    Secp384r1 = 0x01,
+    /// NIST P-521.
+    Secp521r1 = 0x02,
+    /// Brainpool P-256r1.
+    BrainpoolP256r1 = 0x03,
+    /// Brainpool P-384r1.
+    BrainpoolP384r1 = 0x05,
+    /// Brainpool P-512r1.
+    BrainpoolP512r1 = 0x07,
+}
+
+impl Curve {
+    fn require_supported(self) -> Result<(), SecurityDomainError> {
+        if self != Self::Secp256r1 {
+            return Err(SecurityDomainError::NotSupported(
+                "Only P-256 EC keys are supported".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Convert a raw byte to the corresponding [`Curve`], if recognized.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0x00 => Some(Self::Secp256r1),
+            0x01 => Some(Self::Secp384r1),
+            0x02 => Some(Self::Secp521r1),
+            0x03 => Some(Self::BrainpoolP256r1),
+            0x05 => Some(Self::BrainpoolP384r1),
+            0x07 => Some(Self::BrainpoolP512r1),
+            _ => None,
+        }
+    }
+
+    /// OID for this curve (DER-encoded OID value bytes, without the 0x06 tag).
+    pub fn oid(&self) -> &'static [u8] {
+        match self {
+            // 1.2.840.10045.3.1.7
+            Self::Secp256r1 => &[0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07],
+            // 1.3.132.0.34
+            Self::Secp384r1 => &[0x2B, 0x81, 0x04, 0x00, 0x22],
+            // 1.3.132.0.35
+            Self::Secp521r1 => &[0x2B, 0x81, 0x04, 0x00, 0x23],
+            // 1.3.36.3.3.2.8.1.1.7
+            Self::BrainpoolP256r1 => &[0x2B, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x07],
+            // 1.3.36.3.3.2.8.1.1.11
+            Self::BrainpoolP384r1 => &[0x2B, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x0B],
+            // 1.3.36.3.3.2.8.1.1.13
+            Self::BrainpoolP512r1 => &[0x2B, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x0D],
+        }
+    }
+
+    /// Detect curve from an uncompressed SEC1 public key (0x04 || x || y).
+    /// Uses the byte length to determine the curve.
+    pub fn from_public_key_bytes(data: &[u8]) -> Option<Self> {
+        if data.first() != Some(&0x04) {
+            return None;
+        }
+        let coord_len = (data.len() - 1) / 2;
+        match coord_len {
+            32 => Some(Self::Secp256r1), // Could also be BrainpoolP256r1
+            48 => Some(Self::Secp384r1), // Could also be BrainpoolP384r1
+            64 => Some(Self::BrainpoolP512r1),
+            66 => Some(Self::Secp521r1),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ScpKid
+// ---------------------------------------------------------------------------
+
+/// SCP Key ID values identifying the SCP variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[repr(u8)]
+pub enum ScpKid {
+    /// SCP03 (symmetric).
+    Scp03 = 0x01,
+    /// SCP11a (mutual authentication).
+    Scp11a = 0x11,
+    /// SCP11b (one-way authentication).
+    Scp11b = 0x13,
+    /// SCP11c (mutual authentication with receipts).
+    Scp11c = 0x15,
+}
+
+impl ScpKid {
+    /// Convert a raw byte to the corresponding [`ScpKid`], if recognized.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0x01 => Some(Self::Scp03),
+            0x11 => Some(Self::Scp11a),
+            0x13 => Some(Self::Scp11b),
+            0x15 => Some(Self::Scp11c),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// KeyRef
+// ---------------------------------------------------------------------------
+
+/// Reference to an SCP key: key ID (kid) and key version number (kvn).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct KeyRef {
+    /// Key identifier.
+    pub kid: u8,
+    /// Key version number.
+    pub kvn: u8,
+}
+
+impl KeyRef {
+    /// Create a new key reference from a key ID and version number.
+    pub fn new(kid: u8, kvn: u8) -> Self {
+        Self { kid, kvn }
+    }
+
+    /// Parse a key reference from a byte slice (requires at least 2 bytes).
+    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+        if data.len() >= 2 {
+            Some(Self {
+                kid: data[0],
+                kvn: data[1],
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Serialize this key reference as `[kid, kvn]`.
+    pub fn to_bytes(self) -> [u8; 2] {
+        [self.kid, self.kvn]
+    }
+}
+
+impl fmt::Debug for KeyRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "KeyRef(kid=0x{:02x}, kvn=0x{:02x})", self.kid, self.kvn)
+    }
+}
+
+impl fmt::Display for KeyRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "KeyRef(kid=0x{:02x}, kvn=0x{:02x})", self.kid, self.kvn)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// StaticKeys (SCP03)
+// ---------------------------------------------------------------------------
+
+/// SCP03 static key set.
+#[derive(Clone)]
+pub struct StaticKeys {
+    /// Static encryption key (S-ENC).
+    pub key_enc: [u8; 16],
+    /// Static MAC key (S-MAC).
+    pub key_mac: [u8; 16],
+    /// Optional data encryption key (DEK).
+    pub key_dek: Option<[u8; 16]>,
+}
+
+impl Drop for StaticKeys {
+    fn drop(&mut self) {
+        self.key_enc.zeroize();
+        self.key_mac.zeroize();
+        if let Some(ref mut dek) = self.key_dek {
+            dek.zeroize();
+        }
+    }
+}
+
+impl fmt::Debug for StaticKeys {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StaticKeys")
+            .field("key_enc", &"<redacted>")
+            .field("key_mac", &"<redacted>")
+            .field("key_dek", &"<redacted>")
+            .finish()
+    }
+}
+
+impl StaticKeys {
+    /// Create a new static key set with the given encryption, MAC, and optional DEK keys.
+    pub fn new(key_enc: [u8; 16], key_mac: [u8; 16], key_dek: Option<[u8; 16]>) -> Self {
+        Self {
+            key_enc,
+            key_mac,
+            key_dek,
+        }
+    }
+
+    /// Default SCP03 static keys (all 0x40..0x4f repeated).
+    pub fn default_keys() -> Self {
+        let key: [u8; 16] = std::array::from_fn(|i| 0x40 + i as u8);
+        Self {
+            key_enc: key,
+            key_mac: key,
+            key_dek: Some(key),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Encode an integer as an ASN.1 INTEGER in TLV(0x93).
+fn int2asn1(value: &[u8]) -> Vec<u8> {
+    let mut bs = value.to_vec();
+    // Remove leading zeros
+    while bs.len() > 1 && bs[0] == 0 {
+        bs.remove(0);
+    }
+    if bs[0] & 0x80 != 0 {
+        bs.insert(0, 0x00);
+    }
+    tlv_encode(0x93, &bs)
+}
+
+/// AES-CBC encrypt with a given IV (no padding).
+fn encrypt_cbc(key: &[u8], data: &[u8], iv: &[u8; 16]) -> Vec<u8> {
+    let encryptor =
+        CbcEncryptor::<Aes128>::new_from_slices(key, iv).expect("AES-CBC key/iv size mismatch");
+    encryptor.encrypt_padded_vec_mut::<cipher::block_padding::NoPadding>(data)
+}
+
+/// AES-CBC encrypt with zero IV.
+fn encrypt_cbc_zero_iv(key: &[u8], data: &[u8]) -> Vec<u8> {
+    encrypt_cbc(key, data, &[0u8; 16])
+}
+
+// ---------------------------------------------------------------------------
+// SecurityDomainSession
+// ---------------------------------------------------------------------------
+
+/// A session for managing SCP keys on the YubiKey Security Domain.
+pub struct SecurityDomainSession<C: SmartCardConnection> {
+    protocol: SmartCardProtocol<C>,
+    version: Version,
+    dek: Option<crate::smartcard::Dek>,
+}
+
+impl<C: SmartCardConnection> SecurityDomainSession<C> {
+    /// Open a new Security Domain session by selecting the Secure Domain AID.
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new(connection: C) -> Result<Self, (SmartCardError, C)> {
+        let mut protocol = SmartCardProtocol::new(connection);
+        if let Err(e) = protocol.select(Aid::SECURE_DOMAIN) {
+            return Err((e, protocol.into_connection()));
+        }
+        let version = patch_version(Version(5, 3, 0));
+        protocol.configure(version);
+        Ok(Self {
+            protocol,
+            version,
+            dek: None,
+        })
+    }
+
+    /// Open a Security Domain session with SCP (Secure Channel Protocol).
+    ///
+    /// On error, returns the connection so the caller can recover it.
+    pub fn new_with_scp(
+        connection: C,
+        scp_key_params: &crate::smartcard::ScpKeyParams,
+    ) -> Result<Self, (SmartCardError, C)> {
+        let mut protocol = SmartCardProtocol::new(connection);
+        if let Err(e) = protocol.select(Aid::SECURE_DOMAIN) {
+            return Err((e, protocol.into_connection()));
+        }
+        let dek = match protocol.init_scp(scp_key_params) {
+            Ok(dek) => dek,
+            Err(e) => return Err((e, protocol.into_connection())),
+        };
+        let version = patch_version(Version(5, 3, 0));
+        protocol.configure(version);
+        Ok(Self {
+            protocol,
+            version,
+            dek,
+        })
+    }
+
+    /// The Security Domain version.
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
+    /// Get a reference to the underlying protocol.
+    pub fn protocol(&self) -> &SmartCardProtocol<C> {
+        &self.protocol
+    }
+
+    /// Get a mutable reference to the underlying protocol.
+    pub fn protocol_mut(&mut self) -> &mut SmartCardProtocol<C> {
+        &mut self.protocol
+    }
+
+    /// Consume this session and return the underlying connection.
+    pub fn into_connection(self) -> C {
+        self.protocol.into_connection()
+    }
+
+    /// Read data from the security domain.
+    pub fn get_data(&mut self, tag: u32, data: &[u8]) -> Result<Vec<u8>, SecurityDomainError> {
+        Ok(self
+            .protocol
+            .send_apdu(0, INS_GET_DATA, (tag >> 8) as u8, (tag & 0xFF) as u8, data)?)
+    }
+
+    /// Get information about the currently loaded keys.
+    ///
+    /// Returns a map from `KeyRef` to a map of key-component-type to length.
+    pub fn get_key_information(
+        &mut self,
+    ) -> Result<HashMap<KeyRef, HashMap<u8, u8>>, SecurityDomainError> {
+        log::debug!("Reading key information");
+        let resp = self.get_data(TAG_KEY_INFORMATION, &[])?;
+        let entries = parse_tlv_list(&resp)?;
+
+        let mut keys = HashMap::new();
+        for (tag, entry_data) in entries {
+            if tag != 0xC0 {
+                return Err(SecurityDomainError::InvalidData(format!(
+                    "Expected tag 0xC0, got 0x{tag:02X}"
+                )));
+            }
+            let inner = &entry_data;
+            if inner.len() < 2 {
+                return Err(SecurityDomainError::InvalidData(
+                    "Key info entry too short".into(),
+                ));
+            }
+            let key_ref = KeyRef::from_bytes(&inner[..2]).expect("inner has at least 2 bytes");
+            let mut components = HashMap::new();
+            let pairs = &inner[2..];
+            for chunk in pairs.as_chunks::<2>().0 {
+                components.insert(chunk[0], chunk[1]);
+            }
+            keys.insert(key_ref, components);
+        }
+        Ok(keys)
+    }
+
+    /// Get card recognition data.
+    pub fn get_card_recognition_data(&mut self) -> Result<Vec<u8>, SecurityDomainError> {
+        let resp = self.get_data(TAG_CARD_RECOGNITION_DATA, &[])?;
+        Ok(tlv_unpack(0x73, &resp)?)
+    }
+
+    /// Get supported CA identifiers (Subject Key Identifiers).
+    ///
+    /// Setting one of `kloc` or `klcc` to `true` returns only those CAs.
+    /// If both are `false`, both kinds are returned.
+    pub fn get_supported_ca_identifiers(
+        &mut self,
+        kloc: bool,
+        klcc: bool,
+    ) -> Result<HashMap<KeyRef, Vec<u8>>, SecurityDomainError> {
+        let (kloc, klcc) = if !kloc && !klcc {
+            (true, true)
+        } else {
+            (kloc, klcc)
+        };
+
+        let mut data = Vec::new();
+        for (fetch, tag) in [
+            (kloc, TAG_CA_KLOC_IDENTIFIERS),
+            (klcc, TAG_CA_KLCC_IDENTIFIERS),
+        ] {
+            if fetch {
+                match self.get_data(tag, &[]) {
+                    Ok(resp) => data.extend_from_slice(&resp),
+                    Err(SecurityDomainError::Connection(SmartCardError::Apdu { sw, .. }))
+                        if Sw::from_u16(sw) == Some(Sw::ReferenceDataNotFound) =>
+                    {
+                        // No data for this tag, skip
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+
+        let tlvs = parse_tlv_list(&data)?;
+
+        let mut result = HashMap::new();
+        // Entries come in pairs: (tag, ski_value), (tag, key_ref_value)
+        for pair in tlvs.chunks(2) {
+            if pair.len() == 2
+                && let Some(key_ref) = KeyRef::from_bytes(&pair[1].1)
+            {
+                result.insert(key_ref, pair[0].1.clone());
+            }
+        }
+        Ok(result)
+    }
+
+    /// Get the certificate bundle associated with an SCP11 key.
+    ///
+    /// Returns DER-encoded certificates, leaf-last.
+    pub fn get_certificate_bundle(
+        &mut self,
+        key: KeyRef,
+    ) -> Result<Vec<Vec<u8>>, SecurityDomainError> {
+        log::debug!("Reading certificate bundle");
+        let key_tlv = tlv_encode(0xA6, &tlv_encode(0x83, &key.to_bytes()));
+
+        match self.get_data(TAG_CERTIFICATE_STORE, &key_tlv) {
+            Ok(resp) => {
+                // Each certificate is a full DER-encoded TLV (SEQUENCE).
+                // Return each entry as raw bytes including tag + length.
+                let mut certs = Vec::new();
+                let mut offset = 0;
+                while offset < resp.len() {
+                    let (_, _, _, end) = tlv_parse(&resp, offset).map_err(|e| {
+                        SecurityDomainError::InvalidData(format!("TLV parse error: {e}"))
+                    })?;
+                    certs.push(resp[offset..end].to_vec());
+                    offset = end;
+                }
+                Ok(certs)
+            }
+            Err(SecurityDomainError::Connection(SmartCardError::Apdu { sw, .. }))
+                if Sw::from_u16(sw) == Some(Sw::ReferenceDataNotFound) =>
+            {
+                Ok(Vec::new())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Perform a factory reset of the Security Domain.
+    ///
+    /// Removes all keys and associated data by blocking each key with
+    /// repeated failed authentication attempts.
+    pub fn reset(&mut self) -> Result<(), SecurityDomainError> {
+        log::debug!("Resetting security domain");
+        let keys: Vec<KeyRef> = self.get_key_information()?.into_keys().collect();
+        let data = [0u8; 8];
+
+        for key in keys {
+            let (ins, key_ref) = if key.kid == 0x01 {
+                // SCP03: use KID=0, KVN=0 to allow deleting default keys (KVN=0xFF)
+                (INS_INITIALIZE_UPDATE, KeyRef::new(0, 0))
+            } else if key.kid == 0x02 || key.kid == 0x03 {
+                continue; // Deleted along with KID=0x01
+            } else if key.kid == 0x11 || key.kid == 0x15 {
+                (INS_EXTERNAL_AUTHENTICATE, key)
+            } else if key.kid == 0x13 {
+                (INS_INTERNAL_AUTHENTICATE, key)
+            } else {
+                // 0x10, 0x20-0x2F
+                (INS_PERFORM_SECURITY_OPERATION, key)
+            };
+
+            for _ in 0..65 {
+                match self
+                    .protocol
+                    .send_apdu(0x80, ins, key_ref.kvn, key_ref.kid, &data)
+                {
+                    Err(SmartCardError::Apdu { sw, .. })
+                        if Sw::from_u16(sw) == Some(Sw::AuthMethodBlocked)
+                            || Sw::from_u16(sw) == Some(Sw::SecurityConditionNotSatisfied) =>
+                    {
+                        break;
+                    }
+                    Err(SmartCardError::Apdu { sw, .. })
+                        if Sw::from_u16(sw) == Some(Sw::IncorrectParameters) =>
+                    {
+                        continue;
+                    }
+                    Err(e) => return Err(e.into()),
+                    Ok(_) => continue,
+                }
+            }
+        }
+
+        log::info!("Security domain reset");
+        Ok(())
+    }
+
+    /// Store data in the security domain.
+    ///
+    /// Requires OCE verification (SCP authentication).
+    pub fn store_data(&mut self, data: &[u8]) -> Result<(), SecurityDomainError> {
+        log::debug!("Storing security domain data");
+        self.protocol.send_apdu(0, INS_STORE_DATA, 0x90, 0, data)?;
+        Ok(())
+    }
+
+    /// Store the certificate chain for the given key.
+    ///
+    /// Requires OCE verification. Certificates are DER-encoded, leaf-last.
+    pub fn store_certificate_bundle(
+        &mut self,
+        key: KeyRef,
+        certificates: &[&[u8]],
+    ) -> Result<(), SecurityDomainError> {
+        log::debug!("Storing certificate bundle");
+        let key_tlv = tlv_encode(0xA6, &tlv_encode(0x83, &key.to_bytes()));
+        let certs_concat: Vec<u8> = certificates
+            .iter()
+            .flat_map(|c| c.iter().copied())
+            .collect();
+        let cert_store_tlv = tlv_encode(TAG_CERTIFICATE_STORE, &certs_concat);
+
+        let mut data = key_tlv;
+        data.extend_from_slice(&cert_store_tlv);
+        self.store_data(&data)?;
+        log::info!("Certificate bundle stored");
+        Ok(())
+    }
+
+    /// Store which certificate serial numbers can be used for a given key.
+    ///
+    /// Requires OCE verification. If no allowlist is stored, any certificate
+    /// signed by the CA can be used.
+    pub fn store_allowlist(
+        &mut self,
+        key: KeyRef,
+        serials: &[Vec<u8>],
+    ) -> Result<(), SecurityDomainError> {
+        log::debug!("Storing allowlist");
+        let key_tlv = tlv_encode(0xA6, &tlv_encode(0x83, &key.to_bytes()));
+        let serials_data: Vec<u8> = serials.iter().flat_map(|s| int2asn1(s)).collect();
+        let allowlist_tlv = tlv_encode(0x70, &serials_data);
+
+        let mut data = key_tlv;
+        data.extend_from_slice(&allowlist_tlv);
+        self.store_data(&data)?;
+        log::info!("Allowlist stored");
+        Ok(())
+    }
+
+    /// Store the SKI (Subject Key Identifier) for the CA of a given key.
+    ///
+    /// Requires OCE verification.
+    pub fn store_ca_issuer(&mut self, key: KeyRef, ski: &[u8]) -> Result<(), SecurityDomainError> {
+        log::debug!("Storing CA issuer");
+        let klcc = matches!(
+            key.kid,
+            x if x == ScpKid::Scp11a as u8
+                || x == ScpKid::Scp11b as u8
+                || x == ScpKid::Scp11c as u8
+        );
+        let flag = if klcc { b"\x01" } else { b"\x00" };
+
+        let inner = [
+            tlv_encode(0x80, flag),
+            tlv_encode(0x42, ski),
+            tlv_encode(0x83, &key.to_bytes()),
+        ]
+        .concat();
+        let data = tlv_encode(0xA6, &inner);
+        self.store_data(&data)?;
+        log::info!("CA issuer stored");
+        Ok(())
+    }
+
+    /// Delete one or more keys matching the given KID and/or KVN.
+    ///
+    /// Requires OCE verification. To delete the final key, set `delete_last`
+    /// to `true`.
+    pub fn delete_key(
+        &mut self,
+        kid: u8,
+        kvn: u8,
+        delete_last: bool,
+    ) -> Result<(), SecurityDomainError> {
+        log::debug!("Deleting security domain key");
+        if kid == 0 && kvn == 0 {
+            return Err(SecurityDomainError::InvalidData(
+                "Must specify at least one of kid, kvn".into(),
+            ));
+        }
+
+        let kid = if (1..=3).contains(&kid) {
+            // SCP03 keys can only be deleted by KVN
+            if kvn != 0 {
+                0
+            } else {
+                return Err(SecurityDomainError::InvalidData(
+                    "SCP03 keys can only be deleted by KVN".into(),
+                ));
+            }
+        } else {
+            kid
+        };
+
+        let mut data = Vec::new();
+        if kid != 0 {
+            data.extend_from_slice(&tlv_encode(0xD0, &[kid]));
+        }
+        if kvn != 0 {
+            data.extend_from_slice(&tlv_encode(0xD2, &[kvn]));
+        }
+
+        self.protocol
+            .send_apdu(0x80, INS_DELETE, 0, if delete_last { 1 } else { 0 }, &data)?;
+        log::info!("Security domain key deleted");
+        Ok(())
+    }
+
+    /// Generate a new SCP11 EC key pair.
+    ///
+    /// Requires OCE verification. Use `replace_kvn` to replace an existing key.
+    /// Only P-256 is supported.
+    /// Returns the public key as SEC1 uncompressed point bytes.
+    pub fn generate_ec_key(
+        &mut self,
+        key: KeyRef,
+        curve: Curve,
+        replace_kvn: u8,
+    ) -> Result<Vec<u8>, SecurityDomainError> {
+        curve.require_supported()?;
+        log::debug!("Generating EC key");
+        let mut data = vec![key.kvn];
+        data.extend_from_slice(&tlv_encode(KeyType::EccKeyParams as u32, &[curve as u8]));
+
+        let resp = self
+            .protocol
+            .send_apdu(0x80, INS_GENERATE_KEY, replace_kvn, key.kid, &data)?;
+
+        let result = tlv_unpack(KeyType::EccPublicKey as u32, &resp)?;
+        log::info!("EC key generated");
+        Ok(result)
+    }
+
+    /// Import an SCP03 static key set.
+    ///
+    /// Requires OCE verification and an active SCP session with a DEK key.
+    /// Use `replace_kvn` to replace an existing key.
+    pub fn put_key_static(
+        &mut self,
+        key: KeyRef,
+        static_keys: &StaticKeys,
+        replace_kvn: u8,
+    ) -> Result<(), SecurityDomainError> {
+        log::debug!("Importing static key");
+        let dek: &[u8] = self
+            .dek
+            .as_ref()
+            .map(|v| v.as_bytes().as_slice())
+            .ok_or_else(|| {
+                SecurityDomainError::InvalidData("No DEK available (SCP session required)".into())
+            })?;
+
+        let keys_dek = static_keys
+            .key_dek
+            .as_ref()
+            .ok_or_else(|| SecurityDomainError::InvalidData("New DEK must be set".into()))?;
+
+        let mut data = vec![key.kvn];
+        let mut expected = vec![key.kvn];
+
+        for k in [&static_keys.key_enc, &static_keys.key_mac, keys_dek] {
+            let kcv = &encrypt_cbc_zero_iv(k, &DEFAULT_KCV_IV)[..3];
+            let encrypted = encrypt_cbc_zero_iv(dek, k);
+            data.extend_from_slice(&tlv_encode(KeyType::Aes as u32, &encrypted));
+            data.push(kcv.len() as u8);
+            data.extend_from_slice(kcv);
+            expected.extend_from_slice(kcv);
+        }
+
+        let p2 = key.kid | 0x80;
+        let resp = self
+            .protocol
+            .send_apdu(0x80, INS_PUT_KEY, replace_kvn, p2, &data)?;
+
+        if resp != expected {
+            return Err(SecurityDomainError::InvalidData(
+                "Incorrect key check value".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Import an EC private key.
+    ///
+    /// Requires OCE verification and an active SCP session with a DEK key.
+    /// Only P-256 is supported. `private_key` is the 32-byte raw scalar (big-endian).
+    /// Use `replace_kvn` to replace an existing key.
+    pub fn put_key_ec_private(
+        &mut self,
+        key: KeyRef,
+        private_key: &[u8],
+        curve: Curve,
+        replace_kvn: u8,
+    ) -> Result<(), SecurityDomainError> {
+        curve.require_supported()?;
+        log::debug!("Importing EC private key");
+        if private_key.len() != 32 {
+            return Err(SecurityDomainError::InvalidData(
+                "P-256 private key must be 32 bytes".into(),
+            ));
+        }
+        let dek: &[u8] = self
+            .dek
+            .as_ref()
+            .map(|v| v.as_bytes().as_slice())
+            .ok_or_else(|| {
+                SecurityDomainError::InvalidData("No DEK available (SCP session required)".into())
+            })?;
+
+        let encrypted = encrypt_cbc_zero_iv(dek, private_key);
+        let mut data = vec![key.kvn];
+        data.extend_from_slice(&tlv_encode(KeyType::EccPrivateKey as u32, &encrypted));
+        data.extend_from_slice(&tlv_encode(KeyType::EccKeyParams as u32, &[curve as u8]));
+        data.push(0x00); // No KCV for EC keys
+
+        let resp = self
+            .protocol
+            .send_apdu(0x80, INS_PUT_KEY, replace_kvn, key.kid, &data)?;
+
+        let expected = vec![key.kvn];
+        if resp != expected {
+            return Err(SecurityDomainError::InvalidData(
+                "Incorrect key check value".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Import an EC public key.
+    ///
+    /// Requires OCE verification.
+    /// Only P-256 is supported.
+    /// `public_key` is the SEC1 uncompressed point bytes (0x04 || x || y).
+    /// Use `replace_kvn` to replace an existing key.
+    pub fn put_key_ec_public(
+        &mut self,
+        key: KeyRef,
+        public_key: &[u8],
+        curve: Curve,
+        replace_kvn: u8,
+    ) -> Result<(), SecurityDomainError> {
+        curve.require_supported()?;
+        log::debug!("Importing EC public key");
+        let mut data = vec![key.kvn];
+        data.extend_from_slice(&tlv_encode(KeyType::EccPublicKey as u32, public_key));
+        data.extend_from_slice(&tlv_encode(KeyType::EccKeyParams as u32, &[curve as u8]));
+        data.push(0x00); // No KCV for EC keys
+
+        let resp = self
+            .protocol
+            .send_apdu(0x80, INS_PUT_KEY, replace_kvn, key.kid, &data)?;
+
+        let expected = vec![key.kvn];
+        if resp != expected {
+            return Err(SecurityDomainError::InvalidData(
+                "Incorrect key check value".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NoApduConnection;
+
+    impl crate::core::Connection for NoApduConnection {
+        type Error = SmartCardError;
+
+        fn close(&mut self) {}
+    }
+
+    impl SmartCardConnection for NoApduConnection {
+        fn transport(&self) -> crate::core::Transport {
+            crate::core::Transport::Usb
+        }
+
+        fn send_and_receive(&mut self, _: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+            panic!("Unsupported or invalid EC input must not send APDUs");
+        }
+    }
+
+    #[test]
+    fn test_ec_private_key_import_validates_scalar_width_before_dek_or_apdus() {
+        let mut session = SecurityDomainSession {
+            protocol: SmartCardProtocol::new(NoApduConnection),
+            version: Version(5, 7, 2),
+            dek: None,
+        };
+        for len in [0, 1, 16, 31, 32, 33, 48, 64, 66, 80] {
+            let result = session.put_key_ec_private(
+                KeyRef::new(0x13, 2),
+                &vec![1; len],
+                Curve::Secp256r1,
+                0,
+            );
+            let expected = if len == 32 {
+                "No DEK available (SCP session required)"
+            } else {
+                "P-256 private key must be 32 bytes"
+            };
+            assert!(matches!(
+                result,
+                Err(SecurityDomainError::InvalidData(message)) if message == expected
+            ));
+        }
+    }
+
+    #[test]
+    fn test_ec_operations_reject_other_curves_before_dek_or_apdus() {
+        let mut session = SecurityDomainSession {
+            protocol: SmartCardProtocol::new(NoApduConnection),
+            version: Version(5, 7, 2),
+            dek: None,
+        };
+        let key = KeyRef::new(0x13, 2);
+        for curve in [
+            Curve::Secp384r1,
+            Curve::Secp521r1,
+            Curve::BrainpoolP256r1,
+            Curve::BrainpoolP384r1,
+            Curve::BrainpoolP512r1,
+        ] {
+            assert!(matches!(
+                session.generate_ec_key(key, curve, 0),
+                Err(SecurityDomainError::NotSupported(_))
+            ));
+            assert!(matches!(
+                session.put_key_ec_private(key, &[1; 32], curve, 0),
+                Err(SecurityDomainError::NotSupported(_))
+            ));
+            assert!(matches!(
+                session.put_key_ec_public(key, &[0; 65], curve, 0),
+                Err(SecurityDomainError::NotSupported(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn test_key_ref_creation() {
+        let kr = KeyRef::new(0x13, 0x01);
+        assert_eq!(kr.kid, 0x13);
+        assert_eq!(kr.kvn, 0x01);
+        assert_eq!(kr.to_bytes(), [0x13, 0x01]);
+    }
+
+    #[test]
+    fn test_key_ref_from_bytes() {
+        let kr = KeyRef::from_bytes(&[0x01, 0xFF]).unwrap();
+        assert_eq!(kr.kid, 0x01);
+        assert_eq!(kr.kvn, 0xFF);
+        assert!(KeyRef::from_bytes(&[0x01]).is_none());
+    }
+
+    #[test]
+    fn test_key_ref_display() {
+        let kr = KeyRef::new(0x13, 0x01);
+        assert_eq!(format!("{kr}"), "KeyRef(kid=0x13, kvn=0x01)");
+    }
+
+    #[test]
+    fn test_key_ref_equality() {
+        let a = KeyRef::new(0x13, 0x01);
+        let b = KeyRef::new(0x13, 0x01);
+        let c = KeyRef::new(0x13, 0x02);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_key_ref_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(KeyRef::new(0x01, 0x01));
+        set.insert(KeyRef::new(0x01, 0x01));
+        set.insert(KeyRef::new(0x13, 0x01));
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn test_curve_from_u8() {
+        assert_eq!(Curve::from_u8(0x00), Some(Curve::Secp256r1));
+        assert_eq!(Curve::from_u8(0x01), Some(Curve::Secp384r1));
+        assert_eq!(Curve::from_u8(0x02), Some(Curve::Secp521r1));
+        assert_eq!(Curve::from_u8(0x03), Some(Curve::BrainpoolP256r1));
+        assert_eq!(Curve::from_u8(0x05), Some(Curve::BrainpoolP384r1));
+        assert_eq!(Curve::from_u8(0x07), Some(Curve::BrainpoolP512r1));
+        assert_eq!(Curve::from_u8(0xFF), None);
+    }
+
+    #[test]
+    fn test_curve_oid() {
+        // secp256r1 OID: 1.2.840.10045.3.1.7
+        let oid = Curve::Secp256r1.oid();
+        assert_eq!(oid, &[0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07]);
+    }
+
+    #[test]
+    fn test_curve_from_public_key_bytes() {
+        // 65 bytes = 0x04 + 32 + 32 -> Secp256r1
+        let mut key = vec![0x04];
+        key.extend_from_slice(&[0u8; 64]);
+        assert_eq!(Curve::from_public_key_bytes(&key), Some(Curve::Secp256r1));
+
+        // 97 bytes = 0x04 + 48 + 48 -> Secp384r1
+        let mut key = vec![0x04];
+        key.extend_from_slice(&[0u8; 96]);
+        assert_eq!(Curve::from_public_key_bytes(&key), Some(Curve::Secp384r1));
+
+        // Missing 0x04 prefix
+        assert_eq!(Curve::from_public_key_bytes(&[0x00; 65]), None);
+    }
+
+    #[test]
+    fn test_key_type_values() {
+        assert_eq!(KeyType::Aes as u8, 0x88);
+        assert_eq!(KeyType::EccPublicKey as u8, 0xB0);
+        assert_eq!(KeyType::EccPrivateKey as u8, 0xB1);
+        assert_eq!(KeyType::EccKeyParams as u8, 0xF0);
+    }
+
+    #[test]
+    fn test_key_type_from_u8() {
+        assert_eq!(KeyType::from_u8(0x88), Some(KeyType::Aes));
+        assert_eq!(KeyType::from_u8(0xB0), Some(KeyType::EccPublicKey));
+        assert_eq!(KeyType::from_u8(0xB1), Some(KeyType::EccPrivateKey));
+        assert_eq!(KeyType::from_u8(0xF0), Some(KeyType::EccKeyParams));
+        assert_eq!(KeyType::from_u8(0x00), None);
+    }
+
+    #[test]
+    fn test_scp_kid_values() {
+        assert_eq!(ScpKid::Scp03 as u8, 0x01);
+        assert_eq!(ScpKid::Scp11a as u8, 0x11);
+        assert_eq!(ScpKid::Scp11b as u8, 0x13);
+        assert_eq!(ScpKid::Scp11c as u8, 0x15);
+    }
+
+    #[test]
+    fn test_scp_kid_from_u8() {
+        assert_eq!(ScpKid::from_u8(0x01), Some(ScpKid::Scp03));
+        assert_eq!(ScpKid::from_u8(0x11), Some(ScpKid::Scp11a));
+        assert_eq!(ScpKid::from_u8(0x13), Some(ScpKid::Scp11b));
+        assert_eq!(ScpKid::from_u8(0x15), Some(ScpKid::Scp11c));
+        assert_eq!(ScpKid::from_u8(0x00), None);
+    }
+
+    #[test]
+    fn test_static_keys_default() {
+        let keys = StaticKeys::default_keys();
+        let expected: [u8; 16] = std::array::from_fn(|i| 0x40 + i as u8);
+        assert_eq!(keys.key_enc, expected);
+        assert_eq!(keys.key_mac, expected);
+        assert_eq!(keys.key_dek.as_ref().unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_int2asn1() {
+        // Small positive value (no leading zero needed)
+        let result = int2asn1(&[0x2A]);
+        // Should be TLV(0x93, [0x2A])
+        assert_eq!(result, tlv_encode(0x93, &[0x2A]));
+
+        // Value with high bit set (needs leading zero)
+        let result = int2asn1(&[0x80]);
+        assert_eq!(result, tlv_encode(0x93, &[0x00, 0x80]));
+    }
+
+    #[test]
+    fn test_encrypt_cbc_zero_iv() {
+        // Verify basic AES-CBC encryption works with 16-byte input
+        let key = [0x40u8; 16];
+        let data = [0x00u8; 16];
+        let result = encrypt_cbc_zero_iv(&key, &data);
+        assert_eq!(result.len(), 16);
+        // Result should be deterministic
+        let result2 = encrypt_cbc_zero_iv(&key, &data);
+        assert_eq!(result, result2);
+        assert_eq!(encrypt_cbc_zero_iv(&key, &[1; 32]).len(), 32);
+    }
+
+    #[test]
+    fn test_encrypt_cbc_kcv() {
+        // Key check value: encrypt DEFAULT_KCV_IV with the key itself
+        let key = [0x40u8; 16];
+        let kcv = &encrypt_cbc(&key, &DEFAULT_KCV_IV, &DEFAULT_KCV_IV)[..3];
+        assert_eq!(kcv.len(), 3);
+    }
+}

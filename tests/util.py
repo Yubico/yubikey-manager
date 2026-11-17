@@ -3,7 +3,6 @@ import logging
 import os
 
 from cryptography import x509
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
@@ -20,12 +19,10 @@ def open_file(*relative_path):
 def generate_self_signed_certificate(
     common_name="Test", valid_from=None, valid_to=None
 ):
-    valid_from = (
-        valid_from if valid_from else datetime.datetime.now(datetime.timezone.utc)
-    )
+    valid_from = valid_from if valid_from else datetime.datetime.now(datetime.UTC)
     valid_to = valid_to if valid_to else valid_from + datetime.timedelta(days=1)
 
-    private_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
+    private_key = ec.generate_private_key(ec.SECP256R1())
     public_key = private_key.public_key()
 
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
@@ -38,4 +35,4 @@ def generate_self_signed_certificate(
         .serial_number(x509.random_serial_number())
         .not_valid_before(valid_from)
         .not_valid_after(valid_to)
-    ).sign(private_key, hashes.SHA256(), default_backend())
+    ).sign(private_key, hashes.SHA256())

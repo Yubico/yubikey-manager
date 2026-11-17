@@ -1,94 +1,415 @@
 == Working with the code
 
+=== Repository structure
+
+This repository is a mixed Rust/Python workspace:
+
+[cols="1,2"]
+|===
+| Path | Description
+
+| `crates/yubikit`
+| Core Rust library — protocol implementations for all YubiKey applications
+
+| `crates/yubikit-pyo3`
+| PyO3 bindings that expose the Rust library to Python
+
+| `crates/ykman`
+| Rust library implementing higher-level ykman operations
+
+| `crates/ykman-cli`
+| The `ykman` command-line executable
+
+| `crates/ykman-svc`
+| Background service for elevated YubiKey access (Windows)
+
+| `packages/yubikit`
+| Python package wrapping the native Rust extension
+
+| `packages/ykman`
+| Python wrapper for the `ykman` command-line executable
+
+|===
+
 === Install dependencies
 
-This project uses https://docs.astral.sh/uv/[uv] for development.
-Follow the uv Getting Started guide to install and configure it.
-
-==== Windows
-
-Make sure the http://www.swig.org/[swig] executable is in your PATH.
-
-==== macOS
-
-    $ brew install swig
+This project requires Rust 1.88 or later and uses https://rustup.rs/[rustup]
+for the Rust toolchain. The
+Python parts use https://docs.astral.sh/uv/[uv], which can be skipped when
+only developing the Rust parts. Note that changes in the `yubikit` crate often
+require modifications to the Python wrapper as well.
 
 ==== Linux (Debian-based distributions)
 
-    $ sudo apt install swig libu2f-udev pcscd libpcsclite-dev
+    $ sudo apt install build-essential pkg-config pcscd libpcsclite-dev libudev-dev libdbus-1-dev
 
 ==== Linux (RPM-based distributions)
 
-    # Tested on Fedora 34
-    $ sudo dnf install pcsc-lite-devel python3-devel swig
+    $ sudo dnf install gcc pkgconf-pkg-config pcsc-lite pcsc-lite-devel systemd-devel dbus-devel
 
-=== Install yubikey-manager from source
+==== macOS
 
-Clone the repository:
+Install the Xcode Command Line Tools:
+
+    $ xcode-select --install
+
+==== Windows
+
+Use the Rust MSVC toolchain with Visual Studio Build Tools, including the
+Desktop development with C++ workload and Windows SDK.
+
+=== Setting up the development environment
+
+Clone the repository and set up the Python environment. This builds the
+native Rust extension (`_yubikit_native`) and the `ykman` executable, and
+installs them into the virtual environment:
 
     $ git clone https://github.com/Yubico/yubikey-manager.git
     $ cd yubikey-manager
+    $ uv sync
 
-=== Running from source
+After making changes to the Rust code, force a rebuild of the native extension
+before testing, since uv otherwise reuses its cached wheel:
 
-To run ykman from source, use the `uv run` command:
+    $ uv sync --reinstall-package yubikit
 
-    $ uv run ykman
+Use `uv run --no-sync` to run commands without uv re-synchronising (and
+possibly rebuilding) the environment first, e.g. `uv run --no-sync pytest`.
 
-Show available commands:
 
-    $ uv run ykman --help
+=== Building the Rust crates and executables
 
-Show information about inserted YubiKey:
+To build the project use cargo build:
 
-    $ uv run ykman info
+    $ cargo build
 
-Run ykman in DEBUG mode:
+For a release build:
 
-    $ uv run ykman --log-level DEBUG info
+    $ cargo build --release
 
-=== Code Style & Security
+=== Building the ykman executable
 
-This project uses https://docs.astral.sh/ruff/[ruff] for code style, and security
-linting.
-https://mypy-lang.org[mypy] and https://github.com/microsoft/pyright[pyright] are
-used for static type checking.
-These are invoked with a http://pre-commit.com/[pre-commit] hook.
+To build a debug binary:
 
-To use these:
+    $ cargo build -p ykman-cli
+
+The binary is written to `target/debug/ykman`.
+
+For a release build:
+
+    $ cargo build --release -p ykman-cli
+
+The binary is written to `target/release/ykman`.
+
+The `hardware` feature (enabled by default) links against libpcsclite and
+hidapi to communicate directly with connected devices. Build without it to
+produce a binary that can only communicate via the `ykman-svc` service:
+
+    $ cargo build -p ykman-cli --no-default-features
+
+=== Updating third-party licence notices
+
+The CLI embeds `crates/ykman-cli/licenses.txt`. Normal builds, including
+builds from crates.io packages, do not require `cargo-about`.
+
+After changing dependencies, CLI features, the licence policy, or the report
+template, regenerate the notices. CI uses the latest `cargo-about` release to
+detect changes in licence reporting as well as dependency changes. If its
+output differs, update your local tool to the version shown in the CI log
+and regenerate:
+
+    $ cargo install cargo-about --locked --features cli
+    $ cargo fetch --locked
+    $ cargo about generate --locked --offline --all-features --fail \
+        --manifest-path crates/ykman-cli/Cargo.toml \
+        --config crates/ykman-cli/about.toml \
+        --output-file crates/ykman-cli/licenses.txt \
+        crates/ykman-cli/about-cli.hbs
+
+The report covers the CLI's runtime dependencies across platforms, including
+all CLI features, as resolved by `Cargo.lock`. Use `--locked` for release
+builds so the dependencies match the bundled notices.
+CI checks that the checked-in report matches regeneration and verifies crate
+packages without `cargo-about` installed.
+Commit the updated report with the dependency or licence-policy changes.
+
+=== Building the Python wrapper
+
+To build the Python wrapper, use `uv`:
+
+    $ uv sync
+
+Because uv caches wheels, any changes to the native layers require you to
+force a rebuild of the yubikit package:
+
+    $ uv sync --reinstall-package yubikit
+
+=== Building Python source distributions
+
+Build release source distributions for both Python packages using:
+
+    $ uv run --locked python build_source_packages.py
+
+The archives are written to `dist/`. Use this helper rather than publishing raw
+`uv build --sdist` output: Maturin trims the Cargo workspace without updating
+its lockfile. The helper normalizes the bundled lockfile offline, rejects any
+dependency version, source or checksum changes, and verifies that Cargo accepts
+the result with `--locked`. The repository lockfiles are not changed.
+
+CI rebuilds wheels from these archives with `--locked` on Python 3.11 and 3.14,
+then installs and tests the wheels outside the workspace. Release wheels for
+the full platform and architecture matrix are built by the Wheels workflow.
+
+Linux wheels for both packages must use the host's `libpcsclite.so.1`, not a
+bundled copy: the client/daemon protocol is not compatible across all PC/SC
+versions and distribution builds. The Wheels workflow builds unrepaired wheels
+with Maturin, then runs `auditwheel repair --exclude libpcsclite.so.1` inside the
+same manylinux image. Other non-policy libraries are still bundled. The system
+PC/SC runtime remains an explicit installation prerequisite, rather than a
+library supplied by the wheel. CI rejects wheels containing bundled PC/SC
+libraries and exercises installed-wheel reader enumeration against the host
+daemon with a timeout.
+
+=== Code style & security
+
+https://docs.astral.sh/ruff/[ruff] handles Python style and security linting.
+https://mypy-lang.org[mypy], https://github.com/microsoft/pyright[pyright], and
+https://github.com/astral-sh/ty[ty] are used for static type checking.
+Rust code uses `cargo fmt` and `cargo clippy`, and
+https://embarkstudios.github.io/cargo-deny/[cargo deny] checks Rust
+dependencies for advisories, licenses, and duplicate versions (see
+`deny.toml`).
+All checks are wired up via a http://pre-commit.com/[pre-commit] hook:
 
     $ uv tool install pre-commit
     $ pre-commit install
 
+To run all checks manually:
+
+    $ pre-commit run --all
+
+=== CI build and signing inputs
+
+CI-only Rust, Zig, cargo-zigbuild, uv and Maturin versions are maintained in
+`.github/actions/build-versions/versions.env`. Artifact jobs load these pins
+through that local action; developer toolchains are unaffected.
+
+Rust setup uses `actions-rust-lang/setup-rust-toolchain`, pinned to a reviewed
+release commit SHA. Rust checks use current stable, except for the fixed 1.88.0
+MSRV job. The source-package job installs both stable and the pinned compiler;
+pre-commit runs with stable while packaging retains the pinned compiler. Rust
+caching is enabled for host builds: push runs can save
+caches, while pull requests can restore caches but cannot save them. Linux wheel
+builds inside Maturin containers are not covered by this host cache.
+
+Build tools are pinned independently of their installer actions. The
+source-package job writes a temporary uv build-constraints file from the shared
+Maturin version and exports `UV_BUILD_CONSTRAINT`, constraining isolated builds
+without changing either package's public build requirements.
+The wheel workflow pins Maturin and Rust inside containers as well as on hosts.
+The manylinux images are digest-pinned and supply the wheel-repair tooling,
+including auditwheel. Update each image digest for both build and repair
+together (both steps use the same matrix value). Windows installer builds use
+the checksum-verified WiX download in `.github/scripts/install_wix.ps1` on both
+x64 and ARM64; update its download URL and checksum together.
+
+The cargo-about licence comparison and cargo-deny policy checks deliberately
+install the latest releases. The pre-commit hook revisions remain managed
+separately through pre-commit autoupdate and Dependabot. Development environments
+do not need to match CI's build-tool versions. Hosted runner images and system
+packages still float; these pins do not make builds fully hermetic.
+
+The setup action's additional warning policy and `RUSTFLAGS` overrides are
+disabled, preserving the existing Clippy policy and target-specific linker
+flags in `.cargo/config.toml`. Rust build jobs explicitly retain Cargo's default
+dev-profile debug level of 2 rather than the action's default of 0.
+
+CI Cargo builds, tests, Clippy checks and Maturin wheel builds use `--locked`.
+The source-package job also passes `--locked` to Maturin's PEP 517 native
+builds, uses locked uv project commands, and checks that source packaging did
+not modify either lockfile. Dependency changes must include updated lockfiles.
+
+The non-hardware Rust unit-test step overrides the serial test default with
+`--test-threads="$(nproc)"` to use the runner's available CPUs. The serial
+default in `.cargo/config.toml` remains in place for device tests.
+
+Windows signing uses a digest-pinned Scribe container. When updating it, review
+the image release and resolve its registry digest, then update the workflow-level
+`SCRIBE_IMAGE` environment variable in `.github/workflows/windows.yml`.
+
+Signing accepts unprefixed `X.Y.Z-alpha.N`, `X.Y.Z-beta.N` and `X.Y.Z-rc.N`
+tags. Stable releases reuse the signed RC artifacts without rebuilding.
+
+Windows numeric file and product versions use `CargoMajor.CargoMinor.Build.0`.
+Major and minor are derived automatically from each crate's Cargo version;
+the independent third component is maintained in the `WINDOWS_BUILD` constants
+in `crates/ykman-cli/build.rs` and `crates/ykman-svc/build.rs`. The initial beta
+uses `6.0.0.0` for the CLI and `1.0.0.0` for the shared service. Descriptive
+version strings retain the full Cargo versions. The MSI and service merge
+module derive their versions from the respective executables' numeric resources.
+
+Within each major/minor series, increment the third component for each new
+release build, regardless of alpha, beta, RC or stable status or Cargo patch
+version. Coordinate the service's independent counter with other products
+sharing it. Keep the fourth component zero: MSI compares only the first three
+components, with limits of 255, 255 and 65535. Update the Windows CI build-counter
+expectations when changing these constants. Promoting an RC without rebuilding
+retains its numeric versions and descriptive strings; do not reset the counter
+for stable. Each stable release's `NEWS` entry must record the corresponding
+CLI and shared-service Windows file versions.
+
+Signing containers receive only `GOOGLE_APPLICATION_CREDENTIALS`, `CI`,
+`GITHUB_EVENT_NAME`, `GITHUB_REF`, and `GITHUB_REPOSITORY` from the runner.
+Scribe needs the CI metadata to construct the release reference; keep these
+named inputs rather than forwarding the full runner environment.
+
+=== Dependency updates
+
+Dependabot checks GitHub Actions, the Cargo and uv workspaces, and remote
+pre-commit hook revisions monthly. Cargo, uv and pre-commit each group patch
+updates and allow up to five open version-update PRs; minor and major updates
+remain separate. Rust `0.x` minor updates can contain breaking changes.
+The existing GitHub Actions group includes all update types.
+
+Review dependency changes and CI results before merging; auto-merge is not
+enabled by this configuration. Keep manifest and lockfile changes together.
+Local pre-commit hooks and tool versions embedded in CI commands are not
+covered by these update entries.
+
 === Unit tests
 
-To run unit tests:
+These tests do not require a YubiKey to be connected.
+
+Rust unit tests:
+
+    $ cargo test --lib
+
+Python unit tests:
 
     $ uv run pytest
 
-
-=== Integration tests
+=== Rust device tests
 
 WARNING: ONLY run these on dedicated developer keys, as it will permanently
-delete data on the device(s)!
+delete data on the device!
 
-To run integration tests, indicate the serial number (given by `ykman list`) of
-the YubiKey to test with.  Make sure no other YubiKey is connected when running
-the test!
+The test suite automatically detects whether the device is connected over USB or NFC.
+Tests that require a physical USB connection (e.g., OTP/FIDO HID) are automatically
+skipped when the device is connected over NFC.
 
-   $ uv run pytest --device 123456
+    $ YUBIKEY_SERIAL=123456 cargo test -p yubikit --test device_tests -- --test-threads=1 --no-capture
 
-To run the tests over NFC, place the YubiKey to test on an NFC reader, and
-indicate both the reader and the serial number of the YubiKey:
+For devices without a serial number, use `YUBIKEY_SERIAL=-1`:
 
-   $ uv run pytest --reader HID --device 123456
+    $ YUBIKEY_SERIAL=-1 cargo test -p yubikit --test device_tests -- --test-threads=1  --no-capture
 
-The integration test suite will automatically identify which test cases can be
-run with the attached YubiKey.
+The same command works whether the device is connected via USB or via an NFC reader.
 
+You can target specific tests by specifying the test name after the command,
+eg. append "fido" to only run the FIDO tests.
 
-=== Packaging
+NOTE: --test-threads 1 is required as the device tests interact with a connected
+YubiKey and cannot be run in parallel. --no-capture displays output showing which
+tests were skipped, and why.
 
-For third-party packaging, use the source releases and signatures available
-https://developers.yubico.com/yubikey-manager/Releases/[here].
-These artifacts are also published on Github on the Releases page.
+=== CLI device tests
+
+WARNING: ONLY run these on dedicated developer keys, as it will permanently
+delete data on the device!
+
+The `ykman-cli` crate has its own device tests, which run the `ykman`
+executable against a connected YubiKey. They use the same `YUBIKEY_SERIAL`
+environment variable as the Rust device tests:
+
+    $ YUBIKEY_SERIAL=123456 cargo test -p ykman-cli --test cli_tests -- --test-threads=1
+
+As with the Rust device tests, append a test name filter (e.g. "piv") to only
+run a subset.
+
+FIDO command tests require the FIDO2 application, not just the USB FIDO
+interface, which can also be present on U2F-only devices.
+
+=== Python device tests
+
+WARNING: ONLY run these on dedicated developer keys, as it will permanently
+delete data on the device!
+
+Specify the serial number of the YubiKey to test with (shown by `ykman list`):
+
+    $ uv run pytest --device 123456
+
+For devices without a serial number, use `--no-serial` instead of `--device`.
+
+This works for both USB and NFC-connected devices. The test suite automatically
+skips tests that are not applicable to the attached device.
+
+=== Generating documentation
+
+==== Rust (cargo doc)
+
+Generate and open API documentation for the `yubikit` crate:
+
+    $ cargo doc -p yubikit --open
+
+To include documentation for all workspace crates:
+
+    $ cargo doc --workspace --open
+
+The generated HTML is written to `target/doc/`.
+
+The published crates configure docs.rs to build all features for
+`x86_64-unknown-linux-gnu`. Its Linux build environment provides
+`libpcsclite-dev`, `libudev-dev` and `libdbus-1-dev`; other targets require native
+cross-compilation dependencies that are not configured for documentation.
+CI checks each published crate separately with warnings treated as errors:
+
+    $ DOCS_RS=1 RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features -p yubikit
+
+Repeat with `-p ykman`, `-p ykman-cli` and `-p ykman-svc`. Build `ykman` and
+`ykman-cli` separately to avoid their library and binary documentation sharing
+the `ykman` output directory.
+
+==== Python (Sphinx)
+
+Generate HTML API documentation for the Python packages:
+
+    $ uv run --locked sphinx-build -W --keep-going docs docs/_build/html
+
+Open `docs/_build/html/index.html` in a browser to view the result.
+
+=== Release checklist
+
+A release includes both the Rust crates on crates.io and the Python packages on
+PyPI. Python package versions use PEP 440 spelling: `yubikit` `1.0.0b0` and
+`yubikey-manager` `6.0.0b0` correspond to Rust versions `1.0.0-beta.0` and
+`6.0.0-beta.0`. The Python CLI and SDK are
+independently installed distributions, with no dependency between them. Keep
+the Python package metadata and both workspace lockfiles consistent with the
+release.
+
+. Verify the declared Rust minimum, all workspace targets and features, unit
+  tests, and relevant device tests. Require green Linux, macOS and Windows CI
+  for the final release commit.
+. Verify Rust API documentation, including docs.rs native-dependency handling,
+  and build the Python Sphinx documentation.
+. Build and verify all publishable Rust crate packages. Build both Python
+  source distributions and the wheel matrix for supported platforms,
+  architectures and Python versions. Test source builds from the source
+  distributions and clean wheel installations outside the workspace; check
+  installed metadata, Python imports and the `ykman` executable version.
+. Confirm publishing access and intended ownership for all four crates.io
+  projects and both PyPI projects, and configure publishing credentials or
+  trusted publishing.
+. Prepare release notes and tag the exact source commit used for the verified
+  artifacts. For every stable release, record the CLI and shared-service Windows
+  file versions in its `NEWS` entry, including when promoting an existing RC
+  without rebuilding.
+. Publish Rust crates in dependency order: `yubikit`, then `ykman`, then
+  `ykman-cli` and `ykman-svc`. Keep the `yubikit-pyo3` crate unpublished on
+  crates.io; its native extension is distributed inside the Python `yubikit`
+  wheels and source distribution.
+. Publish the verified Python wheels and source distributions to PyPI.
+  The `yubikit` and `yubikey-manager` Python packages can be published in either
+  order.
+. Smoke-test registry-only Rust installation and clean Python installation
+  from PyPI, explicitly selecting the prerelease versions for a beta.

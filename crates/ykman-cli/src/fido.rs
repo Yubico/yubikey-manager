@@ -1,0 +1,1652 @@
+// Copyright 2026 Yubico AB
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! FIDO CLI commands.
+
+use anyhow::{Error, Result, anyhow};
+use clap::Subcommand;
+use yubikit::core::{Connection, Transport};
+use yubikit::ctap::{CtapError, CtapSession};
+use yubikit::ctap2::{
+    BioEnrollment, ClientPin, Config, CredentialManagement, Ctap2Error, Ctap2Pin, Ctap2Session,
+    CtapStatus, Info, Permissions, PinProtocol,
+};
+use yubikit::device::{DeviceError, ReinsertStatus, YubiKeyDevice};
+use yubikit::management::{Capability, UsbInterface};
+use yubikit::smartcard::SmartCardError;
+
+use crate::cancel;
+use crate::context;
+use crate::scp::{self, ScpParams};
+use crate::util::{format_smartcard_connection_error, print_table};
+
+const KEEPALIVE_PROCESSING: u8 = 1;
+const KEEPALIVE_UPNEEDED: u8 = 2;
+const FIDO_WINDOWS_ADMIN_MESSAGE: &str =
+    "A YubiKey was detected, but FIDO access on Windows requires running as Administrator.";
+
+#[derive(Subcommand)]
+pub enum FidoAction {
+    /// Display general status of the FIDO2 application
+    Info,
+    /// Reset all FIDO applications
+    Reset {
+        /// Confirm the action without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Manage FIDO2 PIN
+    #[command(subcommand)]
+    Access(FidoAccessAction),
+    /// Manage discoverable credentials
+    #[command(subcommand)]
+    Credentials(FidoCredentialAction),
+    /// Manage fingerprints
+    #[command(subcommand)]
+    Fingerprints(FidoFingerprintAction),
+    /// Manage configuration options
+    #[command(subcommand)]
+    Config(FidoConfigAction),
+}
+
+#[derive(Subcommand)]
+pub enum FidoAccessAction {
+    /// Set or change the PIN code
+    #[command(name = "change-pin")]
+    ChangePin {
+        /// Current PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// New PIN code
+        #[arg(short = 'n', long)]
+        new_pin: Option<String>,
+    },
+    /// Verify the PIN (and unblock if needed)
+    #[command(name = "verify-pin")]
+    VerifyPin {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Force the PIN to be changed before use
+    #[command(name = "force-change")]
+    ForceChange {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Set the minimum length allowed for PIN
+    #[command(name = "set-min-length")]
+    SetMinLength {
+        /// New minimum PIN length (4-63)
+        length: u32,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// RP ID to allow (can be repeated)
+        #[arg(short = 'R', long, action = clap::ArgAction::Append)]
+        rp_id: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum FidoCredentialAction {
+    /// List stored credentials
+    List {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Output full credential information as CSV
+        #[arg(short = 'c', long)]
+        csv: bool,
+    },
+    /// Delete a credential
+    Delete {
+        /// Credential ID (hex prefix)
+        credential_id: String,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Confirm deletion without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Update user information for a credential
+    Update {
+        /// Credential ID (hex prefix)
+        credential_id: String,
+        /// New user name
+        #[arg(short = 'n', long)]
+        name: Option<String>,
+        /// New display name
+        #[arg(long)]
+        display_name: Option<String>,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum FidoFingerprintAction {
+    /// List registered fingerprints
+    List {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Add a new fingerprint
+    Add {
+        /// Name for the fingerprint
+        name: String,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Rename a fingerprint
+    Rename {
+        /// Fingerprint template ID (hex)
+        template_id: String,
+        /// New name
+        name: String,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Delete a fingerprint
+    Delete {
+        /// Fingerprint template ID (hex) or name
+        template_id: String,
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// Confirm deletion without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum FidoConfigAction {
+    /// Toggle the Always Require UV setting
+    #[command(name = "toggle-always-uv")]
+    ToggleAlwaysUv {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+    /// Enable Enterprise Attestation
+    #[command(name = "enable-ep-attestation")]
+    EnableEpAttestation {
+        /// PIN code
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+}
+
+impl FidoAction {
+    pub fn run(self, dev: &mut dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
+        match self {
+            Self::Info => run_info(dev, scp_params),
+            Self::Reset { force } => run_reset(dev, scp_params, force),
+            Self::Access(access) => {
+                context::check_capability(dev, Capability::FIDO2)?;
+                match access {
+                    FidoAccessAction::ChangePin { pin, new_pin } => {
+                        run_access_change_pin(dev, scp_params, pin.as_deref(), new_pin.as_deref())
+                    }
+                    FidoAccessAction::VerifyPin { pin } => {
+                        run_access_verify_pin(dev, scp_params, pin.as_deref())
+                    }
+                    FidoAccessAction::ForceChange { pin } => {
+                        run_access_force_change(dev, scp_params, pin.as_deref())
+                    }
+                    FidoAccessAction::SetMinLength { length, pin, rp_id } => {
+                        run_access_set_min_length(dev, scp_params, length, pin.as_deref(), &rp_id)
+                    }
+                }
+            }
+            Self::Credentials(cred) => {
+                context::check_capability(dev, Capability::FIDO2)?;
+                match cred {
+                    FidoCredentialAction::List { pin, csv } => {
+                        run_credentials_list(dev, scp_params, pin.as_deref(), csv)
+                    }
+                    FidoCredentialAction::Delete {
+                        credential_id,
+                        pin,
+                        force,
+                    } => run_credentials_delete(
+                        dev,
+                        scp_params,
+                        &credential_id,
+                        pin.as_deref(),
+                        force,
+                    ),
+                    FidoCredentialAction::Update {
+                        credential_id,
+                        name,
+                        display_name,
+                        pin,
+                    } => run_credentials_update(
+                        dev,
+                        scp_params,
+                        &credential_id,
+                        name.as_deref(),
+                        display_name.as_deref(),
+                        pin.as_deref(),
+                    ),
+                }
+            }
+            Self::Fingerprints(fp) => {
+                context::check_capability(dev, Capability::FIDO2)?;
+                match fp {
+                    FidoFingerprintAction::List { pin } => {
+                        run_fingerprints_list(dev, scp_params, pin.as_deref())
+                    }
+                    FidoFingerprintAction::Add { name, pin } => {
+                        run_fingerprints_add(dev, scp_params, &name, pin.as_deref())
+                    }
+                    FidoFingerprintAction::Rename {
+                        template_id,
+                        name,
+                        pin,
+                    } => run_fingerprints_rename(
+                        dev,
+                        scp_params,
+                        &template_id,
+                        &name,
+                        pin.as_deref(),
+                    ),
+                    FidoFingerprintAction::Delete {
+                        template_id,
+                        pin,
+                        force,
+                    } => run_fingerprints_delete(
+                        dev,
+                        scp_params,
+                        &template_id,
+                        pin.as_deref(),
+                        force,
+                    ),
+                }
+            }
+            Self::Config(cfg) => {
+                context::check_capability(dev, Capability::FIDO2)?;
+                match cfg {
+                    FidoConfigAction::ToggleAlwaysUv { pin } => {
+                        run_config_toggle_always_uv(dev, scp_params, pin.as_deref())
+                    }
+                    FidoConfigAction::EnableEpAttestation { pin } => {
+                        run_config_enable_ep_attestation(dev, scp_params, pin.as_deref())
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Session opening — macro to handle HID vs SmartCard generics
+// ---------------------------------------------------------------------------
+
+/// Check that FIDO_CCID capability is available for FIDO-over-SmartCard.
+///
+/// Returns `Ok(())` if capable and enabled, or an appropriate error message.
+fn check_fido_ccid(dev: &dyn YubiKeyDevice) -> Result<()> {
+    let info = dev.info();
+    let transport = dev.transport();
+    let supported = info
+        .supported_capabilities
+        .get(&transport)
+        .copied()
+        .unwrap_or(Capability::NONE);
+    let enabled = info
+        .config
+        .enabled_capabilities
+        .get(&transport)
+        .copied()
+        .unwrap_or(Capability::NONE);
+
+    if !supported.contains(Capability::FIDOCCID) {
+        return Err(anyhow!("FIDO over CCID is not supported by this YubiKey."));
+    }
+    if !enabled.contains(Capability::FIDOCCID) {
+        return Err(anyhow!(
+            "FIDO over CCID is not enabled. \
+             Use \"ykman config usb --enable FIDO_CCID\" to enable it."
+        ));
+    }
+    Ok(())
+}
+
+fn check_fido_fallback(
+    hid_error: DeviceError,
+    hid_enabled: bool,
+    ccid_result: Result<()>,
+) -> Result<()> {
+    if matches!(hid_error, DeviceError::InUse) {
+        return Err(anyhow!(hid_error));
+    }
+    match ccid_result {
+        Err(_) if hid_enabled => Err(anyhow!("Failed to connect to the YubiKey: {hid_error}")),
+        result => result,
+    }
+}
+
+fn format_ctap_init_error(e: CtapError<SmartCardError>) -> Error {
+    if is_windows_fido_access_denied(&e) {
+        anyhow!(FIDO_WINDOWS_ADMIN_MESSAGE)
+    } else {
+        anyhow!("Failed to initialize CTAP: {e}")
+    }
+}
+
+#[cfg(all(target_os = "windows", feature = "hardware"))]
+fn is_windows_fido_access_denied(e: &CtapError<SmartCardError>) -> bool {
+    let CtapError::Connection(SmartCardError::Transport(source)) = e else {
+        return false;
+    };
+
+    source
+        .downcast_ref::<yubikit::platform::pcsc::PcscError>()
+        .is_some_and(|e| e.to_string() == "PC/SC error: Access is denied to this file")
+}
+
+#[cfg(not(all(target_os = "windows", feature = "hardware")))]
+fn is_windows_fido_access_denied(_e: &CtapError<SmartCardError>) -> bool {
+    false
+}
+
+/// Opens a FIDO CTAP2 session and executes the body with the session bound.
+///
+/// Prefers HID when no SCP is required; falls back to SmartCard (NFC/CCID).
+/// When using SmartCard over USB, checks that the FIDO_CCID capability is
+/// enabled.
+/// The body receives `$session: Ctap2Session<C>` and must return
+/// `Result<T>`.
+macro_rules! with_fido_session {
+    ($dev:expr, $scp_params:expr, |$session:ident, $info:ident| $body:block) => {{
+        let scp_config = if $scp_params.is_explicit() {
+            scp::resolve_scp($dev, $scp_params, Capability::FIDO2)?
+        } else {
+            None
+        };
+
+        let mut hid_error = None;
+        let hid_connection = if scp_config.is_none() {
+            match $dev.open_fido() {
+                Ok(conn) => Some(conn),
+                Err(error) => {
+                    hid_error = Some(error);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        if let Some(conn) = hid_connection {
+            let ctap = CtapSession::new_fido(conn)
+                .map_err(|(e, _)| anyhow!("Failed to initialize CTAP: {e}"))?;
+            #[allow(unused_mut)]
+            let mut $session = Ctap2Session::new(ctap)
+                .map_err(|(e, _)| anyhow!("Failed to initialize CTAP2: {e}"))?;
+            let $info = $session
+                .get_info()
+                .map_err(|e| anyhow!("Failed to get info: {e}"))?;
+            $body
+        } else {
+            if $dev.transport() == Transport::Usb {
+                let ccid_result = check_fido_ccid($dev);
+                if let Some(error) = hid_error {
+                    check_fido_fallback(
+                        error,
+                        $dev.usb_interfaces().contains(UsbInterface::FIDO),
+                        ccid_result,
+                    )?;
+                } else {
+                    ccid_result?;
+                }
+            }
+            let conn = $dev
+                .open_smartcard()
+                .map_err(|e| format_smartcard_connection_error("FIDO", e))?;
+            let ctap = if let Some(ref params) = scp_config {
+                CtapSession::new_with_scp(conn, params)
+            } else {
+                CtapSession::new(conn)
+            }
+            .map_err(|(e, _)| format_ctap_init_error(e))?;
+            #[allow(unused_mut)]
+            let mut $session = Ctap2Session::new(ctap)
+                .map_err(|(e, _)| anyhow!("Failed to initialize CTAP2: {e}"))?;
+            let $info = $session
+                .get_info()
+                .map_err(|e| anyhow!("Failed to get info: {e}"))?;
+            $body
+        }
+    }};
+}
+
+// ---------------------------------------------------------------------------
+// Generic helper functions (work for any Connection type)
+// ---------------------------------------------------------------------------
+
+fn get_ctap_status<E: std::error::Error + Send + Sync + 'static>(
+    e: &Ctap2Error<E>,
+) -> Option<CtapStatus> {
+    match e {
+        Ctap2Error::StatusError(s) => Some(*s),
+        _ => None,
+    }
+}
+
+fn format_pin_error<E: std::error::Error + Send + Sync + 'static>(
+    client_pin: &mut ClientPin<impl Connection + 'static>,
+    context: &str,
+    e: &Ctap2Error<E>,
+) -> Error {
+    match get_ctap_status(e) {
+        Some(CtapStatus::PinInvalid) => {
+            if let Ok((retries, _)) = client_pin.get_pin_retries() {
+                anyhow!("Wrong PIN, {retries} attempt(s) remaining.")
+            } else {
+                anyhow!("Wrong PIN.")
+            }
+        }
+        Some(CtapStatus::PinBlocked) => anyhow!("PIN is blocked."),
+        Some(CtapStatus::PinAuthBlocked) => {
+            anyhow!("PIN authentication is currently blocked. Remove and re-insert the YubiKey.")
+        }
+        Some(CtapStatus::PinPolicyViolation) => {
+            anyhow!("New PIN doesn't meet complexity requirements.")
+        }
+        _ => anyhow!("{context}: {e}"),
+    }
+}
+
+fn require_pin_from_info(info: &Info, pin: Option<&str>, feature: &str) -> Result<Ctap2Pin> {
+    if info.options.get("clientPin") != Some(&true) {
+        return Err(anyhow!(
+            "{feature} requires a PIN, but no PIN is currently set. Use 'ykman fido access change-pin' to set one."
+        ));
+    }
+    let pin = match pin {
+        Some(p) => p.to_string(),
+        None => {
+            eprint!("Enter your PIN: ");
+            rpassword::read_password().map_err(|e| anyhow!("Failed to read PIN: {e}"))?
+        }
+    };
+    Ctap2Pin::new(&pin).map_err(Error::msg)
+}
+
+fn get_pin_token_inner<C: Connection + 'static>(
+    client_pin: &mut ClientPin<C>,
+    pin: &Ctap2Pin,
+    permissions: Permissions,
+) -> Result<(Vec<u8>, PinProtocol)> {
+    let token = client_pin
+        .get_pin_token(pin, Some(permissions), None)
+        .map_err(|e| format_pin_error(client_pin, "PIN authentication failed", &e))?;
+    Ok((token, client_pin.protocol()))
+}
+
+fn get_optional_pin_token_inner<C: Connection + 'static>(
+    client_pin: &mut ClientPin<C>,
+    info: &Info,
+    pin: Option<&str>,
+    permissions: Permissions,
+) -> Result<(Option<Vec<u8>>, Option<PinProtocol>)> {
+    if info.options.get("clientPin") != Some(&true) {
+        return Ok((None, None));
+    }
+    let pin_str = require_pin_from_info(info, pin, "This feature")?;
+    let (token, protocol) = get_pin_token_inner(client_pin, &pin_str, permissions)?;
+    Ok((Some(token), Some(protocol)))
+}
+
+fn map_enroll_error<E: std::error::Error + Send + Sync + 'static>(
+    e: Ctap2Error<E>,
+    context: &str,
+) -> Error {
+    if get_ctap_status(&e) == Some(CtapStatus::KeepaliveCancel) {
+        anyhow!("Fingerprint enrollment aborted by user.")
+    } else {
+        anyhow!("{context}: {e}")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CLI command implementations
+// ---------------------------------------------------------------------------
+
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
+    let dev_info = dev.info();
+    let transport = dev.transport();
+    let reset_blocked = dev_info.reset_blocked.contains(Capability::FIDO2);
+
+    // Check if FIDO2 is enabled
+    let fido2_enabled = dev_info
+        .config
+        .enabled_capabilities
+        .get(&transport)
+        .is_some_and(|caps: &Capability| caps.contains(Capability::FIDO2));
+
+    if fido2_enabled {
+        with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+            let mut rows = Vec::new();
+            // FIPS status
+            if dev_info.fips_capable.contains(Capability::FIDO2) {
+                rows.push((
+                    "FIPS approved",
+                    if dev_info.fips_approved.contains(Capability::FIDO2) {
+                        "Yes".to_string()
+                    } else {
+                        "No".to_string()
+                    },
+                ));
+            }
+
+            // AAGUID
+            rows.push(("AAGUID", ctap_info.aaguid.to_string()));
+
+            // PIN status
+            let mut client_pin = ClientPin::new(ctap2)
+                .map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+            if ctap_info.options.get("clientPin") == Some(&true) {
+                if ctap_info.force_pin_change {
+                    println!(
+                        "NOTE: The FIDO PIN is disabled and must be changed before it can be used!"
+                    );
+                }
+                match client_pin.get_pin_retries() {
+                    Ok((retries, power_cycle)) => {
+                        if retries > 0 {
+                            let mut status = format!("{retries} attempt(s) remaining");
+                            if power_cycle.is_some_and(|pc| pc > 0) {
+                                status.push_str(
+                                    "\nPIN is temporarily blocked. \
+                                     Remove and re-insert the YubiKey to unblock.",
+                                );
+                            }
+                            rows.push(("PIN", status));
+                        } else {
+                            rows.push(("PIN", "Blocked".to_string()));
+                        }
+                    }
+                    Err(e) => rows.push(("PIN", format!("Error: {e}"))),
+                }
+            } else {
+                rows.push(("PIN", "Not set".to_string()));
+            }
+
+            // Minimum PIN length
+            rows.push(("Minimum PIN length", ctap_info.min_pin_length.to_string()));
+
+            // Fingerprint status
+            let bio_enroll = ctap_info.options.get("bioEnroll");
+            match bio_enroll {
+                Some(true) => match client_pin.get_uv_retries() {
+                    Ok(retries) => {
+                        if retries > 0 {
+                            rows.push((
+                                "Fingerprints",
+                                format!("Registered, {retries} attempt(s) remaining"),
+                            ));
+                        } else {
+                            rows.push((
+                                "Fingerprints",
+                                "Registered, blocked until PIN is verified".to_string(),
+                            ));
+                        }
+                    }
+                    Err(e) => rows.push(("Fingerprints", format!("Error: {e}"))),
+                },
+                Some(false) => rows.push(("Fingerprints", "Not registered".to_string())),
+                None => {}
+            }
+
+            // Always Require UV
+            if let Some(&always_uv) = ctap_info.options.get("alwaysUv") {
+                rows.push((
+                    "Always Require UV",
+                    if always_uv {
+                        "On".to_string()
+                    } else {
+                        "Off".to_string()
+                    },
+                ));
+            }
+
+            // Remaining discoverable credentials
+            if let Some(remaining) = ctap_info.remaining_disc_creds {
+                rows.push(("Credential storage remaining", remaining.to_string()));
+            }
+
+            // Enterprise Attestation
+            if let Some(&ep) = ctap_info.options.get("ep") {
+                rows.push((
+                    "Enterprise Attestation",
+                    if ep {
+                        "Enabled".to_string()
+                    } else {
+                        "Disabled".to_string()
+                    },
+                ));
+            }
+
+            print_table(rows);
+            if reset_blocked {
+                println!("Factory reset is blocked");
+            }
+
+            Ok(())
+        })
+    } else {
+        // FIDO2 not enabled — check if supported
+        let fido2_supported = dev_info
+            .supported_capabilities
+            .get(&transport)
+            .is_some_and(|caps: &Capability| caps.contains(Capability::FIDO2));
+        if fido2_supported {
+            print_table([
+                ("CTAP2", "Disabled".to_string()),
+                ("PIN", "Disabled".to_string()),
+            ]);
+        } else {
+            print_table([
+                ("CTAP2", "Not supported".to_string()),
+                ("PIN", "Not supported".to_string()),
+            ]);
+        }
+        if reset_blocked {
+            println!("Factory reset is blocked");
+        }
+        Ok(())
+    }
+}
+
+pub fn run_reset(dev: &mut dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
+    let info = dev.info();
+    let transport = dev.transport();
+
+    // Check if FIDO reset is blocked
+    if info.reset_blocked.contains(Capability::FIDO2) {
+        return Err(anyhow!(
+            "Cannot perform FIDO reset when PIV is configured, \
+             use 'ykman config reset' for full factory reset."
+                .to_string(),
+        ));
+    }
+
+    let fido2_enabled = info
+        .config
+        .enabled_capabilities
+        .get(&transport)
+        .is_some_and(|caps: &Capability| caps.contains(Capability::FIDO2));
+
+    if !fido2_enabled {
+        return Err(anyhow!("FIDO2 is not enabled on this YubiKey.".to_string(),));
+    }
+
+    if !force {
+        eprint!(
+            "WARNING! This will delete all FIDO credentials, including FIDO U2F \
+             credentials, and restore factory settings. Proceed? [y/N] "
+        );
+        let mut answer = String::new();
+        std::io::stdin()
+            .read_line(&mut answer)
+            .map_err(|e| anyhow!("Failed to read input: {e}"))?;
+        if !answer.trim().eq_ignore_ascii_case("y") {
+            return Err(anyhow!("Reset aborted by user."));
+        }
+
+        // Close and reinsert
+        dev.reinsert(
+            &|status| match (transport, status) {
+                (Transport::Usb, ReinsertStatus::Remove) => {
+                    eprintln!("Remove your YubiKey from the USB port.")
+                }
+                (Transport::Usb, ReinsertStatus::Reinsert) => {
+                    eprintln!("Re-insert your YubiKey now...")
+                }
+                (Transport::Nfc, ReinsertStatus::Remove) => {
+                    eprintln!("Remove your YubiKey from the NFC reader.")
+                }
+                (Transport::Nfc, ReinsertStatus::Reinsert) => {
+                    eprintln!("Place your YubiKey back on the NFC reader now...")
+                }
+            },
+            &|| false,
+        )
+        .map_err(|e| anyhow!("Reinsert failed: {e}"))?;
+    }
+
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        run_reset_inner(ctap2, ctap_info, transport)
+    })
+}
+
+fn run_reset_inner<C: Connection + 'static>(
+    mut ctap2: Ctap2Session<C>,
+    ctap_info: Info,
+    transport: Transport,
+) -> Result<()> {
+    // Check transport restrictions
+    let transports_for_reset = &ctap_info.transports_for_reset;
+    if !transports_for_reset.is_empty() {
+        let transport_name = match transport {
+            Transport::Usb => "usb",
+            Transport::Nfc => "nfc",
+        };
+        if !transports_for_reset.iter().any(|t| t == transport_name) {
+            return Err(anyhow!(
+                "Cannot perform FIDO reset over the current transport. \
+                 Allowed transports: {}",
+                transports_for_reset.join(", ")
+            ));
+        }
+    }
+
+    let touch_msg = if ctap_info.long_touch_for_reset {
+        "Press and hold the YubiKey button for 5 seconds to confirm."
+    } else {
+        "Touch the YubiKey to confirm."
+    };
+
+    // Set up Ctrl+C cancellation
+    cancel::clear();
+    let result = ctap2.reset(
+        Some(&mut |status| {
+            if status == KEEPALIVE_UPNEEDED {
+                eprintln!("{touch_msg}");
+            } else if status == KEEPALIVE_PROCESSING {
+                eprintln!("Reset in progress, DO NOT REMOVE YOUR YUBIKEY!");
+            }
+        }),
+        Some(&cancel::is_cancelled),
+    );
+
+    match result {
+        Ok(()) => {
+            println!("FIDO application has been reset.");
+            Ok(())
+        }
+        Err(ref e) => match get_ctap_status(e) {
+            Some(CtapStatus::UserActionTimeout) => Err(anyhow!(
+                "Reset failed. You need to touch your YubiKey to confirm the reset.".to_string(),
+            )),
+            Some(CtapStatus::NotAllowed | CtapStatus::PinAuthBlocked) => Err(anyhow!(
+                "Reset failed. Reset must be triggered within 5 seconds after the \
+                     YubiKey is inserted."
+                    .to_string(),
+            )),
+            Some(CtapStatus::KeepaliveCancel) => Err(anyhow!("Reset aborted by user.")),
+            _ => Err(anyhow!("FIDO reset failed: {e}")),
+        },
+    }
+}
+
+pub fn run_access_change_pin(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+    new_pin: Option<&str>,
+) -> Result<()> {
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        let pin_is_set = ctap_info.options.get("clientPin") == Some(&true);
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+
+        if pin_is_set {
+            // Change existing PIN
+            let current_pin = match pin {
+                Some(p) => Ctap2Pin::new(p).map_err(Error::msg)?,
+                None => {
+                    eprint!("Enter your current PIN: ");
+                    let pin = rpassword::read_password()
+                        .map_err(|e| anyhow!("Failed to read PIN: {e}"))?;
+                    Ctap2Pin::new(&pin).map_err(Error::msg)?
+                }
+            };
+            let new = match new_pin {
+                Some(p) => Ctap2Pin::new(p).map_err(Error::msg)?,
+                None => {
+                    eprint!("Enter your new PIN: ");
+                    let p1 = rpassword::read_password()
+                        .map_err(|e| anyhow!("Failed to read PIN: {e}"))?;
+                    eprint!("Confirm your new PIN: ");
+                    let p2 = rpassword::read_password()
+                        .map_err(|e| anyhow!("Failed to read PIN: {e}"))?;
+                    if p1 != p2 {
+                        return Err(anyhow!("PINs do not match."));
+                    }
+                    Ctap2Pin::new(&p1).map_err(Error::msg)?
+                }
+            };
+            client_pin
+                .change_pin(&current_pin, &new)
+                .map_err(|e| format_pin_error(&mut client_pin, "Failed to change PIN", &e))?;
+            println!("PIN has been changed.");
+        } else {
+            // Set new PIN
+            if pin.is_some() && new_pin.is_none() {
+                return Err(anyhow!(
+                    "There is no current PIN set. Use --new-pin to set one."
+                ));
+            }
+            let new = match new_pin.or(pin) {
+                Some(p) => Ctap2Pin::new(p).map_err(Error::msg)?,
+                None => {
+                    eprint!("Enter your new PIN: ");
+                    let p1 = rpassword::read_password()
+                        .map_err(|e| anyhow!("Failed to read PIN: {e}"))?;
+                    eprint!("Confirm your new PIN: ");
+                    let p2 = rpassword::read_password()
+                        .map_err(|e| anyhow!("Failed to read PIN: {e}"))?;
+                    if p1 != p2 {
+                        return Err(anyhow!("PINs do not match."));
+                    }
+                    Ctap2Pin::new(&p1).map_err(Error::msg)?
+                }
+            };
+            client_pin
+                .set_pin(&new)
+                .map_err(|e| format_pin_error(&mut client_pin, "Failed to set PIN", &e))?;
+            println!("PIN has been set.");
+        }
+
+        Ok(())
+    })
+}
+
+pub fn run_access_verify_pin(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+) -> Result<()> {
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        let pin = require_pin_from_info(&ctap_info, pin, "PIN verification")?;
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+
+        // Get a PIN token to verify the PIN
+        client_pin
+            .get_pin_token(&pin, None, None)
+            .map_err(|e| format_pin_error(&mut client_pin, "PIN verification failed", &e))?;
+
+        println!("PIN verified.");
+        Ok(())
+    })
+}
+
+pub fn run_access_force_change(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+) -> Result<()> {
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        if !ctap_info
+            .options
+            .get("setMinPINLength")
+            .copied()
+            .unwrap_or(false)
+        {
+            return Err(anyhow!(
+                "Force change PIN is not supported on this YubiKey.".to_string(),
+            ));
+        }
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Force change PIN")?;
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+        let (token, protocol) =
+            get_pin_token_inner(&mut client_pin, &pin_str, Permissions::AUTHENTICATOR_CFG)?;
+        let session = client_pin.into_session();
+
+        let mut config = Config::new(session, protocol, token)
+            .map_err(|(e, _)| anyhow!("Failed to create config: {e}"))?;
+        config
+            .set_min_pin_length(None, None, true)
+            .map_err(|e| anyhow!("Failed to set force change: {e}"))?;
+
+        println!("Force PIN change set.");
+        Ok(())
+    })
+}
+
+pub fn run_access_set_min_length(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    length: u32,
+    pin: Option<&str>,
+    rp_ids: &[String],
+) -> Result<()> {
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        {
+            if !ctap_info
+                .options
+                .get("setMinPINLength")
+                .copied()
+                .unwrap_or(false)
+            {
+                return Err(anyhow!(
+                    "Set minimum PIN length is not supported on this YubiKey.".to_string(),
+                ));
+            }
+
+            if (length as usize) < ctap_info.min_pin_length {
+                return Err(anyhow!(
+                    "Cannot set a minimum length shorter than {}.",
+                    ctap_info.min_pin_length
+                ));
+            }
+
+            let max_rpids = ctap_info.max_rpids_for_min_pin.unwrap_or(0);
+            if !rp_ids.is_empty() && rp_ids.len() > max_rpids {
+                return Err(anyhow!(
+                    "Authenticator supports up to {max_rpids} RP IDs ({} given).",
+                    rp_ids.len()
+                ));
+            }
+        }
+
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Set minimum PIN length")?;
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+        let (token, protocol) =
+            get_pin_token_inner(&mut client_pin, &pin_str, Permissions::AUTHENTICATOR_CFG)?;
+        let session = client_pin.into_session();
+
+        let mut config = Config::new(session, protocol, token)
+            .map_err(|(e, _)| anyhow!("Failed to create config: {e}"))?;
+        let rp_arg = if rp_ids.is_empty() {
+            None
+        } else {
+            Some(rp_ids)
+        };
+        config
+            .set_min_pin_length(Some(length), rp_arg, false)
+            .map_err(|e| anyhow!("Failed to set minimum PIN length: {e}"))?;
+
+        println!("Minimum PIN length set.");
+        Ok(())
+    })
+}
+
+pub fn run_credentials_list(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+    csv: bool,
+) -> Result<()> {
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        if !ctap_info
+            .options
+            .get("credMgmt")
+            .or(ctap_info.options.get("credentialMgmtPreview"))
+            .copied()
+            .unwrap_or(false)
+        {
+            return Err(anyhow!(
+                "Credential management is not supported on this YubiKey.".to_string(),
+            ));
+        }
+
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Credential Management")?;
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+        let (token, protocol) =
+            get_pin_token_inner(&mut client_pin, &pin_str, Permissions::CREDENTIAL_MGMT)?;
+        let session = client_pin.into_session();
+
+        let mut credman = CredentialManagement::new(session, protocol, token)
+            .map_err(|(e, _)| anyhow!("Failed to create credential manager: {e}"))?;
+
+        let rps = match credman.enumerate_rps() {
+            Ok(rps) => rps,
+            Err(Ctap2Error::StatusError(CtapStatus::NoCredentials)) => Vec::new(),
+            Err(e) => return Err(anyhow!("Failed to enumerate RPs: {e}")),
+        };
+
+        if rps.is_empty() {
+            println!("No discoverable credentials.");
+            return Ok(());
+        }
+
+        // Collect all credentials
+        let mut all_creds: Vec<(String, Vec<u8>, Vec<u8>, String, String)> = Vec::new();
+        for rp_info in &rps {
+            let rp_id = rp_info.rp.id.clone();
+            let rp_id_hash = rp_info.rp_id_hash.clone();
+
+            let creds = credman
+                .enumerate_creds(&rp_id_hash)
+                .map_err(|e| anyhow!("Failed to enumerate credentials: {e}"))?;
+
+            for cred in &creds {
+                let user_name = cred.user.name.clone().unwrap_or_default();
+                let display_name = cred.user.display_name.clone().unwrap_or_default();
+                let user_id = cred.user.id.clone();
+                let cred_id_bytes = cred.credential_id.id.clone();
+
+                all_creds.push((
+                    rp_id.clone(),
+                    cred_id_bytes,
+                    user_id,
+                    user_name,
+                    display_name,
+                ));
+            }
+        }
+
+        if csv {
+            println!("credential_id,rp_id,user_name,user_display_name,user_id");
+            for (rp_id, cred_id, user_id, user_name, display_name) in &all_creds {
+                println!(
+                    "{},{},{},{},{}",
+                    csv_escape(&hex::encode(cred_id)),
+                    csv_escape(rp_id),
+                    csv_escape(user_name),
+                    csv_escape(display_name),
+                    csv_escape(&hex::encode(user_id)),
+                );
+            }
+        } else {
+            // Determine shortest unique credential ID prefix
+            let mut ln = 4;
+            while all_creds
+                .iter()
+                .map(|(_, id, _, _, _)| {
+                    hex::encode(id)[..ln.min(hex::encode(id).len())].to_string()
+                })
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                < all_creds.len()
+            {
+                ln += 1;
+            }
+
+            // Collect rows for table formatting
+            let headings = ["Credential ID", "RP ID", "Username", "Display name"];
+            let rows: Vec<[String; 4]> = all_creds
+                .iter()
+                .map(|(rp_id, cred_id, _, user_name, display_name)| {
+                    let hex_id = hex::encode(cred_id);
+                    let short_id = format!("{}...", &hex_id[..ln.min(hex_id.len())]);
+                    [
+                        short_id,
+                        rp_id.clone(),
+                        user_name.clone(),
+                        display_name.clone(),
+                    ]
+                })
+                .collect();
+
+            // Calculate column widths
+            let mut widths = headings.map(|h| h.len());
+            for row in &rows {
+                for (i, cell) in row.iter().enumerate() {
+                    widths[i] = widths[i].max(cell.len());
+                }
+            }
+
+            // Print header
+            let header: Vec<String> = headings
+                .iter()
+                .enumerate()
+                .map(|(i, h)| format!("{:width$}", h, width = widths[i]))
+                .collect();
+            println!("{}", header.join("  "));
+
+            // Print rows
+            for row in &rows {
+                let formatted: Vec<String> = row
+                    .iter()
+                    .enumerate()
+                    .map(|(i, cell)| format!("{:width$}", cell, width = widths[i]))
+                    .collect();
+                println!("{}", formatted.join("  "));
+            }
+        }
+
+        Ok(())
+    })
+}
+
+pub fn run_credentials_delete(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    credential_id: &str,
+    pin: Option<&str>,
+    force: bool,
+) -> Result<()> {
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Credential Management")?;
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+        let (token, protocol) =
+            get_pin_token_inner(&mut client_pin, &pin_str, Permissions::CREDENTIAL_MGMT)?;
+        let session = client_pin.into_session();
+
+        let mut credman = CredentialManagement::new(session, protocol, token)
+            .map_err(|(e, _)| anyhow!("Failed to create credential manager: {e}"))?;
+        let search = credential_id.trim_end_matches('.').to_lowercase();
+
+        // Find matching credentials
+        let rps = credman
+            .enumerate_rps()
+            .map_err(|e| anyhow!("Failed to enumerate RPs: {e}"))?;
+
+        let mut hits = Vec::new();
+        for rp_info in &rps {
+            let rp_id = rp_info.rp.id.clone();
+
+            let creds = credman
+                .enumerate_creds(&rp_info.rp_id_hash)
+                .unwrap_or_default();
+            for cred in &creds {
+                let user_name = cred.user.name.clone().unwrap_or_default();
+                let display_name = cred.user.display_name.clone().unwrap_or_default();
+                let cred_id_hex = hex::encode(&cred.credential_id.id);
+
+                if cred_id_hex.starts_with(&search) {
+                    hits.push((
+                        rp_id.clone(),
+                        user_name,
+                        display_name,
+                        cred_id_hex,
+                        cred.credential_id.clone(),
+                    ));
+                }
+            }
+        }
+
+        match hits.len() {
+            0 => Err(anyhow!("No matches, nothing to be done.")),
+            1 => {
+                let (rp_id, user_name, display_name, cred_id_hex, cred_id) = &hits[0];
+                if !force {
+                    eprint!("Delete {rp_id} {user_name} {display_name} ({cred_id_hex})? [y/N] ");
+                    let mut answer = String::new();
+                    std::io::stdin()
+                        .read_line(&mut answer)
+                        .map_err(|e| anyhow!("Failed to read input: {e}"))?;
+                    if !answer.trim().eq_ignore_ascii_case("y") {
+                        return Err(anyhow!("Deletion aborted."));
+                    }
+                }
+                println!("Deleting credential, DO NOT REMOVE YOUR YUBIKEY!");
+                credman
+                    .delete_cred(cred_id)
+                    .map_err(|e| anyhow!("Failed to delete credential: {e}"))?;
+                println!("Credential deleted.");
+                Ok(())
+            }
+            _ => Err(anyhow!(
+                "Multiple matches, make the credential ID more specific.".to_string(),
+            )),
+        }
+    })
+}
+
+pub fn run_credentials_update(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    credential_id: &str,
+    name: Option<&str>,
+    display_name: Option<&str>,
+    pin: Option<&str>,
+) -> Result<()> {
+    if name.is_none() && display_name.is_none() {
+        return Err(anyhow!(
+            "At least one of --name or --display-name must be provided.".to_string(),
+        ));
+    }
+
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Credential Management")?;
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+        let (token, protocol) =
+            get_pin_token_inner(&mut client_pin, &pin_str, Permissions::CREDENTIAL_MGMT)?;
+        let session = client_pin.into_session();
+
+        let mut credman = CredentialManagement::new(session, protocol, token)
+            .map_err(|(e, _)| anyhow!("Failed to create credential manager: {e}"))?;
+
+        if !credman.is_update_supported() {
+            return Err(anyhow!(
+                "Credential update is not supported on this YubiKey.".to_string(),
+            ));
+        }
+
+        let search = credential_id.trim_end_matches('.').to_lowercase();
+
+        let rps = credman
+            .enumerate_rps()
+            .map_err(|e| anyhow!("Failed to enumerate RPs: {e}"))?;
+
+        let mut hits = Vec::new();
+        for rp_info in &rps {
+            let rp_id = rp_info.rp.id.clone();
+
+            let creds = credman
+                .enumerate_creds(&rp_info.rp_id_hash)
+                .unwrap_or_default();
+            for cred in &creds {
+                let user_name = cred.user.name.clone().unwrap_or_default();
+                let cred_id_hex = hex::encode(&cred.credential_id.id);
+
+                if cred_id_hex.starts_with(&search) {
+                    hits.push((
+                        rp_id.clone(),
+                        user_name,
+                        cred_id_hex,
+                        cred.credential_id.clone(),
+                        cred.user.clone(),
+                    ));
+                }
+            }
+        }
+
+        match hits.len() {
+            0 => Err(anyhow!("No matches, nothing to be done.")),
+            1 => {
+                let (rp_id, user_name, _cred_id_hex, cred_id, user) = &hits[0];
+
+                // Build updated user entity from existing, overriding specified fields
+                let mut updated_user = user.clone();
+                if let Some(n) = name {
+                    updated_user.name = Some(n.to_string());
+                }
+                if let Some(dn) = display_name {
+                    updated_user.display_name = Some(dn.to_string());
+                }
+
+                println!("Updating credential for {} (user: {})", rp_id, user_name);
+                credman
+                    .update_user_info(cred_id, &updated_user)
+                    .map_err(|e| anyhow!("Failed to update credential: {e}"))?;
+                println!("Credential updated.");
+                Ok(())
+            }
+            _ => Err(anyhow!(
+                "Multiple matches, make the credential ID more specific.".to_string(),
+            )),
+        }
+    })
+}
+
+pub fn run_fingerprints_list(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+) -> Result<()> {
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        if !ctap_info.options.contains_key("bioEnroll") {
+            return Err(anyhow!(
+                "Fingerprints are not supported on this YubiKey.".to_string(),
+            ));
+        }
+
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Biometrics")?;
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+        let (token, protocol) =
+            get_pin_token_inner(&mut client_pin, &pin_str, Permissions::BIO_ENROLL)?;
+        let session = client_pin.into_session();
+
+        let mut bio = BioEnrollment::new(session, protocol, token)
+            .map_err(|(e, _)| anyhow!("Failed to initialize bio enrollment: {e}"))?;
+
+        let enrollments = match bio.enumerate_enrollments() {
+            Ok(templates) => templates,
+            Err(Ctap2Error::StatusError(CtapStatus::InvalidOption)) => vec![],
+            Err(e) => return Err(anyhow!("Failed to enumerate fingerprints: {e}")),
+        };
+
+        if enrollments.is_empty() {
+            println!("No fingerprints registered.");
+        } else {
+            for template in &enrollments {
+                let id = hex::encode(&template.id);
+                if let Some(name) = &template.name {
+                    println!("ID: {id} ({name})");
+                } else {
+                    println!("ID: {id}");
+                }
+            }
+        }
+
+        Ok(())
+    })
+}
+
+pub fn run_fingerprints_add(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    name: &str,
+    pin: Option<&str>,
+) -> Result<()> {
+    if name.len() > 15 {
+        return Err(anyhow!(
+            "Fingerprint name must be a maximum of 15 characters.".to_string(),
+        ));
+    }
+
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Biometrics")?;
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+        let (token, protocol) =
+            get_pin_token_inner(&mut client_pin, &pin_str, Permissions::BIO_ENROLL)?;
+        let session = client_pin.into_session();
+
+        let mut bio = BioEnrollment::new(session, protocol, token)
+            .map_err(|(e, _)| anyhow!("Failed to initialize bio enrollment: {e}"))?;
+
+        // Set up Ctrl+C cancellation
+        cancel::clear();
+
+        // Begin enrollment
+        eprintln!("Place your finger against the sensor now...");
+        let resp = bio
+            .enroll_begin(None, Some(&mut |_| {}), Some(&cancel::is_cancelled))
+            .map_err(|e| map_enroll_error(e, "Enrollment failed"))?;
+
+        let template_id = resp.template_id.clone();
+        let remaining = resp.remaining_samples;
+
+        if remaining > 0 {
+            eprintln!("{remaining} more scans needed.");
+        }
+
+        // Continue capturing
+        let mut scans_remaining = remaining;
+        while scans_remaining > 0 {
+            eprintln!("Place your finger against the sensor now...");
+            match bio.enroll_capture_next(
+                &template_id,
+                None,
+                Some(&mut |_| {}),
+                Some(&cancel::is_cancelled),
+            ) {
+                Ok(resp) => {
+                    scans_remaining = resp.remaining_samples;
+                    if scans_remaining > 0 {
+                        eprintln!("{scans_remaining} more scans needed.");
+                    }
+                }
+                Err(e) => {
+                    if get_ctap_status(&e) == Some(CtapStatus::KeepaliveCancel) {
+                        return Err(anyhow!(
+                            "Fingerprint enrollment aborted by user.".to_string(),
+                        ));
+                    }
+                    if get_ctap_status(&e) == Some(CtapStatus::FpDatabaseFull) {
+                        return Err(anyhow!(
+                            "Fingerprint storage full. Remove some fingerprints first.".to_string(),
+                        ));
+                    }
+                    if get_ctap_status(&e) == Some(CtapStatus::UserActionTimeout) {
+                        return Err(anyhow!(
+                            "Failed to add fingerprint due to user inactivity.".to_string(),
+                        ));
+                    }
+                    eprintln!("Capture failed. Re-center your finger, and try again.");
+                }
+            }
+        }
+
+        eprintln!("Capture complete.");
+        bio.set_name(&template_id, name)
+            .map_err(|e| anyhow!("Failed to set fingerprint name: {e}"))?;
+        println!("Fingerprint registered.");
+        Ok(())
+    })
+}
+
+pub fn run_fingerprints_rename(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    template_id: &str,
+    name: &str,
+    pin: Option<&str>,
+) -> Result<()> {
+    if name.len() > 15 {
+        return Err(anyhow!(
+            "Fingerprint name must be a maximum of 15 characters.".to_string(),
+        ));
+    }
+
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Biometrics")?;
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+        let (token, protocol) =
+            get_pin_token_inner(&mut client_pin, &pin_str, Permissions::BIO_ENROLL)?;
+        let session = client_pin.into_session();
+
+        let mut bio = BioEnrollment::new(session, protocol, token)
+            .map_err(|(e, _)| anyhow!("Failed to initialize bio enrollment: {e}"))?;
+
+        let key = hex::decode(template_id).map_err(|e| anyhow!("Invalid template ID hex: {e}"))?;
+
+        bio.set_name(&key, name)
+            .map_err(|e| anyhow!("Failed to rename fingerprint: {e}"))?;
+        println!("Fingerprint renamed.");
+        Ok(())
+    })
+}
+
+pub fn run_fingerprints_delete(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    template_id: &str,
+    pin: Option<&str>,
+    force: bool,
+) -> Result<()> {
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        let pin_str = require_pin_from_info(&ctap_info, pin, "Biometrics")?;
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+        let (token, protocol) =
+            get_pin_token_inner(&mut client_pin, &pin_str, Permissions::BIO_ENROLL)?;
+        let session = client_pin.into_session();
+
+        let mut bio = BioEnrollment::new(session, protocol, token)
+            .map_err(|(e, _)| anyhow!("Failed to initialize bio enrollment: {e}"))?;
+
+        let key = hex::decode(template_id)
+            .map_err(|_| anyhow!("Invalid template ID hex: {template_id}"))?;
+
+        if !force {
+            eprint!("Delete fingerprint {template_id}? [y/N] ");
+            let mut answer = String::new();
+            std::io::stdin()
+                .read_line(&mut answer)
+                .map_err(|e| anyhow!("Failed to read input: {e}"))?;
+            if !answer.trim().eq_ignore_ascii_case("y") {
+                return Err(anyhow!("Deletion aborted."));
+            }
+        }
+
+        bio.remove_enrollment(&key)
+            .map_err(|e| anyhow!("Failed to delete fingerprint: {e}"))?;
+        println!("Fingerprint deleted.");
+        Ok(())
+    })
+}
+
+pub fn run_config_toggle_always_uv(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+) -> Result<()> {
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        let always_uv = match ctap_info.options.get("alwaysUv") {
+            Some(&v) => v,
+            None => {
+                return Err(anyhow!(
+                    "Always Require UV is not supported on this YubiKey.".to_string(),
+                ));
+            }
+        };
+
+        let info = dev.info();
+        if info.fips_capable.contains(Capability::FIDO2) {
+            return Err(anyhow!(
+                "Always Require UV cannot be disabled on this YubiKey.".to_string(),
+            ));
+        }
+
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+        let (token, protocol) = get_optional_pin_token_inner(
+            &mut client_pin,
+            &ctap_info,
+            pin,
+            Permissions::AUTHENTICATOR_CFG,
+        )?;
+        let session = client_pin.into_session();
+
+        let mut config = if let (Some(token), Some(protocol)) = (token, protocol) {
+            Config::new(session, protocol, token)
+        } else {
+            Config::new_unauthenticated(session)
+        }
+        .map_err(|(e, _)| anyhow!("Failed to create config: {e}"))?;
+        config
+            .toggle_always_uv()
+            .map_err(|e| anyhow!("Failed to toggle Always Require UV: {e}"))?;
+
+        println!(
+            "Always Require UV is {}.",
+            if always_uv { "off" } else { "on" }
+        );
+        Ok(())
+    })
+}
+
+pub fn run_config_enable_ep_attestation(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+) -> Result<()> {
+    with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
+        {
+            let options = &ctap_info.options;
+            if !options.contains_key("ep") {
+                return Err(anyhow!(
+                    "Enterprise Attestation is not supported on this YubiKey.".to_string(),
+                ));
+            }
+            if options.get("alwaysUv") == Some(&true) && options.get("clientPin") != Some(&true) {
+                return Err(anyhow!(
+                    "Enabling Enterprise Attestation requires a PIN when alwaysUv is enabled."
+                        .to_string(),
+                ));
+            }
+        }
+
+        let mut client_pin =
+            ClientPin::new(ctap2).map_err(|(e, _)| anyhow!("Failed to create ClientPin: {e}"))?;
+        let (token, protocol) = get_optional_pin_token_inner(
+            &mut client_pin,
+            &ctap_info,
+            pin,
+            Permissions::AUTHENTICATOR_CFG,
+        )?;
+        let session = client_pin.into_session();
+
+        let mut config = if let (Some(token), Some(protocol)) = (token, protocol) {
+            Config::new(session, protocol, token)
+        } else {
+            Config::new_unauthenticated(session)
+        }
+        .map_err(|(e, _)| anyhow!("Failed to create config: {e}"))?;
+        config
+            .enable_enterprise_attestation()
+            .map_err(|e| anyhow!("Failed to enable Enterprise Attestation: {e}"))?;
+
+        println!("Enterprise Attestation enabled.");
+        Ok(())
+    })
+}
+
+/// Escape a field for CSV output. Quotes the field if it contains commas,
+/// quotes, or newlines.
+fn csv_escape(field: &str) -> String {
+    if field.contains(',') || field.contains('"') || field.contains('\n') {
+        format!("\"{}\"", field.replace('"', "\"\""))
+    } else {
+        field.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::anyhow;
+    use yubikit::device::DeviceError;
+
+    use super::check_fido_fallback;
+
+    #[test]
+    fn failed_hid_with_no_ccid_reports_connection_failure() {
+        let error = check_fido_fallback(
+            DeviceError::NoDeviceFound,
+            true,
+            Err(anyhow!("FIDO over CCID is not supported by this YubiKey.")),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Failed to connect to the YubiKey: No YubiKey device found"
+        );
+        let disabled_ccid = check_fido_fallback(
+            DeviceError::NoDeviceFound,
+            true,
+            Err(anyhow!("FIDO over CCID is not enabled.")),
+        )
+        .unwrap_err();
+        assert_eq!(
+            disabled_ccid.to_string(),
+            "Failed to connect to the YubiKey: No YubiKey device found"
+        );
+    }
+
+    #[test]
+    fn ccid_only_device_keeps_capability_error() {
+        let error = check_fido_fallback(
+            DeviceError::NoDeviceFound,
+            false,
+            Err(anyhow!("FIDO over CCID is not supported by this YubiKey.")),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "FIDO over CCID is not supported by this YubiKey."
+        );
+    }
+
+    #[test]
+    fn enabled_ccid_fallback_and_busy_device() {
+        assert!(check_fido_fallback(DeviceError::NoDeviceFound, true, Ok(())).is_ok());
+        let error = check_fido_fallback(DeviceError::InUse, true, Ok(())).unwrap_err();
+        assert_eq!(error.to_string(), "YubiKey in use by another client");
+    }
+}

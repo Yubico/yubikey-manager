@@ -1,10 +1,8 @@
 import os
 
 import pytest
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
 from yubikit.core import TRANSPORT
 from yubikit.core.smartcard import ApduError
 from yubikit.hsmauth import (
@@ -31,6 +29,7 @@ def session(ccid_connection, transport, info, scp_params):
         hsmauth = HsmAuthSession(ccid_connection)
     hsmauth.reset()
     yield hsmauth
+    hsmauth.close()
 
 
 @pytest.fixture
@@ -100,6 +99,45 @@ def generate_key_asymmetric(
 
 
 class TestCredentialManagement:
+    @condition.min_version(5, 8)
+    @pytest.mark.parametrize("password", ["a" * 16, "\u00e9" * 8])
+    def test_credential_password_byte_limits(self, session, management_key, password):
+        credential = import_key_derived(session, management_key, password)
+        try:
+            context = bytes(16)
+            initial = session.list_credentials()
+            with pytest.raises(ValueError, match="at most 16 UTF-8 bytes"):
+                import_key_symmetric(
+                    session, management_key, bytes(16), bytes(16), password + "a"
+                )
+            with pytest.raises(ValueError, match="at most 16 UTF-8 bytes"):
+                session.calculate_session_keys_symmetric(
+                    credential.label, context, password + "a"
+                )
+            with pytest.raises(TypeError, match="bytes or str"):
+                session.calculate_session_keys_symmetric(credential.label, context, 16)
+            with pytest.raises(ValueError, match="at most 16 UTF-8 bytes"):
+                session.change_credential_password(
+                    credential.label, password + "a", "new"
+                )
+            with pytest.raises(ValueError, match="at most 16 UTF-8 bytes"):
+                session.change_credential_password(
+                    credential.label, password, password + "a"
+                )
+            remaining = session.list_credentials()
+            assert len(remaining) == len(initial) == 1
+            assert remaining[0].counter == initial[0].counter == INITIAL_RETRY_COUNTER
+            session.calculate_session_keys_symmetric(
+                credential.label, context, password
+            )
+            new_password = "12342345"
+            session.change_credential_password(credential.label, password, new_password)
+            session.calculate_session_keys_symmetric(
+                credential.label, context, new_password
+            )
+        finally:
+            session.delete_credential(management_key, credential.label)
+
     def check_credential_in_list(self, session, credential: Credential):
         credentials = session.list_credentials()
 
@@ -162,7 +200,7 @@ class TestCredentialManagement:
         self, session, management_key
     ):
         private_key = ec.generate_private_key(
-            ec.SECP224R1(), backend=default_backend()
+            ec.SECP224R1()
         )  # curve secp224r1 is not supported
 
         with pytest.raises(ValueError):
@@ -170,7 +208,7 @@ class TestCredentialManagement:
 
     @condition.min_version(5, 6)
     def test_import_credential_asymmetric_works(self, session, management_key):
-        private_key = ec.generate_private_key(ec.SECP256R1(), backend=default_backend())
+        private_key = ec.generate_private_key(ec.SECP256R1())
         credential = import_key_asymmetric(session, management_key, private_key)
 
         public_key = private_key.public_key()
@@ -225,7 +263,7 @@ class TestCredentialManagement:
     @condition.min_version(5, 8)
     def test_change_credential_password(self, session, management_key):
         credential_password = "987654321"
-        new_credential_password = "123456789"
+        new_credential_password = "12342345"
         credential = import_key_derived(session, management_key, credential_password)
 
         # Try to change credential password using wrong old password
@@ -248,7 +286,7 @@ class TestCredentialManagement:
 
     @condition.min_version(5, 8)
     def test_change_credential_password_admin(self, session, management_key):
-        new_credential_password = "123456789"
+        new_credential_password = "12342345"
         credential = import_key_derived(session, management_key)
 
         # Try to change credential password using wrong management key

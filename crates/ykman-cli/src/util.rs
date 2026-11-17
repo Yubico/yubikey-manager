@@ -1,0 +1,529 @@
+use anyhow::{Error, Result, anyhow};
+use std::fmt;
+use std::io::{self, Read, Write};
+
+use yubikit::device::{DeviceError, YubiKeyDevice};
+use yubikit::management::{Capability, DeviceInfo};
+use yubikit::oath::parse_b32_key;
+use yubikit::otp::modhex_decode;
+use yubikit::smartcard::{ScpKeyParams, SmartCardConnection, SmartCardError, Sw};
+
+use crate::scp::{self, ScpParams};
+
+pub fn require_fips_approved(
+    info: &DeviceInfo,
+    capability: Capability,
+    operation: &str,
+) -> Result<()> {
+    if info.fips_capable.contains(capability) && !info.fips_approved.contains(capability) {
+        return Err(anyhow!(
+            "YubiKey FIPS must be in FIPS approved mode {operation}."
+        ));
+    }
+    Ok(())
+}
+
+/// Format a failed CCID connection in a way that points at the selected application.
+pub fn format_smartcard_connection_error(app: &str, e: DeviceError) -> Error {
+    match e {
+        DeviceError::NoDeviceFound | DeviceError::CcidUnavailable => anyhow!(
+            "Failed to connect to {app} over CCID: smart-card reader unavailable \
+             (possibly in use by another process)."
+        ),
+        DeviceError::InUse => anyhow!("YubiKey in use by another client"),
+        DeviceError::NotYubiKey => anyhow!("Connected smart card is not a YubiKey."),
+        DeviceError::Cancelled => anyhow!("Operation cancelled."),
+        DeviceError::WrongDevice => {
+            anyhow!("Inserted YubiKey does not match the one removed.")
+        }
+        DeviceError::SmartCard(SmartCardError::ApplicationNotAvailable) => {
+            anyhow!("{app} is not available on this YubiKey.")
+        }
+        DeviceError::SmartCard(SmartCardError::Apdu { sw, .. }) => {
+            anyhow!("{app} is not available on this YubiKey: {}", sw_message(sw))
+        }
+        DeviceError::Transport(e) => anyhow!(
+            "Failed to connect to {app} over CCID: {e}. Make sure the CCID interface is enabled and the YubiKey is accessible."
+        ),
+        other => anyhow!("Failed to connect to {app} over CCID: {other}"),
+    }
+}
+
+/// Format a failed application session open.
+pub fn format_session_error(app: &str, e: impl fmt::Display) -> Error {
+    anyhow!("Failed to open {app} session: {e}")
+}
+
+fn sw_message(sw: u16) -> String {
+    match Sw::from_u16(sw) {
+        Some(Sw::FileNotFound | Sw::AppletSelectFailed) => {
+            format!("application not found (SW=0x{sw:04X})")
+        }
+        Some(Sw::SecurityConditionNotSatisfied) => {
+            format!("security condition not satisfied (SW=0x{sw:04X})")
+        }
+        Some(Sw::ConditionsNotSatisfied) => {
+            format!("conditions of use not satisfied (SW=0x{sw:04X})")
+        }
+        Some(Sw::CommandNotAllowed) => format!("command not allowed (SW=0x{sw:04X})"),
+        Some(Sw::FunctionNotSupported) => format!("function not supported (SW=0x{sw:04X})"),
+        _ => format!("APDU error SW=0x{sw:04X}"),
+    }
+}
+
+/// Prompt the user for visible text input.
+pub fn prompt(prompt: &str) -> Result<String> {
+    eprint!("{prompt}: ");
+    io::stderr().flush().ok();
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|e| anyhow!("Failed to read input: {e}"))?;
+    Ok(input.trim().to_string())
+}
+
+/// Prompt for a secret value with hidden input.
+pub fn prompt_secret(prompt: &str) -> Result<String> {
+    rpassword::prompt_password(format!("{prompt}: "))
+        .map_err(|e| anyhow!("Failed to read input: {e}"))
+}
+
+/// Prompt for a secret value on the terminal, echoing a `*` for each
+/// character typed. Reads from the controlling terminal like [`prompt_secret`].
+pub fn prompt_secret_masked(prompt: &str) -> Result<String> {
+    let config = rpassword::ConfigBuilder::new()
+        .password_feedback_mask('*')
+        .build();
+    rpassword::prompt_password_with_config(format!("{prompt}: "), config)
+        .map_err(|e| anyhow!("Failed to read input: {e}"))
+}
+
+/// Prompt for a new secret value with confirmation. Re-prompts on mismatch.
+pub fn prompt_new_secret(prompt: &str) -> Result<String> {
+    loop {
+        let first = prompt_secret(prompt)?;
+        let confirm = prompt_secret(&format!("Confirm {}", prompt.to_ascii_lowercase()))?;
+        if first == confirm {
+            return Ok(first);
+        }
+        eprintln!("Values do not match, try again.");
+    }
+}
+
+/// Encoding of a binary value entered on the command line.
+#[derive(Clone, Copy)]
+pub enum ByteEncoding {
+    Hex,
+    Modhex,
+    Base32,
+}
+
+impl ByteEncoding {
+    fn label(self) -> &'static str {
+        match self {
+            ByteEncoding::Hex => "hex",
+            ByteEncoding::Modhex => "modhex",
+            ByteEncoding::Base32 => "base32",
+        }
+    }
+
+    fn decode(self, input: &str) -> Result<Vec<u8>> {
+        let input = input.trim();
+        match self {
+            ByteEncoding::Hex => {
+                hex::decode(input).map_err(|_| anyhow!("Value must be hex-encoded."))
+            }
+            ByteEncoding::Modhex => {
+                modhex_decode(input).map_err(|_| anyhow!("Value must be modhex-encoded."))
+            }
+            ByteEncoding::Base32 => {
+                parse_b32_key(input).map_err(|_| anyhow!("Value must be Base32-encoded."))
+            }
+        }
+    }
+}
+
+/// Expected length, in bytes, of a binary value.
+#[derive(Clone, Copy)]
+pub enum ByteLen {
+    /// Any length is accepted.
+    Any,
+    /// Exactly `n` bytes.
+    Exact(usize),
+    /// Between `min` and `max` bytes, inclusive.
+    Range(usize, usize),
+}
+
+impl ByteLen {
+    fn describe(&self) -> Option<String> {
+        match self {
+            ByteLen::Any => None,
+            ByteLen::Exact(n) => Some(format!("{n} bytes")),
+            ByteLen::Range(min, max) => Some(format!("{min}-{max} bytes")),
+        }
+    }
+
+    fn accepts(&self, len: usize) -> bool {
+        match self {
+            ByteLen::Any => true,
+            ByteLen::Exact(n) => len == *n,
+            ByteLen::Range(min, max) => (*min..=*max).contains(&len),
+        }
+    }
+}
+
+/// Describes an expected binary value for prompts, help text and parsing.
+#[derive(Clone, Copy)]
+pub struct ByteFormat {
+    encoding: ByteEncoding,
+    len: ByteLen,
+    masked: bool,
+}
+
+impl ByteFormat {
+    pub fn hex(len: ByteLen) -> Self {
+        Self {
+            encoding: ByteEncoding::Hex,
+            len,
+            masked: false,
+        }
+    }
+
+    pub fn modhex(len: ByteLen) -> Self {
+        Self {
+            encoding: ByteEncoding::Modhex,
+            len,
+            masked: false,
+        }
+    }
+
+    pub fn base32(len: ByteLen) -> Self {
+        Self {
+            encoding: ByteEncoding::Base32,
+            len,
+            masked: false,
+        }
+    }
+
+    /// Mask the input when prompting (for secret values).
+    pub fn masked(mut self) -> Self {
+        self.masked = true;
+        self
+    }
+
+    /// A human-readable description, e.g. "modhex, 0-16 bytes" or "hex, 6 bytes".
+    pub fn describe(&self) -> String {
+        let label = self.encoding.label();
+        match self.len.describe() {
+            Some(len) => format!("{label}, {len}"),
+            None => label.to_string(),
+        }
+    }
+
+    /// Decode and length-validate a user-entered value.
+    pub fn parse(&self, input: &str) -> Result<Vec<u8>> {
+        let bytes = self.encoding.decode(input)?;
+        if !self.len.accepts(bytes.len()) {
+            return Err(anyhow!(
+                "Expected {} but got {} bytes.",
+                self.describe(),
+                bytes.len()
+            ));
+        }
+        Ok(bytes)
+    }
+}
+
+/// Prompt for a hex/modhex/base32 value, showing its expected format, and
+/// return the decoded bytes. Errors if the input is not valid for the format.
+pub fn prompt_bytes(label: &str, spec: &ByteFormat) -> Result<Vec<u8>> {
+    let prompt_line = format!("{label} ({})", spec.describe());
+    let input = if spec.masked {
+        prompt_secret_masked(&prompt_line)?
+    } else {
+        prompt(&prompt_line)?
+    };
+    spec.parse(&input)
+}
+
+/// Read from a file, or from stdin if path is "-".
+pub fn read_file_or_stdin(path: &str) -> Result<Vec<u8>> {
+    if path == "-" {
+        let mut buf = Vec::new();
+        io::stdin()
+            .read_to_end(&mut buf)
+            .map_err(|e| anyhow!("Failed to read from stdin: {e}"))?;
+        Ok(buf)
+    } else {
+        std::fs::read(path).map_err(|e| anyhow!("Failed to read file '{path}': {e}"))
+    }
+}
+
+/// Parse a one-byte hexadecimal value, accepting an optional 0x prefix.
+pub fn parse_hex_u8(s: &str) -> Result<u8> {
+    u8::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16)
+        .map_err(|_| anyhow!("Invalid hex value: {s}"))
+}
+
+/// Encode bytes as Base32 (RFC 4648, no padding).
+pub fn b32_encode(data: &[u8]) -> String {
+    base32::encode(base32::Alphabet::Rfc4648 { padding: false }, data)
+}
+
+/// Prompt the user with a yes/no confirmation.
+pub fn confirm(msg: &str) -> bool {
+    eprint!("{msg} [y/N] ");
+    io::stderr().flush().ok();
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).ok();
+    matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+pub(crate) trait TableRow {
+    fn into_table_row(self) -> Vec<String>;
+}
+
+impl<L, V> TableRow for (L, V)
+where
+    L: Into<String>,
+    V: Into<String>,
+{
+    fn into_table_row(self) -> Vec<String> {
+        vec![format!("{}:", self.0.into()), self.1.into()]
+    }
+}
+
+impl<T, const N: usize> TableRow for [T; N]
+where
+    T: Into<String>,
+{
+    fn into_table_row(self) -> Vec<String> {
+        self.into_iter().map(Into::into).collect()
+    }
+}
+
+impl<T> TableRow for Vec<T>
+where
+    T: Into<String>,
+{
+    fn into_table_row(self) -> Vec<String> {
+        self.into_iter().map(Into::into).collect()
+    }
+}
+
+/// Print rows with columns aligned to the widest cell in each column.
+pub(crate) fn print_table<R>(rows: impl IntoIterator<Item = R>)
+where
+    R: TableRow,
+{
+    print!("{}", Table::new(rows).render(0, false));
+}
+
+pub(crate) struct Table {
+    rows: Vec<Vec<String>>,
+    widths: Vec<usize>,
+}
+
+impl Table {
+    pub(crate) fn new<R>(rows: impl IntoIterator<Item = R>) -> Self
+    where
+        R: TableRow,
+    {
+        let rows: Vec<Vec<String>> = rows.into_iter().map(TableRow::into_table_row).collect();
+        let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+        let mut widths = vec![0; columns];
+        for row in &rows {
+            for (i, cell) in row.iter().enumerate() {
+                widths[i] = widths[i].max(cell.len());
+            }
+        }
+        Self { rows, widths }
+    }
+
+    pub(crate) fn label_width(&self) -> usize {
+        self.widths.first().copied().unwrap_or(0)
+    }
+
+    /// Share a minimum first-column width without widening subsequent columns.
+    pub(crate) fn render(&self, min_label_width: usize, bold_header: bool) -> String {
+        let mut widths = self.widths.clone();
+        if let Some(width) = widths.first_mut() {
+            *width = (*width).max(min_label_width);
+        }
+        let mut output = String::new();
+        for (index, row) in self.rows.iter().enumerate() {
+            let line = format_table_row(row, &widths);
+            if bold_header && index == 0 {
+                output.push_str(&crate::color::bold(&line));
+            } else {
+                output.push_str(&line);
+            }
+            output.push('\n');
+        }
+        output
+    }
+}
+
+fn format_table_row(row: &[String], widths: &[usize]) -> String {
+    let mut line = String::new();
+    for (i, width) in widths.iter().enumerate() {
+        if i > 0 {
+            line.push(' ');
+        }
+        let cell = row.get(i).map(String::as_str).unwrap_or("");
+        line.push_str(&format!("{cell:<width$}"));
+    }
+    line
+}
+
+/// Write to a file, or to stdout if path is "-".
+pub fn write_file_or_stdout(path: &str, data: &[u8]) -> Result<()> {
+    if path == "-" {
+        io::stdout()
+            .write_all(data)
+            .map_err(|e| anyhow!("Failed to write to stdout: {e}"))?;
+        io::stdout()
+            .flush()
+            .map_err(|e| anyhow!("Failed to flush stdout: {e}"))?;
+        Ok(())
+    } else {
+        std::fs::write(path, data).map_err(|e| anyhow!("Failed to write file '{path}': {e}"))
+    }
+}
+
+/// Open a smartcard session with optional SCP, handling connection and error mapping.
+///
+/// Resolves SCP configuration, opens the smartcard connection, and creates a session
+/// using the provided constructors. This eliminates the repetitive open-session boilerplate
+/// across application modules.
+pub fn open_smartcard_session<S, E>(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    capability: Capability,
+    app_name: &str,
+    new_session: impl FnOnce(
+        Box<dyn SmartCardConnection + Send>,
+    ) -> Result<S, (E, Box<dyn SmartCardConnection + Send>)>,
+    new_session_with_scp: impl FnOnce(
+        Box<dyn SmartCardConnection + Send>,
+        &ScpKeyParams,
+    ) -> Result<S, (E, Box<dyn SmartCardConnection + Send>)>,
+) -> Result<S>
+where
+    E: fmt::Display,
+{
+    let scp_config = scp::resolve_scp_for_app(dev, scp_params, capability, app_name)?;
+    let conn = dev
+        .open_smartcard()
+        .map_err(|e| format_smartcard_connection_error(app_name, e))?;
+    match scp_config {
+        None => new_session(conn).map_err(|(e, _)| format_session_error(app_name, e)),
+        Some(params) => {
+            new_session_with_scp(conn, &params).map_err(|(e, _)| format_session_error(app_name, e))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fips_approval_is_scoped_to_the_capable_application() {
+        let mut info = DeviceInfo::parse(&[0], yubikit::core::Version(5, 7, 4)).unwrap();
+        for capability in [Capability::OATH, Capability::PIV, Capability::HSMAUTH] {
+            info.fips_capable = Capability(0);
+            info.fips_approved = Capability(0);
+            require_fips_approved(&info, capability, "prior to testing").unwrap();
+            info.fips_capable = capability;
+            info.fips_approved = Capability::FIDO2;
+            assert_eq!(
+                require_fips_approved(&info, capability, "prior to testing")
+                    .unwrap_err()
+                    .to_string(),
+                "YubiKey FIPS must be in FIPS approved mode prior to testing."
+            );
+            info.fips_approved = capability;
+            require_fips_approved(&info, capability, "prior to testing").unwrap();
+        }
+    }
+
+    #[test]
+    fn tables_share_label_width_without_widening_other_columns() {
+        let table = Table::new([
+            vec!["Name", "State", "Channel"],
+            vec!["Long label", "Ready", "USB"],
+            vec!["Unspecified"],
+        ]);
+        let normal = table.render(0, false);
+        let shared_width = Table::new([("A label in another section", "value")]).label_width();
+        let shared = table.render(shared_width, false);
+        let normal_header = normal.lines().next().unwrap();
+        let shared_header = shared.lines().next().unwrap();
+        let shared_row = shared.lines().nth(1).unwrap();
+        assert_eq!(
+            shared_header.find("State").unwrap() - normal_header.find("State").unwrap(),
+            shared_width - table.label_width(),
+        );
+        assert_eq!(shared_header.find("State"), shared_row.find("Ready"));
+        assert_eq!(shared_header.find("Channel"), shared_row.find("USB"));
+        assert_eq!(
+            shared_header.find("Channel").unwrap() - shared_header.find("State").unwrap(),
+            normal_header.find("Channel").unwrap() - normal_header.find("State").unwrap(),
+        );
+        assert_eq!(shared.lines().nth(2).unwrap().trim(), "Unspecified");
+        assert_eq!(table.render(table.label_width() - 1, false), normal);
+        assert!(
+            Table::new(Vec::<Vec<String>>::new())
+                .render(shared_width, false)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn missing_reader_does_not_claim_the_yubikey_is_absent() {
+        for error in [DeviceError::CcidUnavailable, DeviceError::NoDeviceFound] {
+            let message = format_smartcard_connection_error("PIV", error).to_string();
+            assert!(message.contains("smart-card reader unavailable"));
+            assert!(message.contains("another process"));
+            assert!(!message.contains("scdaemon"));
+            assert!(!message.contains("No YubiKey detected"));
+        }
+    }
+
+    #[test]
+    fn describe_formats() {
+        assert_eq!(
+            ByteFormat::modhex(ByteLen::Range(0, 16)).describe(),
+            "modhex, 0-16 bytes"
+        );
+        assert_eq!(
+            ByteFormat::hex(ByteLen::Exact(6)).describe(),
+            "hex, 6 bytes"
+        );
+        assert_eq!(ByteFormat::hex(ByteLen::Any).describe(), "hex");
+        assert_eq!(ByteFormat::base32(ByteLen::Any).describe(), "base32");
+        assert_eq!(
+            ByteFormat::hex(ByteLen::Exact(16)).masked().describe(),
+            "hex, 16 bytes"
+        );
+    }
+
+    #[test]
+    fn parse_validates_length_and_encoding() {
+        let spec = ByteFormat::hex(ByteLen::Exact(6));
+        assert_eq!(spec.parse("aabbccddeeff").unwrap().len(), 6);
+        assert!(spec.parse("aabbcc").is_err()); // too short
+        assert!(spec.parse("zz").is_err()); // not hex
+
+        let modhex = ByteFormat::modhex(ByteLen::Range(0, 16));
+        assert!(modhex.parse("").unwrap().is_empty()); // empty allowed
+        assert!(modhex.parse("vvincredible").is_ok());
+
+        let any = ByteFormat::hex(ByteLen::Any);
+        assert_eq!(any.parse("00112233").unwrap().len(), 4);
+
+        let b32 = ByteFormat::base32(ByteLen::Any);
+        assert!(b32.parse("gezdgnbvgy3tqoi").is_ok());
+    }
+}

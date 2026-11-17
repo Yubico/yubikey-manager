@@ -1,0 +1,982 @@
+//! RPC proxy implementations of `FidoConnection`, `SmartCardConnection`, and `Device`.
+//!
+//! These allow the client side to use the standard yubikit traits over an RPC
+//! connection, transparently proxying raw commands to the server subprocess.
+
+use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
+
+use hex::{FromHex, ToHex};
+use serde_json::{Value, json};
+
+use yubikit::__internal::SecretValue;
+use yubikit::core::{Connection, Transport};
+use yubikit::device::{DeviceError, ReinsertStatus, YubiKeyDevice};
+use yubikit::fido::FidoConnection;
+use yubikit::fido::{CtapHidCapability, FidoError};
+use yubikit::management::{Capability, DeviceInfo, UsbInterface};
+use yubikit::otp::{OtpConnection, OtpError};
+use yubikit::smartcard::{SmartCardConnection, SmartCardError};
+
+use super::client::{RpcCallError, RpcClient};
+
+type SharedClient = Arc<Mutex<RpcClient>>;
+
+struct RpcConnectionLease {
+    client: SharedClient,
+    target: Vec<String>,
+}
+
+impl Drop for RpcConnectionLease {
+    fn drop(&mut self) {
+        match self.client.lock() {
+            Ok(mut client) => {
+                if let Err(error) = client.close_connection(&self.target) {
+                    log::warn!("Failed to close RPC connection: {error}");
+                }
+            }
+            Err(_) => log::error!("RPC client lock poisoned while closing connection"),
+        }
+    }
+}
+
+fn closed_connection_error() -> RpcTransportError {
+    RpcTransportError("RPC connection is closed".into())
+}
+
+fn device_open_error(error: RpcCallError) -> DeviceError {
+    match error {
+        RpcCallError::Rpc(ref rpc) if rpc.status == "device-busy" => DeviceError::InUse,
+        RpcCallError::Rpc(ref rpc)
+            if rpc.status == "connection-error"
+                && rpc.body.get("reason").and_then(Value::as_str) == Some("ccid-unavailable") =>
+        {
+            DeviceError::CcidUnavailable
+        }
+        other => DeviceError::Transport(Box::new(other)),
+    }
+}
+
+fn smartcard_device_error(error: RpcCallError) -> DeviceError {
+    match error {
+        RpcCallError::Rpc(ref rpc) if rpc.status == "device-busy" => DeviceError::InUse,
+        RpcCallError::Rpc(ref rpc) if rpc.status == "cancelled" => DeviceError::Cancelled,
+        other => DeviceError::SmartCard(SmartCardError::Transport(Box::new(other))),
+    }
+}
+
+/// Build a full target path from a device prefix and a sub-path.
+fn target(prefix: &[String], path: &[&str]) -> Vec<String> {
+    prefix
+        .iter()
+        .cloned()
+        .chain(path.iter().map(|s| s.to_string()))
+        .collect()
+}
+
+fn required_field<'a>(data: &'a Value, key: &str) -> Result<&'a Value, RpcCallError> {
+    data.get(key)
+        .ok_or_else(|| RpcCallError::Transport(format!("Malformed RPC response: missing {key}")))
+}
+
+fn required_str<'a>(data: &'a Value, key: &str) -> Result<&'a str, RpcCallError> {
+    required_field(data, key)?.as_str().ok_or_else(|| {
+        RpcCallError::Transport(format!("Malformed RPC response: {key} is not a string"))
+    })
+}
+
+fn optional_str(data: &Value, key: &str) -> Result<Option<String>, RpcCallError> {
+    match data.get(key) {
+        Some(Value::Null) | None => Ok(None),
+        Some(v) => v.as_str().map(|s| Some(s.to_string())).ok_or_else(|| {
+            RpcCallError::Transport(format!("Malformed RPC response: {key} is not a string"))
+        }),
+    }
+}
+
+fn required_u64(data: &Value, key: &str) -> Result<u64, RpcCallError> {
+    required_field(data, key)?.as_u64().ok_or_else(|| {
+        RpcCallError::Transport(format!("Malformed RPC response: {key} is not an integer"))
+    })
+}
+
+fn optional_u64(data: &Value, key: &str) -> Result<Option<u64>, RpcCallError> {
+    match data.get(key) {
+        Some(Value::Null) | None => Ok(None),
+        Some(v) => v.as_u64().map(Some).ok_or_else(|| {
+            RpcCallError::Transport(format!("Malformed RPC response: {key} is not an integer"))
+        }),
+    }
+}
+
+fn optional_bool(data: &Value, key: &str) -> Result<Option<bool>, RpcCallError> {
+    match data.get(key) {
+        Some(Value::Null) | None => Ok(None),
+        Some(v) => v.as_bool().map(Some).ok_or_else(|| {
+            RpcCallError::Transport(format!("Malformed RPC response: {key} is not a boolean"))
+        }),
+    }
+}
+
+fn as_u8(value: u64, key: &str) -> Result<u8, RpcCallError> {
+    value
+        .try_into()
+        .map_err(|_| RpcCallError::Transport(format!("Malformed RPC response: {key} exceeds u8")))
+}
+
+fn as_u16(value: u64, key: &str) -> Result<u16, RpcCallError> {
+    value
+        .try_into()
+        .map_err(|_| RpcCallError::Transport(format!("Malformed RPC response: {key} exceeds u16")))
+}
+
+fn parse_version_array(v: &Value, key: &str) -> Result<yubikit::core::Version, RpcCallError> {
+    let arr = v.as_array().ok_or_else(|| {
+        RpcCallError::Transport(format!("Malformed RPC response: {key} is not an array"))
+    })?;
+    if arr.len() != 3 {
+        return Err(RpcCallError::Transport(format!(
+            "Malformed RPC response: {key} must contain 3 elements"
+        )));
+    }
+    Ok(yubikit::core::Version(
+        as_u8(
+            arr[0].as_u64().ok_or_else(|| {
+                RpcCallError::Transport(format!(
+                    "Malformed RPC response: {key}[0] is not an integer"
+                ))
+            })?,
+            key,
+        )?,
+        as_u8(
+            arr[1].as_u64().ok_or_else(|| {
+                RpcCallError::Transport(format!(
+                    "Malformed RPC response: {key}[1] is not an integer"
+                ))
+            })?,
+            key,
+        )?,
+        as_u8(
+            arr[2].as_u64().ok_or_else(|| {
+                RpcCallError::Transport(format!(
+                    "Malformed RPC response: {key}[2] is not an integer"
+                ))
+            })?,
+            key,
+        )?,
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// RpcSmartCardConnection
+// ---------------------------------------------------------------------------
+
+/// A `SmartCardConnection` backed by the `send_and_receive` RPC action on a
+/// ccid connection node.
+pub struct RpcSmartCardConnection {
+    client: SharedClient,
+    transport: Transport,
+    device_prefix: Vec<String>,
+    lease: Option<RpcConnectionLease>,
+}
+
+impl Connection for RpcSmartCardConnection {
+    type Error = SmartCardError;
+    fn close(&mut self) {
+        log::debug!("Closing RPC SmartCard connection");
+        self.lease.take();
+    }
+}
+
+impl SmartCardConnection for RpcSmartCardConnection {
+    fn send_and_receive(&mut self, apdu: &[u8]) -> Result<(Vec<u8>, u16), SmartCardError> {
+        if self.lease.is_none() {
+            return Err(SmartCardError::Transport(Box::new(
+                closed_connection_error(),
+            )));
+        }
+        let apdu_hex = SecretValue::new(apdu.encode_hex::<String>());
+        yubikit::log_traffic!(">> {}", apdu_hex.expose_secret());
+        let result = self
+            .client
+            .lock()
+            .map_err(|_| {
+                SmartCardError::Transport(Box::new(RpcTransportError(
+                    "RPC client lock poisoned".into(),
+                )))
+            })?
+            .call(
+                "send_and_receive",
+                &target(&self.device_prefix, &["ccid"]),
+                json!({"apdu": apdu_hex.expose_secret()}),
+                None,
+                false,
+            )
+            .map_err(|e| SmartCardError::Transport(Box::new(RpcTransportError(format!("{e}")))))?;
+
+        let data_hex = SecretValue::new(
+            required_str(&result.body, "data")
+                .map_err(|e| SmartCardError::InvalidData(e.to_string()))?
+                .to_string(),
+        );
+        let data = Vec::from_hex(data_hex.expose_secret())
+            .map_err(|e| SmartCardError::InvalidData(format!("bad hex from RPC: {e}")))?;
+        let sw = as_u16(
+            required_u64(&result.body, "sw")
+                .map_err(|e| SmartCardError::InvalidData(e.to_string()))?,
+            "sw",
+        )
+        .map_err(|e| SmartCardError::InvalidData(e.to_string()))?;
+
+        yubikit::log_traffic!("<< {} {:04x}", data_hex.expose_secret(), sw);
+        Ok((data, sw))
+    }
+
+    fn transport(&self) -> Transport {
+        self.transport
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RpcFidoConnection
+// ---------------------------------------------------------------------------
+
+/// A `FidoConnection` backed by the `call` RPC action on a ctap connection node.
+pub struct RpcFidoConnection {
+    client: SharedClient,
+    device_version: yubikit::core::Version,
+    capabilities: CtapHidCapability,
+    device_prefix: Vec<String>,
+    lease: Option<RpcConnectionLease>,
+}
+
+impl RpcFidoConnection {
+    fn from_client(client: SharedClient, device_prefix: Vec<String>) -> Result<Self, RpcCallError> {
+        let path = target(&device_prefix, &["ctap"]);
+        let info = {
+            let mut rpc = client
+                .lock()
+                .map_err(|_| RpcCallError::Transport("RPC client lock poisoned".into()))?;
+            let info = rpc.get(&path)?;
+            rpc.track_connection(&path);
+            info
+        };
+        let lease = RpcConnectionLease {
+            client: client.clone(),
+            target: path,
+        };
+        let data = required_field(&info.body, "data")?;
+
+        let device_version =
+            parse_version_array(required_field(data, "device_version")?, "device_version")?;
+
+        let capabilities = CtapHidCapability::from_raw(as_u8(
+            required_u64(data, "capabilities")?,
+            "capabilities",
+        )?);
+
+        Ok(Self {
+            client,
+            device_version,
+            capabilities,
+            device_prefix,
+            lease: Some(lease),
+        })
+    }
+}
+
+impl Connection for RpcFidoConnection {
+    type Error = FidoError;
+    fn close(&mut self) {
+        log::debug!("Closing RPC FIDO connection");
+        self.lease.take();
+    }
+}
+
+impl FidoConnection for RpcFidoConnection {
+    fn call(
+        &mut self,
+        cmd: u8,
+        data: &[u8],
+        on_keepalive: Option<&mut dyn FnMut(u8)>,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Vec<u8>, FidoError> {
+        if self.lease.is_none() {
+            return Err(FidoError::Other("RPC connection is closed".into()));
+        }
+        let signal_handler: Option<Box<dyn Fn(&str, &Value) + '_>> =
+            on_keepalive.map(|cb| -> Box<dyn Fn(&str, &Value) + '_> {
+                let cb = RefCell::new(cb);
+                Box::new(move |status: &str, body: &Value| {
+                    if status == "keepalive"
+                        && let Some(s) = body.get("status").and_then(|v| v.as_u64())
+                        && let Ok(mut cb) = cb.try_borrow_mut()
+                    {
+                        cb(s as u8);
+                    }
+                })
+            });
+
+        let data_hex = SecretValue::new(data.encode_hex::<String>());
+        if cancel.is_none() {
+            crate::cancel::clear();
+        }
+        let cancelled = cancel.unwrap_or(&crate::cancel::is_cancelled);
+        let result = self
+            .client
+            .lock()
+            .map_err(|_| FidoError::Other("RPC client lock poisoned".into()))?
+            .call_with_cancel(
+                "call",
+                &target(&self.device_prefix, &["ctap"]),
+                json!({"cmd": cmd, "data": data_hex.expose_secret()}),
+                signal_handler
+                    .as_ref()
+                    .map(|h| h.as_ref() as &dyn Fn(&str, &Value)),
+                Some(cancelled),
+            )
+            .map_err(|e| FidoError::Other(format!("{e}")))?;
+
+        let response_hex = SecretValue::new(
+            required_str(&result.body, "data")
+                .map_err(|e| FidoError::Other(e.to_string()))?
+                .to_string(),
+        );
+        yubikit::log_traffic!("CTAP cmd={:02x} >> {}", cmd, data_hex.expose_secret());
+        yubikit::log_traffic!("CTAP cmd={:02x} << {}", cmd, response_hex.expose_secret());
+        Vec::from_hex(response_hex.expose_secret())
+            .map_err(|e| FidoError::Other(format!("bad hex from RPC: {e}")))
+    }
+
+    fn device_version(&self) -> yubikit::core::Version {
+        self.device_version
+    }
+
+    fn capabilities(&self) -> CtapHidCapability {
+        self.capabilities
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RpcOtpConnection
+// ---------------------------------------------------------------------------
+
+/// An `OtpConnection` backed by `otp_send`/`otp_receive` RPC actions on an
+/// otp connection node.
+pub struct RpcOtpConnection {
+    client: SharedClient,
+    device_prefix: Vec<String>,
+    lease: Option<RpcConnectionLease>,
+}
+
+impl Connection for RpcOtpConnection {
+    type Error = OtpError;
+    fn close(&mut self) {
+        log::debug!("Closing RPC OTP connection");
+        self.lease.take();
+    }
+}
+
+impl OtpConnection for RpcOtpConnection {
+    fn otp_receive(&mut self) -> Result<Vec<u8>, OtpError> {
+        if self.lease.is_none() {
+            return Err(OtpError::CommandRejected("RPC connection is closed".into()));
+        }
+        let result = self
+            .client
+            .lock()
+            .map_err(|_| OtpError::CommandRejected("RPC client lock poisoned".into()))?
+            .call(
+                "otp_receive",
+                &target(&self.device_prefix, &["otp"]),
+                json!({}),
+                None,
+                false,
+            )
+            .map_err(|e| OtpError::CommandRejected(format!("{e}")))?;
+
+        let data_hex = SecretValue::new(
+            required_str(&result.body, "data")
+                .map_err(|e| OtpError::CommandRejected(e.to_string()))?
+                .to_string(),
+        );
+        let data = Vec::from_hex(data_hex.expose_secret())
+            .map_err(|e| OtpError::CommandRejected(format!("bad hex from RPC: {e}")))?;
+        yubikit::log_traffic!("otp_receive << {}", data_hex.expose_secret());
+        Ok(data)
+    }
+
+    fn otp_send(&mut self, data: &[u8]) -> Result<(), OtpError> {
+        if self.lease.is_none() {
+            return Err(OtpError::CommandRejected("RPC connection is closed".into()));
+        }
+        let data_hex = SecretValue::new(data.encode_hex::<String>());
+        yubikit::log_traffic!("otp_send >> {}", data_hex.expose_secret());
+        self.client
+            .lock()
+            .map_err(|_| OtpError::CommandRejected("RPC client lock poisoned".into()))?
+            .call(
+                "otp_send",
+                &target(&self.device_prefix, &["otp"]),
+                json!({"data": data_hex.expose_secret()}),
+                None,
+                false,
+            )
+            .map_err(|e| OtpError::CommandRejected(format!("{e}")))?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RpcDevice
+// ---------------------------------------------------------------------------
+
+/// A `Device` backed by an RPC client, proxying all operations to a subprocess.
+#[derive(Clone)]
+pub struct RpcDevice {
+    client: SharedClient,
+    prefix: Vec<String>,
+    info: DeviceInfo,
+    transport: Transport,
+    name: String,
+    pid: Option<u16>,
+    reader_name: Option<String>,
+    usb_ifaces: UsbInterface,
+    has_ccid: bool,
+    has_ctap: bool,
+    has_otp: bool,
+}
+
+impl RpcDevice {
+    /// Construct a device from the unlocked service inventory.
+    pub fn from_inventory(
+        client: Arc<Mutex<RpcClient>>,
+        device_name: &str,
+        data: &Value,
+    ) -> Result<Self, RpcCallError> {
+        let transport = match required_str(data, "transport")? {
+            "usb" => Transport::Usb,
+            "nfc" => Transport::Nfc,
+            other => {
+                return Err(RpcCallError::Transport(format!(
+                    "Malformed RPC response: unknown transport {other}"
+                )));
+            }
+        };
+        let ifaces = UsbInterface(as_u8(
+            required_u64(data, "usb_interfaces")?,
+            "usb_interfaces",
+        )?);
+        Self::from_data(
+            client,
+            vec![device_name.to_string()],
+            data,
+            transport == Transport::Nfc || ifaces.contains(UsbInterface::CCID),
+            transport == Transport::Usb && ifaces.contains(UsbInterface::FIDO),
+            transport == Transport::Usb && ifaces.contains(UsbInterface::OTP),
+        )
+    }
+
+    /// Create an RPC device from an already-shared client, targeting a specific
+    /// device by name.
+    ///
+    /// Stores the prefix in the device and passes it to every RPC call,
+    /// so concurrent use of the shared client for different devices is safe.
+    pub fn from_shared_at(
+        client: Arc<Mutex<RpcClient>>,
+        device_name: &str,
+    ) -> Result<Self, RpcCallError> {
+        let prefix = vec![device_name.to_string()];
+        Self::from_shared_inner(client, prefix)
+    }
+
+    pub fn pid(&self) -> Option<u16> {
+        self.pid
+    }
+
+    fn from_shared_inner(
+        client: Arc<Mutex<RpcClient>>,
+        prefix: Vec<String>,
+    ) -> Result<Self, RpcCallError> {
+        log::debug!("Initializing RPC device");
+        let root = client
+            .lock()
+            .map_err(|_| RpcCallError::Transport("RPC client lock poisoned".into()))?
+            .get(&prefix)
+            .map_err(|e| match e {
+                RpcCallError::Transport(message) => {
+                    RpcCallError::Transport(format!("Failed to get root node: {message}"))
+                }
+                rpc_error => rpc_error,
+            })?;
+        let data = required_field(&root.body, "data")?;
+        let children = required_field(&root.body, "children")?;
+        let children = children.as_object().ok_or_else(|| {
+            RpcCallError::Transport("Malformed RPC response: children is not an object".into())
+        })?;
+
+        Self::from_data(
+            client,
+            prefix,
+            data,
+            children.contains_key("ccid"),
+            children.contains_key("ctap"),
+            children.contains_key("otp"),
+        )
+    }
+
+    fn from_data(
+        client: SharedClient,
+        prefix: Vec<String>,
+        data: &Value,
+        has_ccid: bool,
+        has_ctap: bool,
+        has_otp: bool,
+    ) -> Result<Self, RpcCallError> {
+        let transport = match required_str(data, "transport")? {
+            "usb" => Transport::Usb,
+            "nfc" => Transport::Nfc,
+            other => {
+                return Err(RpcCallError::Transport(format!(
+                    "Malformed RPC response: unknown transport {other}"
+                )));
+            }
+        };
+
+        let name = required_str(data, "name")?.to_string();
+
+        let pid = optional_u64(data, "pid")?
+            .map(|p| as_u16(p, "pid"))
+            .transpose()?;
+
+        let reader_name = optional_str(data, "reader_name")?;
+
+        let usb_ifaces = UsbInterface(as_u8(
+            required_u64(data, "usb_interfaces")?,
+            "usb_interfaces",
+        )?);
+
+        let info = Self::read_device_info(data)?;
+
+        // Non-final (dev/alpha/beta) firmware reports a placeholder version
+        // (DEV_VERSION) for some applications (e.g. OTP). Local device
+        // enumeration patches this via `apply_device_info_fixups`, setting a
+        // process-wide override so `patch_version` can substitute the real
+        // version later. RPC-sourced devices skip that enumeration path, so
+        // replicate the override here for this (client) process.
+        if info.version_qualifier.release_type != yubikit::management::ReleaseType::Final {
+            log::debug!(
+                "Overriding version {} with qualifier version {} for RPC device",
+                info.version,
+                info.version_qualifier.version
+            );
+            yubikit::core::set_override_version(info.version_qualifier.version);
+        }
+
+        log::debug!(
+            "RPC device: {name}, transport={transport:?}, ccid={has_ccid}, ctap={has_ctap}, otp={has_otp}"
+        );
+        Ok(Self {
+            client,
+            prefix,
+            info,
+            transport,
+            name,
+            pid,
+            reader_name,
+            usb_ifaces,
+            has_ccid,
+            has_ctap,
+            has_otp,
+        })
+    }
+
+    fn read_device_info(data: &Value) -> Result<DeviceInfo, RpcCallError> {
+        use std::collections::HashMap;
+
+        let version = parse_version_array(required_field(data, "version")?, "version")?;
+
+        let serial = optional_u64(data, "serial")?
+            .map(|s| {
+                s.try_into().map_err(|_| {
+                    RpcCallError::Transport("Malformed RPC response: serial exceeds u32".into())
+                })
+            })
+            .transpose()?;
+
+        let parse_cap_map = |key: &str| -> Result<HashMap<Transport, Capability>, RpcCallError> {
+            let mut map = HashMap::new();
+            let Some(value) = data.get(key) else {
+                return Ok(map);
+            };
+            let obj = value.as_object().ok_or_else(|| {
+                RpcCallError::Transport(format!("Malformed RPC response: {key} is not an object"))
+            })?;
+            for (k, v) in obj {
+                let transport = match k.as_str() {
+                    "usb" => Transport::Usb,
+                    "nfc" => Transport::Nfc,
+                    _ => continue,
+                };
+                let cap = Capability(as_u16(
+                    v.as_u64().ok_or_else(|| {
+                        RpcCallError::Transport(format!(
+                            "Malformed RPC response: {key}.{k} is not an integer"
+                        ))
+                    })?,
+                    key,
+                )?);
+                map.insert(transport, cap);
+            }
+            Ok(map)
+        };
+
+        let parse_cap = |key: &str| -> Result<Capability, RpcCallError> {
+            optional_u64(data, key)?
+                .map(|v| as_u16(v, key).map(Capability))
+                .transpose()
+                .map(|v| v.unwrap_or(Capability(0)))
+        };
+
+        let form_factor_raw = as_u8(required_u64(data, "form_factor")?, "form_factor")?;
+
+        let opt_version = |key: &str| -> Result<Option<yubikit::core::Version>, RpcCallError> {
+            data.get(key)
+                .filter(|v| !v.is_null())
+                .map(|v| parse_version_array(v, key))
+                .transpose()
+        };
+
+        let version_qualifier = if let Some(vq) = data.get("version_qualifier") {
+            let vq_version = vq
+                .get("version")
+                .map(|v| parse_version_array(v, "version_qualifier.version"))
+                .transpose()?
+                .unwrap_or(version);
+            let release_type = yubikit::management::ReleaseType::from_value(
+                optional_u64(vq, "release_type")?
+                    .map(|v| as_u8(v, "version_qualifier.release_type"))
+                    .transpose()?
+                    .unwrap_or(2),
+            );
+            let iteration = optional_u64(vq, "iteration")?
+                .map(|v| as_u8(v, "version_qualifier.iteration"))
+                .transpose()?
+                .unwrap_or(0);
+            yubikit::management::VersionQualifier::new(vq_version, release_type, iteration)
+        } else {
+            yubikit::management::VersionQualifier::final_release(version)
+        };
+
+        Ok(DeviceInfo {
+            config: yubikit::management::DeviceConfig {
+                enabled_capabilities: parse_cap_map("enabled_capabilities")?,
+                auto_eject_timeout: optional_u64(data, "auto_eject_timeout")?
+                    .map(|v| as_u16(v, "auto_eject_timeout"))
+                    .transpose()?,
+                challenge_response_timeout: optional_u64(data, "challenge_response_timeout")?
+                    .map(|v| as_u8(v, "challenge_response_timeout"))
+                    .transpose()?,
+                device_flags: optional_u64(data, "device_flags")?
+                    .map(|v| as_u8(v, "device_flags").map(yubikit::management::DeviceFlag))
+                    .transpose()?,
+                nfc_restricted: optional_bool(data, "nfc_restricted")?,
+            },
+            serial,
+            version,
+            form_factor: yubikit::management::FormFactor::from_code(form_factor_raw),
+            supported_capabilities: parse_cap_map("supported_capabilities")?,
+            is_locked: optional_bool(data, "is_locked")?.unwrap_or(false),
+            is_fips: optional_bool(data, "is_fips")?.unwrap_or(false),
+            is_sky: optional_bool(data, "is_sky")?.unwrap_or(false),
+            part_number: optional_str(data, "part_number")?,
+            fips_capable: parse_cap("fips_capable")?,
+            fips_approved: parse_cap("fips_approved")?,
+            pin_complexity: optional_bool(data, "pin_complexity")?.unwrap_or(false),
+            reset_blocked: parse_cap("reset_blocked")?,
+            fps_version: opt_version("fps_version")?,
+            stm_version: opt_version("stm_version")?,
+            version_qualifier,
+            name: optional_str(data, "name")?,
+        })
+    }
+}
+
+impl YubiKeyDevice for RpcDevice {
+    fn info(&self) -> &DeviceInfo {
+        &self.info
+    }
+
+    fn transport(&self) -> Transport {
+        self.transport
+    }
+
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    fn pid(&self) -> Option<u16> {
+        self.pid
+    }
+
+    fn reader_name(&self) -> Option<&str> {
+        self.reader_name.as_deref()
+    }
+
+    fn usb_interfaces(&self) -> UsbInterface {
+        self.usb_ifaces
+    }
+
+    fn open_smartcard(&self) -> Result<Box<dyn SmartCardConnection + Send>, DeviceError> {
+        if !self.has_ccid {
+            return Err(DeviceError::NoDeviceFound);
+        }
+        log::debug!("Opening RPC SmartCard connection");
+        let path = target(&self.prefix, &["ccid"]);
+        let mut client = self.client.lock().map_err(|_| {
+            DeviceError::Transport(Box::new(RpcCallError::Transport(
+                "RPC client lock poisoned".into(),
+            )))
+        })?;
+        client.get(&path).map_err(device_open_error)?;
+        client.track_connection(&path);
+        drop(client);
+        Ok(Box::new(RpcSmartCardConnection {
+            client: self.client.clone(),
+            transport: self.transport,
+            device_prefix: self.prefix.clone(),
+            lease: Some(RpcConnectionLease {
+                client: self.client.clone(),
+                target: path,
+            }),
+        }))
+    }
+
+    fn open_fido(&self) -> Result<Box<dyn FidoConnection + Send>, DeviceError> {
+        if !self.has_ctap {
+            return Err(DeviceError::NoDeviceFound);
+        }
+        log::debug!("Opening RPC FIDO connection");
+        let conn = RpcFidoConnection::from_client(self.client.clone(), self.prefix.clone())
+            .map_err(smartcard_device_error)?;
+        Ok(Box::new(conn))
+    }
+
+    fn open_otp(&self) -> Result<Box<dyn OtpConnection + Send>, DeviceError> {
+        if !self.has_otp {
+            return Err(DeviceError::NoDeviceFound);
+        }
+        log::debug!("Opening RPC OTP connection");
+        let path = target(&self.prefix, &["otp"]);
+        let mut client = self.client.lock().map_err(|_| {
+            DeviceError::Transport(Box::new(RpcCallError::Transport(
+                "RPC client lock poisoned".into(),
+            )))
+        })?;
+        client.get(&path).map_err(device_open_error)?;
+        client.track_connection(&path);
+        drop(client);
+        Ok(Box::new(RpcOtpConnection {
+            client: self.client.clone(),
+            device_prefix: self.prefix.clone(),
+            lease: Some(RpcConnectionLease {
+                client: self.client.clone(),
+                target: path,
+            }),
+        }))
+    }
+
+    fn reinsert(
+        &mut self,
+        status_cb: &dyn Fn(ReinsertStatus),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), DeviceError> {
+        log::debug!("Requesting reinsert via RPC");
+        let signal_handler = |status: &str, body: &Value| {
+            if status == "reinsert" {
+                match body.get("state").and_then(|v| v.as_str()) {
+                    Some("remove") => status_cb(ReinsertStatus::Remove),
+                    Some("insert") => status_cb(ReinsertStatus::Reinsert),
+                    _ => {}
+                }
+            }
+        };
+
+        self.client
+            .lock()
+            .map_err(|_| {
+                DeviceError::SmartCard(SmartCardError::Transport(Box::new(RpcTransportError(
+                    "RPC client lock poisoned".into(),
+                ))))
+            })?
+            .call_with_cancel(
+                "reinsert",
+                &self.prefix,
+                json!({}),
+                Some(&signal_handler),
+                Some(cancelled),
+            )
+            .map_err(smartcard_device_error)?;
+
+        Ok(())
+    }
+
+    fn clone_box(&self) -> Box<dyn YubiKeyDevice> {
+        Box::new(self.clone())
+    }
+}
+
+impl Drop for RpcDevice {
+    fn drop(&mut self) {
+        log::debug!("RPC device disconnected: {}", self.name);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Simple error wrapper for RPC transport errors.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct RpcTransportError(String);
+
+#[cfg(test)]
+mod tests {
+    use super::super::client::RpcClientError;
+    use super::*;
+
+    #[cfg(not(target_os = "windows"))]
+    fn cancelling_service(
+        action: &'static str,
+    ) -> (
+        SharedClient,
+        Arc<std::sync::atomic::AtomicBool>,
+        std::thread::JoinHandle<()>,
+    ) {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::Duration;
+
+        let (client, mut server) = UnixStream::pair().unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancel = cancelled.clone();
+        let worker = std::thread::spawn(move || {
+            let mut reader = BufReader::new(server.try_clone().unwrap());
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&request).unwrap()["action"],
+                action
+            );
+            // No keepalive/status signal: cancellation must also work while the server is silent.
+            cancel.store(true, Ordering::Relaxed);
+            request.clear();
+            reader.read_line(&mut request).unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&request).unwrap()["status"],
+                "cancel"
+            );
+            server
+                .write_all(b"{\"kind\":\"error\",\"status\":\"cancelled\",\"message\":\"Operation cancelled\",\"body\":{}}\n")
+                .unwrap();
+            request.clear();
+            reader.read_line(&mut request).unwrap();
+            // There must be no duplicate cancel or unread response before the next command.
+            assert_eq!(
+                serde_json::from_str::<Value>(&request).unwrap()["action"],
+                "get"
+            );
+            server
+                .write_all(b"{\"kind\":\"success\",\"body\":{}}\n")
+                .unwrap();
+            if action == "call" {
+                request.clear();
+                reader.read_line(&mut request).unwrap();
+                assert_eq!(
+                    serde_json::from_str::<Value>(&request).unwrap()["action"],
+                    "close"
+                );
+                server
+                    .write_all(b"{\"kind\":\"success\",\"body\":{}}\n")
+                    .unwrap();
+            }
+        });
+        (
+            Arc::new(Mutex::new(RpcClient::from_test_stream(client))),
+            cancelled,
+            worker,
+        )
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn reinsert_forwards_cancellation_and_keeps_rpc_usable() {
+        use std::sync::atomic::Ordering;
+        let (client, cancelled, worker) = cancelling_service("reinsert");
+        let mut device = RpcDevice::from_inventory(
+            client.clone(),
+            "123",
+            &json!({
+                "name": "YubiKey", "version": [5, 7, 0], "serial": 123,
+                "form_factor": 3, "transport": "usb", "usb_interfaces": 7,
+            }),
+        )
+        .unwrap();
+        assert!(matches!(
+            device.reinsert(&|_| {}, &|| cancelled.load(Ordering::Relaxed)),
+            Err(DeviceError::Cancelled)
+        ));
+        client.lock().unwrap().get(&[] as &[&str]).unwrap();
+        worker.join().unwrap();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn fido_forwards_cancellation_and_keeps_rpc_usable() {
+        use std::sync::atomic::Ordering;
+        let (client, cancelled, worker) = cancelling_service("call");
+        let path = vec!["123".to_string(), "ctap".to_string()];
+        client.lock().unwrap().track_connection(&path);
+        let mut connection = RpcFidoConnection {
+            client: client.clone(),
+            device_version: yubikit::core::Version(5, 7, 0),
+            capabilities: CtapHidCapability::from_raw(0),
+            device_prefix: vec!["123".into()],
+            lease: Some(RpcConnectionLease {
+                client: client.clone(),
+                target: path,
+            }),
+        };
+        assert!(
+            connection
+                .call(
+                    0x10,
+                    &[0x07],
+                    None,
+                    Some(&|| cancelled.load(Ordering::Relaxed))
+                )
+                .is_err()
+        );
+        client.lock().unwrap().get(&[] as &[&str]).unwrap();
+        connection.close();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn unavailable_ccid_rpc_error_preserves_device_reason() {
+        let error = RpcCallError::Rpc(RpcClientError {
+            status: "connection-error".into(),
+            message: "Error connecting to ccid interface".into(),
+            body: json!({"reason": "ccid-unavailable"}),
+        });
+        assert!(matches!(
+            device_open_error(error),
+            DeviceError::CcidUnavailable
+        ));
+    }
+}

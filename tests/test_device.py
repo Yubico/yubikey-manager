@@ -1,8 +1,8 @@
 from dataclasses import replace
 from typing import cast
 
-import pytest
-from yubikit.core import TRANSPORT, YUBIKEY, Tlv
+from _yubikit_native.device import get_name as _get_name_native
+from yubikit.core import TRANSPORT, YUBIKEY
 from yubikit.management import (
     CAPABILITY,
     FORM_FACTOR,
@@ -10,7 +10,27 @@ from yubikit.management import (
     DeviceInfo,
     Version,
 )
-from yubikit.support import get_name
+
+
+def get_name(info: DeviceInfo, key_type: YUBIKEY | None) -> str:
+    """Determine the product name of a YubiKey
+
+    :param info: The device info.
+    :param key_type: The YubiKey hardware platform.
+    """
+    return _get_name_native(
+        version=(info.version[0], info.version[1], info.version[2]),
+        form_factor=int(info.form_factor),
+        is_sky=info.is_sky,
+        is_fips=info.is_fips,
+        pin_complexity=info.pin_complexity,
+        serial=info.serial,
+        usb_supported=int(
+            info.supported_capabilities.get(TRANSPORT.USB, CAPABILITY(0))
+        ),
+        has_nfc=info.has_transport(TRANSPORT.NFC),
+    )
+
 
 DEFAULT_INFO = DeviceInfo(
     config=cast(DeviceConfig, None),
@@ -187,47 +207,3 @@ def test_enhanced_pin():
         get_name(epin(info_nfc(FORM_FACTOR.USB_C_KEYCHAIN)), kt)
         == "YubiKey 5C NFC - Enhanced PIN"
     )
-
-
-DEVICE_INFO_TESTDATA = [
-    (
-        "YubiKey 5C NFC - Enhanced PIN",
-        "0102033f0302033f0204020b885b04010305030507040602000007010f0801000d02033f0e02033f0a01000f010020030000002103000000100101110400000000120100130c3738434c5546583530303050140200001502000016010117010018020000",
-    ),
-    (
-        "YubiKey 5C NFC FIPS",
-        "0102033d0302033d020401ea505104018305030507040602000007010f0801000d02033d0e02033d0a01000f010020030000002103000000100101110400000000120100130c3738434c55465835303030501402001f1502001f16010117010018020000",
-    ),
-    (
-        "YubiKey 5 Nano",
-        "0102033f0302033e020401c234c404010205030507010602000007010f0801000a01000f010020030000002103000000100101110400000000120100130c3738434c55465835303030501402000015020008160100170100",
-    ),
-    (
-        "YubiKey Bio - FIDO Edition",
-        "0102020203020202020401afba5c04010605030507020602000007010f0801000a01000f010020030005012103030001100101110400000000120100130c3738434c5546583530303050140200001502000016010017010018020000",
-    ),
-    (
-        "YubiKey C Bio - Multi-protocol Edition",
-        "0102061203020612020401afcfff04010705030507020602000007010f0801000a01000f010020030005012103030001100101110400000000120100130c3738434c5546583530303050140200001502000016010017010018020200",
-    ),
-    (
-        "Security Key C NFC - Enterprise Edition",
-        "01020202030202020204017b306c04014305030504030602000007010f0801000d0202060e0202060a01000f0100",
-    ),
-    (
-        "YubiKey 5Ci",
-        "0102023f0302023f020400a0392204010505030502030602000007010f0801000a01000f010c",
-    ),
-    (
-        "YubiKey C Bio - FIDO Edition",
-        "01021206030212060204023251e904010705030000010602000007010f0801000a01000f010020030100002103030001100101110400000000120100130c3738434c5546583530303050140200001502000016010017010018020000190e0103050800020101030400000003",
-    ),
-]
-
-
-@pytest.mark.parametrize("expected_name, data", DEVICE_INFO_TESTDATA)
-def test_device_info(expected_name, data):
-    kt = YUBIKEY.YK4
-    tlvs = Tlv.parse_dict(bytes.fromhex(data))
-    info = DeviceInfo.parse_tlvs(tlvs, Version(5, 3, 0))
-    assert get_name(info, kt) == expected_name

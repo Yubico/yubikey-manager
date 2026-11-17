@@ -1,0 +1,943 @@
+use anyhow::{Result, anyhow};
+use clap::Subcommand;
+use yubikit::device::YubiKeyDevice;
+use yubikit::management::Capability;
+use yubikit::openpgp::{
+    KeyRef, KeyStatus, OpenPgpError, OpenPgpPin, OpenPgpSession, PinPolicy, Uif,
+};
+
+use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
+use crate::scp::ScpParams;
+use crate::util::{
+    confirm, format_smartcard_connection_error, open_smartcard_session, print_table,
+    read_file_or_stdin, write_file_or_stdout,
+};
+
+#[derive(Subcommand)]
+pub enum OpenpgpAction {
+    /// Display OpenPGP status
+    Info,
+    /// Reset the OpenPGP application
+    Reset {
+        /// Confirm the reset without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Manage access (PINs)
+    #[command(subcommand)]
+    Access(OpenpgpAccessAction),
+    /// Manage keys
+    #[command(subcommand)]
+    Keys(OpenpgpKeysAction),
+    /// Manage certificates
+    #[command(subcommand)]
+    Certificates(OpenpgpCertAction),
+}
+
+#[derive(Subcommand)]
+pub enum OpenpgpAccessAction {
+    /// Set PIN retry counts
+    SetRetries {
+        /// User PIN retry count
+        pin_retries: u8,
+        /// Reset code retry count
+        reset_code_retries: u8,
+        /// Admin PIN retry count
+        admin_pin_retries: u8,
+        /// Admin PIN
+        #[arg(short = 'a', long)]
+        admin_pin: Option<String>,
+        /// Confirm changing retry counters without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Change user PIN
+    ChangePin {
+        /// Current user PIN
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+        /// New user PIN
+        #[arg(short = 'n', long)]
+        new_pin: Option<String>,
+    },
+    /// Change admin PIN
+    ChangeAdminPin {
+        /// Current admin PIN
+        #[arg(short = 'a', long)]
+        admin_pin: Option<String>,
+        /// New admin PIN
+        #[arg(short = 'n', long)]
+        new_admin_pin: Option<String>,
+    },
+    /// Change reset code
+    ChangeResetCode {
+        /// Admin PIN
+        #[arg(short = 'a', long)]
+        admin_pin: Option<String>,
+        /// New reset code
+        #[arg(short = 'R', long)]
+        reset_code: Option<String>,
+    },
+    /// Unblock PIN
+    UnblockPin {
+        /// Admin PIN
+        #[arg(short = 'a', long)]
+        admin_pin: Option<String>,
+        /// Reset code
+        #[arg(long)]
+        reset_code: Option<String>,
+        /// New user PIN
+        #[arg(short = 'n', long)]
+        new_pin: Option<String>,
+    },
+    /// Set signature PIN policy
+    SetSignaturePolicy {
+        /// Policy
+        policy: CliOpenpgpPinPolicy,
+        /// Admin PIN
+        #[arg(short = 'a', long)]
+        admin_pin: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum OpenpgpKeysAction {
+    /// Show key metadata
+    Info {
+        /// Key reference
+        key: CliKeyRef,
+    },
+    /// Set touch policy for a key
+    SetTouch {
+        /// Key reference
+        key: CliKeyRef,
+        /// Touch policy
+        policy: CliUif,
+        /// Admin PIN
+        #[arg(short = 'a', long)]
+        admin_pin: Option<String>,
+        /// Confirm setting touch policy without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Import attestation key
+    Import {
+        /// Key reference
+        key: CliKeyRef,
+        /// Key file
+        key_file: String,
+        /// Admin PIN
+        #[arg(short = 'a', long)]
+        admin_pin: Option<String>,
+    },
+    /// Generate attestation certificate
+    Attest {
+        /// Key reference
+        key: CliKeyRef,
+        /// Output file
+        output: String,
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
+        format: CliFormat,
+        /// PIN for attestation
+        #[arg(short = 'P', long)]
+        pin: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum OpenpgpCertAction {
+    /// Export certificate
+    Export {
+        /// Key reference
+        key: CliKeyRef,
+        /// Output file
+        output: String,
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
+        format: CliFormat,
+    },
+    /// Import certificate
+    Import {
+        /// Key reference
+        key: CliKeyRef,
+        /// Certificate file
+        cert_file: String,
+        /// Admin PIN
+        #[arg(short = 'a', long)]
+        admin_pin: Option<String>,
+    },
+    /// Delete certificate
+    Delete {
+        /// Key reference
+        key: CliKeyRef,
+        /// Admin PIN
+        #[arg(short = 'a', long)]
+        admin_pin: Option<String>,
+    },
+}
+
+impl OpenpgpAction {
+    pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
+        match self {
+            Self::Info => run_info(dev, scp_params),
+            Self::Reset { force } => run_reset(dev, scp_params, force),
+            Self::Access(access) => match access {
+                OpenpgpAccessAction::SetRetries {
+                    pin_retries,
+                    reset_code_retries,
+                    admin_pin_retries,
+                    admin_pin,
+                    force,
+                } => run_set_retries(
+                    dev,
+                    scp_params,
+                    pin_retries,
+                    reset_code_retries,
+                    admin_pin_retries,
+                    admin_pin.as_deref(),
+                    force,
+                ),
+                OpenpgpAccessAction::ChangePin { pin, new_pin } => {
+                    run_change_pin(dev, scp_params, pin.as_deref(), new_pin.as_deref())
+                }
+                OpenpgpAccessAction::ChangeAdminPin {
+                    admin_pin,
+                    new_admin_pin,
+                } => run_change_admin_pin(
+                    dev,
+                    scp_params,
+                    admin_pin.as_deref(),
+                    new_admin_pin.as_deref(),
+                ),
+                OpenpgpAccessAction::ChangeResetCode {
+                    admin_pin,
+                    reset_code,
+                } => run_change_reset_code(
+                    dev,
+                    scp_params,
+                    admin_pin.as_deref(),
+                    reset_code.as_deref(),
+                ),
+                OpenpgpAccessAction::UnblockPin {
+                    admin_pin,
+                    reset_code,
+                    new_pin,
+                } => run_unblock_pin(
+                    dev,
+                    scp_params,
+                    admin_pin.as_deref(),
+                    reset_code.as_deref(),
+                    new_pin.as_deref(),
+                ),
+                OpenpgpAccessAction::SetSignaturePolicy { policy, admin_pin } => {
+                    run_set_signature_policy(dev, scp_params, policy, admin_pin.as_deref())
+                }
+            },
+            Self::Keys(keys) => match keys {
+                OpenpgpKeysAction::Info { key } => run_keys_info(dev, scp_params, key),
+                OpenpgpKeysAction::SetTouch {
+                    key,
+                    policy,
+                    admin_pin,
+                    force,
+                } => run_keys_set_touch(dev, scp_params, key, policy, admin_pin.as_deref(), force),
+                OpenpgpKeysAction::Import {
+                    key,
+                    key_file,
+                    admin_pin,
+                } => run_keys_import(dev, scp_params, key, &key_file, admin_pin.as_deref()),
+                OpenpgpKeysAction::Attest {
+                    key,
+                    output,
+                    format,
+                    pin,
+                } => run_keys_attest(dev, scp_params, key, &output, format, pin.as_deref()),
+            },
+            Self::Certificates(certs) => match certs {
+                OpenpgpCertAction::Export {
+                    key,
+                    output,
+                    format,
+                } => run_certificates_export(dev, scp_params, key, &output, format),
+                OpenpgpCertAction::Import {
+                    key,
+                    cert_file,
+                    admin_pin,
+                } => {
+                    run_certificates_import(dev, scp_params, key, &cert_file, admin_pin.as_deref())
+                }
+                OpenpgpCertAction::Delete { key, admin_pin } => {
+                    run_certificates_delete(dev, scp_params, key, admin_pin.as_deref())
+                }
+            },
+        }
+    }
+}
+
+fn open_session(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+) -> Result<OpenPgpSession<Box<dyn yubikit::smartcard::SmartCardConnection + Send>>> {
+    open_smartcard_session(
+        dev,
+        scp_params,
+        Capability::OPENPGP,
+        "OpenPGP",
+        OpenPgpSession::new,
+        OpenPgpSession::new_with_scp,
+    )
+}
+
+fn ensure_admin_pin(admin_pin: Option<&str>) -> Result<OpenPgpPin> {
+    match admin_pin {
+        Some(p) => Ok(OpenPgpPin::new(p)),
+        None => crate::util::prompt_secret("Enter Admin PIN").map(|p| OpenPgpPin::new(&p)),
+    }
+}
+
+fn ensure_pin(pin: Option<&str>) -> Result<OpenPgpPin> {
+    match pin {
+        Some(p) => Ok(OpenPgpPin::new(p)),
+        None => crate::util::prompt_secret("Enter PIN").map(|p| OpenPgpPin::new(&p)),
+    }
+}
+
+fn format_openpgp_credential_error(
+    e: OpenPgpError,
+    credential: &str,
+    action: &str,
+) -> anyhow::Error {
+    match e {
+        OpenPgpError::InvalidPin(0) => anyhow!("{action}: {credential} is blocked."),
+        OpenPgpError::InvalidPin(attempts) => {
+            anyhow!("{action}: Wrong {credential}, {attempts} attempt(s) remaining.")
+        }
+        OpenPgpError::PinBlocked => anyhow!("{action}: {credential} is blocked."),
+        OpenPgpError::Connection(yubikit::smartcard::SmartCardError::Apdu { sw, .. })
+            if sw == yubikit::smartcard::Sw::ConditionsNotSatisfied as u16 =>
+        {
+            anyhow!("{action}: {credential} does not meet complexity requirement.")
+        }
+        e => anyhow!("{action}: {e}"),
+    }
+}
+
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
+    let mut session = open_session(dev, scp_params)?;
+
+    let aid = session.aid().clone();
+    let (major, minor) = aid.version();
+    // OpenPGP spec version is from the AID, application version is firmware
+    let mut rows = vec![
+        ("OpenPGP version", format!("{major}.{minor}")),
+        ("Application version", session.version().to_string()),
+    ];
+
+    if let Ok(pw_status) = session.get_pin_status() {
+        rows.extend([
+            (
+                "PIN tries remaining",
+                pw_status
+                    .get_attempts(yubikit::openpgp::Pw::User)
+                    .to_string(),
+            ),
+            (
+                "Reset code tries remaining",
+                pw_status
+                    .get_attempts(yubikit::openpgp::Pw::Reset)
+                    .to_string(),
+            ),
+            (
+                "Admin PIN tries remaining",
+                pw_status
+                    .get_attempts(yubikit::openpgp::Pw::Admin)
+                    .to_string(),
+            ),
+        ]);
+
+        let pin_policy = match pw_status.pin_policy_user {
+            PinPolicy::Once => "Once",
+            PinPolicy::Always => "Always",
+            _ => "Unknown",
+        };
+        rows.push(("Require PIN for signature", pin_policy.to_string()));
+    }
+
+    if let Ok(kdf) = session.get_kdf() {
+        let enabled = if matches!(kdf, yubikit::openpgp::Kdf::None) {
+            "False"
+        } else {
+            "True"
+        };
+        rows.push(("KDF enabled", enabled.to_string()));
+    } else {
+        rows.push(("KDF enabled", "False".to_string()));
+    }
+    print_table(rows);
+
+    // Show key information
+    if let Ok(data) = session.get_application_related_data() {
+        let disc = &data.discretionary;
+        let ver = session.version();
+
+        for key_ref in &[KeyRef::Sig, KeyRef::Dec, KeyRef::Aut] {
+            let fp = disc.fingerprints.get(key_ref);
+            let status = disc.key_information.get(key_ref);
+
+            // Decide whether to show this key
+            let show = if ver >= yubikit::core::Version(5, 2, 0) {
+                // For 5.2+, show if key_information has a non-None status
+                matches!(status, Some(s) if *s != KeyStatus::None)
+            } else {
+                // For older, show if fingerprint is non-zero
+                fp.is_some_and(|f| f.iter().any(|&b| b != 0))
+            };
+
+            if !show {
+                continue;
+            }
+
+            let name = match key_ref {
+                KeyRef::Sig => "Signature key",
+                KeyRef::Dec => "Decryption key",
+                KeyRef::Aut => "Authentication key",
+                KeyRef::Att => "Attestation key",
+            };
+
+            let fp_str = format_fingerprint(fp.map(|v| v.as_slice()).unwrap_or(&[]));
+            let touch = disc.get_uif(*key_ref).map_or("N/A".to_string(), format_uif);
+
+            println!("{name}:");
+            print_table([("  Fingerprint", fp_str), ("  Touch policy", touch)]);
+        }
+    }
+
+    Ok(())
+}
+
+fn format_fingerprint(fp: &[u8]) -> String {
+    if fp.is_empty() {
+        return "N/A".to_string();
+    }
+    let hex: Vec<String> = fp.iter().map(|b| format!("{b:02X}")).collect();
+    // Format as groups of 4 hex chars (2 bytes), with extra space in the middle
+    let mut parts = Vec::new();
+    for chunk in hex.chunks(2) {
+        parts.push(chunk.join(""));
+    }
+    let mid = parts.len() / 2;
+    let left = parts[..mid].join(" ");
+    let right = parts[mid..].join(" ");
+    format!("{left}  {right}")
+}
+
+fn format_uif(uif: Uif) -> String {
+    match uif {
+        Uif::Off => "Off",
+        Uif::On => "On",
+        Uif::Fixed => "Fixed",
+        Uif::Cached => "Cached",
+        Uif::CachedFixed => "Cached Fixed",
+        _ => "Unknown",
+    }
+    .to_string()
+}
+
+pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
+    if !force {
+        eprintln!(
+            "WARNING! This will delete all stored OpenPGP keys and restore factory settings."
+        );
+        if !confirm("Proceed?") {
+            return Err(anyhow!("Aborted."));
+        }
+    }
+
+    let safe_reset = || -> Result<()> {
+        let conn = dev
+            .open_smartcard()
+            .map_err(|e| format_smartcard_connection_error("OpenPGP", e))?;
+        yubikit::openpgp::safe_reset(conn).map_err(|e| anyhow!("Failed to reset OpenPGP: {e}"))
+    };
+
+    match open_session(dev, scp_params) {
+        Ok(mut session) => {
+            if session.reset().is_err() {
+                safe_reset()?;
+            }
+        }
+        Err(e) if e.to_string() == "Unable to manage OpenPGP over NFC without SCP" => {
+            return Err(e);
+        }
+        Err(_) => safe_reset()?,
+    }
+
+    eprintln!("OpenPGP application has been reset.");
+    Ok(())
+}
+
+pub fn run_set_retries(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin_retries: u8,
+    reset_code_retries: u8,
+    admin_pin_retries: u8,
+    admin_pin: Option<&str>,
+    force: bool,
+) -> Result<()> {
+    if !force
+        && !confirm(&format!(
+            "Set PIN retries to {pin_retries}/{reset_code_retries}/{admin_pin_retries}?"
+        ))
+    {
+        return Err(anyhow!("Aborted."));
+    }
+    let mut session = open_session(dev, scp_params)?;
+    let ap = ensure_admin_pin(admin_pin)?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
+    session
+        .set_pin_attempts(pin_retries, reset_code_retries, admin_pin_retries)
+        .map_err(|e| anyhow!("Failed to set retries: {e}"))?;
+    eprintln!("Retry counts set.");
+    Ok(())
+}
+
+pub fn run_change_pin(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    pin: Option<&str>,
+    new_pin: Option<&str>,
+) -> Result<()> {
+    let old = ensure_pin(pin)?;
+    let new = match new_pin {
+        Some(p) => OpenPgpPin::new(p),
+        None => crate::util::prompt_new_secret("New PIN").map(|p| OpenPgpPin::new(&p))?,
+    };
+    let mut session = open_session(dev, scp_params)?;
+    session
+        .change_pin(&old, &new)
+        .map_err(|e| format_openpgp_credential_error(e, "PIN", "Failed to change PIN"))?;
+    eprintln!("PIN changed.");
+    Ok(())
+}
+
+pub fn run_change_admin_pin(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    admin_pin: Option<&str>,
+    new_admin_pin: Option<&str>,
+) -> Result<()> {
+    let old = ensure_admin_pin(admin_pin)?;
+    let new = match new_admin_pin {
+        Some(p) => OpenPgpPin::new(p),
+        None => crate::util::prompt_new_secret("New Admin PIN").map(|p| OpenPgpPin::new(&p))?,
+    };
+    let mut session = open_session(dev, scp_params)?;
+    session.change_admin(&old, &new).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Failed to change Admin PIN")
+    })?;
+    eprintln!("Admin PIN changed.");
+    Ok(())
+}
+
+pub fn run_change_reset_code(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    admin_pin: Option<&str>,
+    reset_code: Option<&str>,
+) -> Result<()> {
+    let rc = match reset_code {
+        Some(p) => OpenPgpPin::new(p),
+        None => crate::util::prompt_new_secret("New reset code").map(|p| OpenPgpPin::new(&p))?,
+    };
+    let ap = ensure_admin_pin(admin_pin)?;
+    let mut session = open_session(dev, scp_params)?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
+    session.set_reset_code(&rc).map_err(|e| {
+        format_openpgp_credential_error(e, "Reset Code", "Failed to set reset code")
+    })?;
+    eprintln!("Reset code set.");
+    Ok(())
+}
+
+pub fn run_unblock_pin(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    admin_pin: Option<&str>,
+    reset_code: Option<&str>,
+    new_pin: Option<&str>,
+) -> Result<()> {
+    let new = match new_pin {
+        Some(p) => OpenPgpPin::new(p),
+        None => crate::util::prompt_new_secret("New PIN").map(|p| OpenPgpPin::new(&p))?,
+    };
+    let mut session = open_session(dev, scp_params)?;
+    if let Some(ap) = admin_pin {
+        let ap = OpenPgpPin::new(ap);
+        session.verify_admin(&ap).map_err(|e| {
+            format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+        })?;
+    }
+    let reset_code = reset_code.map(OpenPgpPin::new);
+    session.reset_pin(&new, reset_code.as_ref()).map_err(|e| {
+        if matches!(
+            &e,
+            OpenPgpError::Connection(yubikit::smartcard::SmartCardError::Apdu { sw, .. })
+                if *sw == yubikit::smartcard::Sw::ConditionsNotSatisfied as u16
+        ) {
+            return anyhow!("New PIN does not meet complexity requirement.");
+        }
+        let credential = if reset_code.is_some() {
+            "reset code"
+        } else {
+            "Admin PIN"
+        };
+        format_openpgp_credential_error(e, credential, "Failed to unblock PIN")
+    })?;
+    eprintln!("PIN unblocked.");
+    Ok(())
+}
+
+pub fn run_set_signature_policy(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    policy: CliOpenpgpPinPolicy,
+    admin_pin: Option<&str>,
+) -> Result<()> {
+    let pp: PinPolicy = policy.into();
+    let ap = ensure_admin_pin(admin_pin)?;
+    let mut session = open_session(dev, scp_params)?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
+    session
+        .set_signature_pin_policy(pp)
+        .map_err(|e| anyhow!("Failed to set policy: {e}"))?;
+    eprintln!("Signature PIN policy set to {pp:?}.");
+    Ok(())
+}
+
+pub fn run_keys_info(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    key: CliKeyRef,
+) -> Result<()> {
+    let key_ref: KeyRef = key.into();
+    let mut session = open_session(dev, scp_params)?;
+
+    let data = session
+        .get_application_related_data()
+        .map_err(|e| anyhow!("Failed to get application data: {e}"))?;
+    let disc = &data.discretionary;
+
+    let status = disc.key_information.get(&key_ref);
+    let has_key = if session.version() >= yubikit::core::Version(5, 2, 0) {
+        matches!(status, Some(s) if *s != KeyStatus::None)
+    } else {
+        disc.fingerprints
+            .get(&key_ref)
+            .is_some_and(|f| f.iter().any(|&b| b != 0))
+    };
+
+    if !has_key {
+        return Err(anyhow!(
+            "No key stored in slot {}.",
+            format_key_ref(key_ref)
+        ));
+    }
+
+    let name = format_key_ref(key_ref);
+    let mut rows = vec![("Key slot", name.to_string())];
+
+    let fp = disc.fingerprints.get(&key_ref);
+    rows.push((
+        "Fingerprint",
+        format_fingerprint(fp.map(|v| v.as_slice()).unwrap_or(&[])),
+    ));
+
+    if let Ok(attrs) = session.get_algorithm_attributes(key_ref) {
+        rows.push(("Algorithm", format_algorithm(&attrs)));
+    }
+
+    if let Some(s) = status {
+        rows.push(("Origin", format_key_status(*s).to_string()));
+    }
+
+    if let Some(t) = disc.generation_times.get(&key_ref) {
+        rows.push(("Created", format_timestamp(*t)));
+    }
+
+    if let Ok(uif) = session.get_uif(key_ref) {
+        rows.push(("Touch policy", format_uif(uif)));
+    }
+    print_table(rows);
+
+    Ok(())
+}
+
+fn format_key_ref(key_ref: KeyRef) -> &'static str {
+    match key_ref {
+        KeyRef::Sig => "Signature key",
+        KeyRef::Dec => "Decryption key",
+        KeyRef::Aut => "Authentication key",
+        KeyRef::Att => "Attestation key",
+    }
+}
+
+fn format_algorithm(attrs: &yubikit::openpgp::AlgorithmAttributes) -> String {
+    match attrs {
+        yubikit::openpgp::AlgorithmAttributes::Rsa(rsa) => format!("RSA{}", rsa.n_len),
+        yubikit::openpgp::AlgorithmAttributes::Ec(ec) => {
+            ec.oid_str().unwrap_or_else(|_| "Unknown EC".to_string())
+        }
+        _ => "Unknown".to_string(),
+    }
+}
+
+fn format_key_status(s: KeyStatus) -> &'static str {
+    match s {
+        KeyStatus::None => "NONE",
+        KeyStatus::Generated => "GENERATED",
+        KeyStatus::Imported => "IMPORTED",
+    }
+}
+
+fn format_timestamp(t: u32) -> String {
+    jiff::Timestamp::from_second(t.into())
+        .map(|ts| ts.strftime("%Y-%m-%dT%H:%M:%S+00:00").to_string())
+        .unwrap_or_else(|_| format!("{t}"))
+}
+
+pub fn run_keys_set_touch(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    key: CliKeyRef,
+    policy: CliUif,
+    admin_pin: Option<&str>,
+    force: bool,
+) -> Result<()> {
+    let key_ref: KeyRef = key.into();
+    let uif: Uif = policy.into();
+
+    if uif.is_fixed() && !force {
+        eprintln!("WARNING: Setting a FIXED touch policy cannot be undone without a full reset!");
+        if !confirm("Proceed?") {
+            return Err(anyhow!("Aborted."));
+        }
+    }
+
+    let ap = ensure_admin_pin(admin_pin)?;
+    let mut session = open_session(dev, scp_params)?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
+    session
+        .set_uif(key_ref, uif)
+        .map_err(|e| anyhow!("Failed to set touch policy: {e}"))?;
+    eprintln!(
+        "Touch policy for {} set to {}.",
+        format_key_ref(key_ref),
+        format_uif(uif)
+    );
+    Ok(())
+}
+
+pub fn run_keys_import(
+    _dev: &dyn YubiKeyDevice,
+    _scp_params: &ScpParams,
+    key: CliKeyRef,
+    key_file: &str,
+    admin_pin: Option<&str>,
+) -> Result<()> {
+    let _key_ref: KeyRef = key.into();
+    let _data = read_file_or_stdin(key_file)?;
+
+    let _ap = ensure_admin_pin(admin_pin)?;
+
+    Err(anyhow!(
+        "Key import requires parsing private key format. Not yet implemented."
+    ))
+}
+
+pub fn run_keys_attest(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    key: CliKeyRef,
+    output: &str,
+    format: CliFormat,
+    pin: Option<&str>,
+) -> Result<()> {
+    let key_ref: KeyRef = key.into();
+    let mut session = open_session(dev, scp_params)?;
+    let p = ensure_pin(pin)?;
+    session
+        .verify_pin(&p, false)
+        .map_err(|e| format_openpgp_credential_error(e, "PIN", "PIN verification failed"))?;
+    let cert_der = session
+        .attest_key(key_ref)
+        .map_err(|e| anyhow!("Failed to attest key: {e}"))?;
+
+    write_output(output, &cert_der, format, "CERTIFICATE")?;
+    eprintln!("Attestation certificate written to {output}.");
+    Ok(())
+}
+
+pub fn run_certificates_export(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    key: CliKeyRef,
+    output: &str,
+    format: CliFormat,
+) -> Result<()> {
+    let key_ref: KeyRef = key.into();
+    let mut session = open_session(dev, scp_params)?;
+    let cert_der = session
+        .get_certificate(key_ref)
+        .map_err(|e| anyhow!("Failed to get certificate: {e}"))?;
+
+    write_output(output, &cert_der, format, "CERTIFICATE")?;
+    eprintln!("Certificate exported to {output}.");
+    Ok(())
+}
+
+pub fn run_certificates_import(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    key: CliKeyRef,
+    cert_file: &str,
+    admin_pin: Option<&str>,
+) -> Result<()> {
+    let key_ref: KeyRef = key.into();
+    let data = read_file_or_stdin(cert_file)?;
+
+    let der = if let Ok(text) = std::str::from_utf8(&data) {
+        if text.contains("-----BEGIN") {
+            pem_decode(text)?
+        } else {
+            data
+        }
+    } else {
+        data
+    };
+
+    let ap = ensure_admin_pin(admin_pin)?;
+    let mut session = open_session(dev, scp_params)?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
+    session
+        .put_certificate(key_ref, &der)
+        .map_err(|e| anyhow!("Failed to import certificate: {e}"))?;
+    eprintln!("Certificate imported.");
+    Ok(())
+}
+
+pub fn run_certificates_delete(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    key: CliKeyRef,
+    admin_pin: Option<&str>,
+) -> Result<()> {
+    let key_ref: KeyRef = key.into();
+    let ap = ensure_admin_pin(admin_pin)?;
+    let mut session = open_session(dev, scp_params)?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
+    session
+        .delete_certificate(key_ref)
+        .map_err(|e| anyhow!("Failed to delete certificate: {e}"))?;
+    eprintln!("Certificate deleted.");
+    Ok(())
+}
+
+fn write_output(path: &str, der: &[u8], format: CliFormat, label: &str) -> Result<()> {
+    match format {
+        CliFormat::Der => {
+            write_file_or_stdout(path, der)?;
+        }
+        CliFormat::Pem => {
+            let pem = pem_encode(label, der);
+            write_file_or_stdout(path, pem.as_bytes())?;
+        }
+    }
+    Ok(())
+}
+
+fn pem_encode(label: &str, der: &[u8]) -> String {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(der);
+    let mut pem = format!("-----BEGIN {label}-----\n");
+    for chunk in b64.as_bytes().chunks(64) {
+        pem.push_str(std::str::from_utf8(chunk).unwrap());
+        pem.push('\n');
+    }
+    pem.push_str(&format!("-----END {label}-----\n"));
+    pem
+}
+
+fn pem_decode(text: &str) -> Result<Vec<u8>> {
+    use base64::Engine;
+    let mut in_block = false;
+    let mut b64 = String::new();
+    for line in text.lines() {
+        if line.starts_with("-----BEGIN") {
+            in_block = true;
+            continue;
+        }
+        if line.starts_with("-----END") {
+            break;
+        }
+        if in_block {
+            b64.push_str(line.trim());
+        }
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(&b64)
+        .map_err(|e| anyhow!("Invalid PEM data: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use yubikit::openpgp::OpenPgpError;
+
+    use super::{format_openpgp_credential_error, format_timestamp};
+
+    #[test]
+    fn openpgp_timestamps_use_rfc3339_utc_offsets() {
+        assert_eq!(format_timestamp(0), "1970-01-01T00:00:00+00:00");
+        assert_eq!(format_timestamp(u32::MAX), "2106-02-07T06:28:15+00:00");
+    }
+
+    #[test]
+    fn openpgp_complexity_errors_identify_the_credential() {
+        for credential in ["PIN", "Admin PIN", "Reset Code"] {
+            let error = OpenPgpError::Connection(yubikit::smartcard::SmartCardError::Apdu {
+                sw: 0x6985,
+                data: vec![],
+            });
+            assert_eq!(
+                format_openpgp_credential_error(error, credential, "Failed").to_string(),
+                format!("Failed: {credential} does not meet complexity requirement.")
+            );
+        }
+    }
+
+    #[test]
+    fn openpgp_credential_errors_name_the_credential() {
+        let err =
+            format_openpgp_credential_error(OpenPgpError::InvalidPin(2), "Admin PIN", "Failed");
+        assert_eq!(
+            err.to_string(),
+            "Failed: Wrong Admin PIN, 2 attempt(s) remaining."
+        );
+
+        let err = format_openpgp_credential_error(OpenPgpError::PinBlocked, "PIN", "Failed");
+        assert_eq!(err.to_string(), "Failed: PIN is blocked.");
+    }
+}

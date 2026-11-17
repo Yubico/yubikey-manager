@@ -1,6 +1,6 @@
 repos:
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.15.20
+  rev: v0.17.5
   hooks:
     # Run the linter, organize imports
     - id: ruff-check
@@ -8,13 +8,13 @@ repos:
     # Run the formatter
     - id: ruff-format
 - repo: https://github.com/pre-commit/mirrors-mypy
-  rev: v2.1.0
+  rev: v2.4.1
   hooks:
     - id: mypy
       exclude: ^(tests/|docs/)  # keep in sync with mypy.ini
       additional_dependencies: []
 - repo: https://github.com/RobertCraigie/pyright-python
-  rev: v1.1.411
+  rev: v1.1.414
   hooks:
     - id: pyright
 - repo: local
@@ -22,7 +22,25 @@ repos:
   - id: ty-check
     name: ty-check
     language: python
-    entry: ty check yubikit ykman tests
+    entry: ty check packages/yubikit/yubikit packages/ykman/ykman tests
     pass_filenames: false
     args: [--python=.venv/]
     additional_dependencies: [ty]
+  - id: cargo-fmt
+    name: cargo fmt
+    language: system
+    entry: cargo fmt --all -- --check
+    pass_filenames: false
+    types: [rust]
+  - id: cargo-clippy
+    name: cargo clippy
+    language: system
+    entry: cargo clippy --locked --workspace --all-targets -- -D warnings
+    pass_filenames: false
+    types: [rust]
+  - id: cargo-deny
+    name: cargo deny
+    language: system
+    entry: cargo deny check
+    pass_filenames: false
+    files: '(^|/)(Cargo\.toml|Cargo\.lock|deny\.toml)$'

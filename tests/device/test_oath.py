@@ -1,7 +1,6 @@
 import pytest
-
 from yubikit.core import TRANSPORT
-from yubikit.core.smartcard import AID, SW, ApduError
+from yubikit.core.smartcard import SW, ApduError
 from yubikit.management import CAPABILITY
 from yubikit.oath import (
     HASH_ALGORITHM,
@@ -18,20 +17,47 @@ KEY = bytes.fromhex("01020304050607080102030405060708")
 @pytest.fixture
 @condition.capability(CAPABILITY.OATH)
 def session(ccid_connection, info, scp_params):
-    fips = CAPABILITY.OATH in info.fips_capable
-    if ccid_connection.transport == TRANSPORT.NFC and fips:
-        oath = OathSession(ccid_connection, scp_params)
-    else:
-        oath = OathSession(ccid_connection)
-    oath.reset()
+    with OathSession(ccid_connection) as oath:
+        oath.reset()
 
-    if fips:
-        oath.set_key(KEY)
+    params = None
+    if (
+        CAPABILITY.OATH in info.fips_capable
+        and ccid_connection.transport == TRANSPORT.NFC
+    ):
+        params = scp_params
 
-    yield oath
+    with OathSession(ccid_connection, params) as oath:
+        if CAPABILITY.OATH in info.fips_capable:
+            oath.set_key(KEY)
+        yield oath
 
 
 CRED_DATA = CredentialData("name", OATH_TYPE.TOTP, HASH_ALGORITHM.SHA1, b"secret")
+
+
+@condition.capability(CAPABILITY.OATH)
+@pytest.mark.parametrize("secure", (False, True), ids=("plain", "scp"))
+def test_reset_requires_new_session(ccid_connection, info, scp_params, secure):
+    if secure and scp_params is None:
+        pytest.skip("SCP11b key not available")
+    params = scp_params if secure else None
+    oath = OathSession(ccid_connection, params)
+    old_id = oath.device_id
+    oath.reset()
+    for operation in (
+        oath.list_credentials,
+        oath.reset,
+        lambda: oath.derive_key("password"),
+    ):
+        with pytest.raises(RuntimeError, match="Session is closed"):
+            operation()
+    oath.close()
+    with OathSession(ccid_connection, params) as reopened:
+        assert reopened.device_id != old_id
+        if CAPABILITY.OATH in info.fips_capable:
+            reopened.set_key(KEY)
+        assert reopened.list_credentials() == []
 
 
 class TestFunctions:
@@ -53,15 +79,19 @@ class TestFunctions:
 
 class TestLockPreventsAccess:
     @pytest.fixture(autouse=True)
-    def set_lock(self, session):
+    def set_lock(self, session, ccid_connection):
+        if ccid_connection.transport == TRANSPORT.NFC:
+            pytest.skip("Disconnect/reconnect does not reset NFC card state")
         assert not session.locked
         session.put_credential(CRED_DATA)
         session.set_key(KEY)
 
-        # Force re-select to lock
-        session.protocol.connection.connection.disconnect()
-        session.protocol.connection.connection.connect()
-        session.protocol.select(AID.OATH)
+        # Close session to release connection, then power-cycle card
+        session.close()
+        ccid_connection._native.disconnect()
+        ccid_connection._native.connect()
+        # Re-initialize session (selects OATH, discovers locked state)
+        session.__init__(ccid_connection)
 
     def test_list(self, session):
         with pytest.raises(ApduError) as ctx:
@@ -147,7 +177,7 @@ HMAC_PARAMS = [
 
 
 def _ids_hmac(params):
-    key, challenge, hash_algorithm, expected = params
+    key, challenge, hash_algorithm, _expected = params
     key_s = key.hex() if len(key) < 6 else key[:6].hex() + "..."
     challenge_s = challenge.hex() if len(challenge) < 6 else challenge[:6].hex() + "..."
     return f"{hash_algorithm.name}-{key_s}-{challenge_s}"
@@ -157,10 +187,12 @@ class TestHmacVectors:
     @pytest.mark.parametrize("params", HMAC_PARAMS, ids=_ids_hmac)
     def test_vector(self, info, session, params):
         key, challenge, hash_algorithm, expected = params
-        if hash_algorithm == HASH_ALGORITHM.SHA512:
-            if info.version[0] <= 4:
-                if info.is_fips or info.version < (4, 3, 1):
-                    pytest.skip("SHA512 requires (non-FIPS) YubiKey 4.3.1 or later")
+        if (
+            hash_algorithm == HASH_ALGORITHM.SHA512
+            and info.version[0] <= 4
+            and (info.is_fips or info.version < (4, 3, 1))
+        ):
+            pytest.skip("SHA512 requires (non-FIPS) YubiKey 4.3.1 or later")
         cred = session.put_credential(
             CredentialData("test", OATH_TYPE.TOTP, hash_algorithm, key)
         )
@@ -202,10 +234,12 @@ class TestTotpVectors:
     )
     def test_vector(self, info, session, params, digits):
         timestamp, hash_algorithm, value, key = params
-        if hash_algorithm == HASH_ALGORITHM.SHA512:
-            if info.version[0] <= 4:
-                if info.is_fips or info.version < (4, 3, 1):
-                    pytest.skip("SHA512 requires (non-FIPS) YubiKey 4.3.1 or later")
+        if (
+            hash_algorithm == HASH_ALGORITHM.SHA512
+            and info.version[0] <= 4
+            and (info.is_fips or info.version < (4, 3, 1))
+        ):
+            pytest.skip("SHA512 requires (non-FIPS) YubiKey 4.3.1 or later")
 
         cred = session.put_credential(
             CredentialData("test", OATH_TYPE.TOTP, hash_algorithm, key, digits)
@@ -234,7 +268,7 @@ HOTP_VECTORS = {
 class TestHotpVectors:
     @pytest.mark.parametrize("digits", [6, 8])
     @pytest.mark.parametrize(
-        "params", HOTP_VECTORS.items(), ids=lambda x: "{0}".format(*x)
+        "params", HOTP_VECTORS.items(), ids=lambda x: "{}".format(*x)
     )
     def test_vector(self, session, params, digits):
         key, values = params

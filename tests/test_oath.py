@@ -1,71 +1,12 @@
-#  vim: set fileencoding=utf-8 :
-
 import pytest
-
+from yubikit.core import TRANSPORT, Tlv
+from yubikit.core.smartcard import SW, ApduError, SmartCardConnection
 from yubikit.oath import (
     HASH_ALGORITHM,
     OATH_TYPE,
     CredentialData,
-    _derive_key,
-    _format_cred_id,
-    _parse_cred_id,
+    OathSession,
 )
-
-
-@pytest.mark.parametrize(
-    ("raw", "issuer", "name", "period"),
-    [
-        (b"20/Issuer:name", "Issuer", "name", 20),
-        (b"weird/Issuer:name", "weird/Issuer", "name", 30),
-        (b"Issuer:name", "Issuer", "name", 30),
-        (b"20/name", None, "name", 20),
-        (b"name", None, "name", 30),
-    ],
-)
-def test_parse_cred_id(raw, issuer, name, period):
-    parsed_issuer, parsed_name, parsed_period = _parse_cred_id(raw, OATH_TYPE.TOTP)
-    assert (parsed_issuer, parsed_name, parsed_period) == (issuer, name, period)
-
-
-@pytest.mark.parametrize(
-    ("issuer", "name", "period", "expected"),
-    [
-        (None, "name", None, b"name"),
-        ("Issuer", "name", None, b"Issuer:name"),
-        ("Issuer", "name", 20, b"20/Issuer:name"),
-        ("Issuer", "name", 30, b"Issuer:name"),
-        (None, "name", 20, b"20/name"),
-    ],
-)
-def test_format_cred_id(issuer, name, period, expected):
-    kwargs = {}
-    if period is not None:
-        kwargs["period"] = period
-    assert _format_cred_id(issuer, name, OATH_TYPE.TOTP, **kwargs) == expected
-
-
-@pytest.mark.parametrize(
-    ("salt", "password", "expected"),
-    [
-        (
-            b"\0" * 8,
-            "foobar",
-            b"\xb0}\xa1\xe7\xde\x87\xf8\x9a\x87\xa2\xb5\x98\xea\xa2\x18\x8c",
-        ),
-        (
-            b"12345678",
-            "Hallå världen!",
-            b"\xda\x81\x8ek,\xf0\xa2\xd0\xbf\x19\xb3\xdd\xd3K\x83\xf5",
-        ),
-        (
-            b"saltsalt",
-            "Ťᶒśƫ ᵽĥřӓşḛ",
-            b"\xf3\xdf\xa7\x81T\xc8\x102\x99E\xfb\xc4\xb55\xe57",
-        ),
-    ],
-)
-def test_derive_key(salt, password, expected):
-    assert _derive_key(salt, password) == expected
 
 
 @pytest.mark.parametrize(
@@ -96,3 +37,87 @@ def test_parse_uri_full_payload():
     assert data.digits == 7
     assert data.period == 20
     assert data.counter == 5
+
+
+class ResetConnection(SmartCardConnection):
+    def __init__(self, outcome):
+        self.outcome = outcome
+        self.sent = []
+        self.did_reset = False
+        self.closed = False
+
+    @property
+    def transport(self):
+        return TRANSPORT.USB
+
+    def close(self):
+        self.closed = True
+
+    def send_and_receive(self, apdu):
+        self.sent.append(apdu)
+        if apdu[1] == 0xA4:
+            salt = b"new salt" if self.did_reset else b"old salt"
+            return Tlv(0x79, b"\x05\x07\x02") + Tlv(0x71, salt), SW.OK
+        if apdu[1] == 0x04:
+            assert apdu[:4] == b"\x00\x04\xde\xad"
+            if self.outcome == "transport":
+                raise OSError("Reset transport failure")
+            if self.outcome == "status":
+                return b"", SW.SECURITY_CONDITION_NOT_SATISFIED
+            self.did_reset = True
+            return b"", SW.OK
+        if apdu[1] == 0xA1:
+            return b"", SW.OK
+        pytest.fail(f"Unexpected APDU: {apdu.hex()}")
+
+
+@pytest.mark.parametrize("outcome", ("success", "status", "transport"))
+def test_reset_closes_session_and_restores_connection(outcome):
+    connection = ResetConnection(outcome)
+    oath = OathSession(connection)
+    old_id = oath.device_id
+    version = oath.version
+    if outcome == "success":
+        assert oath.reset() is None
+    elif outcome == "status":
+        with pytest.raises(ApduError) as exc:
+            oath.reset()
+        assert exc.value.sw == SW.SECURITY_CONDITION_NOT_SATISFIED
+    else:
+        with pytest.raises(RuntimeError, match="Reset transport failure"):
+            oath.reset()
+
+    assert len(connection.sent) == 2
+    assert connection._session is None
+    assert oath._connection is None
+    assert not connection.closed
+    assert oath.device_id == old_id
+    assert oath.version == version
+
+    credential = CredentialData("name", OATH_TYPE.TOTP, HASH_ALGORITHM.SHA1, b"secret")
+    for operation in (
+        oath.reset,
+        oath.list_credentials,
+        lambda: oath.has_key,
+        lambda: oath.locked,
+        lambda: oath._native.version,
+        lambda: oath._native.device_id,
+        lambda: oath.derive_key("password"),
+        lambda: oath.validate(bytes(16)),
+        lambda: oath.set_key(bytes(16)),
+        oath.unset_key,
+        lambda: oath.put_credential(credential),
+        lambda: oath.delete_credential(b"name"),
+        lambda: oath.rename_credential(b"name", "newname"),
+        lambda: oath.calculate(b"name", b"challenge"),
+        oath.calculate_all,
+    ):
+        with pytest.raises(RuntimeError, match="Session is closed"):
+            operation()
+    oath.close()
+    oath.close()
+    assert len(connection.sent) == 2
+
+    with OathSession(connection) as reopened:
+        assert (reopened.device_id != old_id) == (outcome == "success")
+        assert reopened.list_credentials() == []

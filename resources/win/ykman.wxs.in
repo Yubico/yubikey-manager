@@ -2,15 +2,22 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
   <?define ProductVersion="{RELEASE_VERSION}" ?>
   <?define ProductName="YubiKey Manager CLI" ?>
+  <?define BinaryDir="{BINARY_DIR}" ?>
 
    <Product Id="*" UpgradeCode="fba0ab59-48d1-4050-82eb-acad31cf2239" Name="$(var.ProductName)" Version="$(var.ProductVersion)" Manufacturer="Yubico AB" Language="1033">
-      <Package InstallerVersion="301" Compressed="yes" InstallScope="perMachine" Platform="x64" Description="$(var.ProductName) $(var.ProductVersion)" />
+      <Package InstallerVersion="{INSTALLER_VERSION}" Compressed="yes" InstallScope="perMachine" Platform="{ARCHITECTURE}" Description="$(var.ProductName) $(var.ProductVersion)" />
       <Media Id="1" Cabinet="ykman.cab" EmbedCab="yes"/>
 
       <WixVariable Id="WixUIDialogBmp" Value="yubico-msi-background.png" />
       <WixVariable Id="WixUIBannerBmp" Value="yubico-msi-y-banner.png" />
 
       <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />
+      <Property Id="YKMANSERVICEARCH">
+        <RegistrySearch Id="ServiceArchitecture" Root="HKLM" Key="Software\Yubico\YubiKey Manager Service" Name="Architecture" Type="raw" Win64="yes" />
+      </Property>
+      <Condition Message="The installed YubiKey Manager Service has a different architecture. Use installers of the same architecture for YubiKey Manager and Yubico Authenticator.">
+        Installed OR NOT YKMANSERVICEARCH OR YKMANSERVICEARCH = "{ARCHITECTURE}"
+      </Condition>
 
       <Property Id="PREVIOUSVERSIONSINSTALLED" Secure="yes" />
 
@@ -50,14 +57,22 @@
          	<Directory Id="ApplicationProgramsFolder" Name="YubiKey Manager CLI"/>
          </Directory>
 
-         <Component Id='EnvVars' Guid="7e30efe4-dc8b-40ba-a182-76e490de4f37">
-	   <!--<CreateFolder />-->
+         <Component Id='EnvVars' Guid="{ENVVARS_GUID}">
            <Environment Id='PathEnvVar' Action='set' System='yes' Name='PATH' Part='last' Value='[INSTALLDIR]'/>
          </Component>
       </Directory>
 
+      <DirectoryRef Id="INSTALLDIR">
+         <Component Id="YkmanExe" Guid="{YKMAN_EXE_GUID}">
+             <File Id="ykman.exe" Source="$(var.BinaryDir)\ykman.exe" KeyPath="yes" />
+         </Component>
+      </DirectoryRef>
+
+      <DirectoryRef Id="TARGETDIR">
+        <Merge Id="YkmanService" SourceFile="$(var.ServiceModule)" DiskId="1" Language="1033" />
+      </DirectoryRef>
       <DirectoryRef Id="ApplicationProgramsFolder">
-         <Component Id="ApplicationShortcut" Guid="fba0ab59-48d1-4050-82eb-acad31cf2239">
+         <Component Id="ApplicationShortcut" Guid="{SHORTCUT_GUID}">
              <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall"/>
              <RegistryValue Root="HKCU" Key="Software\Yubico\YubiKey Manager CLI" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
              <util:RemoveFolderEx Id="Remove" On="install" Property="INSTALLDIR" />
@@ -65,18 +80,9 @@
 
       </DirectoryRef>
 
-      <!--
-      <DirectoryRef Id="TARGETDIR">
-        <Merge Id="VCRedist" SourceFile="$(env.MERGEDPATH)" DiskId="1" Language="0"/>
-      </DirectoryRef>
-
-      <Feature Id="VCRedist" Title="Visual C++ Runtime" AllowAdvertise="no" Display="hidden" Level="1">
-        <MergeRef Id="VCRedist"/>
-      </Feature>
-      -->
-
       <Feature Id="DefaultFeature" Level="1">
-         <ComponentGroupRef Id="ApplicationFiles"/>
+         <ComponentRef Id="YkmanExe" />
+         <MergeRef Id="YkmanService" />
       </Feature>
 
       <Feature Id="MainApplication" Title="Main Application" Level="1">

@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?if $(var.Platform) = arm64 ?>
+    <?define ModuleGuid="c871dc98-5a40-4875-8f79-45a493f89826" ?>
+    <?define ComponentGuid="085d53ef-8e28-5d07-82c8-fcf8a7ce74bd" ?>
+    <?define InstallerVersion="500" ?>
+  <?else ?>
+    <?define ModuleGuid="2f14e8ed-0490-4c66-b6ab-9d90f855b1c4" ?>
+    <?define ComponentGuid="b4e8d2f3-6a9b-4c0f-ad2e-3f5a7b9c1d4e" ?>
+    <?define InstallerVersion="301" ?>
+  <?endif ?>
+  <Module Id="YkmanService" Language="1033" Version="$(var.ServiceVersion)">
+    <Package Id="$(var.ModuleGuid)" Manufacturer="Yubico AB" InstallerVersion="$(var.InstallerVersion)" />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="ServiceYubicoDir" Name="Yubico">
+          <Directory Id="YkmanServiceDir" Name="YubiKey Manager Service">
+            <Component Id="YkmanService" Guid="$(var.ComponentGuid)" Win64="yes">
+              <File Id="YkmanServiceExe" Name="ykman-svc.exe" Source="$(var.ServiceSource)" KeyPath="yes" />
+              <RegistryValue Root="HKLM" Key="Software\Yubico\YubiKey Manager Service"
+                             Name="Architecture" Type="string" Value="$(var.Platform)" />
+              <ServiceInstall Id="YkmanServiceInstall"
+                              Name="ykman-svc"
+                              DisplayName="YubiKey Manager Service"
+                              Description="Provides device management services for YubiKey Manager."
+                              Type="ownProcess" Start="auto" Account="LocalSystem"
+                              ErrorControl="normal" Arguments="run" />
+              <ServiceControl Id="YkmanServiceControl" Name="ykman-svc"
+                              Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+            </Component>
+          </Directory>
+        </Directory>
+      </Directory>
+    </Directory>
+  </Module>
+</Wix>

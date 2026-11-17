@@ -3,22 +3,20 @@ import time
 from functools import partial
 
 import pytest
-
-from ykman._cli.util import find_scp11_params
-from ykman.device import list_all_devices, read_info
-from ykman.pcsc import list_devices
 from yubikit.core import TRANSPORT, _override_version
 from yubikit.core.fido import FidoConnection
 from yubikit.core.otp import OtpConnection
 from yubikit.core.smartcard import SmartCardConnection
 from yubikit.core.smartcard.scp import ScpKid
+from yubikit.device import list_all_devices
 from yubikit.management import RELEASE_TYPE
+from yubikit.support import find_scp11_params
 
 from . import condition
 
 
 @pytest.fixture(scope="session")
-def _device(pytestconfig):
+def device(pytestconfig):
     serial = pytestconfig.getoption("device")
     no_serial = pytestconfig.getoption("no_serial")
     if not serial:
@@ -27,36 +25,22 @@ def _device(pytestconfig):
         else:
             pytest.skip("No serial specified for device tests")
 
-    reader = pytestconfig.getoption("reader")
-    if reader:
-        readers = list_devices(reader)
-        if len(readers) != 1:
-            pytest.exit("No/Multiple readers matched")
-        dev = readers[0]
-        with dev.open_connection(SmartCardConnection) as conn:
-            info = read_info(conn)
-    else:
-        devices = list_all_devices()
-        if len(devices) != 1:
-            pytest.exit("Device tests require a single YubiKey")
-        dev, info = devices[0]
-    if info.serial != serial:
-        pytest.exit("Device serial does not match: %d != %r" % (serial, info.serial))
+    devices = list_all_devices()
+    if serial is not None:
+        devices = [d for d in devices if d.info.serial == serial]
+    if len(devices) != 1:
+        pytest.exit(f"Expected a single device (serial={serial})")
+    dev = devices[0]
 
-    if info.version_qualifier.type != RELEASE_TYPE.FINAL:
-        _override_version(info.version)
+    if dev.info.version_qualifier.type != RELEASE_TYPE.FINAL:
+        _override_version(dev.info.version)
 
-    return dev, info
+    return dev
 
 
 @pytest.fixture(scope="session")
-def device(_device):
-    return _device[0]
-
-
-@pytest.fixture(scope="session")
-def info(_device):
-    return _device[1]
+def info(device):
+    return device.info
 
 
 @pytest.fixture(scope="session")

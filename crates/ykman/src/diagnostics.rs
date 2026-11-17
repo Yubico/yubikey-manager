@@ -1,0 +1,1340 @@
+//! Diagnostics data collection for YubiKey Manager.
+//!
+//! Provides a `run_diagnostics()` function that probes all connected YubiKeys
+//! across all transports and returns a serializable report.
+
+use std::collections::BTreeMap;
+
+use serde::Serialize;
+
+use yubikit::core::Connection;
+use yubikit::core::Transport;
+use yubikit::device::get_name;
+#[cfg(any(feature = "hardware", target_os = "windows", debug_assertions))]
+use yubikit::device::{read_info_ccid, read_info_fido, read_info_otp};
+use yubikit::management::{Capability, DeviceInfo, ReleaseType};
+
+#[cfg(feature = "hardware")]
+use yubikit::platform::hidapi::{
+    HidFidoConnection, HidOtpConnection, list_fido_devices, list_otp_devices,
+};
+#[cfg(feature = "hardware")]
+use yubikit::platform::pcsc::{PcscSmartCardConnection, is_reader_usb, list_readers};
+
+use yubikit::ctap::CtapSession;
+use yubikit::ctap2::{ClientPin, Ctap2Session};
+
+/// A value that is either a successful result or an error message.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum ResultOrError<T: Serialize> {
+    Ok(T),
+    Err(String),
+}
+
+impl<T: Serialize> From<Result<T, String>> for ResultOrError<T> {
+    fn from(r: Result<T, String>) -> Self {
+        match r {
+            Ok(v) => ResultOrError::Ok(v),
+            Err(e) => ResultOrError::Err(e),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Top-level report
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticsReport {
+    pub app_version: String,
+    pub lib_version: String,
+    pub features: Vec<String>,
+    pub platform: String,
+    pub arch: String,
+    pub pcsc: Option<ResultOrError<PcscDiag>>,
+    pub otp: Option<ResultOrError<BTreeMap<String, OtpDeviceDiag>>>,
+    pub fido: Option<ResultOrError<BTreeMap<String, FidoDeviceDiag>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub svc: Option<ResultOrError<SvcDiag>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PcscDiag {
+    pub readers: BTreeMap<String, String>,
+    pub yubikeys: BTreeMap<String, PcscDeviceDiag>,
+}
+
+// ---------------------------------------------------------------------------
+// PC/SC
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct PcscDeviceDiag {
+    pub management: ResultOrError<ManagementDiag>,
+    pub piv: ResultOrError<PivDiag>,
+    pub oath: ResultOrError<OathDiag>,
+    pub openpgp: ResultOrError<OpenPgpDiag>,
+    pub hsmauth: ResultOrError<HsmAuthDiag>,
+    pub fido: Option<ResultOrError<Ctap2Diag>>,
+}
+
+// ---------------------------------------------------------------------------
+// HID OTP
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct OtpDeviceDiag {
+    pub management: ResultOrError<ManagementDiag>,
+    pub otp: ResultOrError<OtpConfigDiag>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OtpConfigDiag {
+    pub slot1_configured: Option<bool>,
+    pub slot2_configured: Option<bool>,
+    pub slot1_touch_triggered: Option<bool>,
+    pub slot2_touch_triggered: Option<bool>,
+    pub led_inverted: bool,
+}
+
+// ---------------------------------------------------------------------------
+// HID FIDO
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct FidoDeviceDiag {
+    pub ctap_version: String,
+    pub capabilities: u8,
+    pub ctap2: ResultOrError<Ctap2Diag>,
+    pub management: ResultOrError<ManagementDiag>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Ctap2Diag {
+    pub info: Ctap2InfoDiag,
+    pub pin: ResultOrError<PinStatusDiag>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PinStatusDiag {
+    pub configured: bool,
+    pub retries: Option<u32>,
+    pub power_cycle: Option<u32>,
+    pub bio_enroll: Option<BioEnrollDiag>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum BioEnrollDiag {
+    Configured { uv_retries: u32 },
+    NotConfigured,
+}
+
+// ---------------------------------------------------------------------------
+// Shared sub-structs
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct ManagementDiag {
+    pub name: String,
+    pub device_info: DeviceInfoDiag,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceInfoDiag {
+    pub serial: Option<u32>,
+    pub version: String,
+    pub form_factor: String,
+    pub supported_capabilities: BTreeMap<String, CapabilityDiag>,
+    pub config: DeviceConfigDiag,
+    pub is_locked: bool,
+    pub is_fips: bool,
+    pub is_sky: bool,
+    pub part_number: Option<String>,
+    pub fips_capable: CapabilityDiag,
+    pub fips_approved: CapabilityDiag,
+    pub pin_complexity: bool,
+    pub reset_blocked: CapabilityDiag,
+    pub fps_version: Option<String>,
+    pub stm_version: Option<String>,
+    pub version_qualifier: Option<VersionQualifierDiag>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceConfigDiag {
+    pub enabled_capabilities: BTreeMap<String, CapabilityDiag>,
+    pub auto_eject_timeout: u16,
+    pub challenge_response_timeout: u8,
+    pub device_flags: u8,
+    pub nfc_restricted: bool,
+}
+
+#[derive(Debug)]
+pub struct CapabilityDiag {
+    pub names: Vec<String>,
+    pub value: u16,
+}
+
+impl Serialize for CapabilityDiag {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let s = if self.names.is_empty() {
+            format!("0x{:x}", self.value)
+        } else {
+            format!("{}: 0x{:x}", self.names.join("|"), self.value)
+        };
+        serializer.serialize_str(&s)
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct VersionQualifierDiag {
+    pub version: String,
+    pub release_type: String,
+    pub iteration: u8,
+}
+
+// ---------------------------------------------------------------------------
+// Session diagnostics
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct PivDiag {
+    pub version: String,
+    pub pin_tries: Option<String>,
+    pub puk_tries: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bio_metadata: Option<PivBioMetadataDiag>,
+    pub management_key_algorithm: Option<String>,
+    pub warnings: Vec<String>,
+    pub chuid: Option<String>,
+    pub ccc: Option<String>,
+    pub slots: BTreeMap<String, PivSlotDiag>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PivBioMetadataDiag {
+    pub configured: bool,
+    pub attempts_remaining: u32,
+    pub temporary_pin: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PivSlotDiag {
+    pub key_type: String,
+    pub fingerprint: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OathDiag {
+    pub version: String,
+    pub password_protected: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenPgpDiag {
+    pub openpgp_version: String,
+    pub application_version: String,
+    pub pin_tries: Option<u8>,
+    pub reset_code_tries: Option<u8>,
+    pub admin_pin_tries: Option<u8>,
+    pub signature_pin_policy: Option<String>,
+    pub kdf_enabled: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HsmAuthDiag {
+    pub version: String,
+    pub management_key_retries: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Service (ykman-svc) diagnostics
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct SvcDiag {
+    pub devices: BTreeMap<String, SvcDeviceDiag>,
+}
+
+/// Per-device diagnostics gathered via the ykman-svc service.
+#[derive(Debug, Serialize)]
+pub struct SvcDeviceDiag {
+    /// Management info read directly from the cached device data.
+    pub management: ResultOrError<ManagementDiag>,
+    /// CCID (SmartCard) application diagnostics, if the device has CCID.
+    pub ccid: Option<ResultOrError<PcscDeviceDiag>>,
+    /// FIDO/CTAP diagnostics, if the device has CTAP.
+    pub ctap: Option<ResultOrError<FidoDeviceDiag>>,
+    /// OTP diagnostics, if the device has OTP.
+    pub otp: Option<ResultOrError<OtpDeviceDiag>>,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct Ctap2InfoDiag {
+    /// 0x01
+    pub versions: Vec<String>,
+    /// 0x02
+    pub extensions: Vec<String>,
+    /// 0x03
+    pub aaguid: String,
+    /// 0x04
+    pub options: BTreeMap<String, bool>,
+    /// 0x05
+    pub max_msg_size: usize,
+    /// 0x06
+    pub pin_uv_auth_protocols: Vec<u32>,
+    /// 0x07
+    pub max_creds_in_list: Option<usize>,
+    /// 0x08
+    pub max_cred_id_length: Option<usize>,
+    /// 0x09
+    pub transports: Vec<String>,
+    /// 0x0A
+    pub algorithms: Vec<String>,
+    /// 0x0B
+    pub max_large_blob: Option<usize>,
+    /// 0x0C
+    pub force_pin_change: bool,
+    /// 0x0D
+    pub min_pin_length: usize,
+    /// 0x0E
+    pub firmware_version: Option<u64>,
+    /// 0x0F
+    pub max_cred_blob_length: Option<usize>,
+    /// 0x10
+    pub max_rpids_for_min_pin: Option<usize>,
+    /// 0x11
+    pub preferred_platform_uv_attempts: Option<usize>,
+    /// 0x12
+    pub uv_modality: Option<u32>,
+    /// 0x13
+    pub certifications: BTreeMap<String, String>,
+    /// 0x14
+    pub remaining_disc_creds: Option<u32>,
+    /// 0x15
+    pub vendor_prototype_config_commands: Vec<u32>,
+    /// 0x16
+    pub attestation_formats: Vec<String>,
+    /// 0x17
+    pub uv_count_since_pin: Option<u32>,
+    /// 0x18
+    pub long_touch_for_reset: bool,
+    /// 0x1A
+    pub transports_for_reset: Vec<String>,
+    /// 0x1B
+    pub pin_complexity_policy: Option<bool>,
+    /// 0x1C
+    pub pin_complexity_policy_url: Option<String>,
+    /// 0x1D
+    pub max_pin_length: Option<usize>,
+    /// 0x1F
+    pub config_commands: Vec<u32>,
+}
+
+// ---------------------------------------------------------------------------
+// Conversion helpers
+// ---------------------------------------------------------------------------
+
+fn cap_diag(cap: Capability) -> CapabilityDiag {
+    let all: &[(Capability, &str)] = &[
+        (Capability::OTP, "OTP"),
+        (Capability::U2F, "U2F"),
+        (Capability::FIDO2, "FIDO2"),
+        (Capability::OATH, "OATH"),
+        (Capability::PIV, "PIV"),
+        (Capability::OPENPGP, "OPENPGP"),
+        (Capability::HSMAUTH, "HSMAUTH"),
+        (Capability::FIDOCCID, "FIDOCCID"),
+    ];
+    let names: Vec<String> = all
+        .iter()
+        .filter(|(c, _)| cap.contains(*c))
+        .map(|(_, n)| n.to_string())
+        .collect();
+    CapabilityDiag {
+        names,
+        value: cap.0,
+    }
+}
+
+fn transport_name(t: Transport) -> &'static str {
+    match t {
+        Transport::Usb => "USB",
+        Transport::Nfc => "NFC",
+    }
+}
+
+fn caps_map(
+    caps: &std::collections::HashMap<Transport, Capability>,
+) -> BTreeMap<String, CapabilityDiag> {
+    caps.iter()
+        .map(|(t, c)| (transport_name(*t).to_string(), cap_diag(*c)))
+        .collect()
+}
+
+fn device_info_diag(info: &DeviceInfo) -> DeviceInfoDiag {
+    let vq = if info.version_qualifier.release_type != ReleaseType::Final {
+        Some(VersionQualifierDiag {
+            version: info.version_qualifier.version.to_string(),
+            release_type: format!("{}", info.version_qualifier.release_type),
+            iteration: info.version_qualifier.iteration,
+        })
+    } else {
+        None
+    };
+
+    DeviceInfoDiag {
+        serial: info.serial,
+        version: info.version.to_string(),
+        form_factor: format!("{}", info.form_factor),
+        supported_capabilities: caps_map(&info.supported_capabilities),
+        config: DeviceConfigDiag {
+            enabled_capabilities: caps_map(&info.config.enabled_capabilities),
+            auto_eject_timeout: info.config.auto_eject_timeout.unwrap_or(0),
+            challenge_response_timeout: info.config.challenge_response_timeout.unwrap_or(0),
+            device_flags: info.config.device_flags.map(|f| f.0).unwrap_or(0),
+            nfc_restricted: info.config.nfc_restricted == Some(true),
+        },
+        is_locked: info.is_locked,
+        is_fips: info.is_fips,
+        is_sky: info.is_sky,
+        part_number: info.part_number.clone(),
+        fips_capable: cap_diag(info.fips_capable),
+        fips_approved: cap_diag(info.fips_approved),
+        pin_complexity: info.pin_complexity,
+        reset_blocked: cap_diag(info.reset_blocked),
+        fps_version: info.fps_version.map(|v| v.to_string()),
+        stm_version: info.stm_version.map(|v| v.to_string()),
+        version_qualifier: vq,
+        name: info.name.clone(),
+    }
+}
+
+fn management_diag(info: &DeviceInfo) -> ManagementDiag {
+    ManagementDiag {
+        name: get_name(info),
+        device_info: device_info_diag(info),
+    }
+}
+
+fn ctap2_info_diag(info: &yubikit::ctap2::Info) -> Ctap2InfoDiag {
+    let algorithms = info
+        .algorithms
+        .iter()
+        .map(|p| format!("{}({})", p.type_, p.alg))
+        .collect();
+    let certifications = info
+        .certifications
+        .iter()
+        .map(|(k, v)| (k.clone(), format!("{v:?}")))
+        .collect();
+    let pin_complexity_policy_url = info
+        .pin_complexity_policy_url
+        .as_ref()
+        .map(|b| String::from_utf8_lossy(b).into_owned());
+    Ctap2InfoDiag {
+        versions: info.versions.clone(),
+        extensions: info.extensions.clone(),
+        aaguid: info.aaguid.to_string(),
+        options: info.options.clone(),
+        max_msg_size: info.max_msg_size,
+        pin_uv_auth_protocols: info.pin_uv_protocols.clone(),
+        max_creds_in_list: info.max_creds_in_list,
+        max_cred_id_length: info.max_cred_id_length,
+        transports: info.transports.clone(),
+        algorithms,
+        max_large_blob: info.max_large_blob,
+        force_pin_change: info.force_pin_change,
+        min_pin_length: info.min_pin_length,
+        firmware_version: info.firmware_version,
+        max_cred_blob_length: info.max_cred_blob_length,
+        max_rpids_for_min_pin: info.max_rpids_for_min_pin,
+        preferred_platform_uv_attempts: info.preferred_platform_uv_attempts,
+        uv_modality: info.uv_modality,
+        certifications,
+        remaining_disc_creds: info.remaining_disc_creds,
+        vendor_prototype_config_commands: info.vendor_prototype_config_commands.clone(),
+        attestation_formats: info.attestation_formats.clone(),
+        uv_count_since_pin: info.uv_count_since_pin,
+        long_touch_for_reset: info.long_touch_for_reset,
+        transports_for_reset: info.transports_for_reset.clone(),
+        pin_complexity_policy: info.pin_complexity_policy,
+        pin_complexity_policy_url,
+        max_pin_length: info.max_pin_length,
+        config_commands: info.config_commands.clone(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Probing functions
+// ---------------------------------------------------------------------------
+
+fn probe_piv<C: yubikit::smartcard::SmartCardConnection + 'static>(
+    conn: C,
+) -> (ResultOrError<PivDiag>, C) {
+    match yubikit::piv::PivSession::new(conn) {
+        Ok(mut session) => {
+            let version = session.version().to_string();
+            let pin_tries = session
+                .get_pin_metadata()
+                .ok()
+                .map(|m| format!("{}/{}", m.attempts_remaining, m.total_attempts));
+            let puk_tries = session
+                .get_puk_metadata()
+                .ok()
+                .map(|m| format!("{}/{}", m.attempts_remaining, m.total_attempts));
+            let bio_metadata = session.get_bio_metadata().ok().map(|m| PivBioMetadataDiag {
+                configured: m.configured,
+                attempts_remaining: m.attempts_remaining,
+                temporary_pin: m.temporary_pin,
+            });
+            let mgmt_algo = session
+                .get_management_key_metadata()
+                .ok()
+                .map(|m| format!("{}", m.key_type));
+
+            let mut warnings = Vec::new();
+            if let Ok(meta) = session.get_pin_metadata()
+                && meta.default_value
+            {
+                warnings.push("Using default PIN!".to_string());
+            }
+            if let Ok(meta) = session.get_puk_metadata()
+                && meta.default_value
+            {
+                warnings.push("Using default PUK!".to_string());
+            }
+            if let Ok(meta) = session.get_management_key_metadata()
+                && meta.default_value
+            {
+                warnings.push("Using default Management key!".to_string());
+            }
+
+            use yubikit::piv::{ObjectId, Slot};
+            let chuid = session
+                .get_object(ObjectId::Chuid)
+                .ok()
+                .map(|d| hex::encode(&d));
+            let ccc = session
+                .get_object(ObjectId::Capability)
+                .ok()
+                .map(|d| hex::encode(&d));
+
+            let mut slots = BTreeMap::new();
+            for slot in Slot::key_slots() {
+                let key_type = session
+                    .get_slot_metadata(slot)
+                    .ok()
+                    .map(|meta| meta.key_type.to_string());
+                let cert = session.get_certificate(slot).ok();
+                if let Some((name, diag)) = piv_slot_diag(slot, key_type, cert) {
+                    slots.insert(name, diag);
+                }
+            }
+
+            let conn = session.into_connection();
+            (
+                ResultOrError::Ok(PivDiag {
+                    version,
+                    pin_tries,
+                    puk_tries,
+                    bio_metadata,
+                    management_key_algorithm: mgmt_algo,
+                    warnings,
+                    chuid,
+                    ccc,
+                    slots,
+                }),
+                conn,
+            )
+        }
+        Err((e, conn)) => (ResultOrError::Err(format!("{e}")), conn),
+    }
+}
+
+fn piv_slot_diag(
+    slot: yubikit::piv::Slot,
+    key_type: Option<String>,
+    cert: Option<Vec<u8>>,
+) -> Option<(String, PivSlotDiag)> {
+    use yubikit::piv::Slot;
+    if key_type.is_none() && cert.is_none() {
+        return None;
+    }
+    let name = match slot {
+        Slot::Authentication => "AUTHENTICATION".to_string(),
+        Slot::Signature => "DIGITAL SIGNATURE".to_string(),
+        Slot::KeyManagement => "KEY MANAGEMENT".to_string(),
+        Slot::CardAuth => "CARD AUTH".to_string(),
+        _ => format!("{slot:?}").to_ascii_uppercase(),
+    };
+    let fingerprint = cert.map(|bytes| {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(&bytes))
+    });
+    Some((
+        format!("{:02X} ({name})", slot as u8),
+        PivSlotDiag {
+            key_type: key_type.unwrap_or_else(|| "EMPTY".to_string()),
+            fingerprint,
+        },
+    ))
+}
+
+fn probe_oath<C: yubikit::smartcard::SmartCardConnection + 'static>(
+    conn: C,
+) -> (ResultOrError<OathDiag>, C) {
+    match yubikit::oath::OathSession::new(conn) {
+        Ok(session) => {
+            let diag = OathDiag {
+                version: session.version().to_string(),
+                password_protected: session.locked(),
+            };
+            (ResultOrError::Ok(diag), session.into_connection())
+        }
+        Err((e, conn)) => (ResultOrError::Err(format!("{e}")), conn),
+    }
+}
+
+fn probe_openpgp<C: yubikit::smartcard::SmartCardConnection + 'static>(
+    conn: C,
+) -> (ResultOrError<OpenPgpDiag>, C) {
+    match yubikit::openpgp::OpenPgpSession::new(conn) {
+        Ok(mut session) => {
+            let aid_ver = session.aid().version();
+            let openpgp_version = format!("{}.{}", aid_ver.0, aid_ver.1);
+            let application_version = session.version().to_string();
+
+            let (pin_tries, reset_code_tries, admin_pin_tries, sig_policy) =
+                match session.get_pin_status() {
+                    Ok(pw) => {
+                        let policy = match pw.pin_policy_user {
+                            yubikit::openpgp::PinPolicy::Once => "Once",
+                            yubikit::openpgp::PinPolicy::Always => "Always",
+                            _ => "Unknown",
+                        };
+                        (
+                            Some(pw.attempts_user),
+                            Some(pw.attempts_reset),
+                            Some(pw.attempts_admin),
+                            Some(policy.to_string()),
+                        )
+                    }
+                    Err(_) => (None, None, None, None),
+                };
+
+            let kdf_enabled = session
+                .get_kdf()
+                .ok()
+                .map(|kdf| !matches!(kdf, yubikit::openpgp::Kdf::None));
+
+            let conn = session.into_connection();
+            (
+                ResultOrError::Ok(OpenPgpDiag {
+                    openpgp_version,
+                    application_version,
+                    pin_tries,
+                    reset_code_tries,
+                    admin_pin_tries,
+                    signature_pin_policy: sig_policy,
+                    kdf_enabled,
+                }),
+                conn,
+            )
+        }
+        Err((e, conn)) => (ResultOrError::Err(format!("{e}")), conn),
+    }
+}
+
+fn probe_hsmauth<C: yubikit::smartcard::SmartCardConnection + 'static>(
+    conn: C,
+) -> (ResultOrError<HsmAuthDiag>, C) {
+    match yubikit::hsmauth::HsmAuthSession::new(conn) {
+        Ok(mut session) => {
+            let version = session.version().to_string();
+            let retries = session
+                .get_management_key_retries()
+                .ok()
+                .map(|r| format!("{r}/8"));
+            // HsmAuthSession doesn't have into_connection, just drop it
+            // We need to get the connection back somehow
+            let conn = session.into_connection();
+            (
+                ResultOrError::Ok(HsmAuthDiag {
+                    version,
+                    management_key_retries: retries,
+                }),
+                conn,
+            )
+        }
+        Err((e, conn)) => (ResultOrError::Err(format!("{e}")), conn),
+    }
+}
+
+fn probe_ctap2_pin<C: Connection + 'static>(
+    mut ctap2: Ctap2Session<C>,
+) -> (ResultOrError<PinStatusDiag>, Ctap2Session<C>) {
+    let info = match ctap2.get_info() {
+        Ok(i) => i,
+        Err(e) => {
+            return (
+                ResultOrError::Err(format!("Failed to get info: {e}")),
+                ctap2,
+            );
+        }
+    };
+    if info.options.get("clientPin") != Some(&true) {
+        return (
+            ResultOrError::Ok(PinStatusDiag {
+                configured: false,
+                retries: None,
+                power_cycle: None,
+                bio_enroll: None,
+            }),
+            ctap2,
+        );
+    }
+
+    let bio_enroll_option = info.options.get("bioEnroll").copied();
+
+    match ClientPin::new(ctap2) {
+        Ok(mut client_pin) => {
+            let (retries, power_cycle) = client_pin.get_pin_retries().unwrap_or((0, None));
+
+            let bio_enroll = match bio_enroll_option {
+                Some(true) => Some(
+                    client_pin
+                        .get_uv_retries()
+                        .map(|r| BioEnrollDiag::Configured { uv_retries: r })
+                        .unwrap_or(BioEnrollDiag::NotConfigured),
+                ),
+                Some(false) => Some(BioEnrollDiag::NotConfigured),
+                _ => None,
+            };
+
+            let ctap2 = client_pin.into_session();
+            (
+                ResultOrError::Ok(PinStatusDiag {
+                    configured: true,
+                    retries: Some(retries),
+                    power_cycle,
+                    bio_enroll,
+                }),
+                ctap2,
+            )
+        }
+        Err((e, ctap2)) => (
+            ResultOrError::Err(format!("ClientPin::new failed: {e}")),
+            ctap2,
+        ),
+    }
+}
+
+#[cfg(any(feature = "hardware", target_os = "windows", debug_assertions))]
+fn probe_ctap2_ccid<C: yubikit::smartcard::SmartCardConnection + Send + 'static>(
+    conn: C,
+) -> ResultOrError<Ctap2Diag> {
+    match CtapSession::new(conn) {
+        Ok(ctap) => match Ctap2Session::new(ctap) {
+            Ok(mut ctap2) => {
+                let info = ctap2.get_info().ok();
+                let info_diag = info.as_ref().map(ctap2_info_diag).unwrap_or_default();
+                let (pin, _ctap2) = probe_ctap2_pin(ctap2);
+                ResultOrError::Ok(Ctap2Diag {
+                    info: info_diag,
+                    pin,
+                })
+            }
+            Err((e, _)) => ResultOrError::Err(format!("{e}")),
+        },
+        Err((e, _)) => ResultOrError::Err(format!("{e}")),
+    }
+}
+
+/// Read management (DeviceInfo) diagnostics over a FIDO connection.
+#[cfg(any(feature = "hardware", target_os = "windows", debug_assertions))]
+fn fido_management_diag<C: yubikit::fido::FidoConnection + 'static>(
+    conn: C,
+    pid: u16,
+) -> ResultOrError<ManagementDiag> {
+    match read_info_fido(conn, pid) {
+        Ok((info, _)) => ResultOrError::Ok(management_diag(&info)),
+        Err((e, _)) => ResultOrError::Err(format!("{e}")),
+    }
+}
+
+/// Probe CTAP/CTAP2 and management diagnostics over a FIDO connection.
+///
+/// Shared by the local HID FIDO probe and the service CTAP probe.
+#[cfg(any(feature = "hardware", target_os = "windows", debug_assertions))]
+fn fido_diag<C: yubikit::fido::FidoConnection + Send + 'static>(
+    conn: C,
+    pid: u16,
+) -> FidoDeviceDiag {
+    let yubikit::core::Version(v1, v2, v3) = conn.device_version();
+    let capabilities = conn.capabilities();
+    let ctap_version = format!("{v1}.{v2}.{v3}");
+    let raw_caps = capabilities.raw();
+
+    if !capabilities.has_cbor() {
+        return FidoDeviceDiag {
+            ctap_version,
+            capabilities: raw_caps,
+            ctap2: ResultOrError::Err("No CBOR support".to_string()),
+            management: fido_management_diag(conn, pid),
+        };
+    }
+
+    let (ctap2, management) = match CtapSession::new_fido(conn) {
+        Ok(ctap) => match Ctap2Session::new(ctap) {
+            Ok(mut ctap2) => {
+                let info = ctap2.get_info().ok();
+                let info_diag = info.as_ref().map(ctap2_info_diag).unwrap_or_default();
+                let (pin, ctap2) = probe_ctap2_pin(ctap2);
+                let ctap2_diag = ResultOrError::Ok(Ctap2Diag {
+                    info: info_diag,
+                    pin,
+                });
+                let conn = ctap2.into_session().into_connection();
+                (ctap2_diag, fido_management_diag(conn, pid))
+            }
+            Err((e, _)) => (
+                ResultOrError::Err(format!("{e}")),
+                ResultOrError::Err(format!("{e}")),
+            ),
+        },
+        Err((e, _)) => (
+            ResultOrError::Err(format!("{e}")),
+            ResultOrError::Err(format!("{e}")),
+        ),
+    };
+
+    FidoDeviceDiag {
+        ctap_version,
+        capabilities: raw_caps,
+        ctap2,
+        management,
+    }
+}
+
+/// Probe the OTP application configuration state over an OTP connection.
+///
+/// Shared by the local HID OTP probe and the service OTP probe.
+#[cfg(any(feature = "hardware", target_os = "windows", debug_assertions))]
+fn otp_config_diag<C: yubikit::otp::OtpConnection + Send + 'static>(
+    conn: C,
+) -> ResultOrError<OtpConfigDiag> {
+    use yubikit::yubiotp::{Slot, YubiOtpSession};
+    match YubiOtpSession::new_otp(conn) {
+        Ok(session) => {
+            let state = session.get_config_state();
+            ResultOrError::Ok(OtpConfigDiag {
+                slot1_configured: state.is_configured(Slot::One).ok(),
+                slot2_configured: state.is_configured(Slot::Two).ok(),
+                slot1_touch_triggered: state.is_touch_triggered(Slot::One).ok(),
+                slot2_touch_triggered: state.is_touch_triggered(Slot::Two).ok(),
+                led_inverted: state.is_led_inverted(),
+            })
+        }
+        Err((e, _)) => ResultOrError::Err(format!("{e}")),
+    }
+}
+
+/// Probe all CCID applications (PIV, OATH, OpenPGP, HSM Auth) in sequence,
+/// threading the connection through each probe.
+#[cfg(any(feature = "hardware", target_os = "windows", debug_assertions))]
+fn probe_ccid_apps<C: yubikit::smartcard::SmartCardConnection + 'static>(
+    conn: C,
+) -> (
+    ResultOrError<PivDiag>,
+    ResultOrError<OathDiag>,
+    ResultOrError<OpenPgpDiag>,
+    ResultOrError<HsmAuthDiag>,
+) {
+    let (piv, conn) = probe_piv(conn);
+    let (oath, conn) = probe_oath(conn);
+    let (openpgp, conn) = probe_openpgp(conn);
+    let (hsmauth, _conn) = probe_hsmauth(conn);
+    (piv, oath, openpgp, hsmauth)
+}
+
+// ---------------------------------------------------------------------------
+// Main entry point
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "hardware")]
+fn device_key_pcsc(reader: &str) -> String {
+    let transport = if is_reader_usb(reader) { "USB" } else { "NFC" };
+    format!("CCID ({reader}, [{transport}])")
+}
+
+/// Whether FIDO-over-CCID is available for a device on the given transport.
+///
+/// NFC devices always expose FIDO via CCID; USB devices only when the
+/// FIDOCCID capability is enabled.
+#[cfg(any(feature = "hardware", target_os = "windows", debug_assertions))]
+fn fido_ccid_enabled(transport: Transport, info: Option<&DeviceInfo>) -> bool {
+    if transport == Transport::Nfc {
+        return true;
+    }
+    let Some(info) = info else {
+        return false;
+    };
+    info.config
+        .enabled_capabilities
+        .get(&Transport::Usb)
+        .copied()
+        .unwrap_or(Capability(0))
+        .contains(Capability::FIDOCCID)
+}
+
+#[cfg(feature = "hardware")]
+fn device_key_otp(pid: u16, path: &str) -> String {
+    format!("OTP (pid={pid:04x}, path={path})")
+}
+
+#[cfg(feature = "hardware")]
+fn device_key_fido(pid: u16, path: &str) -> String {
+    format!("FIDO (pid={pid:04x}, path={path})")
+}
+
+#[cfg(feature = "hardware")]
+fn probe_pcsc() -> ResultOrError<PcscDiag> {
+    match list_readers() {
+        Ok(readers) => {
+            // Test all readers for connectivity
+            let mut reader_status = BTreeMap::new();
+            for reader in &readers {
+                let status = match PcscSmartCardConnection::new(reader, false) {
+                    Ok(conn) => {
+                        drop(conn);
+                        "Success".to_string()
+                    }
+                    Err(e) => format!("{e}"),
+                };
+                reader_status.insert(reader.clone(), status);
+            }
+
+            // Collect readers with a YubiKey present, caching NFC read results
+            let yubikey_readers: Vec<(&String, Option<DeviceInfo>)> = readers
+                .iter()
+                .filter_map(|r| {
+                    if is_reader_usb(r) {
+                        return Some((r, None));
+                    }
+                    let conn = PcscSmartCardConnection::new(r, false).ok()?;
+                    let (info, _) = read_info_ccid(conn, None).ok()?;
+                    Some((r, Some(info)))
+                })
+                .collect();
+
+            let mut yubikeys = BTreeMap::new();
+            for (reader, cached_info) in &yubikey_readers {
+                let key = device_key_pcsc(reader);
+
+                let conn = match PcscSmartCardConnection::new(reader, false) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        yubikeys.insert(
+                            key,
+                            PcscDeviceDiag {
+                                management: ResultOrError::Err(format!(
+                                    "Error opening connection: {e}"
+                                )),
+                                piv: ResultOrError::Err("skipped".to_string()),
+                                oath: ResultOrError::Err("skipped".to_string()),
+                                openpgp: ResultOrError::Err("skipped".to_string()),
+                                hsmauth: ResultOrError::Err("skipped".to_string()),
+                                fido: None,
+                            },
+                        );
+                        continue;
+                    }
+                };
+
+                let (mgmt, conn, usb_info) = if let Some(info) = cached_info {
+                    (ResultOrError::Ok(management_diag(info)), conn, None)
+                } else {
+                    match read_info_ccid(conn, None) {
+                        Ok((info, c)) => {
+                            let mgmt = ResultOrError::Ok(management_diag(&info));
+                            (mgmt, c, Some(info))
+                        }
+                        Err(e) => {
+                            let mgmt = ResultOrError::Err(format!("{e}"));
+                            match PcscSmartCardConnection::new(reader, false) {
+                                Ok(c) => (mgmt, c, None),
+                                Err(_) => {
+                                    yubikeys.insert(
+                                        key,
+                                        PcscDeviceDiag {
+                                            management: mgmt,
+                                            piv: ResultOrError::Err("skipped".to_string()),
+                                            oath: ResultOrError::Err("skipped".to_string()),
+                                            openpgp: ResultOrError::Err("skipped".to_string()),
+                                            hsmauth: ResultOrError::Err("skipped".to_string()),
+                                            fido: None,
+                                        },
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                };
+
+                let (piv, oath, openpgp, hsmauth) = probe_ccid_apps(conn);
+
+                let effective_info = cached_info.as_ref().or(usb_info.as_ref());
+                let transport = if is_reader_usb(reader) {
+                    Transport::Usb
+                } else {
+                    Transport::Nfc
+                };
+                let fido = if fido_ccid_enabled(transport, effective_info) {
+                    PcscSmartCardConnection::new(reader, false)
+                        .ok()
+                        .map(probe_ctap2_ccid)
+                } else {
+                    None
+                };
+
+                yubikeys.insert(
+                    key,
+                    PcscDeviceDiag {
+                        management: mgmt,
+                        piv,
+                        oath,
+                        openpgp,
+                        hsmauth,
+                        fido,
+                    },
+                );
+            }
+            ResultOrError::Ok(PcscDiag {
+                readers: reader_status,
+                yubikeys,
+            })
+        }
+        Err(e) => ResultOrError::Err(format!("{e}")),
+    }
+}
+
+#[cfg(feature = "hardware")]
+fn probe_otp() -> ResultOrError<BTreeMap<String, OtpDeviceDiag>> {
+    match list_otp_devices() {
+        Ok(hid_devices) => {
+            let mut devices = BTreeMap::new();
+            for hid in &hid_devices {
+                let key = device_key_otp(hid.pid, &hid.path);
+
+                let conn = match HidOtpConnection::new(&hid.path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        devices.insert(
+                            key,
+                            OtpDeviceDiag {
+                                management: ResultOrError::Err(format!(
+                                    "Error opening connection: {e}"
+                                )),
+                                otp: ResultOrError::Err("skipped".to_string()),
+                            },
+                        );
+                        continue;
+                    }
+                };
+
+                let (mgmt, conn) = match read_info_otp(conn, hid.pid) {
+                    Ok((info, c)) => (ResultOrError::Ok(management_diag(&info)), c),
+                    Err((e, conn_opt)) => {
+                        let mgmt = ResultOrError::Err(format!("{e}"));
+                        match conn_opt.or_else(|| HidOtpConnection::new(&hid.path).ok()) {
+                            Some(c) => (mgmt, c),
+                            None => {
+                                devices.insert(
+                                    key,
+                                    OtpDeviceDiag {
+                                        management: mgmt,
+                                        otp: ResultOrError::Err("skipped".to_string()),
+                                    },
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                };
+
+                let otp = otp_config_diag(conn);
+
+                devices.insert(
+                    key,
+                    OtpDeviceDiag {
+                        management: mgmt,
+                        otp,
+                    },
+                );
+            }
+            ResultOrError::Ok(devices)
+        }
+        Err(e) => ResultOrError::Err(format!("{e}")),
+    }
+}
+
+#[cfg(feature = "hardware")]
+fn probe_fido() -> ResultOrError<BTreeMap<String, FidoDeviceDiag>> {
+    match list_fido_devices() {
+        Ok(fido_devices) => {
+            let mut devices = BTreeMap::new();
+            for fido in &fido_devices {
+                let key = device_key_fido(fido.pid, &fido.path);
+
+                match HidFidoConnection::open(fido) {
+                    Ok(conn) => {
+                        devices.insert(key, fido_diag(conn, fido.pid));
+                    }
+                    Err(e) => {
+                        devices.insert(
+                            key,
+                            FidoDeviceDiag {
+                                ctap_version: "unknown".to_string(),
+                                capabilities: 0,
+                                ctap2: ResultOrError::Err(format!("{e}")),
+                                management: ResultOrError::Err("skipped".to_string()),
+                            },
+                        );
+                    }
+                }
+            }
+            ResultOrError::Ok(devices)
+        }
+        Err(e) => ResultOrError::Err(format!("{e}")),
+    }
+}
+
+/// Run full diagnostics across all transports and return a serializable report.
+///
+/// `app_version` should be the version of the top-level application, passed in
+/// by the caller. The `lib_version` is the version of this (`ykman`) library
+/// crate.
+pub fn run_diagnostics(app_version: &str) -> DiagnosticsReport {
+    let mut features = Vec::new();
+    if cfg!(feature = "hardware") {
+        features.push("hardware".to_string());
+    }
+
+    DiagnosticsReport {
+        app_version: app_version.to_string(),
+        lib_version: env!("CARGO_PKG_VERSION").to_string(),
+        features,
+        platform: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        #[cfg(feature = "hardware")]
+        pcsc: Some(probe_pcsc()),
+        #[cfg(not(feature = "hardware"))]
+        pcsc: None,
+        #[cfg(feature = "hardware")]
+        otp: Some(probe_otp()),
+        #[cfg(not(feature = "hardware"))]
+        otp: None,
+        #[cfg(feature = "hardware")]
+        fido: Some(probe_fido()),
+        #[cfg(not(feature = "hardware"))]
+        fido: None,
+        #[cfg(any(target_os = "windows", debug_assertions))]
+        svc: Some(probe_svc()),
+        #[cfg(not(any(target_os = "windows", debug_assertions)))]
+        svc: None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ykman-svc probe
+// ---------------------------------------------------------------------------
+
+#[cfg(any(target_os = "windows", debug_assertions))]
+fn probe_svc() -> ResultOrError<SvcDiag> {
+    use crate::device::{DeviceSource, RpcDeviceSource};
+
+    // Connect to the service and obtain a DeviceSource.
+    let mut source = match RpcDeviceSource::connect() {
+        Some(s) => s,
+        None => return ResultOrError::Err("Service not available".to_string()),
+    };
+
+    // Enumerate devices through the source. Each returned device performs all
+    // subsequent application probes over the same shared connection.
+    let listed = match source.list_devices() {
+        Ok(d) => d,
+        Err(e) => return ResultOrError::Err(format!("Failed to list devices: {e}")),
+    };
+
+    let mut devices = BTreeMap::new();
+    for dev in &listed {
+        // Derive a stable, unique display key from the product name.
+        let base = dev.name();
+        let mut key = base.clone();
+        let mut n = 2;
+        while devices.contains_key(&key) {
+            key = format!("{base} ({n})");
+            n += 1;
+        }
+        devices.insert(key, probe_svc_device(dev.as_ref()));
+    }
+
+    ResultOrError::Ok(SvcDiag { devices })
+}
+
+/// Whether a device exposes a CCID (SmartCard) interface.
+#[cfg(any(target_os = "windows", debug_assertions))]
+fn dev_has_ccid(dev: &dyn yubikit::device::YubiKeyDevice) -> bool {
+    use yubikit::management::UsbInterface;
+    dev.transport() == Transport::Nfc || dev.usb_interfaces().contains(UsbInterface::CCID)
+}
+
+/// Whether a device exposes a FIDO/CTAP HID interface.
+#[cfg(any(target_os = "windows", debug_assertions))]
+fn dev_has_ctap(dev: &dyn yubikit::device::YubiKeyDevice) -> bool {
+    use yubikit::management::UsbInterface;
+    dev.transport() == Transport::Usb && dev.usb_interfaces().contains(UsbInterface::FIDO)
+}
+
+/// Whether a device exposes an OTP HID interface.
+#[cfg(any(target_os = "windows", debug_assertions))]
+fn dev_has_otp(dev: &dyn yubikit::device::YubiKeyDevice) -> bool {
+    use yubikit::management::UsbInterface;
+    dev.transport() == Transport::Usb && dev.usb_interfaces().contains(UsbInterface::OTP)
+}
+
+#[cfg(any(target_os = "windows", debug_assertions))]
+fn probe_svc_device(dev: &dyn yubikit::device::YubiKeyDevice) -> SvcDeviceDiag {
+    // Management info comes from the cached device info; no extra round-trip.
+    let management = ResultOrError::Ok(management_diag(dev.info()));
+
+    let ccid = if dev_has_ccid(dev) {
+        Some(probe_svc_ccid(dev))
+    } else {
+        None
+    };
+    let ctap = if dev_has_ctap(dev) {
+        Some(probe_svc_ctap(dev))
+    } else {
+        None
+    };
+    let otp = if dev_has_otp(dev) {
+        Some(probe_svc_otp(dev))
+    } else {
+        None
+    };
+
+    SvcDeviceDiag {
+        management,
+        ccid,
+        ctap,
+        otp,
+    }
+}
+
+#[cfg(any(target_os = "windows", debug_assertions))]
+fn probe_svc_ccid(dev: &dyn yubikit::device::YubiKeyDevice) -> ResultOrError<PcscDeviceDiag> {
+    let conn = match dev.open_smartcard() {
+        Ok(c) => c,
+        Err(e) => return ResultOrError::Err(format!("Failed to open CCID: {e}")),
+    };
+
+    let (mgmt, conn, info) = match read_info_ccid(conn, dev.pid()) {
+        Ok((info, c)) => (ResultOrError::Ok(management_diag(&info)), c, Some(info)),
+        Err(e) => {
+            let mgmt = ResultOrError::Err(format!("{e}"));
+            match dev.open_smartcard() {
+                Ok(c) => (mgmt, c, None),
+                Err(e2) => {
+                    return ResultOrError::Ok(PcscDeviceDiag {
+                        management: mgmt,
+                        piv: ResultOrError::Err(format!("reopen failed: {e2}")),
+                        oath: ResultOrError::Err("skipped".to_string()),
+                        openpgp: ResultOrError::Err("skipped".to_string()),
+                        hsmauth: ResultOrError::Err("skipped".to_string()),
+                        fido: None,
+                    });
+                }
+            }
+        }
+    };
+
+    let (piv, oath, openpgp, hsmauth) = probe_ccid_apps(conn);
+
+    // Probe FIDO over CCID on devices that support it, mirroring direct access.
+    let effective_info = info.as_ref().or_else(|| Some(dev.info()));
+    let fido = if fido_ccid_enabled(dev.transport(), effective_info) {
+        dev.open_smartcard().ok().map(probe_ctap2_ccid)
+    } else {
+        None
+    };
+
+    ResultOrError::Ok(PcscDeviceDiag {
+        management: mgmt,
+        piv,
+        oath,
+        openpgp,
+        hsmauth,
+        fido,
+    })
+}
+
+#[cfg(any(target_os = "windows", debug_assertions))]
+fn probe_svc_ctap(dev: &dyn yubikit::device::YubiKeyDevice) -> ResultOrError<FidoDeviceDiag> {
+    let conn = match dev.open_fido() {
+        Ok(c) => c,
+        Err(e) => return ResultOrError::Err(format!("Failed to open CTAP: {e}")),
+    };
+    ResultOrError::Ok(fido_diag(conn, dev.pid().unwrap_or(0x0112)))
+}
+
+#[cfg(any(target_os = "windows", debug_assertions))]
+fn probe_svc_otp(dev: &dyn yubikit::device::YubiKeyDevice) -> ResultOrError<OtpDeviceDiag> {
+    let conn = match dev.open_otp() {
+        Ok(c) => c,
+        Err(e) => return ResultOrError::Err(format!("Failed to open OTP: {e}")),
+    };
+
+    let (mgmt, conn) = match read_info_otp(conn, dev.pid().unwrap_or(0x0112)) {
+        Ok((info, c)) => (ResultOrError::Ok(management_diag(&info)), c),
+        Err((e, c)) => (
+            ResultOrError::Err(format!("{e}")),
+            c.unwrap_or_else(|| dev.open_otp().expect("reopen failed")),
+        ),
+    };
+
+    let otp = otp_config_diag(conn);
+
+    ResultOrError::Ok(OtpDeviceDiag {
+        management: mgmt,
+        otp,
+    })
+}
+
+#[cfg(test)]
+mod piv_slot_tests {
+    use super::piv_slot_diag;
+    use yubikit::piv::Slot;
+
+    #[test]
+    fn retired_slots_include_keys_and_certificate_only_entries() {
+        assert!(piv_slot_diag(Slot::Retired1, None, None).is_none());
+
+        let (name, key) = piv_slot_diag(Slot::Retired1, Some("ECCP256".into()), None).unwrap();
+        assert_eq!(name, "82 (RETIRED1)");
+        assert_eq!(key.key_type, "ECCP256");
+        assert!(key.fingerprint.is_none());
+
+        let (name, cert) = piv_slot_diag(Slot::Retired20, None, Some(vec![])).unwrap();
+        assert_eq!(name, "95 (RETIRED20)");
+        assert_eq!(cert.key_type, "EMPTY");
+        assert_eq!(
+            cert.fingerprint.as_deref(),
+            Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        );
+    }
+}

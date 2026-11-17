@@ -7,81 +7,124 @@ permissions: read-all
 jobs:
   build:
     runs-on: ubuntu-latest
+    name: Build and test - Python ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "2"
+      MATURIN_PEP517_ARGS: "--locked"
+      UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load CI build versions
+        uses: ./.github/actions/build-versions
+
+      - name: Constrain Maturin in uv builds
+        run: |
+          echo "maturin==$MATURIN_VERSION" > "$RUNNER_TEMP/build-constraints.txt"
+          echo "UV_BUILD_CONSTRAINT=$RUNNER_TEMP/build-constraints.txt" >> "$GITHUB_ENV"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
+          version: ${{ env.UV_VERSION }}
           enable-cache: true
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -qq swig libpcsclite-dev
+          sudo apt-get install -qq swig libpcsclite-dev libudev-dev libdbus-1-dev
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          toolchain: stable,${{ env.RUSTUP_TOOLCHAIN }}
+          components: clippy,rustfmt
+          build-warnings: ""
+          rustflags: ""
+          cache: true
+          cache-save-if: ${{ github.event_name == 'push' }}
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cargo-deny
 
       - name: Install the project
         run: uv sync --locked
 
       - name: Run pre-commit hooks
+        env:
+          RUSTUP_TOOLCHAIN: stable
         run: |
           uv tool install pre-commit
           pre-commit run --all-files --verbose
 
       - name: Run unit tests
-        run: uv run pytest
+        run: uv run --locked pytest
 
-      - name: Create source package
+      - name: Create source packages
         run: |
-          # poetry will by default set all timestamps to 0, which Debian doesn't allow
           export SOURCE_DATE_EPOCH=$(git show --no-patch --format=%ct)
-          uv build
-          mkdir artifacts
-          mv dist/yubikey_manager-*.tar.gz artifacts/
-          mv dist/yubikey_manager-*.whl artifacts/
+          uv run --locked python build_source_packages.py --out-dir artifacts
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Build wheels from source packages
+        run: |
+          for source in artifacts/*.tar.gz; do
+            uv build "$source" --wheel --out-dir "$RUNNER_TEMP/sdist-wheels"
+          done
+          git diff --exit-code -- Cargo.lock uv.lock
+
+      - name: Test source-built wheels outside the workspace
+        run: |
+          uv venv "$RUNNER_TEMP/sdist-venv"
+          uv pip install --python "$RUNNER_TEMP/sdist-venv/bin/python" \
+            "$RUNNER_TEMP"/sdist-wheels/*.whl \
+            "pytest>=8,<10" "makefun>=1.9.5,<2"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/sdist-venv/bin/python" -m pytest \
+            "$GITHUB_WORKSPACE/tests" --ignore="$GITHUB_WORKSPACE/tests/device"
+          "$RUNNER_TEMP/sdist-venv/bin/python" -m ykman --version
+
+      - name: Check documented migration and independent CLI installation
+        run: |
+          uv venv --seed "$RUNNER_TEMP/migration-venv"
+          python="$RUNNER_TEMP/migration-venv/bin/python"
+          "$python" -m pip install --no-deps "yubikey-manager==5.9.2"
+          "$python" -m pip uninstall -y yubikey-manager yubikit
+          "$python" -m pip install "$RUNNER_TEMP"/sdist-wheels/yubikey_manager-*.whl
+          cd "$RUNNER_TEMP"
+          "$python" -I -c \
+            'from importlib.util import find_spec; assert find_spec("yubikit") is None'
+          "$python" -m ykman --version
+          "$python" -m pip install "$RUNNER_TEMP"/sdist-wheels/yubikit-*.whl
+          "$python" -I -c \
+            'from yubikit.device import list_all_devices; from yubikit.core import PID; print(list_all_devices, PID)'
+          "$python" -m ykman --version
+
+      - name: Upload source packages
+        if: matrix.python-version == '3.14'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: yubikey-manager-source-package
           path: artifacts
 
-  docs:
-    runs-on: ubuntu-latest
-    name: Build sphinx documentation
-
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: 3.13
-
-      - name: Install python dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -qq swig libpcsclite-dev
-
-      - name: Install the project
-        run: uv sync --locked
-
       - name: Build sphinx documentation
-        run: uv run make -C docs/ html
+        if: matrix.python-version == '3.14'
+        run: uv run --locked make -C docs/ html SPHINXOPTS="-W --keep-going"
 
       - name: Upload documentation
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: matrix.python-version == '3.14'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: yubikey-manager-docs
           path: docs/_build/html

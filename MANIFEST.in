@@ -1,7 +1,0 @@
-include COPYING
-include README.adoc
-include NEWS
-include ChangeLog
-include doc/*.adoc
-include man/*
-recursive-include test *.py

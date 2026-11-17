@@ -1,0 +1,24 @@
+[package]
+name = "yubikit-pyo3"
+version = "1.0.0-beta.0.dev.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Python bindings for yubikit"
+publish = false
+
+[lib]
+name = "_yubikit_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+yubikit = { workspace = true, default-features = true }
+pyo3.workspace = true
+log.workspace = true
+p256.workspace = true
+elliptic-curve.workspace = true
+
+
+[lints]
+workspace = true

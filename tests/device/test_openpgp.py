@@ -2,14 +2,13 @@ import time
 from typing import NamedTuple
 
 import pytest
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa, x25519
-
 from yubikit.core import TRANSPORT, InvalidPinError
-from yubikit.core.smartcard import AID, ApduError
+from yubikit.core.smartcard import ApduError
 from yubikit.management import CAPABILITY
 from yubikit.openpgp import (
+    HASH_ALGORITHM,
     KEY_REF,
     OID,
     RSA_SIZE,
@@ -35,7 +34,8 @@ def session(ccid_connection, info, scp_params):
     else:
         pgp = OpenPgpSession(ccid_connection)
     pgp.reset()
-    return pgp
+    yield pgp
+    pgp.close()
 
 
 class Keys(NamedTuple):
@@ -59,7 +59,7 @@ def not_fips_capable(info):
 
 
 @pytest.fixture
-def keys(session, info, transport, scp_params):
+def keys(session, info, transport, scp_params, ccid_connection):
     if fips_capable(info) or info.pin_complexity:
         new_keys = Keys(
             "12345679",
@@ -68,11 +68,15 @@ def keys(session, info, transport, scp_params):
         session.change_pin(DEFAULT_PIN, new_keys.pin)
         session.change_admin(DEFAULT_ADMIN_PIN, new_keys.admin)
 
-        session.protocol.connection.connection.disconnect()
-        session.protocol.connection.connection.connect()
-        session.protocol.select(AID.OPENPGP)
+        # Close session to release connection, then power-cycle card
+        session.close()
+        ccid_connection._native.disconnect()
+        ccid_connection._native.connect()
+        # Re-initialize session (selects OpenPGP applet)
         if transport == TRANSPORT.NFC and scp_params:
-            session.protocol.init_scp(scp_params)
+            session.__init__(ccid_connection, scp_params)
+        else:
+            session.__init__(ccid_connection)
 
         yield new_keys
     else:
@@ -138,7 +142,7 @@ def test_change_pin_retries(session, keys, version):
 
 
 def test_import_requires_admin(session):
-    priv = rsa.generate_private_key(E, RSA_SIZE.RSA2048, default_backend())
+    priv = rsa.generate_private_key(E, RSA_SIZE.RSA2048)
     with pytest.raises(ApduError):
         session.put_key(KEY_REF.SIG, priv)
 
@@ -212,7 +216,7 @@ def test_import_sign_rsa(session, keys, key_size, info):
             pytest.skip(f"RSA {key_size} requires YubiKey 4 or later")
         elif info.version[0] == 4 and info.is_fips:
             pytest.skip(f"RSA {key_size} not supported on YubiKey 4 FIPS")
-    priv = rsa.generate_private_key(E, key_size, default_backend())
+    priv = rsa.generate_private_key(E, key_size)
     session.verify_admin(keys.admin)
     session.put_key(KEY_REF.SIG, priv)
     if 0 < info.version[0] < 5:
@@ -233,7 +237,7 @@ def test_import_decrypt_rsa(session, keys, key_size, info):
             pytest.skip(f"RSA {key_size} requires YubiKey 4 or later")
         elif info.version[0] == 4 and info.is_fips:
             pytest.skip(f"RSA {key_size} not supported on YubiKey 4 FIPS")
-    priv = rsa.generate_private_key(E, key_size, default_backend())
+    priv = rsa.generate_private_key(E, key_size)
     session.verify_admin(keys.admin)
     session.put_key(KEY_REF.DEC, priv)
     if info.version[0] < 5:
@@ -326,6 +330,24 @@ def test_kdf(session, keys):
     session.set_kdf(KdfNone())
     session.verify_admin(DEFAULT_ADMIN_PIN)
     session.verify_pin(DEFAULT_PIN)
+
+
+@condition.min_version(5, 2)
+@pytest.mark.parametrize("algorithm", list(HASH_ALGORITHM))
+@pytest.mark.parametrize("count", [1, 8, 15])
+def test_kdf_short_count_includes_full_pin(session, keys, algorithm, count):
+    session.verify_admin(keys.admin)
+    session.set_kdf(KdfIterSaltedS2k.create(algorithm, count))
+    try:
+        with pytest.raises(InvalidPinError):
+            session.verify_admin("12345679")
+        session.verify_admin(DEFAULT_ADMIN_PIN)
+
+        with pytest.raises(InvalidPinError):
+            session.verify_pin("123457")
+        session.verify_pin(DEFAULT_PIN)
+    finally:
+        session.set_kdf(KdfNone())
 
 
 @condition.min_version(5, 2)
