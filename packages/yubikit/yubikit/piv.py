@@ -430,7 +430,7 @@ class SlotMetadata:
 
     @property
     def public_key(self) -> PublicKey:
-        return load_der_public_key(self.public_key_encoded)  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
+        return cast(PublicKey, load_der_public_key(self.public_key_encoded))
 
 
 @dataclass
@@ -1388,7 +1388,7 @@ class PivSession(Session):
             int(touch_policy),
         )
 
-        return load_der_public_key(spki_der)  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
+        return cast(PublicKey, load_der_public_key(spki_der))
 
     def attest_key(self, slot: SLOT) -> x509.Certificate:
         """Attest key in slot.
