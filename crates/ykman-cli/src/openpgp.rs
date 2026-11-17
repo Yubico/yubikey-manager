@@ -3,7 +3,8 @@ use clap::Subcommand;
 use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::openpgp::{
-    KeyRef, KeyStatus, OpenPgpError, OpenPgpPin, OpenPgpSession, PinPolicy, Uif,
+    DiscretionaryDataObjects, KeyRef, KeyStatus, OpenPgpError, OpenPgpPin, OpenPgpSession,
+    PinPolicy, Uif,
 };
 
 use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
@@ -382,21 +383,10 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
         let ver = session.version();
 
         for key_ref in &[KeyRef::Sig, KeyRef::Dec, KeyRef::Aut] {
-            let fp = disc.fingerprints.get(key_ref);
-            let status = disc.key_information.get(key_ref);
-
-            // Decide whether to show this key
-            let show = if ver >= yubikit::core::Version(5, 2, 0) {
-                // For 5.2+, show if key_information has a non-None status
-                matches!(status, Some(s) if *s != KeyStatus::None)
-            } else {
-                // For older, show if fingerprint is non-zero
-                fp.is_some_and(|f| f.iter().any(|&b| b != 0))
-            };
-
-            if !show {
+            if !has_key(disc, *key_ref, ver) {
                 continue;
             }
+            let fp = disc.fingerprints.get(key_ref);
 
             let name = match key_ref {
                 KeyRef::Sig => "Signature key",
@@ -636,19 +626,8 @@ pub fn run_keys_info(
     let disc = &data.discretionary;
 
     let status = disc.key_information.get(&key_ref);
-    let has_key = if session.version() >= yubikit::core::Version(5, 2, 0) {
-        matches!(status, Some(s) if *s != KeyStatus::None)
-    } else {
-        disc.fingerprints
-            .get(&key_ref)
-            .is_some_and(|f| f.iter().any(|&b| b != 0))
-    };
-
-    if !has_key {
-        return Err(anyhow!(
-            "No key stored in slot {}.",
-            format_key_ref(key_ref)
-        ));
+    if !has_key(disc, key_ref, session.version()) {
+        return Err(no_key_error(key_ref));
     }
 
     let name = format_key_ref(key_ref);
@@ -678,6 +657,25 @@ pub fn run_keys_info(
     print_table(rows);
 
     Ok(())
+}
+
+/// Whether a key is stored in the slot. Key status is only reported by firmware 5.2+.
+fn has_key(
+    disc: &DiscretionaryDataObjects,
+    key_ref: KeyRef,
+    version: yubikit::core::Version,
+) -> bool {
+    if version >= yubikit::core::Version(5, 2, 0) {
+        matches!(disc.key_information.get(&key_ref), Some(s) if *s != KeyStatus::None)
+    } else {
+        disc.fingerprints
+            .get(&key_ref)
+            .is_some_and(|f| f.iter().any(|&b| b != 0))
+    }
+}
+
+fn no_key_error(key_ref: KeyRef) -> anyhow::Error {
+    anyhow!("No {} stored.", format_key_ref(key_ref))
 }
 
 fn format_key_ref(key_ref: KeyRef) -> &'static str {
@@ -774,6 +772,12 @@ pub fn run_keys_attest(
 ) -> Result<()> {
     let key_ref: KeyRef = key.into();
     let mut session = open_session(dev, scp_params)?;
+    let data = session
+        .get_application_related_data()
+        .map_err(|e| anyhow!("Failed to get application data: {e}"))?;
+    if !has_key(&data.discretionary, key_ref, session.version()) {
+        return Err(no_key_error(key_ref));
+    }
     let p = ensure_pin(pin)?;
     session
         .verify_pin(&p, false)
@@ -796,9 +800,13 @@ pub fn run_certificates_export(
 ) -> Result<()> {
     let key_ref: KeyRef = key.into();
     let mut session = open_session(dev, scp_params)?;
-    let cert_der = session
-        .get_certificate(key_ref)
-        .map_err(|e| anyhow!("Failed to get certificate: {e}"))?;
+    let cert_der = session.get_certificate(key_ref).map_err(|e| match e {
+        // Returned when the certificate data object is empty.
+        OpenPgpError::InvalidData(_) => {
+            anyhow!("No certificate stored for the {}.", format_key_ref(key_ref))
+        }
+        e => anyhow!("Failed to get certificate: {e}"),
+    })?;
 
     write_output(output, &cert_der, format, "CERTIFICATE")?;
     eprintln!("Certificate exported to {output}.");
