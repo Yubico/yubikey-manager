@@ -23,14 +23,11 @@ des = "0.8"
 ecdsa = "0.17"
 ed25519-dalek = "3"
 elliptic-curve = { version = "0.14.3", features = ["sec1"] }
-bp256 = { version = "0.6", features = ["ecdsa"] }
-bp384 = { version = "0.6", features = ["ecdsa"] }
 hkdf = "0.13"
 hmac = "0.13"
 k256 = { version = "0.14", features = ["ecdsa"] }
 p256 = { version = "0.14", features = ["ecdh", "ecdsa"] }
 p384 = { version = "0.14", features = ["ecdh", "ecdsa"] }
-p521 = { version = "0.13", features = ["ecdsa"] }
 pbkdf2 = { version = "0.12", features = ["hmac"] }
 pkcs8 = { version = "0.10.2", features = ["encryption", "pem"] }
 rsa = "0.9"

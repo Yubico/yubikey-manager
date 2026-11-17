@@ -1139,11 +1139,7 @@ impl<C: Connection + 'static, U: UserInteraction, D: ClientDataCollector> WebAut
                 // Additional permissions beyond MC/GA always need UV
                 let additional = permissions.bits()
                     & !(Permissions::MAKE_CREDENTIAL.bits() | Permissions::GET_ASSERTION.bits());
-                if additional != 0 && uv_configured {
-                    return Ok(true);
-                }
-
-                Ok(false)
+                Ok(additional != 0 && uv_configured)
             }
         }
     }
