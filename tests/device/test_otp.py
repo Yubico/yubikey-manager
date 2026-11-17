@@ -94,6 +94,7 @@ class TestProgrammingState:
         assert not state.is_configured(SLOT.ONE)
         assert not state.is_configured(SLOT.TWO)
 
+    @condition.has_transport(TRANSPORT.NFC)
     def test_configure_ndef(self, session):
         session.put_configuration(SLOT.ONE, StaticPasswordSlotConfiguration(b"a"))
         session.set_ndef_configuration(SLOT.ONE)
