@@ -41,7 +41,7 @@ version = ".".join(release.split(".")[:2])
 # ones.
 extensions = [
     "autoapi.extension",
-    "sphinx.ext.autodoc.typehints",
+    "sphinx.ext.autodoc",
     "sphinx.ext.doctest",
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
