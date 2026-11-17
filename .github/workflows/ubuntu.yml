@@ -27,6 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load CI build versions
+        uses: ./.github/actions/build-versions
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -35,7 +38,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
           target: ${{ matrix.rust-target }}
           build-warnings: ""
           rustflags: ""
@@ -44,11 +47,13 @@ jobs:
 
       - name: Install Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
 
       - name: Install cargo plugins
         uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
-          tool: cargo-zigbuild
+          tool: cargo-zigbuild@${{ env.CARGO_ZIGBUILD_VERSION }}
 
       - name: Build Rust CLI
         run: |
@@ -116,7 +121,7 @@ jobs:
       - name: Install cargo-about
         uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
-          tool: cargo-about@0.9.1
+          tool: cargo-about
 
       - name: Check bundled CLI licenses
         run: |

@@ -4,6 +4,9 @@ on: [push, pull_request]
 
 permissions: read-all
 
+env:
+  SCRIBE_IMAGE: ghcr.io/yubico/scribe-ci:v1.6.0@sha256:459bbfb9a267d60072ebbc5fdfa8e5bfd32637177188470eafc3fadd6218c730
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -23,10 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load CI build versions
+        uses: ./.github/actions/build-versions
+
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
           build-warnings: ""
           rustflags: ""
           cache: true
@@ -70,28 +76,18 @@ jobs:
         shell: bash
         run: cp -r resources/win dist/scripts
 
-      - name: Install WiX for ARM64 validation
-        if: matrix.os == 'windows-11-arm'
-        run: |
-          $archive = Join-Path $env:RUNNER_TEMP 'wix314-binaries.zip'
-          Invoke-WebRequest 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip' -OutFile $archive
-          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne '6AC824E1642D6F7277D0ED7EA09411A508F6116BA6FAE0AA5F2C7DAA2FF43D31') {
-            throw 'WiX download checksum mismatch'
-          }
-          $wixDir = Join-Path $env:RUNNER_TEMP 'wix314'
-          Expand-Archive $archive -DestinationPath $wixDir
-          "WIX_BIN=$wixDir" >> $env:GITHUB_ENV
+      - name: Install WiX
+        run: .\.github\scripts\install_wix.ps1
 
       - name: Test shared service lifecycle
         run: |
           $arch = if ('${{ matrix.os }}' -eq 'windows-11-arm') { 'arm64' } else { 'x64' }
-          $wixBin = if ($env:WIX_BIN) { $env:WIX_BIN } else { "$env:WIX\bin" }
-          .\resources\win\test_service_msm.ps1 -Architecture $arch -WixBin $wixBin
+          .\resources\win\test_service_msm.ps1 -Architecture $arch -WixBin $env:WIX_BIN
 
       - name: Build installer
         if: matrix.os == 'windows-latest'
         working-directory: ./dist
-        run: .\scripts\make_msi.ps1 -SourceDir .\ykman
+        run: .\scripts\make_msi.ps1 -SourceDir .\ykman -WixBin $env:WIX_BIN
 
       - name: Verify installer and service module versions
         if: matrix.os == 'windows-latest'
@@ -163,7 +159,7 @@ jobs:
           --env GITHUB_EVENT_NAME
           --env GITHUB_REF
           --env GITHUB_REPOSITORY
-          ghcr.io/yubico/scribe-ci:v1.6.0@sha256:459bbfb9a267d60072ebbc5fdfa8e5bfd32637177188470eafc3fadd6218c730
+          "$SCRIBE_IMAGE"
           --project-id scribe-prod-987134
           --bucket scribe-u-pub-ykman-fqj0hy
           --config /scribe/.github/scribe-sign-exe-dll.yml
@@ -217,23 +213,12 @@ jobs:
           name: signed-files${{ env.SUFFIX }}
           path: ykman-builds-windows
 
-      - name: Install WiX 3.14.1 on ARM64
-        if: matrix.arch == 'arm64'
-        run: |
-          $archive = Join-Path $env:RUNNER_TEMP 'wix314-binaries.zip'
-          Invoke-WebRequest 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip' -OutFile $archive
-          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne '6AC824E1642D6F7277D0ED7EA09411A508F6116BA6FAE0AA5F2C7DAA2FF43D31') {
-            throw 'WiX download checksum mismatch'
-          }
-          $wixDir = Join-Path $env:RUNNER_TEMP 'wix314'
-          Expand-Archive $archive -DestinationPath $wixDir
-          "WIX_BIN=$wixDir" >> $env:GITHUB_ENV
+      - name: Install WiX
+        run: .\.github\scripts\install_wix.ps1
 
       - name: Build installer
         working-directory: .\ykman-builds-windows
-        run: |
-          $wixBin = if ($env:WIX_BIN) { $env:WIX_BIN } else { "$env:WIX\bin" }
-          .\scripts\make_msi.ps1 -SourceDir .\ykman -Architecture ${{ matrix.arch }} -WixBin $wixBin
+        run: .\scripts\make_msi.ps1 -SourceDir .\ykman -Architecture ${{ matrix.arch }} -WixBin $env:WIX_BIN
 
       - name: Verify installer and service module versions
         run: .\resources\win\test_installer_versions.ps1 -BuildDir .\ykman-builds-windows -Architecture ${{ matrix.arch }}
@@ -291,7 +276,7 @@ jobs:
           --env GITHUB_EVENT_NAME
           --env GITHUB_REF
           --env GITHUB_REPOSITORY
-          ghcr.io/yubico/scribe-ci:v1.6.0@sha256:459bbfb9a267d60072ebbc5fdfa8e5bfd32637177188470eafc3fadd6218c730
+          "$SCRIBE_IMAGE"
           --project-id scribe-prod-987134
           --bucket scribe-u-pub-ykman-fqj0hy
           --config /scribe/.github/scribe-sign-msi.yml

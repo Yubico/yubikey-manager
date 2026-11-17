@@ -19,10 +19,10 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64
-            container: quay.io/pypa/manylinux_2_28_x86_64
+            container: quay.io/pypa/manylinux_2_28_x86_64@sha256:d086f64cddcace250ef0f0073583c51b8298159303290a730c9f59bd91edfd2c
           - os: ubuntu-22.04-arm
             target: aarch64
-            container: quay.io/pypa/manylinux_2_28_aarch64
+            container: quay.io/pypa/manylinux_2_28_aarch64@sha256:34a5e614a4eb26f73f8bf44cbbf2acf8011620453d03ea35a58537bb3cde44de
           - os: macos-latest
             target: universal2-apple-darwin
           - os: windows-latest
@@ -44,6 +44,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load CI build versions
+        uses: ./.github/actions/build-versions
+
       - name: Set up Python
         if: matrix.python-versions || matrix.container
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -57,10 +60,10 @@ jobs:
           sudo apt-get install -qq libpcsclite-dev libudev-dev pcscd
 
       - name: Install Rust toolchain
-        if: matrix.package == 'ykman' && !matrix.container
+        if: ${{ !matrix.container }}
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
           build-warnings: ""
           rustflags: ""
           cache: true
@@ -69,6 +72,8 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
+          maturin-version: v${{ env.MATURIN_VERSION }}
+          rust-toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
           target: ${{ matrix.target }}
           args: --locked --release --out ${{ matrix.container && 'unrepaired' || 'dist' }} ${{ matrix.container && '--auditwheel skip' || '' }} ${{ matrix.interpreter && format('--interpreter {0}', matrix.interpreter) || '--find-interpreter' }}
           manylinux: manylinux_2_28

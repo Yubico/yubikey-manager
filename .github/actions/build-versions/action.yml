@@ -1,0 +1,9 @@
+name: Load CI build versions
+description: Export pinned build-tool versions to the job environment
+runs:
+  using: composite
+  steps:
+    - name: Load versions
+      shell: bash
+      # Windows checkouts may convert versions.env to CRLF.
+      run: tr -d '\r' < "$GITHUB_ACTION_PATH/versions.env" | grep -E '^[A-Z0-9_]+=' >> "$GITHUB_ENV"

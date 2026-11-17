@@ -113,9 +113,12 @@ The CLI embeds `crates/ykman-cli/licenses.txt`. Normal builds, including
 builds from crates.io packages, do not require `cargo-about`.
 
 After changing dependencies, CLI features, the licence policy, or the report
-template, regenerate the notices using the same `cargo-about` version as CI:
+template, regenerate the notices. CI uses the latest `cargo-about` release to
+detect changes in licence reporting as well as dependency changes. If its
+output differs, update your local tool to the version shown in the CI log
+and regenerate:
 
-    $ cargo install cargo-about --version 0.9.1 --locked --features cli
+    $ cargo install cargo-about --locked --features cli
     $ cargo fetch --locked
     $ cargo about generate --locked --offline --all-features --fail \
         --manifest-path crates/ykman-cli/Cargo.toml \
@@ -187,11 +190,34 @@ To run all checks manually:
 
 === CI build and signing inputs
 
+CI-only Rust, Zig, cargo-zigbuild, uv and Maturin versions are maintained in
+`.github/actions/build-versions/versions.env`. Artifact jobs load these pins
+through that local action; developer toolchains are unaffected.
+
 Rust setup uses `actions-rust-lang/setup-rust-toolchain`, pinned to a reviewed
-release commit SHA. The explicit `toolchain: stable` input selects the current
-stable compiler. Rust caching is enabled for host builds: push runs can save
+release commit SHA. Rust checks use current stable, except for the fixed 1.88.0
+MSRV job. The source-package job installs both stable and the pinned compiler;
+pre-commit runs with stable while packaging retains the pinned compiler. Rust
+caching is enabled for host builds: push runs can save
 caches, while pull requests can restore caches but cannot save them. Linux wheel
 builds inside Maturin containers are not covered by this host cache.
+
+Build tools are pinned independently of their installer actions. The
+source-package job writes a temporary uv build-constraints file from the shared
+Maturin version and exports `UV_BUILD_CONSTRAINT`, constraining isolated builds
+without changing either package's public build requirements.
+The wheel workflow pins Maturin and Rust inside containers as well as on hosts.
+The manylinux images are digest-pinned and supply the wheel-repair tooling,
+including auditwheel. Update each image digest for both build and repair
+together (both steps use the same matrix value). Windows installer builds use
+the checksum-verified WiX download in `.github/scripts/install_wix.ps1` on both
+x64 and ARM64; update its download URL and checksum together.
+
+The cargo-about licence comparison and cargo-deny policy checks deliberately
+install the latest releases. The pre-commit hook revisions remain managed
+separately through pre-commit autoupdate and Dependabot. Development environments
+do not need to match CI's build-tool versions. Hosted runner images and system
+packages still float; these pins do not make builds fully hermetic.
 
 The setup action's additional warning policy and `RUSTFLAGS` overrides are
 disabled, preserving the existing Clippy policy and target-specific linker
@@ -208,8 +234,8 @@ The non-hardware Rust unit-test step overrides the serial test default with
 default in `.cargo/config.toml` remains in place for device tests.
 
 Windows signing uses a digest-pinned Scribe container. When updating it, review
-the image release and resolve its registry digest, then update all four signing
-jobs for the x64 and ARM64 executables and installers.
+the image release and resolve its registry digest, then update the workflow-level
+`SCRIBE_IMAGE` environment variable in `.github/workflows/windows.yml`.
 
 Signing accepts unprefixed `X.Y.Z-alpha.N`, `X.Y.Z-beta.N` and `X.Y.Z-rc.N`
 tags. Stable releases reuse the signed RC artifacts without rebuilding.

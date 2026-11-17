@@ -20,9 +20,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load CI build versions
+        uses: ./.github/actions/build-versions
+
+      - name: Constrain Maturin in uv builds
+        run: |
+          echo "maturin==$MATURIN_VERSION" > "$RUNNER_TEMP/build-constraints.txt"
+          echo "UV_BUILD_CONSTRAINT=$RUNNER_TEMP/build-constraints.txt" >> "$GITHUB_ENV"
+
       - name: Install uv
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
+          version: ${{ env.UV_VERSION }}
           enable-cache: true
 
       - name: Set up Python
@@ -38,7 +47,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          toolchain: stable
+          toolchain: stable,${{ env.RUSTUP_TOOLCHAIN }}
           components: clippy,rustfmt
           build-warnings: ""
           rustflags: ""
@@ -54,6 +63,8 @@ jobs:
         run: uv sync --locked
 
       - name: Run pre-commit hooks
+        env:
+          RUSTUP_TOOLCHAIN: stable
         run: |
           uv tool install pre-commit
           pre-commit run --all-files --verbose
