@@ -1,3 +1,10 @@
+* Version 6.0.0-beta.1 (unreleased)
+ ** CLI: Remove "ykman info --check-fips"; FIPS approved status is now always shown in the applications table, including for YubiKey FIPS (4 Series).
+ ** CLI: Remove unneeded prompt for PIN when generating PIV keys.
+ ** CLI: Add YubiKey FIPS (4 Series) support for setting and verifying the U2F PIN and resetting the FIDO application.
+ ** Rust: The yubikit crate now only depends on libudev when the hid feature is enabled.
+ ** Windows: Restrict DLL loading to System32.
+
 * Version 6.0.0-beta.0 (released 2026-11-03)
  ** Initial beta of the Rust rewrite, with a native CLI and Rust-backed Python bindings.
  ** Rust libraries provided by the yubikit and ykman crates.
@@ -8,7 +15,6 @@
  ** Windows: Bundle a background service allowing FIDO management without running the CLI as administrator.
  ** Windows: Add native ARM64 installers.
  ** Management: Show application storage usage in "ykman info" on supported devices.
- ** Management: Remove "ykman info --check-fips"; FIPS approved status is always shown in the applications table, including for YubiKey FIPS (4 Series).
  ** PIV: Add support for ML-DSA and ML-KEM, including ML-DSA context and external mu signing.
  ** PIV: Add "piv keys sign", "piv keys decrypt", "piv keys derive", and "piv keys decapsulate" commands.
  ** PIV: Remove support for legacy PIN-derived management keys. Use 5.x to replace derived keys before upgrading.
