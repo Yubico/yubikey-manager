@@ -921,9 +921,9 @@ where
             ..
         })) if sw == yubikit::smartcard::Sw::SecurityConditionNotSatisfied as u16 => {
             ensure_pin(session, pin)?;
-            f(session).map_err(|e| anyhow!("{e}"))
+            f(session).map_err(anyhow::Error::from)
         }
-        Err(e) => Err(anyhow!("{e}")),
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -939,6 +939,22 @@ fn format_piv_credential_error(e: PivError, credential: &str, action: &str) -> a
             anyhow!("{action}: {credential} does not meet complexity requirement.")
         }
         e => anyhow!("{action}: {e}"),
+    }
+}
+
+fn piv_sw(e: &PivError) -> Option<Sw> {
+    match e {
+        PivError::Connection(e) => e.sw().and_then(Sw::from_u16),
+        _ => None,
+    }
+}
+
+/// Format an error from a command operating on the key in `slot`, reporting an empty slot clearly.
+fn format_slot_key_error(e: PivError, slot: Slot, action: &str) -> anyhow::Error {
+    if piv_sw(&e) == Some(Sw::ReferenceDataNotFound) {
+        anyhow!("No key stored in slot {slot}.")
+    } else {
+        anyhow!("{action}: {e}")
     }
 }
 
@@ -1595,9 +1611,13 @@ fn operation_key_type<C: SmartCardConnection>(
             })
             .ok_or_else(|| anyhow!("Slot metadata is unavailable; specify --algorithm."));
     }
-    let metadata = session
-        .get_slot_metadata(slot)
-        .map_err(|e| anyhow!("Failed to read key metadata for slot {slot}: {e}"))?;
+    let metadata = session.get_slot_metadata(slot).map_err(|e| {
+        format_slot_key_error(
+            e,
+            slot,
+            &format!("Failed to read key metadata for slot {slot}"),
+        )
+    })?;
     if let Some(algorithm) = algorithm
         && KeyType::from(algorithm) != metadata.key_type
     {
@@ -1832,7 +1852,7 @@ pub fn run_keys_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, slot: &str
     let mut session = open_session(dev, scp_params)?;
     let meta = session
         .get_slot_metadata(slot)
-        .map_err(|e| anyhow!("Failed to get slot metadata: {e}"))?;
+        .map_err(|e| format_slot_key_error(e, slot, "Failed to get slot metadata"))?;
 
     println!("Slot: {slot}");
     println!("Algorithm: {:?}", meta.key_type);
@@ -1860,7 +1880,7 @@ pub fn run_keys_attest(
     let mut session = open_session(dev, scp_params)?;
     let cert_der = session
         .attest_key(slot)
-        .map_err(|e| anyhow!("Failed to attest key: {e}"))?;
+        .map_err(|e| format_slot_key_error(e, slot, "Failed to attest key"))?;
 
     write_cert_file(output, &cert_der, format)?;
     eprintln!("Attestation certificate written to {output}.");
@@ -1880,25 +1900,31 @@ pub fn run_keys_export(
     let mut session = open_session(dev, scp_params)?;
 
     // Try metadata first (5.3.0+)
-    let (spki_der, from_cert) = if let Ok(meta) = session.get_slot_metadata(slot) {
-        let der = meta
-            .public_key
-            .to_spki()
-            .map_err(|e| anyhow!("Failed to encode public key: {e}"))?;
-        (der, false)
-    } else {
-        // Fall back to reading public key from stored certificate
-        let cert_der = session
-            .get_certificate(slot)
-            .map_err(|_| anyhow!("Unable to export public key from slot {slot}."))?;
-        let cert = Certificate::from_der(&cert_der)
-            .map_err(|e| anyhow!("Failed to parse certificate: {e}"))?;
-        let spki = cert
-            .tbs_certificate
-            .subject_public_key_info
-            .to_der()
-            .map_err(|e| anyhow!("Failed to encode SPKI: {e}"))?;
-        (spki, true)
+    let (spki_der, from_cert) = match session.get_slot_metadata(slot) {
+        Ok(meta) => {
+            let der = meta
+                .public_key
+                .to_spki()
+                .map_err(|e| anyhow!("Failed to encode public key: {e}"))?;
+            (der, false)
+        }
+        Err(e) if piv_sw(&e) == Some(Sw::ReferenceDataNotFound) => {
+            return Err(anyhow!("No key stored in slot {slot}."));
+        }
+        Err(_) => {
+            // Fall back to reading public key from stored certificate
+            let cert_der = session
+                .get_certificate(slot)
+                .map_err(|_| anyhow!("Unable to export public key from slot {slot}."))?;
+            let cert = Certificate::from_der(&cert_der)
+                .map_err(|e| anyhow!("Failed to parse certificate: {e}"))?;
+            let spki = cert
+                .tbs_certificate
+                .subject_public_key_info
+                .to_der()
+                .map_err(|e| anyhow!("Failed to encode SPKI: {e}"))?;
+            (spki, true)
+        }
     };
 
     // Verify the public key matches the private key if requested.
@@ -1937,9 +1963,11 @@ pub fn run_keys_move(
     if !pin_verified {
         ensure_pin(&mut session, pin)?;
     }
-    session
-        .move_key(from, to)
-        .map_err(|e| anyhow!("Failed to move key: {e}"))?;
+    session.move_key(from, to).map_err(|e| match piv_sw(&e) {
+        Some(Sw::ReferenceDataNotFound) => anyhow!("No key stored in slot {from}."),
+        Some(Sw::IncorrectParameters) => anyhow!("Destination slot {to} is not empty."),
+        _ => anyhow!("Failed to move key: {e}"),
+    })?;
     println!("Key moved from {from} to {to}.");
     Ok(())
 }
@@ -1959,7 +1987,7 @@ pub fn run_keys_delete(
     }
     session
         .delete_key(slot)
-        .map_err(|e| anyhow!("Failed to delete key: {e}"))?;
+        .map_err(|e| format_slot_key_error(e, slot, "Failed to delete key"))?;
     eprintln!("Key in slot {slot} deleted.");
     Ok(())
 }
@@ -1975,7 +2003,10 @@ pub fn run_certificates_export(
     let mut session = open_session(dev, scp_params)?;
     let cert_der = session
         .get_certificate(slot)
-        .map_err(|e| anyhow!("Failed to get certificate: {e}"))?;
+        .map_err(|e| match piv_sw(&e) {
+            Some(Sw::FileNotFound) => anyhow!("No certificate stored in slot {slot}."),
+            _ => anyhow!("Failed to get certificate: {e}"),
+        })?;
 
     write_cert_file(output, &cert_der, format)?;
     eprintln!("Certificate exported to {output}.");
@@ -2074,7 +2105,12 @@ pub fn run_objects_export(
         require_fips_approved(dev.info(), Capability::PIV, "to export this object")?;
     }
     let mut session = open_session(dev, scp_params)?;
-    let data = verify_pin_if_needed(&mut session, pin, |s| s.get_object_raw(obj_id))?;
+    let data = verify_pin_if_needed(&mut session, pin, |s| s.get_object_raw(obj_id)).map_err(
+        |e| match e.downcast_ref::<PivError>().and_then(piv_sw) {
+            Some(Sw::FileNotFound) => anyhow!("No data stored in object 0x{obj_id:06X}."),
+            _ => e,
+        },
+    )?;
 
     write_file_or_stdout(output, &data)?;
     if output != "-" {
@@ -2329,7 +2365,7 @@ fn resolve_public_key(
     } else {
         let metadata = session
             .get_slot_metadata(slot)
-            .map_err(|e| anyhow!("Failed to get slot metadata (is a key present?): {e}"))?;
+            .map_err(|e| format_slot_key_error(e, slot, "Failed to get slot metadata"))?;
         let kt = metadata.key_type;
         let der = metadata
             .public_key
@@ -2511,7 +2547,13 @@ fn check_key_match<C: yubikit::smartcard::SmartCardConnection>(
             verify_signature(key_type, spki_der, test_message, &signature)
                 .map_err(|e| anyhow!("Failed to verify public key for slot {slot}: {e}"))?
         }
-        Err(e) => return Err(anyhow!("Failed to read key metadata for slot {slot}: {e}")),
+        Err(e) => {
+            return Err(format_slot_key_error(
+                e,
+                slot,
+                &format!("Failed to read key metadata for slot {slot}"),
+            ));
+        }
     };
     if !verified {
         return Err(anyhow!(
@@ -3048,7 +3090,14 @@ mod tests {
             let error =
                 super::check_key_match(&mut session, Slot::Authentication, key.as_bytes(), None)
                     .unwrap_err();
-            assert!(error.to_string().contains("Failed to read key metadata"));
+            if status == 0x6a88 {
+                assert_eq!(
+                    error.to_string(),
+                    format!("No key stored in slot {}.", Slot::Authentication)
+                );
+            } else {
+                assert!(error.to_string().contains("Failed to read key metadata"));
+            }
         }
     }
 
