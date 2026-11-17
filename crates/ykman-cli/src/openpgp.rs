@@ -708,11 +708,9 @@ fn format_key_status(s: KeyStatus) -> &'static str {
 }
 
 fn format_timestamp(t: u32) -> String {
-    use chrono::{TimeZone, Utc};
-    Utc.timestamp_opt(t as i64, 0)
-        .single()
-        .map(|dt| dt.to_rfc3339())
-        .unwrap_or_else(|| format!("{t}"))
+    jiff::Timestamp::from_second(t.into())
+        .map(|ts| ts.strftime("%Y-%m-%dT%H:%M:%S+00:00").to_string())
+        .unwrap_or_else(|_| format!("{t}"))
 }
 
 pub fn run_keys_set_touch(
@@ -908,7 +906,13 @@ fn pem_decode(text: &str) -> Result<Vec<u8>> {
 mod tests {
     use yubikit::openpgp::OpenPgpError;
 
-    use super::format_openpgp_credential_error;
+    use super::{format_openpgp_credential_error, format_timestamp};
+
+    #[test]
+    fn openpgp_timestamps_use_rfc3339_utc_offsets() {
+        assert_eq!(format_timestamp(0), "1970-01-01T00:00:00+00:00");
+        assert_eq!(format_timestamp(u32::MAX), "2106-02-07T06:28:15+00:00");
+    }
 
     #[test]
     fn openpgp_complexity_errors_identify_the_credential() {

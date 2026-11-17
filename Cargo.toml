@@ -55,7 +55,6 @@ serde_json = "1"
 
 # Utilities
 anyhow = "1"
-chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "4" }
 ctrlc = "3.5"
@@ -63,6 +62,7 @@ dirs = "6"
 fernet = { version = "0.2", default-features = false, features = ["rustcrypto"] }
 flate2 = "1"
 getrandom = "0.4"
+jiff = "1"
 log = "0.4"
 thiserror = "2"
 x509-cert = { version = "0.2.5", features = ["builder", "pem"] }

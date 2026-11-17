@@ -24,7 +24,7 @@ hardware = ["yubikit/pcsc", "yubikit/hid"]
 
 [dependencies]
 yubikit.workspace = true
-chrono.workspace = true
+jiff.workspace = true
 clap.workspace = true
 ctrlc.workspace = true
 hex.workspace = true

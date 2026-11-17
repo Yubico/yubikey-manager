@@ -9,7 +9,6 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
 
-use chrono::Local;
 use log::{Level, LevelFilter, Log, Metadata, Record};
 use thiserror::Error;
 
@@ -125,9 +124,9 @@ impl Log for YkmanLogger {
             return;
         }
 
-        let now = Local::now();
-        let timestamp = now.format("%H:%M:%S");
-        let millis = now.timestamp_subsec_millis();
+        let now = jiff::ZonedDateTime::now();
+        let timestamp = now.strftime("%H:%M:%S");
+        let millis = now.millisecond();
 
         // Map level name: Trace with traffic target → "TRAFFIC", Warn → "WARNING"
         let level_name = if record.level() == Level::Trace

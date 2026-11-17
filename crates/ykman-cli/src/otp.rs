@@ -936,7 +936,9 @@ pub fn run_yubiotp(
 
     if let Some(output_path) = output_path {
         let serial = serial.unwrap();
-        let timestamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+        let timestamp = jiff::ZonedDateTime::now()
+            .strftime("%Y-%m-%dT%H:%M:%S")
+            .to_string();
         let access_code_hex = acc.as_ref().map_or(String::new(), hex::encode);
         let csv_line = format!(
             "{},{},{},{},{},{},",

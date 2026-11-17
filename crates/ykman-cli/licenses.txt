@@ -1,7 +1,7 @@
 Third-party licenses for ykman
 ================================
-Apache License 2.0 (240 crates)
-MIT License (28 crates)
+Apache License 2.0 (242 crates)
+MIT License (32 crates)
 BSD 3-Clause "New" or "Revised" License (4 crates)
 Mozilla Public License 2.0 (2 crates)
 Unicode License v3 (1 crate)
@@ -6234,6 +6234,8 @@ Used by:
   - num-conv 0.2.2
   - p12-keystore 0.2.1
   - pin-project-lite 0.2.17
+  - portable-atomic-util 0.2.8
+  - portable-atomic 1.15.0
   - proc-macro2 1.0.107
   - quote 1.0.47
   - r-efi 6.0.0
@@ -7051,6 +7053,10 @@ MIT License (MIT)
 Used by:
   - aho-corasick 1.1.5
   - byteorder 1.5.0
+  - jiff-core 1.0.0
+  - jiff-tzdb-platform 1.0.0
+  - jiff-tzdb 1.0.0
+  - jiff 1.0.0
   - memchr 2.8.3
 --------------------------------------------------------------------------------
 The MIT License (MIT)
