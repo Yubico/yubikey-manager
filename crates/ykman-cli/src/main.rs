@@ -26,6 +26,7 @@ mod piv;
 mod scp;
 mod securitydomain;
 mod util;
+mod yk4_fips;
 
 // Re-export library modules so binary-internal modules can use them via crate::
 use ykman::appdata;
@@ -190,11 +191,7 @@ enum Commands {
         readers: bool,
     },
     /// Show general information
-    Info {
-        /// Check FIPS approved mode status
-        #[arg(short = 'c', long)]
-        check_fips: bool,
-    },
+    Info,
     /// Enable or disable applications and settings
     #[command(after_help = "Examples:\n\
       \n  Disable PIV over NFC:\
@@ -410,9 +407,9 @@ fn run_command(
             }
             list::run(serials, readers)
         }
-        Commands::Info { check_fips } => {
+        Commands::Info => {
             let dev = ctx.device()?;
-            info::run(&dev, check_fips)
+            info::run(&dev)
         }
         Commands::Config { action } => {
             let dev = ctx.device()?;

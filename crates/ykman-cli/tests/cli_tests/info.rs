@@ -49,15 +49,6 @@ fn test_info() {
 }
 
 #[test]
-fn test_info_check_fips() {
-    require_device_configured!();
-    ykman_dev()
-        .args(["info", "--check-fips"])
-        .assert()
-        .success();
-}
-
-#[test]
 fn test_diagnose() {
     require_device_configured!();
     ykman().arg("--diagnose").assert().success();
