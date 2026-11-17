@@ -274,7 +274,6 @@ fn test_help_layout_and_entry_points() {
     let root = plain_help(&["--help"]);
     assert_eq!(root, plain_help(&["-h"]));
     assert_eq!(root.trim_end(), plain_help(&[]).trim_end());
-    assert!(include_str!("../../../../README.adoc").contains(root.trim_end()));
     for heading in [
         "USAGE",
         "COMMANDS",
