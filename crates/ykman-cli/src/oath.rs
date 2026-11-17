@@ -1191,8 +1191,7 @@ fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>> {
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                let local = local_name(e.name().as_ref());
-                match local.as_str() {
+                match local_name(e.name().as_ref()) {
                     "KeyPackage" => {
                         in_key_package = true;
                         current_id = None;
@@ -1208,12 +1207,11 @@ fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>> {
                     }
                     "Key" if in_key_package => {
                         for attr in e.attributes().flatten() {
-                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
                             let val = attr
                                 .normalized_value(quick_xml::XmlVersion::Implicit1_0)
                                 .unwrap_or_default()
                                 .to_string();
-                            match local_name(key.as_bytes()).as_str() {
+                            match local_name(attr.key.as_ref()) {
                                 "Id" => current_id = Some(val),
                                 "Algorithm" => current_algorithm = Some(val),
                                 _ => {}
@@ -1229,12 +1227,11 @@ fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>> {
                     "ResponseFormat" if in_key_package => {
                         _in_response_format = true;
                         for attr in e.attributes().flatten() {
-                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
                             let val = attr
                                 .normalized_value(quick_xml::XmlVersion::Implicit1_0)
                                 .unwrap_or_default()
                                 .to_string();
-                            if local_name(key.as_bytes()) == "Length" {
+                            if local_name(attr.key.as_ref()) == "Length" {
                                 current_response_length = val.parse().ok();
                             }
                         }
@@ -1261,7 +1258,6 @@ fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>> {
             Ok(Event::Text(ref e)) => {
                 let text = e
                     .xml_content(quick_xml::XmlVersion::Implicit1_0)
-                    .unwrap_or_default()
                     .to_string();
                 if in_plain_value && in_secret {
                     current_secret_b64 = Some(text.clone());
@@ -1279,8 +1275,7 @@ fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>> {
                 }
             }
             Ok(Event::End(ref e)) => {
-                let local = local_name(e.name().as_ref());
-                match local.as_str() {
+                match local_name(e.name().as_ref()) {
                     "PlainValue" => in_plain_value = false,
                     "Secret" => in_secret = false,
                     "ResponseFormat" => _in_response_format = false,
@@ -1388,10 +1383,6 @@ fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>> {
 }
 
 /// Extract the local name from a potentially namespace-prefixed XML name.
-fn local_name(full: &[u8]) -> String {
-    let s = std::str::from_utf8(full).unwrap_or("");
-    match s.rfind(':') {
-        Some(idx) => s[idx + 1..].to_string(),
-        None => s.to_string(),
-    }
+fn local_name(full: &str) -> &str {
+    full.rsplit_once(':').map_or(full, |(_, local)| local)
 }
