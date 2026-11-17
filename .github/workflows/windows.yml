@@ -30,7 +30,7 @@ jobs:
         uses: ./.github/actions/build-versions
 
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
           build-warnings: ""
@@ -154,7 +154,7 @@ jobs:
         run: python3 .github/scripts/windows_signing.py prepare binaries artifacts signing-input >> "$GITHUB_OUTPUT"
 
       - name: docker login
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ci@yubico.com
@@ -271,7 +271,7 @@ jobs:
         run: python3 .github/scripts/windows_signing.py prepare installers artifacts signing-input >> "$GITHUB_OUTPUT"
 
       - name: Docker login
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ci@yubico.com

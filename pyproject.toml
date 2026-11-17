@@ -10,7 +10,7 @@ dev = [
     "yubikey-manager",
     "pytest>=8.0,<10",
     "makefun>=1.9.5,<2",
-    "sphinx>=7.4,<8",
+    "sphinx>=7.4,<10",
     "sphinx-rtd-theme>=3,<4",
     "sphinx-autoapi>=3.3.3,<4",
 ]
