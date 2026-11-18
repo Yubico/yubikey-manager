@@ -24,6 +24,14 @@ Actual results and logs
 [What actually happened?]
 
 
+Diagnostics
+---
+
+```
+[If possible, include output from `ykman --diagnose` here.]
+```
+
+
 Other info
 ---
 
