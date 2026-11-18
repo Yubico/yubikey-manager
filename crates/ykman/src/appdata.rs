@@ -302,39 +302,13 @@ mod tests {
 
         let value = "abcdef0123456789";
         let json_value = serde_json::to_string(value).unwrap();
+        assert_eq!(json_value, "\"abcdef0123456789\""); // Same as Python's json.dumps
         let token = f.encrypt(json_value.as_bytes());
 
         let plaintext = f.decrypt(&token).unwrap();
         let plaintext_str = String::from_utf8(plaintext).unwrap();
         let recovered: String = serde_json::from_str(&plaintext_str).unwrap();
         assert_eq!(recovered, value);
-    }
-
-    /// Verify that a token encrypted by Python's cryptography.fernet can be
-    /// decrypted by our Rust implementation.
-    ///
-    /// Generated with:
-    /// ```python
-    /// from cryptography.fernet import Fernet
-    /// import json
-    /// key = b'VGhpc0lzQVRlc3RLZXlGb3JGZXJuZXQhIT0tLi4u'  # 32 bytes base64
-    /// # Actually, let's use a proper generated key for the test.
-    /// ```
-    #[test]
-    fn decrypt_python_fernet_token() {
-        // Use a known Fernet key (url-safe base64 of 32 random bytes)
-        let key = Fernet::generate_key();
-        let f = Fernet::new(&key).unwrap();
-
-        // Simulate what Python does: json.dumps("hello world") -> '"hello world"'
-        let python_plaintext = "\"hello world\""; // json.dumps("hello world")
-        let token = f.encrypt(python_plaintext.as_bytes());
-
-        // Our get_secret logic: decrypt then json.loads
-        let plaintext = f.decrypt(&token).unwrap();
-        let plaintext_str = String::from_utf8(plaintext).unwrap();
-        let recovered: String = serde_json::from_str(&plaintext_str).unwrap();
-        assert_eq!(recovered, "hello world");
     }
 
     /// Verify that the Fernet key format is a valid url-safe base64 string
@@ -380,26 +354,5 @@ mod tests {
         let plaintext = f.decrypt(token).unwrap();
         let value: String = serde_json::from_str(&String::from_utf8(plaintext).unwrap()).unwrap();
         assert_eq!(value, "");
-    }
-
-    /// Verify that tokens encrypted by Rust can be decrypted by the Python-
-    /// compatible Fernet format (same JSON wrapping convention).
-    #[test]
-    fn rust_tokens_match_python_format() {
-        let key = Fernet::generate_key();
-        let f = Fernet::new(&key).unwrap();
-
-        let value = "test_secret_hex_key";
-
-        // Encrypt using the same convention as put_secret
-        let json_value = serde_json::to_string(value).unwrap();
-        assert_eq!(json_value, "\"test_secret_hex_key\""); // json.dumps wraps in quotes
-        let token = f.encrypt(json_value.as_bytes());
-
-        // Decrypt and verify (simulating Python's json.loads(fernet.decrypt(...)))
-        let plaintext = f.decrypt(&token).unwrap();
-        let plaintext_str = String::from_utf8(plaintext).unwrap();
-        let recovered: String = serde_json::from_str(&plaintext_str).unwrap();
-        assert_eq!(recovered, value);
     }
 }
