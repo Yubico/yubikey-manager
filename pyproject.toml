@@ -28,10 +28,6 @@ yubikey-manager = { workspace = true }
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-[tool.mypy]
-mypy_path = "typings"
-python_version = "3.11"
-
 [tool.ruff.lint]
 extend-select = ["E", "I", "S"]
 
