@@ -43,6 +43,30 @@ fn is_probe_placeholder(d: &Device) -> bool {
     d.serial == NO_SERIAL && d.version == "1.1.0"
 }
 
+/// Longest a command start waits for an in-flight probe to finish.
+const PAUSE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Dropping it lets the monitor probe keys again.
+pub(super) struct Pause(#[allow(dead_code)] Sender<()>);
+
+/// Stops the monitor from probing keys until the result is dropped, so a
+/// command doesn't compete with it for the same key. Waits for a probe that is
+/// already running; `None` if there is no monitor or it didn't finish in time.
+pub(super) fn pause(monitor: Option<&dyn std::any::Any>) -> Option<Pause> {
+    let handle = Arc::clone(monitor?.downcast_ref::<Arc<MonitorHandle>>()?);
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        let guard = handle.pause(PAUSE_TIMEOUT);
+        let _ = held_tx.send(guard.is_some());
+        if guard.is_some() {
+            // Returns once the `Pause` (the sender) is dropped.
+            let _ = release_rx.recv();
+        }
+    });
+    held_rx.recv().ok()?.then_some(Pause(release_tx))
+}
+
 /// Starts the monitor without waiting for it. Every change, starting with the
 /// first full scan, sends the complete device list as `Msg::Monitored`; until
 /// then the shell keeps polling.

@@ -294,18 +294,3 @@ fn masking_leaves_ordinary_steps_alone() {
         "oath accounts add \"My Label\" ••••"
     );
 }
-
-#[test]
-fn secret_looking_steps() {
-    assert!(looks_secret(&s(&["otp", "yubiotp", "1", "--key", "abc"])));
-    assert!(looks_secret(&s(&["otp", "static", "1", "abc"])));
-    assert!(looks_secret(&s(&["oath", "accounts", "add", "A", "B"])));
-    assert!(looks_secret(&s(&[
-        "repeat", "2", "oath", "accounts", "uri", "u"
-    ])));
-    assert!(!looks_secret(&s(&["oath", "info"])));
-    // A variable is asked for at run time, so nothing secret is stored.
-    assert!(!looks_secret(&s(&[
-        "otp", "yubiotp", "1", "--key", "${key}"
-    ])));
-}

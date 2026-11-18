@@ -33,7 +33,10 @@ pub(super) const BUILTINS: [(&str, &str); 17] = [
         "batch",
         "Repeat a command or saved script on one YubiKey after another",
     ),
-    ("record", "Record a sequence of commands, then run it"),
+    (
+        "record",
+        "Record a sequence of commands to save as a script",
+    ),
     (
         "export",
         "Export generated values as CSV: /export [copy|file]",
@@ -297,6 +300,17 @@ impl App {
             if "stop".starts_with(partial) {
                 add("stop", "End the batch and show a summary");
             }
+            if "last".starts_with(partial)
+                && let Some(s) = self.last_sequence.as_ref()
+            {
+                let n = s.steps.len();
+                let first = s.steps.first().map_or_else(String::new, |f| self.masked(f));
+                let more = if n > 1 { "…" } else { "" };
+                add(
+                    "last",
+                    &format!("≡ Last sequence · {n} step{} · {first}{more}", plural(n)),
+                );
+            }
             for (name, n, steps) in self.load_script_list() {
                 if name.starts_with(partial) {
                     add(&name, &script_desc(n, &steps));
@@ -373,13 +387,6 @@ impl App {
             let name = sub.get_name();
             if sub.is_hide_set() || name == "help" || !name.starts_with(partial) {
                 continue;
-            }
-            if self.batch_mode {
-                let mut path = words[..used].to_vec();
-                path.push(name);
-                if !self.batch_possible(&path) {
-                    continue;
-                }
             }
             add(
                 name,
@@ -797,7 +804,7 @@ impl App {
             ),
             (
                 "/record",
-                "Queue several commands, run once or on every key",
+                "Record commands to save as a script; in batch mode they run on every key",
             ),
             (
                 "/repeat <n> <cmd…>",

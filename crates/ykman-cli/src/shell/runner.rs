@@ -183,6 +183,7 @@ impl App {
         self.scroll = 0;
         self.push(Kind::Cmd, shown.to_string());
         if let Err(e) = self.try_spawn(args) {
+            self.monitor_pause = None;
             self.push(Kind::Err, format!("failed to start: {e:#}"));
         }
     }
@@ -195,6 +196,11 @@ impl App {
         ));
         create_private_file(&log_path).context("creating log file")?;
         super::state::wait_for_poll();
+        #[cfg(feature = "hardware")]
+        if self.monitor_pause.is_none() {
+            self.monitor_pause = super::monitor::pause(self.monitor.as_deref())
+                .map(|p| Box::new(p) as Box<dyn std::any::Any>);
+        }
 
         let mut cmd = CommandBuilder::new(exe());
         cmd.args(["--log-level", self.log_level, "--log-file"]);

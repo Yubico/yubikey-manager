@@ -1,18 +1,5 @@
 use super::*;
 
-/// Command paths that make sense to repeat on many keys (plus any `reset`).
-pub(super) const BATCH_ALLOWED: [&[&str]; 10] = [
-    &["otp", "yubiotp"],
-    &["otp", "static"],
-    &["otp", "chalresp"],
-    &["otp", "hotp"],
-    &["otp", "ndef"],
-    &["otp", "swap"],
-    &["config"],
-    &["oath", "accounts", "add"],
-    &["oath", "accounts", "import"],
-    &["oath", "accounts", "uri"],
-];
 /// Read-only commands: `info`, and `info` or `list` under an application.
 fn is_read_only(path: &[&str]) -> bool {
     matches!(path, ["info"] | [_, .., "info" | "list"])
@@ -84,30 +71,6 @@ pub(super) struct Batch {
 }
 
 impl App {
-    /// Whether the command path is (or leads to) something batch mode accepts.
-    pub(super) fn batch_possible(&self, words: &[&str]) -> bool {
-        fn has_reset(c: &clap::Command) -> bool {
-            c.get_subcommands()
-                .any(|s| matches!(s.get_name(), "reset" | "info" | "list") || has_reset(s))
-        }
-        let (node, used) = self.resolve(words);
-        used < words.len()
-            || matches!(node.get_name(), "reset" | "info" | "list")
-            || BATCH_ALLOWED
-                .iter()
-                .any(|p| p.starts_with(words) || words.starts_with(p))
-            || has_reset(node)
-    }
-
-    /// Whether the full command is on the batch allowlist (or any reset).
-    pub(super) fn batch_allows(&self, words: &[&str]) -> bool {
-        let (_, used) = self.resolve(words);
-        let is_reset = used > 0 && words[used - 1] == "reset";
-        is_reset
-            || is_read_only(&words[..used])
-            || BATCH_ALLOWED.iter().any(|p| words.starts_with(p))
-    }
-
     pub(super) fn enter_batch_mode(&mut self) {
         if self.batch_mode {
             self.note("Already in batch mode.");
@@ -154,11 +117,12 @@ impl App {
             self.batch_script(name);
             return;
         }
-        let words: Vec<&str> = args.iter().map(String::as_str).collect();
-        if !self.batch_allows(&words) {
-            self.note(
-                "Batch supports OTP programming, OATH account adding, config, reset and info/list commands. Example: `otp yubiotp 1 -S -g -G`",
-            );
+        if args == ["last"] {
+            self.batch_last();
+            return;
+        }
+        if let Err(e) = self.check_step(args) {
+            self.note(&format!("Not started: {e}"));
             return;
         }
         if self.devices.len() > 1 {
@@ -177,6 +141,7 @@ impl App {
             self.note("A command is already running.");
             return;
         }
+        let words: Vec<&str> = args.iter().map(String::as_str).collect();
         if words.starts_with(&["otp", "yubiotp"])
             && args.iter().any(|a| {
                 ["-P", "-p", "-k", "--public-id", "--private-id", "--key"].contains(&a.as_str())
@@ -204,6 +169,18 @@ impl App {
         let was_batch = self.batch_mode;
         self.batch_mode = true;
         self.script_run(name);
+        if self.batch.is_some() {
+            self.batch_oneshot = !was_batch;
+        } else {
+            self.batch_mode = was_batch;
+        }
+    }
+
+    /// `/batch last`: run the last sequence, saved or not, on every key.
+    fn batch_last(&mut self) {
+        let was_batch = self.batch_mode;
+        self.batch_mode = true;
+        self.script_last();
         if self.batch.is_some() {
             self.batch_oneshot = !was_batch;
         } else {
@@ -783,12 +760,6 @@ impl App {
         }
         let expanded = self.expand(args, Expand::Check);
         let words: Vec<&str> = expanded.iter().map(String::as_str).collect();
-        if self.batch_mode && !self.batch_allows(&words) {
-            return Err(
-                "batch supports OTP programming, OATH account adding, config, reset and info/list commands."
-                    .into(),
-            );
-        }
         let parsed = self
             .tree
             .clone()
@@ -869,6 +840,21 @@ impl App {
             self.note("Recording cancelled: no commands were added.");
             return;
         }
+        if !self.batch_mode {
+            // Outside batch mode a recording is only kept; running it is up to the user.
+            let steps = self.recording.take().unwrap_or_default();
+            self.note(&format!(
+                "Recorded {} step{}:",
+                steps.len(),
+                plural(steps.len())
+            ));
+            self.show_steps(&steps);
+            self.remember_sequence(&steps, None);
+            self.note(
+                "Save it with `/script save <name>`, then run it with `/batch <name>` or `/script run <name>`.",
+            );
+            return;
+        }
         let queued = self.recording.clone().unwrap_or_default();
         if !self.sequence_ready(&queued) {
             return;
@@ -936,9 +922,14 @@ impl App {
 }
 
 /// Errors a key gives while it is still re-enumerating (typically a NEO
-/// switching interfaces); the command had not started, so it is safe to retry.
+/// switching interfaces), so the step is worth retrying. A NEO can also drop
+/// the card just as a command ends; a repeated reset or password change is harmless.
 fn is_transient_failure(text: &str) -> bool {
     text.contains("reader name is not recognized")
+        || text.contains("non-existent transaction")
+        || text.contains("smart-card reader unavailable")
+        || text.contains("hid_open_path")
+        || text.contains("smart card has been reset")
         || (text.contains("YubiKey with serial") && text.contains("not found"))
 }
 
@@ -959,6 +950,17 @@ fn row_group(b: &Batch, idx: usize, fresh: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn neo_card_drops_are_transient() {
+        assert!(is_transient_failure(
+            "PC/SC error: An attempt was made to end a non-existent transaction"
+        ));
+        assert!(is_transient_failure(
+            "Failed to connect to OATH over CCID: smart-card reader unavailable (possibly in use by another process)."
+        ));
+        assert!(!is_transient_failure("Error: Wrong password."));
+    }
 
     #[test]
     fn read_only_commands_are_recognised() {

@@ -342,25 +342,6 @@ pub(super) fn masked_step(step: &[String], names: &[Option<String>]) -> String {
     out.join(" ")
 }
 
-/// Steps that may carry secrets on the command line.
-fn looks_secret(step: &[String]) -> bool {
-    let step = match parse_repeat(step) {
-        Ok((_, rest)) if step[0] == "repeat" => rest,
-        _ => step,
-    };
-    let flag = step.iter().enumerate().any(|(i, w)| {
-        // A variable is asked for at run time, so nothing secret is stored.
-        if step.get(i + 1).is_some_and(|n| n.contains("${")) {
-            return false;
-        }
-        secret_flag(w)
-    });
-    let w: Vec<&str> = step.iter().map(String::as_str).collect();
-    flag || w.starts_with(&["otp", "static"])
-        || w.starts_with(&["oath", "accounts", "add"])
-        || w.starts_with(&["oath", "accounts", "uri"])
-}
-
 impl App {
     pub(super) fn new_batch(&self, steps: Vec<Vec<String>>, once: bool, current: u32) -> Batch {
         let csv = self.csv.clone().filter(|t| steps_use(&steps, &t.headers));
@@ -438,6 +419,7 @@ impl App {
             let col = t.headers.iter().position(|h| h == name)?;
             t.rows.get(current_row(b)?)?.get(col).cloned()
         };
+        let hide = mode == Expand::Display && self.hide_secrets;
         let value = |name: &str| -> String {
             let check = mode == Expand::Check;
             match name {
@@ -449,7 +431,7 @@ impl App {
                 _ if is_random(name) => match (mode, b.and_then(|b| b.random.get(name))) {
                     (Expand::Run, Some(v)) => v.clone(),
                     (Expand::Display, Some(v)) => {
-                        if random_is_secret(name) {
+                        if hide && random_is_secret(name) {
                             "••••".into()
                         } else {
                             v.clone()
@@ -461,13 +443,13 @@ impl App {
                 "date" => chrono::Local::now().format("%Y-%m-%d").to_string(),
                 _ if check => "1".into(),
                 _ if csv_value(name).is_some() => {
-                    if mode == Expand::Display && var_secret(name) {
+                    if hide && var_secret(name) {
                         "••••".into()
                     } else {
                         csv_value(name).unwrap_or_default()
                     }
                 }
-                _ if mode == Expand::Display && var_secret(name) => "••••".into(),
+                _ if hide && var_secret(name) => "••••".into(),
                 _ => b
                     .and_then(|b| b.vars.get(name).cloned())
                     .unwrap_or_else(|| format!("${{{name}}}")),
@@ -537,13 +519,7 @@ impl App {
             (Some("run"), Some(n)) => self.script_run(n),
             (Some("delete"), Some(n)) => self.script_delete(n),
             (Some("list"), _) => self.script_list(),
-            (Some("last" | "rerun"), _) => match self.last_sequence.as_ref() {
-                Some(s) => {
-                    let (steps, name) = (s.steps.clone(), s.name.clone());
-                    self.start_saved(steps, name);
-                }
-                None => self.note("No sequence yet. Use `/record` to make one."),
-            },
+            (Some("last" | "rerun"), _) => self.script_last(),
             _ => self.note(
                 "Usage: `/script save <name>` · `run <name>` · `show <name>` · `rename <old> <new>` · `list` · `delete <name>` · `last`",
             ),
@@ -576,19 +552,6 @@ impl App {
             self.note("No place to save scripts on this system.");
             return;
         };
-        let secret = steps.iter().any(|s| looks_secret(s));
-        let confirmed = self.confirm_save.as_deref() == Some(name);
-        if secret && !confirmed {
-            self.confirm_save = Some(name.to_string());
-            self.push(
-                Kind::Fail,
-                "These steps may contain secrets, which are saved as plain text. \
-                 Run the same command again to save anyway."
-                    .to_string(),
-            );
-            return;
-        }
-        self.confirm_save = None;
         let mut text = String::new();
         for s in &steps {
             text.push_str(&format_step(s));
@@ -720,6 +683,22 @@ impl App {
             }
         }
         self.start_saved(steps, Some(name.to_string()));
+    }
+
+    /// Run the last sequence again, whether or not it was saved.
+    pub(super) fn script_last(&mut self) {
+        let Some(s) = self.last_sequence.as_ref() else {
+            self.note("No sequence yet. Use `/record` to make one.");
+            return;
+        };
+        let (steps, name) = (s.steps.clone(), s.name.clone());
+        for (i, s) in steps.iter().enumerate() {
+            if let Err(e) = self.check_step(s) {
+                self.note(&format!("Step {}: {e}", i + 1));
+                return;
+            }
+        }
+        self.start_saved(steps, name);
     }
 
     fn start_saved(&mut self, steps: Vec<Vec<String>>, name: Option<String>) {
