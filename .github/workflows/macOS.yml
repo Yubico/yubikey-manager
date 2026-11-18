@@ -8,8 +8,6 @@ jobs:
   build:
     runs-on: macos-latest
     name: Build (universal)
-    env:
-      CARGO_PROFILE_DEV_DEBUG: "2"
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,3 +48,26 @@ jobs:
         with:
           name: ykman-builds-macos
           path: dist
+
+  test:
+    runs-on: macos-latest
+    name: Rust tests (no hardware)
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "2"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+        with:
+          toolchain: stable
+          build-warnings: ""
+          rustflags: ""
+          cache: true
+          cache-save-if: ${{ github.event_name == 'push' }}
+
+      # The Python extension module is built and tested by the wheels workflow.
+      - name: Run non-hardware tests
+        run: |
+          cargo test --locked --workspace --exclude yubikit-pyo3 --all-features --lib --bins \
+            -- --test-threads="$(sysctl -n hw.logicalcpu)"
