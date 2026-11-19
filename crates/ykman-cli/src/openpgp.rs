@@ -15,28 +15,33 @@ use crate::util::{
 
 #[derive(Subcommand)]
 pub enum OpenpgpAction {
-    /// Display OpenPGP status
+    /// Display general status of the OpenPGP application
     Info,
-    /// Reset the OpenPGP application
+    /// Reset all OpenPGP data
+    ///
+    /// This action will wipe all OpenPGP data, and set all PINs to their
+    /// default values.
+    ///
+    /// The attestation key and certificate will NOT be reset.
     Reset {
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Manage access (PINs)
+    /// Manage OpenPGP access (PIN, Reset Code, Admin PIN)
     #[command(subcommand)]
     Access(OpenpgpAccessAction),
-    /// Manage keys
+    /// Manage OpenPGP keys
     #[command(subcommand)]
     Keys(OpenpgpKeysAction),
-    /// Manage certificates
+    /// Manage OpenPGP certificates
     #[command(subcommand)]
     Certificates(OpenpgpCertAction),
 }
 
 #[derive(Subcommand)]
 pub enum OpenpgpAccessAction {
-    /// Set PIN retry counts
+    /// Set the PIN, Reset Code and Admin PIN retry counts
     SetRetries {
         /// User PIN retry count
         pin_retries: u8,
@@ -51,7 +56,10 @@ pub enum OpenpgpAccessAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Change user PIN
+    /// Change the User PIN
+    ///
+    /// The PIN has a minimum length of 6 (or 8, for YubiKey 5.7+ FIPS when not
+    /// using KDF), and supports any type of alphanumeric characters.
     ChangePin {
         /// Current user PIN
         #[arg(short = 'P', long)]
@@ -60,7 +68,10 @@ pub enum OpenpgpAccessAction {
         #[arg(short = 'n', long, value_name = "PIN")]
         new_pin: Option<String>,
     },
-    /// Change admin PIN
+    /// Change the Admin PIN
+    ///
+    /// The Admin PIN has a minimum length of 8, and supports any type of
+    /// alphanumeric characters.
     ChangeAdminPin {
         /// Current admin PIN
         #[arg(short = 'a', long, value_name = "PIN")]
@@ -69,7 +80,10 @@ pub enum OpenpgpAccessAction {
         #[arg(short = 'n', long, value_name = "PIN")]
         new_admin_pin: Option<String>,
     },
-    /// Change reset code
+    /// Change the Reset Code
+    ///
+    /// The Reset Code has a minimum length of 6, and supports any type of
+    /// alphanumeric characters.
     ChangeResetCode {
         /// Admin PIN
         #[arg(short = 'a', long, value_name = "PIN")]
@@ -78,7 +92,14 @@ pub enum OpenpgpAccessAction {
         #[arg(short = 'r', long, value_name = "CODE")]
         reset_code: Option<String>,
     },
-    /// Unblock PIN
+    /// Unblock the PIN using the Reset Code or Admin PIN
+    ///
+    /// If the PIN is lost or blocked, you can reset it to a new value using
+    /// the Reset Code (--reset-code). Alternatively, the Admin PIN can be used
+    /// (--admin-pin) instead of the Reset Code.
+    ///
+    /// The new PIN has a minimum length of 6, and supports any type of
+    /// alphanumeric characters.
     UnblockPin {
         /// Admin PIN
         #[arg(short = 'a', long, value_name = "PIN")]
@@ -90,7 +111,11 @@ pub enum OpenpgpAccessAction {
         #[arg(short = 'n', long, value_name = "PIN")]
         new_pin: Option<String>,
     },
-    /// Set signature PIN policy
+    /// Set the signature PIN policy
+    ///
+    /// The signature PIN policy controls whether the PIN is always required
+    /// when using the signature key, or if it is required only once per
+    /// session.
     SetSignaturePolicy {
         /// Policy
         policy: CliOpenpgpPinPolicy,
@@ -102,12 +127,30 @@ pub enum OpenpgpAccessAction {
 
 #[derive(Subcommand)]
 pub enum OpenpgpKeysAction {
-    /// Show key metadata
+    /// Show metadata for a key
+    ///
+    /// This will show what type of key is stored in a specific slot, whether it
+    /// was imported into the YubiKey or generated on-chip, and what the touch
+    /// policy is for using the key.
     Info {
         /// Key reference
         key: CliKeyRef,
     },
-    /// Set touch policy for a key
+    /// Set the touch policy for a key
+    ///
+    /// The touch policy is used to require user interaction for all operations
+    /// using the private key on the YubiKey. The touch policy is set
+    /// individually for each key slot. To see the current touch policy, run
+    /// the "openpgp info" subcommand.
+    ///
+    /// The available policies are: off (default, no touch required), on
+    /// (touch required), fixed (touch required, can't be disabled without
+    /// deleting the private key), cached (touch required, cached for 15s after
+    /// use), and cached-fixed (touch required, cached for 15s after use, can't
+    /// be disabled without deleting the private key).
+    ///
+    /// WARNING: Setting the touch policy of the attestation key to "fixed"
+    /// cannot be undone without replacing the attestation private key.
     SetTouch {
         /// Key reference
         key: CliKeyRef,
@@ -120,7 +163,12 @@ pub enum OpenpgpKeysAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Import attestation key
+    /// Import an attestation key
+    ///
+    /// The attestation key is by default pre-generated during production with
+    /// a Yubico-issued key and certificate.
+    ///
+    /// WARNING: This private key cannot be recovered once overwritten!
     Import {
         /// Key reference
         key: CliKeyRef,
@@ -130,7 +178,10 @@ pub enum OpenpgpKeysAction {
         #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
     },
-    /// Generate attestation certificate
+    /// Generate an attestation certificate for a key
+    ///
+    /// Attestation is used to show that an asymmetric key was generated on the
+    /// YubiKey and therefore doesn't exist outside the device.
     Attest {
         /// Key reference
         key: CliKeyRef,
@@ -147,7 +198,7 @@ pub enum OpenpgpKeysAction {
 
 #[derive(Subcommand)]
 pub enum OpenpgpCertAction {
-    /// Export certificate
+    /// Export a certificate
     Export {
         /// Key reference
         key: CliKeyRef,
@@ -157,7 +208,7 @@ pub enum OpenpgpCertAction {
         #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
-    /// Import certificate
+    /// Import a certificate
     Import {
         /// Key reference
         key: CliKeyRef,
@@ -167,7 +218,7 @@ pub enum OpenpgpCertAction {
         #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
     },
-    /// Delete certificate
+    /// Delete a certificate
     Delete {
         /// Key reference
         key: CliKeyRef,
@@ -474,6 +525,10 @@ pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -
     }
 
     eprintln!("OpenPGP application has been reset.");
+    eprintln!("Your YubiKey now has the default PINs:");
+    eprintln!("  PIN:         123456");
+    eprintln!("  Reset code:  not set");
+    eprintln!("  Admin PIN:   12345678");
     Ok(())
 }
 

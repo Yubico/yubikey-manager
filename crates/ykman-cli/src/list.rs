@@ -69,7 +69,7 @@ pub fn run(serials: bool, readers: bool) -> Result<()> {
         {
             let (scan_pids, _) = scan_usb_devices();
             if scan_pids.is_empty() {
-                println!("No YubiKeys detected.");
+                eprintln!("No YubiKeys detected.");
             } else {
                 for pid in scan_pids.keys() {
                     print_blocked_device(*pid);
@@ -78,13 +78,13 @@ pub fn run(serials: bool, readers: bool) -> Result<()> {
         }
         #[cfg(not(feature = "hardware"))]
         {
-            println!("No YubiKeys detected.");
+            eprintln!("No YubiKeys detected.");
         }
         return Ok(());
     }
 
     if devices.is_empty() && !serials {
-        println!("No YubiKeys detected.");
+        eprintln!("No YubiKeys detected.");
         return Ok(());
     }
 

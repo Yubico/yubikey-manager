@@ -27,7 +27,10 @@ use crate::util::{
 pub enum OathAction {
     /// Display general status of the OATH application
     Info,
-    /// Reset the OATH application
+    /// Reset all OATH data
+    ///
+    /// This action will delete all accounts and restore factory settings for
+    /// the OATH application on the YubiKey.
     Reset {
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -44,6 +47,10 @@ pub enum OathAction {
 #[derive(Subcommand)]
 pub enum OathAccessAction {
     /// Change the password used to protect OATH accounts
+    ///
+    /// Allows you to set or change a password that will be required to access
+    /// the OATH accounts stored on the YubiKey. Use --clear to remove the
+    /// password.
     Change {
         /// Current password to unlock OATH
         #[arg(short = 'p', long)]
@@ -59,6 +66,9 @@ pub enum OathAccessAction {
         remember: bool,
     },
     /// Remember the password for the current YubiKey on this computer
+    ///
+    /// Stores the OATH password of the YubiKey on this computer, to avoid
+    /// having to enter it on each use.
     Remember {
         /// Password to store
         #[arg(short = 'p', long)]
@@ -114,6 +124,13 @@ pub enum OathAccountAction {
         single: bool,
     },
     /// Add an OATH account
+    ///
+    /// This will add a new OATH account to the YubiKey. If SECRET is not given,
+    /// you will be prompted for it, unless --generate is used to create a
+    /// random secret.
+    ///
+    /// Use --output to also write the account to a PSKC file, which can be
+    /// used to back up the account or to add it to another YubiKey.
     Add {
         /// Account name
         name: String,
@@ -168,7 +185,13 @@ pub enum OathAccountAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Add new account(s) from a PSKC file
+    /// Add accounts from a PSKC file
+    ///
+    /// Reads accounts from a PSKC file, adding them to the YubiKey. The file
+    /// can contain multiple accounts, and you will be prompted to confirm each
+    /// one before it is added, unless --force is used, in which case all valid
+    /// accounts will be added without prompting, overwriting any existing
+    /// accounts with the same name.
     Import {
         /// PSKC file to import
         file: String,
@@ -200,6 +223,8 @@ pub enum OathAccountAction {
         force: bool,
     },
     /// Rename an OATH account
+    ///
+    /// Requires YubiKey 5.3.1 or later.
     Rename {
         /// A query to match a single account (as shown in "list")
         query: String,
@@ -215,7 +240,10 @@ pub enum OathAccountAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Add account from otpauth:// URI
+    /// Add an OATH account from an otpauth:// URI
+    ///
+    /// Use a URI, such as one encoded in a QR code provided by a service, to
+    /// add a new account to the YubiKey.
     Uri {
         /// otpauth:// URI string
         uri: String,

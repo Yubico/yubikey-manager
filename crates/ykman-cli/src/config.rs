@@ -15,7 +15,7 @@ use crate::util::{
 
 #[derive(Subcommand)]
 pub enum ConfigAction {
-    /// Configure USB applications
+    /// Enable or disable applications over USB
     Usb {
         /// Enable an application (can be repeated)
         #[arg(short = 'e', long, action = clap::ArgAction::Append, value_name = "APP")]
@@ -45,7 +45,7 @@ pub enum ConfigAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Configure NFC applications
+    /// Enable or disable applications over NFC
     Nfc {
         /// Enable an application (can be repeated)
         #[arg(short = 'e', long, action = clap::ArgAction::Append, value_name = "APP")]
@@ -90,7 +90,7 @@ pub enum ConfigAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Manage connection modes (USB Interfaces).
+    /// Manage connection modes (USB interfaces)
     ///
     /// This command is generally used with YubiKeys prior to the 5 series.
     /// Use "ykman config usb" for more granular control on YubiKey 5 and later.
@@ -119,7 +119,12 @@ pub enum ConfigAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Factory reset the YubiKey (Bio only)
+    /// Reset all YubiKey data
+    ///
+    /// This command is used with the YubiKey Bio Multi-protocol Edition.
+    ///
+    /// This action will wipe all data and restore factory settings for all
+    /// applications on the YubiKey.
     Reset {
         /// Confirm without prompting
         #[arg(short = 'f', long)]

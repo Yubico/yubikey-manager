@@ -47,19 +47,52 @@ pub enum FidoAction {
     /// Display general status of the FIDO2 application
     Info,
     /// Reset all FIDO applications
+    ///
+    /// This action will wipe all FIDO credentials, including FIDO U2F
+    /// credentials, on the YubiKey and remove the PIN.
+    ///
+    /// The reset must be triggered shortly after the YubiKey is inserted, and
+    /// requires a touch on the YubiKey. You will be prompted to remove and
+    /// re-insert the YubiKey before the reset is performed.
     Reset {
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Manage FIDO2 PIN
+    /// Manage FIDO access (PIN)
     #[command(subcommand)]
     Access(FidoAccessAction),
     /// Manage discoverable credentials
-    #[command(subcommand)]
+    ///
+    /// This command lets you manage discoverable (resident) credentials stored
+    /// on your YubiKey. Credential management is only available when a FIDO
+    /// PIN is set on the YubiKey.
+    #[command(
+        subcommand,
+        after_help = "Examples:\n\
+      \n  List credentials (providing PIN via argument):\
+      \n  $ ykman fido credentials list --pin 123456\
+      \n\
+      \n  Delete a credential (ID shown in \"list\" output, PIN will be prompted for):\
+      \n  $ ykman fido credentials delete da7fdc"
+    )]
     Credentials(FidoCredentialAction),
     /// Manage fingerprints
-    #[command(subcommand)]
+    ///
+    /// Requires a YubiKey with a fingerprint sensor. Fingerprint management is
+    /// only available when a FIDO PIN is set on the YubiKey.
+    #[command(
+        subcommand,
+        after_help = "Examples:\n\
+      \n  Register a new fingerprint (providing PIN via argument):\
+      \n  $ ykman fido fingerprints add \"Left thumb\" --pin 123456\
+      \n\
+      \n  List already stored fingerprints (providing PIN via argument):\
+      \n  $ ykman fido fingerprints list --pin 123456\
+      \n\
+      \n  Delete a stored fingerprint with ID \"f691\" (PIN will be prompted for):\
+      \n  $ ykman fido fingerprints delete f691"
+    )]
     Fingerprints(FidoFingerprintAction),
     /// Manage configuration options
     #[command(subcommand)]
@@ -69,6 +102,10 @@ pub enum FidoAction {
 #[derive(Subcommand)]
 pub enum FidoAccessAction {
     /// Set or change the PIN
+    ///
+    /// The FIDO2 PIN must be at least 4 characters long, and supports any type
+    /// of alphanumeric characters. Some YubiKeys can be configured to require a
+    /// longer PIN.
     ///
     /// On YubiKey FIPS (4 Series), this sets the FIDO U2F PIN, which must be
     /// at least 6 characters long.
@@ -82,6 +119,9 @@ pub enum FidoAccessAction {
         new_pin: Option<String>,
     },
     /// Verify the PIN (and unblock if needed)
+    ///
+    /// For YubiKeys supporting FIDO2 this will reset the retry counter of the
+    /// PIN.
     ///
     /// On YubiKey FIPS (4 Series) this unlocks the session, allowing U2F
     /// registration.
@@ -98,7 +138,10 @@ pub enum FidoAccessAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
-    /// Set the minimum length allowed for PIN
+    /// Set the minimum length allowed for the PIN
+    ///
+    /// The minimum length can only be increased. Optionally use the --rp-id
+    /// option to specify which RPs are allowed to request this information.
     #[command(name = "set-min-length")]
     SetMinLength {
         /// New minimum PIN length (4-63)
@@ -115,6 +158,9 @@ pub enum FidoAccessAction {
 #[derive(Subcommand)]
 pub enum FidoCredentialAction {
     /// List stored credentials
+    ///
+    /// The --csv flag will output more complete information about each
+    /// credential, formatted as CSV (comma separated values).
     List {
         /// PIN
         #[arg(short = 'P', long)]
@@ -124,6 +170,9 @@ pub enum FidoCredentialAction {
         csv: bool,
     },
     /// Delete a credential
+    ///
+    /// The credential is identified by a unique prefix of its ID, as shown in
+    /// the output of the "list" subcommand.
     Delete {
         /// Credential ID (hex prefix)
         credential_id: String,
@@ -153,6 +202,8 @@ pub enum FidoCredentialAction {
 #[derive(Subcommand)]
 pub enum FidoFingerprintAction {
     /// List registered fingerprints
+    ///
+    /// Lists fingerprints by ID and (if available) name.
     List {
         /// PIN
         #[arg(short = 'P', long)]
@@ -177,8 +228,11 @@ pub enum FidoFingerprintAction {
         pin: Option<String>,
     },
     /// Delete a fingerprint
+    ///
+    /// Deletes a fingerprint from the YubiKey by its ID, which can be seen by
+    /// running the "list" subcommand.
     Delete {
-        /// Fingerprint template ID (hex) or name
+        /// Fingerprint template ID (hex)
         template_id: String,
         /// PIN
         #[arg(short = 'P', long)]
@@ -199,6 +253,9 @@ pub enum FidoConfigAction {
         pin: Option<String>,
     },
     /// Enable Enterprise Attestation
+    ///
+    /// Only available on YubiKeys pre-configured to support Enterprise
+    /// Attestation.
     #[command(name = "enable-ep-attestation")]
     EnableEpAttestation {
         /// PIN
@@ -620,21 +677,8 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
 
     if fido2_enabled {
         with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
-            let mut rows = Vec::new();
-            // FIPS status
-            if dev_info.fips_capable.contains(Capability::FIDO2) {
-                rows.push((
-                    "FIPS approved",
-                    if dev_info.fips_approved.contains(Capability::FIDO2) {
-                        "Yes".to_string()
-                    } else {
-                        "No".to_string()
-                    },
-                ));
-            }
-
             // AAGUID
-            rows.push(("AAGUID", ctap_info.aaguid.to_string()));
+            let mut rows = vec![("AAGUID", ctap_info.aaguid.to_string())];
 
             // PIN status
             let mut client_pin = ClientPin::new(ctap2)
