@@ -54,7 +54,7 @@ pub enum OathAccessAction {
         #[arg(short = 'c', long)]
         clear: bool,
         /// Remember the new password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
     },
     /// Remember the password for the current YubiKey on this computer
@@ -79,7 +79,7 @@ pub enum OathAccountAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Show hidden accounts
         #[arg(short = 'H', long)]
@@ -97,7 +97,7 @@ pub enum OathAccountAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Search filter
         query: Option<String>,
@@ -119,7 +119,7 @@ pub enum OathAccountAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Issuer name
         #[arg(short = 'i', long)]
@@ -157,7 +157,7 @@ pub enum OathAccountAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Require touch for code generation
         #[arg(short = 't', long)]
@@ -174,7 +174,7 @@ pub enum OathAccountAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -190,7 +190,7 @@ pub enum OathAccountAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -204,7 +204,7 @@ pub enum OathAccountAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Require touch for code generation
         #[arg(short = 't', long)]

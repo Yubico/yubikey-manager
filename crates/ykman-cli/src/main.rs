@@ -186,7 +186,7 @@ enum Commands {
         #[arg(short = 's', long)]
         serials: bool,
         /// List available smart card readers
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         readers: bool,
     },
     /// Show general information

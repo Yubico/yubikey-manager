@@ -106,7 +106,7 @@ pub enum OtpAction {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
         /// Access code (hex)
-        #[arg(short = 'A', long)]
+        #[arg(long)]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -123,7 +123,7 @@ pub enum OtpAction {
         #[arg(short = 't', long, default_value = "uri")]
         ndef_type: crate::cli_enums::CliNdefType,
         /// Access code (hex)
-        #[arg(short = 'A', long)]
+        #[arg(long)]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -154,7 +154,7 @@ pub enum OtpAction {
         #[command(flatten)]
         enter: EnterArgs,
         /// Access code (hex)
-        #[arg(short = 'A', long)]
+        #[arg(long)]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -185,7 +185,7 @@ pub enum OtpAction {
         #[command(flatten)]
         enter: EnterArgs,
         /// Access code (hex)
-        #[arg(short = 'A', long)]
+        #[arg(long)]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -198,16 +198,16 @@ pub enum OtpAction {
         /// HMAC-SHA1 key (hex)
         key: Option<String>,
         /// Use TOTP mode
-        #[arg(short = 't', long)]
+        #[arg(short = 'T', long)]
         totp: bool,
         /// Require touch
-        #[arg(short = 'T', long)]
+        #[arg(short = 't', long)]
         touch: bool,
         /// Generate random key
         #[arg(short = 'g', long, conflicts_with = "key")]
         generate: bool,
         /// Access code (hex)
-        #[arg(short = 'A', long)]
+        #[arg(long)]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -220,7 +220,7 @@ pub enum OtpAction {
         /// Challenge (hex)
         challenge: Option<String>,
         /// Use TOTP mode (time-based challenge)
-        #[arg(short = 't', long)]
+        #[arg(short = 'T', long)]
         totp: bool,
         /// Number of digits for TOTP
         #[arg(long, default_value = "6")]
@@ -241,7 +241,7 @@ pub enum OtpAction {
         #[command(flatten)]
         enter: EnterArgs,
         /// Access code (hex)
-        #[arg(short = 'A', long)]
+        #[arg(long)]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -266,13 +266,13 @@ pub enum OtpAction {
         #[arg(long)]
         serial_usb_visible: bool,
         /// New access code (hex)
-        #[arg(long)]
+        #[arg(short = 'A', long)]
         new_access_code: Option<String>,
         /// Delete access code
         #[arg(long, conflicts_with = "new_access_code", requires = "access_code")]
         delete_access_code: bool,
         /// Current access code (hex)
-        #[arg(short = 'A', long)]
+        #[arg(long)]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]

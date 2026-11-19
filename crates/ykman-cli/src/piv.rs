@@ -351,6 +351,9 @@ pub enum PivCertAction {
         /// challenge. Does not check certificate signatures, validity, or trust.
         #[arg(short = 'v', long)]
         verify: bool,
+        /// Update CHUID after importing certificate (default)
+        #[arg(long = "update-chuid", conflicts_with = "no_update_chuid")]
+        _update_chuid: bool,
         /// Don't update CHUID after importing certificate
         #[arg(long)]
         no_update_chuid: bool,
@@ -365,6 +368,9 @@ pub enum PivCertAction {
         /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
+        /// Update CHUID after deleting certificate (default)
+        #[arg(long = "update-chuid", conflicts_with = "no_update_chuid")]
+        _update_chuid: bool,
         /// Don't update CHUID after deleting certificate
         #[arg(long)]
         no_update_chuid: bool,
@@ -391,6 +397,9 @@ pub enum PivCertAction {
         /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
+        /// Update CHUID after generating certificate (default)
+        #[arg(long = "update-chuid", conflicts_with = "no_update_chuid")]
+        _update_chuid: bool,
         /// Don't update CHUID after generating certificate
         #[arg(long)]
         no_update_chuid: bool,
@@ -649,6 +658,7 @@ impl PivAction {
                     password,
                     verify,
                     no_update_chuid,
+                    _update_chuid: _,
                 } => run_certificates_import(
                     dev,
                     scp_params,
@@ -666,6 +676,7 @@ impl PivAction {
                     management_key,
                     pin,
                     no_update_chuid,
+                    _update_chuid: _,
                 } => run_certificates_delete(
                     dev,
                     scp_params,
@@ -683,6 +694,7 @@ impl PivAction {
                     management_key,
                     pin,
                     no_update_chuid,
+                    _update_chuid: _,
                 } => run_certificates_generate(
                     dev,
                     scp_params,
