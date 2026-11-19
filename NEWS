@@ -2,10 +2,15 @@
  ** CLI: Restore 5.x short options that were changed or dropped: "otp chalresp -t/-T", "otp calculate -T", "otp settings -A", "oath -r", "list -r", and "openpgp access change-reset-code/unblock-pin -r".
  ** CLI: Accept "--update-chuid" again for "piv certificates generate/import/delete".
  ** CLI: Make output consistent across commands: uppercase placeholders in help, value names for all options, uniform confirmation prompts and abort messages, status messages on stderr, and a lowercase "error:" prefix.
- ** OATH: Remove the unused "--password" option from "oath info".
+ ** CLI: Restore extended help descriptions and examples, and make command summaries consistent.
+ ** CLI: Validate PIV slots and the "otp static --length" range before connecting to the YubiKey.
+ ** CLI: Show the default credentials after "piv reset" and "openpgp reset".
+ ** CLI: Print "No YubiKeys detected." from "list" to stderr.
  ** OTP: Accept "-" for "--access-code" and "--new-access-code" to prompt for the access code, and allow "--delete-access-code" with the group-level "--access-code".
  ** Management: Remove "ykman info --check-fips"; FIPS approved status is always shown in the applications table, including for YubiKey FIPS (4 Series).
+ ** FIDO: Remove the "FIPS approved" row from "fido info"; FIPS status is shown by "ykman info".
  ** FIDO: Support YubiKey FIPS (4 Series): show U2F PIN state in "fido info", set and verify the U2F PIN with "fido access change-pin/verify-pin", and reset with "fido reset".
+ ** OATH: Remove the unused "--password" option from "oath info".
  ** OATH: Restore PSKC export with "oath accounts add --output", optionally encrypted with "--pskc-passphrase" or "--pskc-key".
  ** OATH: Support importing encrypted PSKC files, and fix parsing of some PSKC values.
  ** OATH: Restore 5.x behavior of "oath accounts code": calculate touch and HOTP accounts on a single match, prompt for touch, prefer exact matches, sort output, and show Steam codes.

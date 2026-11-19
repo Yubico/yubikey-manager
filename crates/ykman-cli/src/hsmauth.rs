@@ -17,15 +17,18 @@ pub enum HsmauthAction {
     /// Display general status of the YubiHSM Auth application
     Info,
     /// Reset all YubiHSM Auth data
+    ///
+    /// This action will wipe all data and restore factory settings for the
+    /// YubiHSM Auth application on the YubiKey.
     Reset {
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Manage credentials
+    /// Manage YubiHSM Auth credentials
     #[command(subcommand)]
     Credentials(HsmauthCredAction),
-    /// Manage access
+    /// Manage YubiHSM Auth access (management password)
     #[command(subcommand)]
     Access(HsmauthAccessAction),
 }
@@ -34,7 +37,10 @@ pub enum HsmauthAction {
 pub enum HsmauthCredAction {
     /// List credentials
     List,
-    /// Generate asymmetric credential
+    /// Generate an asymmetric credential
+    ///
+    /// This will generate an asymmetric YubiHSM Auth credential (private key)
+    /// on the YubiKey. Requires YubiKey 5.6 or later.
     Generate {
         /// Credential label
         label: String,
@@ -48,7 +54,10 @@ pub enum HsmauthCredAction {
         #[arg(short = 't', long)]
         touch: bool,
     },
-    /// Import symmetric credential
+    /// Import a symmetric credential
+    ///
+    /// This will import an encryption and MAC key as a symmetric YubiHSM Auth
+    /// credential on the YubiKey.
     Symmetric {
         /// Credential label
         label: String,
@@ -71,7 +80,10 @@ pub enum HsmauthCredAction {
         #[arg(short = 't', long)]
         touch: bool,
     },
-    /// Import credential derived from password
+    /// Import a symmetric credential derived from a password
+    ///
+    /// This will import a symmetric YubiHSM Auth credential by deriving ENC and
+    /// MAC keys from a password.
     Derive {
         /// Credential label
         label: String,
@@ -88,7 +100,7 @@ pub enum HsmauthCredAction {
         #[arg(short = 't', long)]
         touch: bool,
     },
-    /// Delete credential
+    /// Delete a credential
     Delete {
         /// Credential label
         label: String,
@@ -99,10 +111,10 @@ pub enum HsmauthCredAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Change credential password
+    /// Change the password of a credential
     ///
     /// Requires either the current credential password or the management
-    /// password (not both).
+    /// password (not both). Requires YubiKey 5.8 or later.
     ChangePassword {
         /// Credential label
         label: String,
@@ -122,6 +134,9 @@ pub enum HsmauthCredAction {
         new_credential_password: Option<String>,
     },
     /// Import an asymmetric credential
+    ///
+    /// This will import a private key as an asymmetric YubiHSM Auth credential
+    /// to the YubiKey. Requires YubiKey 5.6 or later.
     Import {
         /// Credential label
         label: String,
@@ -141,7 +156,11 @@ pub enum HsmauthCredAction {
         #[arg(short = 't', long)]
         touch: bool,
     },
-    /// Export public key for asymmetric credential
+    /// Export the public key of an asymmetric credential
+    ///
+    /// This will export the long-term public key corresponding to the
+    /// asymmetric YubiHSM Auth credential stored on the YubiKey. Requires
+    /// YubiKey 5.6 or later.
     Export {
         /// Credential label
         label: String,
@@ -156,6 +175,9 @@ pub enum HsmauthCredAction {
 #[derive(Subcommand)]
 pub enum HsmauthAccessAction {
     /// Change the management password
+    ///
+    /// Allows you to change the management password, which is required to add
+    /// and delete YubiHSM Auth credentials stored on the YubiKey.
     #[command(name = "change-management-password")]
     ChangeManagementPassword {
         /// Current management password

@@ -13,22 +13,30 @@ use crate::util::{
 
 #[derive(Subcommand)]
 pub enum SecurityDomainAction {
-    /// Display Security Domain info
+    /// Display general status of the Security Domain
+    ///
+    /// Lists the SCP keys stored in the Security Domain of the YubiKey.
     Info,
-    /// Reset Security Domain
+    /// Reset all Security Domain data
+    ///
+    /// This action will wipe all keys and restore factory settings for the
+    /// Security Domain on the YubiKey.
     Reset {
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Manage keys
+    /// Manage Security Domain keys
     #[command(subcommand)]
     Keys(SecurityDomainKeysAction),
 }
 
 #[derive(Subcommand)]
 pub enum SecurityDomainKeysAction {
-    /// Generate EC key pair
+    /// Generate an EC key pair
+    ///
+    /// The private key is generated on the YubiKey, and stored under the given
+    /// KID and KVN. The public key is written to OUTPUT.
     Generate {
         /// Key ID (hex)
         kid: String,
@@ -40,7 +48,7 @@ pub enum SecurityDomainKeysAction {
         #[arg(long, value_name = "KVN")]
         replace_kvn: Option<String>,
     },
-    /// Export certificate bundle
+    /// Export the certificate chain for a key
     Export {
         /// Key ID (hex)
         kid: String,
@@ -49,7 +57,11 @@ pub enum SecurityDomainKeysAction {
         /// Output file for certificate bundle
         output: String,
     },
-    /// Delete a key
+    /// Delete a key or key set
+    ///
+    /// Deletes the key or key set with the given KID and KVN. Set either KID or
+    /// KVN to 0 to use it as a wildcard and delete all keys matching the other
+    /// value. SCP03 key sets (KID 1-3) can only be deleted by KVN.
     Delete {
         /// Key ID (hex)
         kid: String,
@@ -59,7 +71,14 @@ pub enum SecurityDomainKeysAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Import a key (SCP03 static keys or SCP11 certificate/private key)
+    /// Import a key or certificate
+    ///
+    /// With --key-type scp03, INPUT is a ":"-separated set of hex keys:
+    /// K-ENC:K-MAC, optionally followed by :K-DEK.
+    ///
+    /// With --key-type scp11 (default), INPUT is a PEM file. KID 0x11, 0x13 and
+    /// 0x15 expect a private key and (optionally) a certificate chain. KID 0x10
+    /// and 0x20-0x2F expect a CA-KLOC certificate.
     Import {
         /// Key ID (hex)
         kid: String,
@@ -77,7 +96,11 @@ pub enum SecurityDomainKeysAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
     },
-    /// Set certificate serial number allowlist
+    /// Set an allowlist of certificate serial numbers for a key
+    ///
+    /// Each certificate in the chain used when authenticating an SCP11a/c
+    /// session will be checked and rejected if its serial number is not in
+    /// this allowlist.
     SetAllowlist {
         /// Key ID (hex)
         kid: String,

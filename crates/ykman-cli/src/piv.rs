@@ -39,9 +39,12 @@ use yubikit::__internal::{padding, piv_secret};
 
 #[derive(Subcommand)]
 pub enum PivAction {
-    /// Display PIV status
+    /// Display general status of the PIV application
     Info,
-    /// Reset the PIV application
+    /// Reset all PIV data
+    ///
+    /// This action will wipe all data and restore factory settings for the
+    /// PIV application on the YubiKey.
     Reset {
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -54,6 +57,10 @@ pub enum PivAction {
     #[command(subcommand)]
     Keys(PivKeysAction),
     /// Manage PIV certificates
+    ///
+    /// By default, modifying the certificate in a slot will also update the
+    /// CHUID with a new random GUID. To prevent this, use the
+    /// --no-update-chuid option.
     #[command(subcommand)]
     Certificates(PivCertAction),
     /// Manage PIV data objects
@@ -75,6 +82,10 @@ pub enum PivAction {
 #[derive(Subcommand)]
 pub enum PivAccessAction {
     /// Change the PIV PIN
+    ///
+    /// The PIN must be between 6 and 8 bytes long, and supports any type of
+    /// alphanumeric characters. For cross-platform compatibility, numeric PINs
+    /// are recommended.
     ChangePin {
         /// Current PIN
         #[arg(short = 'P', long)]
@@ -84,6 +95,10 @@ pub enum PivAccessAction {
         new_pin: Option<String>,
     },
     /// Change the PIV PUK
+    ///
+    /// If the PIN is lost or blocked it can be reset using the PUK. The PUK
+    /// must be between 6 and 8 bytes long, and supports any type of
+    /// alphanumeric characters.
     ChangePuk {
         /// Current PUK
         #[arg(short = 'p', long)]
@@ -92,7 +107,7 @@ pub enum PivAccessAction {
         #[arg(short = 'n', long, value_name = "PUK")]
         new_puk: Option<String>,
     },
-    /// Unblock the PIN using PUK
+    /// Unblock the PIN using the PUK
     UnblockPin {
         /// Current PUK
         #[arg(short = 'p', long)]
@@ -101,7 +116,9 @@ pub enum PivAccessAction {
         #[arg(short = 'n', long, value_name = "PIN")]
         new_pin: Option<String>,
     },
-    /// Set PIN and PUK retry counts
+    /// Set the PIN and PUK retry counts
+    ///
+    /// This will also reset the PIN and PUK to their factory default values.
     SetRetries {
         /// PIN retry count
         pin_retries: u8,
@@ -118,6 +135,11 @@ pub enum PivAccessAction {
         force: bool,
     },
     /// Change the management key
+    ///
+    /// Management functionality is guarded by a management key. This key is
+    /// required for administrative tasks, such as generating key pairs. Use
+    /// --generate together with --protect to store a random management key on
+    /// the YubiKey, protected by the PIN.
     ChangeManagementKey {
         /// Current management key (hex, 16/24/32 bytes)
         #[arg(short = 'm', long, value_name = "KEY")]
@@ -146,8 +168,12 @@ pub enum PivAccessAction {
 #[derive(Subcommand)]
 pub enum PivKeysAction {
     /// Generate an asymmetric key pair
+    ///
+    /// The private key is generated on the YubiKey, and written to one of the
+    /// slots. The public key is written to OUTPUT.
     Generate {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Output file for public key
         output: String,
@@ -173,6 +199,7 @@ pub enum PivKeysAction {
     /// Import a private key
     Import {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Private key file
         key_file: String,
@@ -239,14 +266,24 @@ pub enum PivKeysAction {
         #[command(flatten)]
         operation: KeyOperation,
     },
-    /// Show key metadata
+    /// Show metadata for a key
+    ///
+    /// This will show what type of key is stored in a specific slot, whether it
+    /// was imported into the YubiKey or generated on-chip, and what the PIN and
+    /// touch policies are for using the key. Requires YubiKey 5.3 or later.
     Info {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
     },
-    /// Generate attestation certificate
+    /// Generate an attestation certificate for a key
+    ///
+    /// Attestation is used to show that an asymmetric key was generated on the
+    /// YubiKey and therefore doesn't exist outside the device. Requires
+    /// YubiKey 4.3 or later.
     Attest {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Output certificate file
         output: String,
@@ -254,9 +291,15 @@ pub enum PivKeysAction {
         #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
-    /// Export public key
+    /// Export a public key
+    ///
+    /// On YubiKey 5.3 and later, the public key is read from the slot metadata.
+    /// On older YubiKeys, it is read from the certificate stored in the slot,
+    /// which is assumed to contain the correct public key. Use --verify to
+    /// check that it matches the private key.
     Export {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Output file
         output: String,
@@ -273,7 +316,10 @@ pub enum PivKeysAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
-    /// Move key between slots
+    /// Move a key to another slot
+    ///
+    /// Moves a key from one PIV slot into another. Requires YubiKey 5.7 or
+    /// later.
     Move {
         /// Source slot
         source: String,
@@ -286,9 +332,13 @@ pub enum PivKeysAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
-    /// Delete key in slot
+    /// Delete a key
+    ///
+    /// Deletes a key from a PIV slot on the YubiKey. Requires YubiKey 5.7 or
+    /// later.
     Delete {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Management key (hex, 16/24/32 bytes)
         #[arg(short = 'm', long, value_name = "KEY")]
@@ -302,6 +352,7 @@ pub enum PivKeysAction {
 #[derive(Args)]
 pub struct KeyOperation {
     /// PIV slot
+    #[arg(value_parser = parse_slot_arg)]
     slot: String,
     /// Input file, or - for stdin
     input: String,
@@ -317,9 +368,10 @@ pub struct KeyOperation {
 
 #[derive(Subcommand)]
 pub enum PivCertAction {
-    /// Export certificate from slot
+    /// Export a certificate
     Export {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Output file
         output: String,
@@ -327,9 +379,10 @@ pub enum PivCertAction {
         #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
-    /// Import certificate to slot
+    /// Import a certificate
     Import {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Certificate file
         cert_file: String,
@@ -358,9 +411,10 @@ pub enum PivCertAction {
         #[arg(long)]
         no_update_chuid: bool,
     },
-    /// Delete certificate from slot
+    /// Delete a certificate
     Delete {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Management key (hex, 16/24/32 bytes)
         #[arg(short = 'm', long, value_name = "KEY")]
@@ -376,8 +430,13 @@ pub enum PivCertAction {
         no_update_chuid: bool,
     },
     /// Generate a self-signed certificate
+    ///
+    /// A self-signed certificate is generated and written to one of the slots
+    /// on the YubiKey. A private key must already be present in the
+    /// corresponding key slot.
     Generate {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// File containing a public key (use '-' for stdin). Optional if YubiKey >= 5.4.
         #[arg(value_name = "PUBLIC-KEY")]
@@ -405,8 +464,11 @@ pub enum PivCertAction {
         no_update_chuid: bool,
     },
     /// Generate a Certificate Signing Request (CSR)
+    ///
+    /// A private key must already be present in the corresponding key slot.
     Request {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// File containing a public key (use '-' for stdin)
         #[arg(value_name = "PUBLIC-KEY")]
@@ -438,6 +500,9 @@ pub enum PivObjectAction {
         pin: Option<String>,
     },
     /// Import a PIV data object
+    ///
+    /// Writes a PIV data object, given by name or ID in hex. Yubico writable
+    /// PIV objects are available in the range 5f0000 - 5fffff.
     Import {
         /// Object ID
         object: String,
@@ -450,7 +515,7 @@ pub enum PivObjectAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
-    /// Generate a data object (CHUID or CCC)
+    /// Generate a PIV data object (CHUID or CCC)
     Generate {
         /// Object type: CHUID or CCC
         object: String,
@@ -772,6 +837,10 @@ fn open_session(
         PivSession::new,
         PivSession::new_with_scp,
     )
+}
+
+fn parse_slot_arg(s: &str) -> Result<String> {
+    parse_slot(s).map(|_| s.to_string())
 }
 
 fn parse_slot(s: &str) -> Result<Slot> {
@@ -1195,7 +1264,20 @@ pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -
     session
         .reset()
         .map_err(|e| anyhow!("Failed to reset PIV: {e}"))?;
+    // The PUK is blocked on biometric YubiKeys; firmware without metadata support has one
+    let has_puk = session
+        .get_puk_metadata()
+        .map_or(true, |meta| meta.attempts_remaining > 0);
     eprintln!("PIV application has been reset.");
+    if has_puk {
+        eprintln!("Your YubiKey now has the default PIN, PUK and Management Key:");
+        eprintln!("  PIN:             123456");
+        eprintln!("  PUK:             12345678");
+    } else {
+        eprintln!("Your YubiKey now has the default PIN and Management Key:");
+        eprintln!("  PIN:             123456");
+    }
+    eprintln!("  Management Key:  010203040506070801020304050607080102030405060708");
     Ok(())
 }
 

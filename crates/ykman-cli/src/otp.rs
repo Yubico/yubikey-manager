@@ -93,7 +93,7 @@ pub struct EnterArgs {
 
 #[derive(Subcommand)]
 pub enum OtpAction {
-    /// Display OTP slot status
+    /// Display general status of the YubiOTP application
     Info,
     /// Swap the two OTP slot configurations
     Swap {
@@ -101,7 +101,7 @@ pub enum OtpAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Delete an OTP slot configuration
+    /// Delete the configuration of a slot
     Delete {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
@@ -112,7 +112,11 @@ pub enum OtpAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Configure an NDEF slot
+    /// Configure a slot to be used over NDEF (NFC)
+    ///
+    /// If --prefix is not given, a default value is used, based on the type.
+    /// For URI the default is `https://my.yubico.com/yk/#`, for text it is an
+    /// empty string.
     Ndef {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
@@ -164,6 +168,14 @@ pub enum OtpAction {
         config_output: Option<String>,
     },
     /// Program a static password
+    ///
+    /// To avoid problems with different keyboard layouts, only the following
+    /// characters (upper and lower case) are allowed by default:
+    /// cbdefghijklnrtuv
+    ///
+    /// Use the --keyboard-layout option to allow more characters, based on
+    /// your preferred keyboard layout. Use --list-layouts to show the
+    /// available layouts.
     Static {
         /// Slot number (1 or 2)
         #[arg(required_unless_present = "list_layouts")]
@@ -174,8 +186,13 @@ pub enum OtpAction {
         #[arg(short = 'g', long, conflicts_with = "password")]
         generate: bool,
         /// Length of generated password
-        #[arg(short = 'L', long, default_value_t = 38)]
-        length: usize,
+        #[arg(
+            short = 'L',
+            long,
+            default_value_t = 38,
+            value_parser = clap::value_parser!(u8).range(1..=38)
+        )]
+        length: u8,
         /// Keyboard layout, 'layout' or 'layout:variant' (see --list-layouts)
         #[arg(short = 'k', long, value_name = "LAYOUT", default_value = "modhex")]
         keyboard_layout: LayoutSelection,
@@ -191,7 +208,11 @@ pub enum OtpAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Program challenge-response (HMAC-SHA1)
+    /// Program a challenge-response credential
+    ///
+    /// Programs an HMAC-SHA1 challenge-response credential. If KEY is not
+    /// given, you will be prompted for it, unless --generate is used to create
+    /// a random key.
     Chalresp {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
@@ -214,6 +235,14 @@ pub enum OtpAction {
         force: bool,
     },
     /// Perform a challenge-response calculation
+    ///
+    /// Send a challenge (in hex) to a slot with a challenge-response
+    /// credential, and read the response. If CHALLENGE is not given, you will
+    /// be prompted for it.
+    ///
+    /// With --totp, the response is output as an OATH-TOTP code. The challenge
+    /// is then derived from the current time, or from CHALLENGE given as a
+    /// Unix timestamp.
     Calculate {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
@@ -226,7 +255,18 @@ pub enum OtpAction {
         #[arg(long, default_value = "6")]
         digits: CliCalcDigits,
     },
-    /// Program OATH-HOTP credential
+    /// Program an OATH-HOTP credential
+    ///
+    /// Programs an HMAC-SHA1 OATH-HOTP credential. If KEY is not given, you
+    /// will be prompted for it.
+    ///
+    /// The YubiKey can be configured to output an OATH Token Identifier as a
+    /// prefix to the OTP itself, which consists of OMP+TT+MUI. Using the
+    /// --identifier option, you may specify the OMP+TT as 4 characters (the
+    /// serial number is then used as MUI), the MUI as 8 characters ("ubhe" is
+    /// then used as OMP+TT), or the full OMP+TT+MUI as 12 characters. Use "-"
+    /// for "ubhe" followed by the serial number. If omitted, no token
+    /// identifier is output.
     Hotp {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
@@ -250,7 +290,10 @@ pub enum OtpAction {
         #[arg(short = 'i', long)]
         identifier: Option<String>,
     },
-    /// Update slot settings
+    /// Update the settings for a slot
+    ///
+    /// Change the settings for a slot without changing the stored secret.
+    /// All settings not specified will be written with default values.
     Settings {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
@@ -368,7 +411,7 @@ impl OtpAction {
                         slot,
                         password: password.as_deref(),
                         generate,
-                        length,
+                        length: length.into(),
                         keyboard_layout,
                         enter: enter.value(),
                         access_code: effective_access_code(parent_access_code, &access_code),
