@@ -427,7 +427,7 @@ fn test_parser_rejects_common_invalid_arguments_without_device() {
             "otp",
             "hotp",
             "1",
-            "3132333435363738393031323334353637383930",
+            "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
             "--enter",
             "--no-enter",
         ],

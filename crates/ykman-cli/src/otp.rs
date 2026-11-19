@@ -195,7 +195,7 @@ pub enum OtpAction {
     Chalresp {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
-        /// HMAC-SHA1 key (hex)
+        /// HMAC-SHA1 key (hex, or Base32 with --totp)
         key: Option<String>,
         /// Use TOTP mode
         #[arg(short = 'T', long)]
@@ -230,7 +230,7 @@ pub enum OtpAction {
     Hotp {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
-        /// HMAC key (hex, or Base32 with --totp)
+        /// HMAC key (Base32)
         key: Option<String>,
         /// Number of digits (6 or 8)
         #[arg(long, default_value = "6")]
@@ -1258,12 +1258,12 @@ pub fn run_hotp(
     let acc = access_code.map(parse_access_code).transpose()?;
 
     let key_bytes = if let Some(k) = key {
-        parse_hex_key(k)?
+        parse_b32_key(k).map_err(|_| anyhow!("Invalid Base32-encoded key."))?
     } else {
         loop {
             match util::prompt_bytes(
                 "Enter a secret key",
-                &util::ByteFormat::hex(util::ByteLen::Any).masked(),
+                &util::ByteFormat::base32(util::ByteLen::Any).masked(),
             ) {
                 Ok(k) => break k,
                 Err(e) => eprintln!("{e}"),
