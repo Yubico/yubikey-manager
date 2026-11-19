@@ -1364,9 +1364,16 @@ pub fn run_change_management_key(
     };
 
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
-    if protect && !pin_verified {
+    let was_stored = has_stored_key(
+        &get_pivman_data(&mut session).map_err(|e| anyhow!("Failed to read pivman data: {e}"))?,
+    );
+    // The PIN is needed to store the new key, or to clear a previously stored key.
+    let pin_verified = if !pin_verified && (protect || (was_stored && pin.is_some())) {
         ensure_pin(&mut session, pin)?;
-    }
+        true
+    } else {
+        pin_verified
+    };
 
     let new_key = if generate {
         let mut k = vec![0u8; key_len];
@@ -1391,6 +1398,12 @@ pub fn run_change_management_key(
         eprintln!("Management key set: {}", hex::encode(&new_key));
     } else {
         eprintln!("Management key changed.");
+    }
+    if was_stored && !pin_verified {
+        eprintln!(
+            "WARNING: The previous management key stored on the YubiKey was not cleared. \
+             Provide the PIN (--pin) to clear it."
+        );
     }
     Ok(())
 }
