@@ -33,7 +33,7 @@ use yubikit::smartcard::{SmartCardError, Sw};
 use crate::cancel;
 use crate::context;
 use crate::scp::{self, ScpParams};
-use crate::util::{format_smartcard_connection_error, print_table};
+use crate::util::{confirm, format_smartcard_connection_error, print_table};
 
 const KEEPALIVE_PROCESSING: u8 = 1;
 const KEEPALIVE_UPNEEDED: u8 = 2;
@@ -48,7 +48,7 @@ pub enum FidoAction {
     Info,
     /// Reset all FIDO applications
     Reset {
-        /// Confirm the action without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -68,17 +68,17 @@ pub enum FidoAction {
 
 #[derive(Subcommand)]
 pub enum FidoAccessAction {
-    /// Set or change the PIN code
+    /// Set or change the PIN
     ///
     /// On YubiKey FIPS (4 Series), this sets the FIDO U2F PIN, which must be
     /// at least 6 characters long.
     #[command(name = "change-pin")]
     ChangePin {
-        /// Current PIN code
+        /// Current PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
-        /// New PIN code
-        #[arg(short = 'n', long)]
+        /// New PIN
+        #[arg(short = 'n', long, value_name = "PIN")]
         new_pin: Option<String>,
     },
     /// Verify the PIN (and unblock if needed)
@@ -87,14 +87,14 @@ pub enum FidoAccessAction {
     /// registration.
     #[command(name = "verify-pin")]
     VerifyPin {
-        /// PIN code
+        /// PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
     /// Force the PIN to be changed before use
     #[command(name = "force-change")]
     ForceChange {
-        /// PIN code
+        /// PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -103,7 +103,7 @@ pub enum FidoAccessAction {
     SetMinLength {
         /// New minimum PIN length (4-63)
         length: u32,
-        /// PIN code
+        /// PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// RP ID to allow (can be repeated)
@@ -116,7 +116,7 @@ pub enum FidoAccessAction {
 pub enum FidoCredentialAction {
     /// List stored credentials
     List {
-        /// PIN code
+        /// PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// Output full credential information as CSV
@@ -127,10 +127,10 @@ pub enum FidoCredentialAction {
     Delete {
         /// Credential ID (hex prefix)
         credential_id: String,
-        /// PIN code
+        /// PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
-        /// Confirm deletion without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -142,9 +142,9 @@ pub enum FidoCredentialAction {
         #[arg(short = 'n', long)]
         name: Option<String>,
         /// New display name
-        #[arg(long)]
+        #[arg(long, value_name = "NAME")]
         display_name: Option<String>,
-        /// PIN code
+        /// PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -154,7 +154,7 @@ pub enum FidoCredentialAction {
 pub enum FidoFingerprintAction {
     /// List registered fingerprints
     List {
-        /// PIN code
+        /// PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -162,7 +162,7 @@ pub enum FidoFingerprintAction {
     Add {
         /// Name for the fingerprint
         name: String,
-        /// PIN code
+        /// PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -172,7 +172,7 @@ pub enum FidoFingerprintAction {
         template_id: String,
         /// New name
         name: String,
-        /// PIN code
+        /// PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -180,10 +180,10 @@ pub enum FidoFingerprintAction {
     Delete {
         /// Fingerprint template ID (hex) or name
         template_id: String,
-        /// PIN code
+        /// PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
-        /// Confirm deletion without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -194,14 +194,14 @@ pub enum FidoConfigAction {
     /// Toggle the Always Require UV setting
     #[command(name = "toggle-always-uv")]
     ToggleAlwaysUv {
-        /// PIN code
+        /// PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
     /// Enable Enterprise Attestation
     #[command(name = "enable-ep-attestation")]
     EnableEpAttestation {
-        /// PIN code
+        /// PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
@@ -785,16 +785,12 @@ pub fn run_reset(dev: &mut dyn YubiKeyDevice, scp_params: &ScpParams, force: boo
     }
 
     if !force {
-        eprint!(
+        eprintln!(
             "WARNING! This will delete all FIDO credentials, including FIDO U2F \
-             credentials, and restore factory settings. Proceed? [y/N] "
+             credentials, and restore factory settings."
         );
-        let mut answer = String::new();
-        std::io::stdin()
-            .read_line(&mut answer)
-            .map_err(|e| anyhow!("Failed to read input: {e}"))?;
-        if !answer.trim().eq_ignore_ascii_case("y") {
-            return Err(anyhow!("Reset aborted by user."));
+        if !confirm("Proceed?") {
+            return Err(anyhow!("Aborted by user."));
         }
         if yk4_fips {
             eprint!(
@@ -808,7 +804,7 @@ pub fn run_reset(dev: &mut dyn YubiKeyDevice, scp_params: &ScpParams, force: boo
                 .read_line(&mut answer)
                 .map_err(|e| anyhow!("Failed to read input: {e}"))?;
             if answer.trim_end_matches(['\r', '\n']) != "OVERWRITE" {
-                return Err(anyhow!("Reset aborted by user."));
+                return Err(anyhow!("Aborted by user."));
             }
         }
 
@@ -852,7 +848,7 @@ fn run_fips_reset(dev: &dyn YubiKeyDevice) -> Result<()> {
     );
     match result {
         Ok(()) => {
-            println!("FIDO application has been reset.");
+            eprintln!("FIDO application has been reset.");
             Ok(())
         }
         Err(e) if cancel::is_cancelled() => Err(e),
@@ -906,7 +902,7 @@ fn run_reset_inner<C: Connection + 'static>(
 
     match result {
         Ok(()) => {
-            println!("FIDO application has been reset.");
+            eprintln!("FIDO application has been reset.");
             Ok(())
         }
         Err(ref e) => match get_ctap_status(e) {
@@ -918,7 +914,7 @@ fn run_reset_inner<C: Connection + 'static>(
                      YubiKey is inserted."
                     .to_string(),
             )),
-            Some(CtapStatus::KeepaliveCancel) => Err(anyhow!("Reset aborted by user.")),
+            Some(CtapStatus::KeepaliveCancel) => Err(anyhow!("Aborted by user.")),
             _ => Err(anyhow!("FIDO reset failed: {e}")),
         },
     }
@@ -1325,15 +1321,12 @@ pub fn run_credentials_delete(
             0 => Err(anyhow!("No matches, nothing to be done.")),
             1 => {
                 let (rp_id, user_name, display_name, cred_id_hex, cred_id) = &hits[0];
-                if !force {
-                    eprint!("Delete {rp_id} {user_name} {display_name} ({cred_id_hex})? [y/N] ");
-                    let mut answer = String::new();
-                    std::io::stdin()
-                        .read_line(&mut answer)
-                        .map_err(|e| anyhow!("Failed to read input: {e}"))?;
-                    if !answer.trim().eq_ignore_ascii_case("y") {
-                        return Err(anyhow!("Deletion aborted."));
-                    }
+                if !force
+                    && !confirm(&format!(
+                        "Delete {rp_id} {user_name} {display_name} ({cred_id_hex})?"
+                    ))
+                {
+                    return Err(anyhow!("Aborted by user."));
                 }
                 println!("Deleting credential, DO NOT REMOVE YOUR YUBIKEY!");
                 credman
@@ -1620,15 +1613,8 @@ pub fn run_fingerprints_delete(
         let key = hex::decode(template_id)
             .map_err(|_| anyhow!("Invalid template ID hex: {template_id}"))?;
 
-        if !force {
-            eprint!("Delete fingerprint {template_id}? [y/N] ");
-            let mut answer = String::new();
-            std::io::stdin()
-                .read_line(&mut answer)
-                .map_err(|e| anyhow!("Failed to read input: {e}"))?;
-            if !answer.trim().eq_ignore_ascii_case("y") {
-                return Err(anyhow!("Deletion aborted."));
-            }
+        if !force && !confirm(&format!("Delete fingerprint {template_id}?")) {
+            return Err(anyhow!("Aborted by user."));
         }
 
         bio.remove_enrollment(&key)

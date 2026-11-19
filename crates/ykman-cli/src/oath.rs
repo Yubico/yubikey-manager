@@ -26,11 +26,7 @@ use crate::util::{
 #[derive(Subcommand)]
 pub enum OathAction {
     /// Display general status of the OATH application
-    Info {
-        /// Password to unlock OATH
-        #[arg(short = 'p', long)]
-        password: Option<String>,
-    },
+    Info,
     /// Reset the OATH application
     Reset {
         /// Confirm without prompting
@@ -53,7 +49,7 @@ pub enum OathAccessAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// New password to set
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PASSWORD")]
         new_password: Option<String>,
         /// Remove the password
         #[arg(short = 'c', long)]
@@ -134,7 +130,7 @@ pub enum OathAccountAction {
         #[arg(short = 'i', long)]
         issuer: Option<String>,
         /// Credential type
-        #[arg(short = 'o', long, default_value = "totp")]
+        #[arg(short = 'o', long, default_value = "totp", value_name = "TYPE")]
         oath_type: CliOathType,
         /// Number of digits
         #[arg(long, default_value = "6")]
@@ -241,7 +237,7 @@ pub enum OathAccountAction {
 impl OathAction {
     pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
         match self {
-            Self::Info { password } => run_info(dev, scp_params, password.as_deref()),
+            Self::Info => run_info(dev, scp_params),
             Self::Reset { force } => run_reset(dev, scp_params, force),
             Self::Access(access) => match access {
                 OathAccessAction::Change {
@@ -666,15 +662,10 @@ fn with_touch_prompt_timeout<T>(f: impl FnOnce() -> T) -> T {
     result
 }
 
-pub fn run_info(
-    dev: &dyn YubiKeyDevice,
-    scp_params: &ScpParams,
-    password: Option<&str>,
-) -> Result<()> {
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     // Open a raw session without unlocking — info doesn't require authentication
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
     let session = new_oath_session(dev, &scp_config)?;
-    let _ = password; // Not needed for info
     let keys = oath_keys()?;
     print_table([
         ("OATH version", session.version().to_string()),

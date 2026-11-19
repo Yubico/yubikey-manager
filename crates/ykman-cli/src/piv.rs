@@ -43,7 +43,7 @@ pub enum PivAction {
     Info,
     /// Reset the PIV application
     Reset {
-        /// Confirm the reset without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -80,7 +80,7 @@ pub enum PivAccessAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// New PIN
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PIN")]
         new_pin: Option<String>,
     },
     /// Change the PIV PUK
@@ -89,7 +89,7 @@ pub enum PivAccessAction {
         #[arg(short = 'p', long)]
         puk: Option<String>,
         /// New PUK
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PUK")]
         new_puk: Option<String>,
     },
     /// Unblock the PIN using PUK
@@ -98,7 +98,7 @@ pub enum PivAccessAction {
         #[arg(short = 'p', long)]
         puk: Option<String>,
         /// New PIN
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PIN")]
         new_pin: Option<String>,
     },
     /// Set PIN and PUK retry counts
@@ -113,7 +113,7 @@ pub enum PivAccessAction {
         /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
-        /// Confirm changing retry counters without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -155,10 +155,10 @@ pub enum PivKeysAction {
         #[arg(short = 'a', long, default_value = "eccp256")]
         algorithm: CliKeyType,
         /// PIN policy for the generated key
-        #[arg(long, default_value = "default")]
+        #[arg(long, default_value = "default", value_name = "POLICY")]
         pin_policy: CliPinPolicy,
         /// Touch policy for the generated key
-        #[arg(long, default_value = "default")]
+        #[arg(long, default_value = "default", value_name = "POLICY")]
         touch_policy: CliTouchPolicy,
         /// Management key (hex, 16/24/32 bytes)
         #[arg(short = 'm', long, value_name = "KEY")]
@@ -177,10 +177,10 @@ pub enum PivKeysAction {
         /// Private key file
         key_file: String,
         /// PIN policy for the imported key
-        #[arg(long, default_value = "default")]
+        #[arg(long, default_value = "default", value_name = "POLICY")]
         pin_policy: CliPinPolicy,
         /// Touch policy for the imported key
-        #[arg(long, default_value = "default")]
+        #[arg(long, default_value = "default", value_name = "POLICY")]
         touch_policy: CliTouchPolicy,
         /// Management key (hex, 16/24/32 bytes)
         #[arg(short = 'm', long, value_name = "KEY")]
@@ -199,13 +199,13 @@ pub enum PivKeysAction {
     Sign {
         #[command(flatten)]
         operation: KeyOperation,
-        /// RSA/ECDSA hash (default: sha256); unused for Ed25519/ML-DSA
+        /// Hash algorithm for RSA/ECDSA, unused for Ed25519/ML-DSA [default: sha256]
         #[arg(short = 'a', long, value_name = "HASH")]
         hash_algorithm: Option<CliHashAlgorithm>,
         /// Input is already a digest (RSA/ECDSA only)
         #[arg(long)]
         prehashed: bool,
-        /// RSA padding (default: pkcs1v15; PSS salt is digest length)
+        /// RSA padding (PSS uses a salt of digest length) [default: pkcs1v15]
         #[arg(long)]
         padding: Option<CliSignaturePadding>,
         /// ML-DSA context string (at most 255 bytes)
@@ -225,7 +225,7 @@ pub enum PivKeysAction {
         /// RSA encryption padding
         #[arg(long, default_value = "oaep")]
         padding: CliDecryptionPadding,
-        /// OAEP and MGF1 hash (default: sha256; empty label)
+        /// Hash algorithm for OAEP and MGF1 (with an empty label) [default: sha256]
         #[arg(short = 'a', long, value_name = "HASH")]
         hash_algorithm: Option<CliHashAlgorithm>,
     },
@@ -1179,7 +1179,7 @@ pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -
     if !force {
         eprintln!("WARNING! This will delete all stored PIV data and restore factory settings.");
         if !confirm("Proceed?") {
-            return Err(anyhow!("Aborted."));
+            return Err(anyhow!("Aborted by user."));
         }
     }
     let mut session = open_session(dev, scp_params)?;
@@ -1310,7 +1310,7 @@ pub fn run_set_retries(
             "Set PIN retries to {pin_retries} and PUK retries to {puk_retries}? This will reset PIN and PUK to defaults."
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
 
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;

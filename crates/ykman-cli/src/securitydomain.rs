@@ -17,7 +17,7 @@ pub enum SecurityDomainAction {
     Info,
     /// Reset Security Domain
     Reset {
-        /// Confirm the reset without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -37,7 +37,7 @@ pub enum SecurityDomainKeysAction {
         /// Output file for public key
         output: String,
         /// Replace existing KVN
-        #[arg(long)]
+        #[arg(long, value_name = "KVN")]
         replace_kvn: Option<String>,
     },
     /// Export certificate bundle
@@ -55,7 +55,7 @@ pub enum SecurityDomainKeysAction {
         kid: String,
         /// Key Version Number (hex)
         kvn: String,
-        /// Confirm deletion without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -66,12 +66,12 @@ pub enum SecurityDomainKeysAction {
         /// Key Version Number (hex)
         kvn: String,
         /// Key type
-        #[arg(short = 't', long, default_value = "scp11")]
+        #[arg(short = 't', long, default_value = "scp11", value_name = "TYPE")]
         key_type: CliSdKeyType,
         /// For SCP03: K-ENC:K-MAC:K-DEK hex keys. For SCP11: PEM file with certificate(s) and/or private key
         input: String,
         /// Replace existing KVN
-        #[arg(long)]
+        #[arg(long, value_name = "KVN")]
         replace_kvn: Option<String>,
         /// Password for decrypting private key files
         #[arg(short = 'p', long)]
@@ -267,7 +267,7 @@ pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -
     if !force {
         eprintln!("WARNING! This will reset all Security Domain data.");
         if !confirm("Proceed?") {
-            return Err(anyhow!("Aborted."));
+            return Err(anyhow!("Aborted by user."));
         }
     }
     let mut session = open_session(dev, scp_params)?;
@@ -311,7 +311,7 @@ pub fn run_keys_delete(
     force: bool,
 ) -> Result<()> {
     if !force && !confirm(&format!("Delete key (KID=0x{kid:02X}, KVN=0x{kvn:02X})?")) {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
     let mut session = open_session(dev, scp_params)?;
     session

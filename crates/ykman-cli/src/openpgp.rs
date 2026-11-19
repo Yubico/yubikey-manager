@@ -19,7 +19,7 @@ pub enum OpenpgpAction {
     Info,
     /// Reset the OpenPGP application
     Reset {
-        /// Confirm the reset without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -45,9 +45,9 @@ pub enum OpenpgpAccessAction {
         /// Admin PIN retry count
         admin_pin_retries: u8,
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
-        /// Confirm changing retry counters without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -57,37 +57,37 @@ pub enum OpenpgpAccessAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// New user PIN
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PIN")]
         new_pin: Option<String>,
     },
     /// Change admin PIN
     ChangeAdminPin {
         /// Current admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
         /// New admin PIN
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PIN")]
         new_admin_pin: Option<String>,
     },
     /// Change reset code
     ChangeResetCode {
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
         /// New reset code
-        #[arg(short = 'r', long)]
+        #[arg(short = 'r', long, value_name = "CODE")]
         reset_code: Option<String>,
     },
     /// Unblock PIN
     UnblockPin {
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
         /// Reset code
-        #[arg(short = 'r', long)]
+        #[arg(short = 'r', long, value_name = "CODE")]
         reset_code: Option<String>,
         /// New user PIN
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PIN")]
         new_pin: Option<String>,
     },
     /// Set signature PIN policy
@@ -95,7 +95,7 @@ pub enum OpenpgpAccessAction {
         /// Policy
         policy: CliOpenpgpPinPolicy,
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
     },
 }
@@ -114,9 +114,9 @@ pub enum OpenpgpKeysAction {
         /// Touch policy
         policy: CliUif,
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
-        /// Confirm setting touch policy without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -127,7 +127,7 @@ pub enum OpenpgpKeysAction {
         /// Key file
         key_file: String,
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
     },
     /// Generate attestation certificate
@@ -164,7 +164,7 @@ pub enum OpenpgpCertAction {
         /// Certificate file
         cert_file: String,
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
     },
     /// Delete certificate
@@ -172,7 +172,7 @@ pub enum OpenpgpCertAction {
         /// Key reference
         key: CliKeyRef,
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
     },
 }
@@ -450,7 +450,7 @@ pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -
             "WARNING! This will delete all stored OpenPGP keys and restore factory settings."
         );
         if !confirm("Proceed?") {
-            return Err(anyhow!("Aborted."));
+            return Err(anyhow!("Aborted by user."));
         }
     }
 
@@ -491,7 +491,7 @@ pub fn run_set_retries(
             "Set PIN retries to {pin_retries}/{reset_code_retries}/{admin_pin_retries}?"
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
     let mut session = open_session(dev, scp_params)?;
     let ap = ensure_admin_pin(admin_pin)?;
@@ -727,7 +727,7 @@ pub fn run_keys_set_touch(
     if uif.is_fixed() && !force {
         eprintln!("WARNING: Setting a FIXED touch policy cannot be undone without a full reset!");
         if !confirm("Proceed?") {
-            return Err(anyhow!("Aborted."));
+            return Err(anyhow!("Aborted by user."));
         }
     }
 

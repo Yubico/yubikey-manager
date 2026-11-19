@@ -18,10 +18,10 @@ pub enum ConfigAction {
     /// Configure USB applications
     Usb {
         /// Enable an application (can be repeated)
-        #[arg(short = 'e', long, action = clap::ArgAction::Append)]
+        #[arg(short = 'e', long, action = clap::ArgAction::Append, value_name = "APP")]
         enable: Vec<CliCapability>,
         /// Disable an application (can be repeated)
-        #[arg(short = 'x', long, action = clap::ArgAction::Append)]
+        #[arg(short = 'x', long, action = clap::ArgAction::Append, value_name = "APP")]
         disable: Vec<CliCapability>,
         /// Enable all supported applications
         #[arg(short = 'a', long)]
@@ -48,10 +48,10 @@ pub enum ConfigAction {
     /// Configure NFC applications
     Nfc {
         /// Enable an application (can be repeated)
-        #[arg(short = 'e', long, action = clap::ArgAction::Append)]
+        #[arg(short = 'e', long, action = clap::ArgAction::Append, value_name = "APP")]
         enable: Vec<CliCapability>,
         /// Disable an application (can be repeated)
-        #[arg(short = 'x', long, action = clap::ArgAction::Append)]
+        #[arg(short = 'x', long, action = clap::ArgAction::Append, value_name = "APP")]
         disable: Vec<CliCapability>,
         /// Enable all supported applications
         #[arg(short = 'a', long)]
@@ -86,7 +86,7 @@ pub enum ConfigAction {
         /// Generate a random 32-character hex lock code
         #[arg(short = 'g', long, conflicts_with = "new_lock_code")]
         generate: bool,
-        /// Confirm the action without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },

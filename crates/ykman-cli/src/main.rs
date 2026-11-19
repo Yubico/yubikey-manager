@@ -239,8 +239,8 @@ enum Commands {
       \n  Remove a currently set access code from slot 2:\
       \n  $ ykman otp --access-code 0123456789ab settings 2 --delete-access-code")]
     Otp {
-        /// 6 byte access code (use "-" to prompt for input)
-        #[arg(long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         #[command(subcommand)]
         action: otp::OtpAction,
@@ -463,7 +463,7 @@ fn run_command(
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("Error: {e}");
+        eprintln!("error: {e}");
         process::exit(1);
     }
 }

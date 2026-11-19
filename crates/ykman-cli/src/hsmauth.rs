@@ -14,11 +14,11 @@ const MANAGEMENT_KEY_LEN: usize = 16;
 
 #[derive(Subcommand)]
 pub enum HsmauthAction {
-    /// Display HSM Auth status
+    /// Display general status of the YubiHSM Auth application
     Info,
-    /// Reset the HSM Auth application
+    /// Reset all YubiHSM Auth data
     Reset {
-        /// Confirm the reset without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -42,7 +42,7 @@ pub enum HsmauthCredAction {
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, value_name = "PASSWORD")]
         management_password: Option<String>,
         /// Require touch to use the credential
         #[arg(short = 't', long)]
@@ -53,10 +53,10 @@ pub enum HsmauthCredAction {
         /// Credential label
         label: String,
         /// Encryption key in hex
-        #[arg(short = 'E', long)]
+        #[arg(short = 'E', long, value_name = "KEY")]
         enc_key: Option<String>,
         /// MAC key in hex
-        #[arg(short = 'M', long)]
+        #[arg(short = 'M', long, value_name = "KEY")]
         mac_key: Option<String>,
         /// Generate random encryption and MAC keys
         #[arg(short = 'g', long)]
@@ -65,7 +65,7 @@ pub enum HsmauthCredAction {
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, value_name = "PASSWORD")]
         management_password: Option<String>,
         /// Require touch to use the credential
         #[arg(short = 't', long)]
@@ -82,7 +82,7 @@ pub enum HsmauthCredAction {
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, value_name = "PASSWORD")]
         management_password: Option<String>,
         /// Require touch to use the credential
         #[arg(short = 't', long)]
@@ -93,9 +93,9 @@ pub enum HsmauthCredAction {
         /// Credential label
         label: String,
         /// Management password
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, value_name = "PASSWORD")]
         management_password: Option<String>,
-        /// Confirm deletion without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -110,7 +110,12 @@ pub enum HsmauthCredAction {
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short = 'm', long, conflicts_with = "credential_password")]
+        #[arg(
+            short = 'm',
+            long,
+            conflicts_with = "credential_password",
+            value_name = "PASSWORD"
+        )]
         management_password: Option<String>,
         /// New credential password (at most 16 UTF-8 bytes)
         #[arg(short = 'n', long, value_name = "PASSWORD")]
@@ -130,7 +135,7 @@ pub enum HsmauthCredAction {
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, value_name = "PASSWORD")]
         management_password: Option<String>,
         /// Require touch
         #[arg(short = 't', long)]
@@ -150,11 +155,11 @@ pub enum HsmauthCredAction {
 
 #[derive(Subcommand)]
 pub enum HsmauthAccessAction {
-    /// Change the management key
+    /// Change the management password
     #[command(name = "change-management-password")]
     ChangeManagementPassword {
         /// Current management password
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, value_name = "PASSWORD")]
         management_password: Option<String>,
         /// New management password
         #[arg(short = 'n', long, value_name = "PASSWORD")]
@@ -390,16 +395,16 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
 
 pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
     if !force {
-        eprintln!("WARNING! This will delete all stored HSM Auth credentials.");
+        eprintln!("WARNING! This will delete all stored YubiHSM Auth credentials.");
         if !confirm("Proceed?") {
-            return Err(anyhow!("Aborted."));
+            return Err(anyhow!("Aborted by user."));
         }
     }
     let mut session = open_session(dev, scp_params)?;
     session
         .reset()
         .map_err(|e| anyhow!("Failed to reset: {e}"))?;
-    eprintln!("HSM Auth application has been reset.");
+    eprintln!("YubiHSM Auth application has been reset.");
     Ok(())
 }
 
@@ -466,7 +471,7 @@ pub fn run_credentials_delete(
     force: bool,
 ) -> Result<()> {
     if !force && !confirm(&format!("Delete credential '{label}'?")) {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
     let mgmt = require_management_password(management_key)?;
     let mut session = open_session(dev, scp_params)?;

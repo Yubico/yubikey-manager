@@ -105,8 +105,8 @@ pub enum OtpAction {
     Delete {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
-        /// Access code (hex)
-        #[arg(long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -120,10 +120,10 @@ pub enum OtpAction {
         #[arg(short = 'p', long)]
         prefix: Option<String>,
         /// NDEF type
-        #[arg(short = 't', long, default_value = "uri")]
+        #[arg(short = 't', long, default_value = "uri", value_name = "TYPE")]
         ndef_type: crate::cli_enums::CliNdefType,
-        /// Access code (hex)
-        #[arg(long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -134,10 +134,10 @@ pub enum OtpAction {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
         /// Public ID (modhex, 0-16 bytes)
-        #[arg(short = 'P', long)]
+        #[arg(short = 'P', long, value_name = "MODHEX")]
         public_id: Option<String>,
         /// Private ID (hex, 6 bytes)
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, value_name = "HEX")]
         private_id: Option<String>,
         /// AES key (hex, 16 bytes)
         #[arg(short = 'k', long)]
@@ -153,14 +153,14 @@ pub enum OtpAction {
         generate_key: bool,
         #[command(flatten)]
         enter: EnterArgs,
-        /// Access code (hex)
-        #[arg(long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
         /// File path to output configuration
-        #[arg(short = 'O', long)]
+        #[arg(short = 'O', long, value_name = "FILE")]
         config_output: Option<String>,
     },
     /// Program a static password
@@ -184,8 +184,8 @@ pub enum OtpAction {
         list_layouts: bool,
         #[command(flatten)]
         enter: EnterArgs,
-        /// Access code (hex)
-        #[arg(long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -206,8 +206,8 @@ pub enum OtpAction {
         /// Generate random key
         #[arg(short = 'g', long, conflicts_with = "key")]
         generate: bool,
-        /// Access code (hex)
-        #[arg(long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -232,7 +232,7 @@ pub enum OtpAction {
         slot: CliOtpSlot,
         /// HMAC key (Base32)
         key: Option<String>,
-        /// Number of digits (6 or 8)
+        /// Number of digits
         #[arg(long, default_value = "6")]
         digits: CliHotpDigits,
         /// Initial counter value
@@ -240,8 +240,8 @@ pub enum OtpAction {
         counter: u32,
         #[command(flatten)]
         enter: EnterArgs,
-        /// Access code (hex)
-        #[arg(long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -256,8 +256,8 @@ pub enum OtpAction {
         slot: CliOtpSlot,
         #[command(flatten)]
         enter: EnterArgs,
-        /// Keystroke pacing in ms
-        #[arg(short = 'p', long)]
+        /// Delay between keystrokes in milliseconds
+        #[arg(short = 'p', long, value_name = "MS")]
         pacing: Option<CliPacing>,
         /// Use numeric keypad for digits
         #[arg(long)]
@@ -265,14 +265,14 @@ pub enum OtpAction {
         /// Make serial visible over USB
         #[arg(long)]
         serial_usb_visible: bool,
-        /// New access code (hex)
-        #[arg(short = 'A', long)]
+        /// New 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(short = 'A', long, value_name = "HEX")]
         new_access_code: Option<String>,
         /// Delete access code
-        #[arg(long, conflicts_with = "new_access_code", requires = "access_code")]
+        #[arg(long, conflicts_with = "new_access_code")]
         delete_access_code: bool,
-        /// Current access code (hex)
-        #[arg(long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -564,6 +564,13 @@ fn generate_static_pw(length: usize, layout: LayoutSelection) -> Result<String> 
 }
 
 fn parse_access_code(s: &str) -> Result<[u8; ACC_CODE_SIZE]> {
+    if s == "-" {
+        return parse_access_code_hex(&util::prompt_secret("Enter the access code")?);
+    }
+    parse_access_code_hex(s)
+}
+
+fn parse_access_code_hex(s: &str) -> Result<[u8; ACC_CODE_SIZE]> {
     let bytes = hex::decode(s).map_err(|_| anyhow!("Access code must be hex-encoded."))?;
     if bytes.len() != ACC_CODE_SIZE {
         return Err(anyhow!(
@@ -644,7 +651,7 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
 
 pub fn run_swap(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
     if !force && !confirm("Swap the two slot configurations?") {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
     struct Swap;
     impl YubiOtpOp<()> for Swap {
@@ -682,7 +689,7 @@ pub fn run_delete(
             return Err(anyhow!("Not possible to delete an empty slot."));
         }
         if !confirm(&format!("Delete slot {}?", slot.map(1, 2))) {
-            return Err(anyhow!("Aborted."));
+            return Err(anyhow!("Aborted by user."));
         }
     }
 
@@ -721,7 +728,7 @@ pub fn run_ndef(
             slot.map(1, 2)
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
     struct Ndef {
         slot: Slot,
@@ -886,7 +893,7 @@ pub fn run_yubiotp(
             slot.map(1, 2)
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
 
     let mut config = SlotConfiguration::yubiotp(&pub_id_bytes, &priv_id, &key_bytes)
@@ -1097,7 +1104,7 @@ pub fn run_chalresp(
             slot.map(1, 2)
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
 
     let hmac_key = HmacKey::new(&key_bytes).map_err(|e| anyhow!("Invalid key: {e}"))?;
@@ -1326,7 +1333,7 @@ pub fn run_hotp(
             slot.map(1, 2)
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
 
     let hmac_key = HmacKey::new(&key_bytes).map_err(|e| anyhow!("Invalid key: {e}"))?;
@@ -1422,7 +1429,16 @@ pub fn run_settings(
     let new_acc = if delete_access_code {
         None
     } else if let Some(nac) = new_access_code {
-        Some(parse_access_code(nac)?)
+        let nac = if nac == "-" {
+            parse_access_code_hex(&util::prompt_new_secret("Enter new access code")?)?
+        } else {
+            parse_access_code_hex(nac)?
+        };
+        let unique: std::collections::HashSet<_> = nac.iter().collect();
+        if dev.info().pin_complexity && unique.len() < 2 {
+            return Err(anyhow!("Access code does not meet complexity requirement."));
+        }
+        Some(nac)
     } else {
         cur_acc
     };
@@ -1433,7 +1449,7 @@ pub fn run_settings(
             slot.map(1, 2)
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
 
     let mut config = SlotConfiguration::update();
