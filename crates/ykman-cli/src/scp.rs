@@ -11,7 +11,8 @@ use yubikit::securitydomain::{KeyRef, SecurityDomainSession};
 use yubikit::smartcard::{ScpKeyParams, SmartCardConnection, SmartCardProtocol};
 
 use crate::util::{
-    format_session_error, format_smartcard_connection_error, parse_hex_u8, read_file_or_stdin,
+    format_session_error, format_smartcard_connection_error, load_key_file, parse_hex_u8,
+    read_file_or_stdin,
 };
 
 /// Parsed SCP parameters from CLI flags (before device interaction).
@@ -66,7 +67,7 @@ pub fn parse_scp_params(input: ScpInputs<'_>) -> Result<ScpParams> {
 
     if let Some(ca_path) = input.scp_ca {
         let data = read_file_or_stdin(ca_path)?;
-        params.ca_cert = Some(der_or_first_pem(&data)?);
+        params.ca_cert = Some(ykman::pki::pem_or_der(&data)?);
     }
 
     if input.scp_cred.is_empty() {
@@ -96,23 +97,11 @@ pub fn parse_scp_params(input: ScpInputs<'_>) -> Result<ScpParams> {
 
     for path in input.scp_cred {
         let data = read_file_or_stdin(path)?;
-        let pem_text = std::str::from_utf8(&data).ok();
-
-        if let Some(text) = pem_text {
-            if text.contains("-----BEGIN") {
-                if text.contains("PRIVATE KEY") {
-                    let der = decrypt_private_key_data(text, input.scp_password)?;
-                    params.scp11_private_key = Some(extract_ec_private_key(&der)?);
-                }
-                params
-                    .scp11_certificates
-                    .extend(pem_decode_all_certs(text)?);
-            } else {
-                params.scp11_certificates.push(data);
-            }
-        } else {
-            params.scp11_certificates.push(data);
+        let file = load_key_file(&data, input.scp_password)?;
+        if let Some(der) = file.private_key {
+            params.scp11_private_key = Some(extract_ec_private_key(&der)?);
         }
+        params.scp11_certificates.extend(file.certificates);
     }
 
     Ok(params)
@@ -516,86 +505,6 @@ fn parse_der_length(data: &[u8], pos: usize) -> Result<(usize, usize)> {
     }
 }
 
-fn der_or_first_pem(data: &[u8]) -> Result<Vec<u8>> {
-    if let Ok(text) = std::str::from_utf8(data)
-        && text.contains("-----BEGIN")
-    {
-        return pem_decode_first(text);
-    }
-    Ok(data.to_vec())
-}
-
-fn decrypt_private_key_data(text: &str, password: Option<&str>) -> Result<Vec<u8>> {
-    if text.contains("ENCRYPTED") {
-        let password = match password {
-            Some(password) => password.to_string(),
-            None => crate::util::prompt_secret("Enter password to decrypt SCP key")?,
-        };
-        decrypt_pem_private_key(text, &password)
-    } else {
-        pem_decode_first(text)
-    }
-}
-
-fn decrypt_pem_private_key(pem_text: &str, password: &str) -> Result<Vec<u8>> {
-    use pkcs8::EncryptedPrivateKeyInfo;
-
-    let der = pem_decode_first(pem_text)?;
-    let enc_key = EncryptedPrivateKeyInfo::try_from(der.as_slice())
-        .map_err(|e| anyhow!("Failed to parse encrypted SCP key: {e}"))?;
-    let dec_key = enc_key
-        .decrypt(password)
-        .map_err(|_| anyhow!("Wrong password for encrypted SCP key."))?;
-    Ok(dec_key.as_bytes().to_vec())
-}
-
-fn pem_decode_first(text: &str) -> Result<Vec<u8>> {
-    use base64::Engine;
-    let mut in_block = false;
-    let mut b64 = String::new();
-    for line in text.lines() {
-        if line.starts_with("-----BEGIN") {
-            in_block = true;
-            continue;
-        }
-        if line.starts_with("-----END") {
-            break;
-        }
-        if in_block {
-            b64.push_str(line.trim());
-        }
-    }
-    base64::engine::general_purpose::STANDARD
-        .decode(&b64)
-        .map_err(|e| anyhow!("Invalid PEM data: {e}"))
-}
-
-fn pem_decode_all_certs(text: &str) -> Result<Vec<Vec<u8>>> {
-    use base64::Engine;
-    let mut certs = Vec::new();
-    let mut in_cert = false;
-    let mut b64 = String::new();
-    for line in text.lines() {
-        if line.starts_with("-----BEGIN CERTIFICATE") {
-            in_cert = true;
-            b64.clear();
-            continue;
-        }
-        if line.starts_with("-----END CERTIFICATE") {
-            in_cert = false;
-            let der = base64::engine::general_purpose::STANDARD
-                .decode(&b64)
-                .map_err(|e| anyhow!("Invalid PEM cert: {e}"))?;
-            certs.push(der);
-            continue;
-        }
-        if in_cert {
-            b64.push_str(line.trim());
-        }
-    }
-    Ok(certs)
-}
-
 fn extract_ec_private_key(der: &[u8]) -> Result<Vec<u8>> {
     use elliptic_curve::SecretKey;
     use elliptic_curve::pkcs8::DecodePrivateKey;
@@ -626,7 +535,7 @@ mod tests {
     use yubikit::smartcard::SmartCardError;
 
     fn certificate_chain() -> (Vec<u8>, Vec<Vec<u8>>) {
-        let ca = pem_decode_first(include_str!(
+        let ca = ykman::pki::pem_decode(include_str!(
             "../../../tests/files/scp/cert.ca-kloc.ecdsa.pem"
         ))
         .unwrap();
@@ -635,13 +544,13 @@ mod tests {
             include_str!("../../../tests/files/scp/cert.oce.ecka.pem"),
         ]
         .into_iter()
-        .map(|pem| pem_decode_first(pem).unwrap())
+        .map(|pem| ykman::pki::pem_decode(pem).unwrap())
         .collect();
         (ca, chain)
     }
 
     fn unrelated_ca() -> Vec<u8> {
-        pem_decode_first(include_str!("../tests/fixtures/ec_p256_cert.pem")).unwrap()
+        ykman::pki::pem_decode(include_str!("../tests/fixtures/ec_p256_cert.pem")).unwrap()
     }
 
     #[test]
@@ -651,7 +560,7 @@ mod tests {
             include_str!("../tests/fixtures/ec_p384_cert.pem"),
             include_str!("../tests/fixtures/rsa_2048_cert.pem"),
         ] {
-            let cert = Certificate::from_der(&pem_decode_first(pem).unwrap()).unwrap();
+            let cert = Certificate::from_der(&ykman::pki::pem_decode(pem).unwrap()).unwrap();
             verify_certificate_signature(&cert, &cert).unwrap();
             let mut tampered = cert.clone();
             tampered.tbs_certificate.serial_number = 123u32.into();

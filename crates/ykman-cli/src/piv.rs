@@ -5,7 +5,7 @@ use std::time::Duration;
 use clap::{Args, Subcommand};
 use x509_cert::Certificate;
 use x509_cert::builder::{Builder, CertificateBuilder, Profile, RequestBuilder};
-use x509_cert::der::{self, Decode, Encode, EncodePem, pem::LineEnding};
+use x509_cert::der::{Decode, Encode, EncodePem, pem::LineEnding};
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
@@ -31,8 +31,8 @@ use crate::cli_enums::{
 };
 use crate::scp::ScpParams;
 use crate::util::{
-    ByteFormat, ByteLen, confirm, open_smartcard_session, print_table, prompt_bytes,
-    read_file_or_stdin, require_fips_approved, write_file_or_stdout,
+    ByteFormat, ByteLen, confirm, load_certificate, load_private_key, open_smartcard_session,
+    print_table, prompt_bytes, read_file_or_stdin, require_fips_approved, write_file_or_stdout,
 };
 
 use yubikit::__internal::{padding, piv_secret};
@@ -1156,15 +1156,26 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
 
         if let Some(ref cert_der) = has_cert {
             // Parse certificate to show details
-            if let Some(info) = parse_cert_info(cert_der) {
+            if let Ok(info) = ykman::pki::certificate_info(cert_der) {
                 if has_key.is_some() {
-                    rows.push(("  Public key type", info.key_type));
+                    let key_type = info
+                        .public_key
+                        .as_ref()
+                        .and_then(|pk| KeyType::from_public_key(pk).ok())
+                        .map_or_else(|| "Unknown".to_string(), |kt| kt.to_string());
+                    rows.push(("  Public key type", key_type));
                 }
+                let serial = info
+                    .serial
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(":");
                 rows.extend([
                     ("  Subject DN", info.subject),
                     ("  Issuer DN", info.issuer),
-                    ("  Serial", info.serial),
-                    ("  Fingerprint", info.fingerprint),
+                    ("  Serial", serial),
+                    ("  Fingerprint", hex::encode(info.fingerprint)),
                     ("  Not before", info.not_before),
                     ("  Not after", info.not_after),
                 ]);
@@ -1189,51 +1200,6 @@ fn slot_heading(slot: Slot) -> String {
         _ => format!("{slot:?}").to_ascii_uppercase(),
     };
     format!("Slot {:02X} ({name})", slot as u8)
-}
-
-struct CertInfo {
-    key_type: String,
-    subject: String,
-    issuer: String,
-    serial: String,
-    fingerprint: String,
-    not_before: String,
-    not_after: String,
-}
-
-fn parse_cert_info(cert_der: &[u8]) -> Option<CertInfo> {
-    use sha2::Digest;
-    let fingerprint = hex::encode(sha2::Sha256::digest(cert_der));
-
-    let cert = Certificate::from_der(cert_der).ok()?;
-    let tbs = &cert.tbs_certificate;
-
-    let subject = tbs.subject.to_string();
-    let issuer = tbs.issuer.to_string();
-    let serial = hex::encode(tbs.serial_number.as_bytes())
-        .as_bytes()
-        .chunks(2)
-        .map(|c| std::str::from_utf8(c).unwrap_or("??"))
-        .collect::<Vec<_>>()
-        .join(":");
-    let not_before = tbs.validity.not_before.to_string();
-    let not_after = tbs.validity.not_after.to_string();
-
-    let key_type = PublicKey::from_spki(&tbs.subject_public_key_info.to_der().unwrap_or_default())
-        .ok()
-        .and_then(|pk| KeyType::from_public_key(&pk).ok())
-        .map(|kt| format!("{kt}"))
-        .unwrap_or_else(|| "Unknown".to_string());
-
-    Some(CertInfo {
-        key_type,
-        subject,
-        issuer,
-        serial,
-        fingerprint,
-        not_before,
-        not_after,
-    })
 }
 
 pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
@@ -1641,7 +1607,7 @@ pub fn run_keys_import(
 
     let data = read_file_or_stdin(key_file)?;
 
-    let der = decrypt_private_key_data(&data, password)?;
+    let der = load_private_key(&data, password)?;
 
     // Parse the private key (auto-detects algorithm from PKCS#8)
     let private_key = PrivateKey::from_pkcs8(&der)
@@ -1731,11 +1697,7 @@ fn pin_required(slot: Slot, pin_policy: PinPolicy, version: Version) -> bool {
 }
 
 fn peer_key_bytes(key_type: KeyType, input: &[u8]) -> Result<Vec<u8>> {
-    let der = if input.starts_with(b"-----BEGIN") {
-        pem_decode(std::str::from_utf8(input)?)?
-    } else {
-        input.to_vec()
-    };
+    let der = ykman::pki::pem_or_der(input)?;
     let public_key = PublicKey::from_spki(&der).map_err(|e| {
         anyhow!("Invalid peer public key (expected PEM/DER SubjectPublicKeyInfo): {e}")
     })?;
@@ -2105,7 +2067,7 @@ pub fn run_certificates_import(
 
     let data = read_file_or_stdin(cert_file)?;
 
-    let der = decrypt_certificate_data(&data, password)?;
+    let der = load_certificate(&data, password)?;
 
     let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
@@ -2419,15 +2381,7 @@ fn resolve_public_key(
 ) -> Result<(KeyType, Vec<u8>)> {
     if let Some(pk_file) = public_key_file {
         let data = read_file_or_stdin(pk_file)?;
-        let der = if let Ok(text) = std::str::from_utf8(&data) {
-            if text.contains("-----BEGIN") {
-                pem_decode(text)?
-            } else {
-                data
-            }
-        } else {
-            data
-        };
+        let der = ykman::pki::pem_or_der(&data)?;
         let pk = PublicKey::from_spki(&der)
             .map_err(|_| anyhow!("Could not determine key type from public key file."))?;
         let kt = KeyType::from_public_key(&pk)
@@ -2455,132 +2409,6 @@ fn random_serial_number() -> Result<SerialNumber> {
         buf[0] = 0x01;
     }
     SerialNumber::new(&buf).map_err(|e| anyhow!("Invalid serial number: {e}"))
-}
-
-// ---------------------------------------------------------------------------
-// Password-protected key/cert parsing helpers
-// ---------------------------------------------------------------------------
-
-/// Attempt to decrypt/parse a private key from raw data, handling
-/// PEM (plain or ENCRYPTED), PKCS#12, and raw DER. If the key is encrypted
-/// and no password is provided, the user is prompted interactively.
-pub(crate) fn decrypt_private_key_data(data: &[u8], password: Option<&str>) -> Result<Vec<u8>> {
-    if let Ok(text) = std::str::from_utf8(data)
-        && text.contains("-----BEGIN")
-    {
-        let encrypted = text.contains("ENCRYPTED");
-        if encrypted {
-            let pw = match password {
-                Some(p) => p.to_string(),
-                None => crate::util::prompt_secret("Enter password to decrypt key")?,
-            };
-            return decrypt_pem_private_key(text, &pw);
-        }
-        return pem_decode(text);
-    }
-
-    // Try PKCS#12 if the data looks like it
-    if is_pkcs12(data) {
-        let pw = match password {
-            Some(p) => p.to_string(),
-            None => crate::util::prompt_secret("Enter password to decrypt PKCS#12 file")?,
-        };
-        return extract_private_key_from_pkcs12(data, &pw);
-    }
-
-    // Try plain DER
-    Ok(data.to_vec())
-}
-
-/// Decrypt an encrypted PKCS#8 PEM private key.
-fn decrypt_pem_private_key(pem_text: &str, password: &str) -> Result<Vec<u8>> {
-    use pkcs8::EncryptedPrivateKeyInfo;
-
-    let der = pem_decode(pem_text)?;
-    let enc_key = EncryptedPrivateKeyInfo::try_from(der.as_slice())
-        .map_err(|e| anyhow!("Failed to parse encrypted key: {e}"))?;
-    let dec_key = enc_key
-        .decrypt(password)
-        .map_err(|_| anyhow!("Wrong password for encrypted key."))?;
-    Ok(dec_key.as_bytes().to_vec())
-}
-
-/// Attempt to parse a certificate from raw data, supporting password-protected
-/// PKCS#12 files. For PEM and DER certs, the password is ignored.
-fn decrypt_certificate_data(data: &[u8], password: Option<&str>) -> Result<Vec<u8>> {
-    if let Ok(text) = std::str::from_utf8(data)
-        && text.contains("-----BEGIN")
-    {
-        return pem_decode(text);
-    }
-
-    // Try PKCS#12
-    if is_pkcs12(data) {
-        let pw = match password {
-            Some(p) => p.to_string(),
-            None => crate::util::prompt_secret("Enter password to decrypt PKCS#12 file")?,
-        };
-        return extract_certificate_from_pkcs12(data, &pw);
-    }
-
-    // Plain DER certificate
-    Ok(data.to_vec())
-}
-
-/// Check if data looks like a PKCS#12 file.
-/// PKCS#12 is a DER SEQUENCE whose first element is INTEGER with value 3.
-fn is_pkcs12(data: &[u8]) -> bool {
-    if data.len() < 10 || data[0] != 0x30 {
-        return false;
-    }
-    // Skip the outer SEQUENCE length bytes
-    let len_byte = data[1];
-    let offset = if len_byte & 0x80 == 0 {
-        2
-    } else {
-        2 + (len_byte & 0x7f) as usize
-    };
-    // Expect INTEGER tag (0x02) with length 1 and value 3
-    offset + 3 <= data.len()
-        && data[offset] == 0x02
-        && data[offset + 1] == 0x01
-        && data[offset + 2] == 0x03
-}
-
-/// Extract a private key from PKCS#12 data.
-fn extract_private_key_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8>> {
-    use p12_keystore::KeyStore;
-
-    let ks = KeyStore::from_pkcs12(data, password)
-        .map_err(|e| anyhow!("Failed to parse PKCS#12 file: {e}"))?;
-    let (_, chain) = ks
-        .private_key_chain()
-        .ok_or_else(|| anyhow!("No private key found in PKCS#12 file."))?;
-    Ok(chain.key().to_vec())
-}
-
-/// Extract a certificate from PKCS#12 data.
-fn extract_certificate_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8>> {
-    use p12_keystore::{KeyStore, KeyStoreEntry};
-
-    let ks = KeyStore::from_pkcs12(data, password)
-        .map_err(|e| anyhow!("Failed to parse PKCS#12 file: {e}"))?;
-
-    // Try cert from a key chain first, then standalone certs
-    for (_, entry) in ks.entries() {
-        match entry {
-            KeyStoreEntry::PrivateKeyChain(chain) => {
-                if let Some(cert) = chain.chain().first() {
-                    return Ok(cert.as_der().to_vec());
-                }
-            }
-            KeyStoreEntry::Certificate(cert) => {
-                return Ok(cert.as_der().to_vec());
-            }
-            _ => {}
-        }
-    }
-    Err(anyhow!("No certificate found in PKCS#12 file."))
 }
 
 /// Verify that a public key (as SPKI DER) matches the private key in a PIV slot
@@ -2680,18 +2508,6 @@ fn verify_signature(
     Ok(verified)
 }
 
-// ---------------------------------------------------------------------------
-// PEM encoding / decoding
-// ---------------------------------------------------------------------------
-
-fn pem_decode(text: &str) -> Result<Vec<u8>> {
-    // Generic PEM decode: extract first PEM block regardless of label
-    let doc = der::Document::from_pem(text)
-        .map(|(_, doc)| doc)
-        .map_err(|e| anyhow!("Invalid PEM data: {e}"))?;
-    Ok(doc.as_bytes().to_vec())
-}
-
 fn write_cert_file(output: &str, cert_der: &[u8], format: CliFormat) -> Result<()> {
     match format {
         CliFormat::Der => {
@@ -2721,9 +2537,8 @@ mod tests {
     use crate::cli_enums::CliKeyType;
 
     use super::{
-        check_management_key_type_supported, decrypt_private_key_data,
-        format_management_key_auth_error, format_piv_credential_error,
-        management_key_type_prompt_name, slot_heading,
+        check_management_key_type_supported, format_management_key_auth_error,
+        format_piv_credential_error, management_key_type_prompt_name, slot_heading,
     };
 
     fn device_info(fips: bool) -> yubikit::management::DeviceInfo {
@@ -3368,7 +3183,7 @@ mod tests {
                     env!("CARGO_MANIFEST_DIR")
                 );
                 let pem = std::fs::read(&path).expect("read OpenSSL key fixture");
-                let der = decrypt_private_key_data(&pem, None).expect("decode PEM");
+                let der = crate::util::load_private_key(&pem, None).expect("decode PEM");
                 let key = PrivateKey::from_pkcs8(&der).expect("parse PKCS#8 key");
                 assert_eq!(
                     KeyType::try_from(&key.algorithm()).unwrap(),

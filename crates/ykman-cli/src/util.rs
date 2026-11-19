@@ -2,6 +2,7 @@ use anyhow::{Error, Result, anyhow};
 use std::fmt;
 use std::io::{self, Read, Write};
 
+use ykman::pki::{self, KeyFile, PasswordProtection, PkiError};
 use yubikit::device::{DeviceError, YubiKeyDevice};
 use yubikit::management::{Capability, DeviceInfo};
 use yubikit::oath::parse_b32_key;
@@ -260,6 +261,43 @@ pub fn read_file_or_stdin(path: &str) -> Result<Vec<u8>> {
 }
 
 /// Parse a one-byte hexadecimal value, accepting an optional 0x prefix.
+/// Run a key file parser, prompting for a password if one is needed.
+fn with_file_password<T>(
+    password: Option<&str>,
+    parse: impl Fn(Option<&str>) -> Result<T, PkiError>,
+) -> Result<T> {
+    let result = match parse(password) {
+        Err(PkiError::PasswordRequired(kind)) if password.is_none() => {
+            let prompt = match kind {
+                PasswordProtection::EncryptedKey => "Enter password to decrypt key",
+                PasswordProtection::Pkcs12 => "Enter password to decrypt PKCS#12 file",
+            };
+            let password = prompt_secret(prompt)?;
+            parse(Some(&password))
+        }
+        result => result,
+    };
+    result.map_err(|e| anyhow!("{e}."))
+}
+
+/// Read a private key and/or certificates from PEM, DER or PKCS#12 data,
+/// prompting for a password if needed.
+pub fn load_key_file(data: &[u8], password: Option<&str>) -> Result<KeyFile> {
+    with_file_password(password, |p| pki::parse_key_file(data, p))
+}
+
+/// Read a DER-encoded private key from PEM, DER or PKCS#12 data, prompting
+/// for a password if needed.
+pub fn load_private_key(data: &[u8], password: Option<&str>) -> Result<Vec<u8>> {
+    with_file_password(password, |p| pki::load_private_key(data, p))
+}
+
+/// Read a DER-encoded certificate from PEM, DER or PKCS#12 data, prompting
+/// for a password if needed.
+pub fn load_certificate(data: &[u8], password: Option<&str>) -> Result<Vec<u8>> {
+    with_file_password(password, |p| pki::load_certificate(data, p))
+}
+
 pub fn parse_hex_u8(s: &str) -> Result<u8> {
     u8::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16)
         .map_err(|_| anyhow!("Invalid hex value: {s}"))

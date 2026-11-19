@@ -7,9 +7,10 @@ use yubikit::securitydomain::{KeyRef, ScpKid, SecurityDomainSession};
 use crate::cli_enums::CliSdKeyType;
 use crate::scp::{self, ScpParams};
 use crate::util::{
-    confirm, format_session_error, format_smartcard_connection_error, parse_hex_u8,
+    confirm, format_session_error, format_smartcard_connection_error, load_key_file, parse_hex_u8,
     read_file_or_stdin, write_file_or_stdout,
 };
+use ykman::pki::KeyFile;
 
 #[derive(Subcommand)]
 pub enum SecurityDomainAction {
@@ -76,9 +77,9 @@ pub enum SecurityDomainKeysAction {
     /// With --key-type scp03, INPUT is a ":"-separated set of hex keys:
     /// K-ENC:K-MAC, optionally followed by :K-DEK.
     ///
-    /// With --key-type scp11 (default), INPUT is a PEM file. KID 0x11, 0x13 and
-    /// 0x15 expect a private key and (optionally) a certificate chain. KID 0x10
-    /// and 0x20-0x2F expect a CA-KLOC certificate.
+    /// With --key-type scp11 (default), INPUT is a PEM, DER or PKCS#12 file.
+    /// KID 0x11, 0x13 and 0x15 expect a private key and (optionally) a
+    /// certificate chain. KID 0x10 and 0x20-0x2F expect a CA-KLOC certificate.
     Import {
         /// Key ID (hex)
         kid: String,
@@ -87,7 +88,7 @@ pub enum SecurityDomainKeysAction {
         /// Key type
         #[arg(short = 't', long, default_value = "scp11", value_name = "TYPE")]
         key_type: CliSdKeyType,
-        /// For SCP03: K-ENC:K-MAC:K-DEK hex keys. For SCP11: PEM file with certificate(s) and/or private key
+        /// For SCP03: K-ENC:K-MAC:K-DEK hex keys. For SCP11: PEM, DER or PKCS#12 file with certificate(s) and/or private key
         input: String,
         /// Replace existing KVN
         #[arg(long, value_name = "KVN")]
@@ -362,17 +363,10 @@ pub fn run_keys_export(
     }
 
     // Write all certs concatenated as PEM
-    use base64::Engine;
-    let mut pem_out = String::new();
-    for cert_der in &certs {
-        let b64 = base64::engine::general_purpose::STANDARD.encode(cert_der);
-        pem_out.push_str("-----BEGIN CERTIFICATE-----\n");
-        for chunk in b64.as_bytes().chunks(64) {
-            pem_out.push_str(std::str::from_utf8(chunk).unwrap());
-            pem_out.push('\n');
-        }
-        pem_out.push_str("-----END CERTIFICATE-----\n");
-    }
+    let pem_out: String = certs
+        .iter()
+        .map(|cert_der| ykman::pki::pem_encode("CERTIFICATE", cert_der))
+        .collect();
     write_file_or_stdout(output, pem_out.as_bytes())?;
     println!("Exported {} certificate(s) to {output}.", certs.len());
     Ok(())
@@ -425,57 +419,12 @@ pub fn run_keys_import(
             eprintln!("SCP03 keys imported (KID=0x{kid:02X}, KVN=0x{kvn:02X}).");
         }
         CliSdKeyType::Scp11 => {
-            // Input is a PEM file with certificate(s) and/or private key
-            let pem_bytes = read_file_or_stdin(input)?;
-            let pem_data = String::from_utf8(pem_bytes)
-                .map_err(|e| anyhow!("Failed to read {input} as UTF-8: {e}"))?;
-
-            let mut certs = Vec::new();
-            let mut private_key: Option<Vec<u8>> = None;
-            let mut has_encrypted_key = false;
-
-            for block in pem_data.split("-----BEGIN ") {
-                if block.trim().is_empty() {
-                    continue;
-                }
-                if block.starts_with("CERTIFICATE-----") {
-                    if let Some(b64) = block.split("-----END").next() {
-                        let b64 = b64.trim_start_matches("CERTIFICATE-----").trim();
-                        use base64::Engine;
-                        let der = base64::engine::general_purpose::STANDARD
-                            .decode(b64.replace(['\n', '\r'], ""))
-                            .map_err(|_| anyhow!("Invalid certificate PEM"))?;
-                        certs.push(der);
-                    }
-                } else if block.starts_with("ENCRYPTED PRIVATE KEY-----") {
-                    has_encrypted_key = true;
-                } else if (block.starts_with("EC PRIVATE KEY-----")
-                    || block.starts_with("PRIVATE KEY-----"))
-                    && let Some(b64) = block.split("-----END").next()
-                {
-                    let label = if block.starts_with("EC") {
-                        "EC PRIVATE KEY-----"
-                    } else {
-                        "PRIVATE KEY-----"
-                    };
-                    let b64 = b64.trim_start_matches(label).trim();
-                    use base64::Engine;
-                    let der = base64::engine::general_purpose::STANDARD
-                        .decode(b64.replace(['\n', '\r'], ""))
-                        .map_err(|_| anyhow!("Invalid private key PEM"))?;
-                    private_key = Some(der);
-                }
-            }
-
-            // Handle encrypted private keys
-            if has_encrypted_key && private_key.is_none() {
-                let pw = match password {
-                    Some(p) => p.to_string(),
-                    None => crate::util::prompt_secret("Enter password to decrypt key")?,
-                };
-                // Decrypt the private key before checking its curve.
-                private_key = try_decrypt_sd_private_key(&pem_data, &pw)?;
-            }
+            // Input contains certificate(s) and/or a private key
+            let data = read_file_or_stdin(input)?;
+            let KeyFile {
+                private_key,
+                certificates: certs,
+            } = load_key_file(&data, password)?;
 
             // OCE CA key references (KID=0x10 or 0x20-0x2F): extract public key
             // from cert and import as public key + store CA issuer (SKI).
@@ -633,39 +582,4 @@ fn extract_ski_from_cert(cert_der: &[u8]) -> Option<Vec<u8>> {
         }
     }
     None
-}
-
-/// Try to decrypt an encrypted private key from PEM data.
-/// Returns the DER-encoded PKCS#8 private key on success.
-fn try_decrypt_sd_private_key(pem_data: &str, password: &str) -> Result<Option<Vec<u8>>> {
-    use base64::Engine;
-    use elliptic_curve::SecretKey;
-    use elliptic_curve::pkcs8::DecodePrivateKey;
-    use pkcs8::EncryptedPrivateKeyInfo;
-
-    if let Ok(sk) = SecretKey::<p256::NistP256>::from_pkcs8_pem(pem_data) {
-        use elliptic_curve::pkcs8::EncodePrivateKey;
-        let doc = sk
-            .to_pkcs8_der()
-            .map_err(|e| anyhow!("Failed to re-encode key: {e}"))?;
-        return Ok(Some(doc.as_bytes().to_vec()));
-    }
-    let Some(block) = pem_data
-        .split("-----BEGIN ENCRYPTED PRIVATE KEY-----")
-        .nth(1)
-        .and_then(|rest| rest.split("-----END ENCRYPTED PRIVATE KEY-----").next())
-    else {
-        return Ok(None);
-    };
-
-    let der = base64::engine::general_purpose::STANDARD
-        .decode(block.replace(['\n', '\r'], ""))
-        .map_err(|e| anyhow!("Invalid encrypted private key PEM: {e}"))?;
-    let enc_key = EncryptedPrivateKeyInfo::try_from(der.as_slice())
-        .map_err(|e| anyhow!("Failed to parse encrypted private key: {e}"))?;
-    let dec_key = enc_key
-        .decrypt(password)
-        .map_err(|_| anyhow!("Wrong password for encrypted private key."))?;
-
-    Ok(Some(dec_key.as_bytes().to_vec()))
 }

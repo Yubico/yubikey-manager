@@ -10,8 +10,8 @@ use yubikit::openpgp::{
 use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
 use crate::scp::ScpParams;
 use crate::util::{
-    confirm, format_smartcard_connection_error, open_smartcard_session, print_table,
-    read_file_or_stdin, write_file_or_stdout,
+    confirm, format_smartcard_connection_error, load_certificate, load_private_key,
+    open_smartcard_session, print_table, read_file_or_stdin, write_file_or_stdout,
 };
 
 #[derive(Subcommand)]
@@ -877,7 +877,7 @@ pub fn run_keys_import(
         ));
     }
     let data = read_file_or_stdin(key_file)?;
-    let der = crate::piv::decrypt_private_key_data(&data, password)?;
+    let der = load_private_key(&data, password)?;
     let private_key =
         PrivateKey::from_pkcs8(&der).map_err(|_| anyhow!("Failed to parse private key."))?;
 
@@ -1002,15 +1002,7 @@ pub fn run_certificates_import(
     let key_ref: KeyRef = key.into();
     let data = read_file_or_stdin(cert_file)?;
 
-    let der = if let Ok(text) = std::str::from_utf8(&data) {
-        if text.contains("-----BEGIN") {
-            pem_decode(text)?
-        } else {
-            data
-        }
-    } else {
-        data
-    };
+    let der = load_certificate(&data, None)?;
 
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
@@ -1049,44 +1041,11 @@ fn write_output(path: &str, der: &[u8], format: CliFormat, label: &str) -> Resul
             write_file_or_stdout(path, der)?;
         }
         CliFormat::Pem => {
-            let pem = pem_encode(label, der);
+            let pem = ykman::pki::pem_encode(label, der);
             write_file_or_stdout(path, pem.as_bytes())?;
         }
     }
     Ok(())
-}
-
-fn pem_encode(label: &str, der: &[u8]) -> String {
-    use base64::Engine;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(der);
-    let mut pem = format!("-----BEGIN {label}-----\n");
-    for chunk in b64.as_bytes().chunks(64) {
-        pem.push_str(std::str::from_utf8(chunk).unwrap());
-        pem.push('\n');
-    }
-    pem.push_str(&format!("-----END {label}-----\n"));
-    pem
-}
-
-fn pem_decode(text: &str) -> Result<Vec<u8>> {
-    use base64::Engine;
-    let mut in_block = false;
-    let mut b64 = String::new();
-    for line in text.lines() {
-        if line.starts_with("-----BEGIN") {
-            in_block = true;
-            continue;
-        }
-        if line.starts_with("-----END") {
-            break;
-        }
-        if in_block {
-            b64.push_str(line.trim());
-        }
-    }
-    base64::engine::general_purpose::STANDARD
-        .decode(&b64)
-        .map_err(|e| anyhow!("Invalid PEM data: {e}"))
 }
 
 #[cfg(test)]
