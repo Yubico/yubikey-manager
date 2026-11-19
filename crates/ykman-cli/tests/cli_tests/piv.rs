@@ -227,6 +227,48 @@ fn test_piv_change_management_key(#[case] mode: InputMode) {
     piv_reset();
 }
 
+fn change_management_key(current: &str, new: &str, extra: &[&str]) -> assert_cmd::assert::Assert {
+    ykman_dev()
+        .args([
+            "piv",
+            "access",
+            "change-management-key",
+            "-m",
+            current,
+            "-n",
+            new,
+            "-a",
+            piv_management_key_algorithm(),
+        ])
+        .args(extra)
+        .assert()
+        .success()
+}
+
+#[test]
+fn test_piv_change_management_key_clears_stored_key() {
+    require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
+    if app_is_fips_capable("PIV") {
+        eprintln!("SKIP: --protect requires FIPS approved mode");
+        return;
+    }
+    piv_reset();
+    let (key, new_key) = (piv_management_key(), piv_new_management_key());
+    let warning = "previous management key stored on the YubiKey was not cleared";
+
+    change_management_key(key, new_key, &["--protect", "-P", piv_pin()]);
+    change_management_key(new_key, key, &["-P", piv_pin()])
+        .stderr(predicate::str::contains(warning).not());
+
+    change_management_key(key, new_key, &["--protect", "-P", piv_pin()]);
+    change_management_key(new_key, key, &[]).stderr(predicate::str::contains(warning));
+
+    piv_reset();
+}
+
 #[rstest]
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
