@@ -29,6 +29,10 @@ hardware = ["ykman/hardware", "yubikit/pcsc", "yubikit/hid"]
 [dependencies]
 ykman.workspace = true
 yubikit.workspace = true
+aes.workspace = true
+cbc.workspace = true
+pbkdf2.workspace = true
+sha1.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 clap_complete.workspace = true

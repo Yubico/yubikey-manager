@@ -381,6 +381,66 @@ fn test_oath_import_pskc() {
     oath_reset();
 }
 
+#[rstest]
+#[case::plain(&[], None)]
+#[case::passphrase(&["--pskc-passphrase", "passphrase123"], Some("passphrase123"))]
+#[case::preshared_key(
+    &["--pskc-key", "12345678901234567890123456789012"],
+    Some("12345678901234567890123456789012")
+)]
+fn test_oath_add_pskc_output(#[case] encryption: &[&str], #[case] decryption: Option<&str>) {
+    if decryption.is_some() && InputMode::Interactive.skip_if_windows() {
+        return;
+    }
+    require_capability!("OATH");
+    let password = prepare_oath_for_credentials();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("export.xml");
+    let path = path.to_str().unwrap();
+
+    let mut args = vec![
+        "oath",
+        "accounts",
+        "add",
+        "-i",
+        "Issuer",
+        "export-test",
+        OATH_ACCOUNT_SECRET,
+        "-O",
+        path,
+    ];
+    args.extend(encryption);
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Credential written to PSKC file"));
+
+    let password = prepare_oath_for_credentials();
+    let mut args = vec!["oath", "accounts", "import", path, "-f"];
+    add_password(&mut args, password);
+    match decryption {
+        None => {
+            ykman_dev().args(args).assert().success();
+        }
+        Some(secret) => {
+            let output = ykman_dev_tty(&args, &format!("{secret}\n"));
+            assert!(output.status.success(), "{output:?}");
+        }
+    }
+
+    let mut args = vec!["oath", "accounts", "list"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Issuer:export-test"));
+
+    oath_reset();
+}
+
 #[test]
 fn test_oath_import_pskc_multi() {
     require_capability!("OATH");

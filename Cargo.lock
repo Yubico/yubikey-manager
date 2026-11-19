@@ -3530,10 +3530,12 @@ dependencies = [
 name = "ykman-cli"
 version = "6.0.0-beta.0.dev.0"
 dependencies = [
+ "aes",
  "anyhow",
  "assert_cmd",
  "base32",
  "base64 0.22.1",
+ "cbc",
  "clap",
  "clap_complete",
  "ctrlc",
@@ -3547,6 +3549,7 @@ dependencies = [
  "p12-keystore",
  "p256",
  "p384",
+ "pbkdf2",
  "pkcs8 0.10.2",
  "portable-pty",
  "predicates",
@@ -3556,6 +3559,7 @@ dependencies = [
  "rstest",
  "serde",
  "serde_json",
+ "sha1",
  "sha2 0.10.9",
  "sha2 0.11.1",
  "subtle",
