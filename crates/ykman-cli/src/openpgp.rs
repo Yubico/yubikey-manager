@@ -75,7 +75,7 @@ pub enum OpenpgpAccessAction {
         #[arg(short = 'a', long)]
         admin_pin: Option<String>,
         /// New reset code
-        #[arg(short = 'R', long)]
+        #[arg(short = 'r', long)]
         reset_code: Option<String>,
     },
     /// Unblock PIN
@@ -84,7 +84,7 @@ pub enum OpenpgpAccessAction {
         #[arg(short = 'a', long)]
         admin_pin: Option<String>,
         /// Reset code
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         reset_code: Option<String>,
         /// New user PIN
         #[arg(short = 'n', long)]
