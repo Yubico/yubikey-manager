@@ -252,6 +252,75 @@ fn test_oath_rename() {
     oath_reset();
 }
 
+#[test]
+fn test_oath_list_delete_rename_by_credential_id() {
+    require_capability!("OATH");
+    let password = prepare_oath_for_credentials();
+
+    for (name, period) in [("Issuer:acct", "30"), ("Issuer:acct", "60"), ("b", "30")] {
+        let mut args = vec![
+            "oath",
+            "accounts",
+            "add",
+            "-f",
+            "-P",
+            period,
+            name,
+            OATH_ACCOUNT_SECRET,
+        ];
+        add_password(&mut args, password);
+        ykman_dev().args(args).assert().success();
+    }
+
+    let mut args = vec!["oath", "accounts", "list", "-o", "-P"];
+    add_password(&mut args, password);
+    ykman_dev().args(args).assert().success().stdout(
+        predicate::str::is_match(r"(?m)^Issuer:acct, TOTP, 30$")
+            .unwrap()
+            .and(predicate::str::is_match(r"(?m)^60/Issuer:acct, TOTP, 60$").unwrap())
+            .and(predicate::str::is_match(r"(?m)^b, TOTP, 30\n?\z").unwrap()),
+    );
+
+    if !skip_before_version((5, 3, 1), "OATH rename") {
+        let mut args = vec!["oath", "accounts", "rename", "60/", "Other:acct", "-f"];
+        add_password(&mut args, password);
+        ykman_dev()
+            .args(args)
+            .assert()
+            .success()
+            .stdout("Renamed 60/Issuer:acct to 60/Other:acct.\n");
+
+        let mut args = vec!["oath", "accounts", "rename", "b", "Issuer:acct", "-f"];
+        add_password(&mut args, password);
+        ykman_dev()
+            .args(args)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "Another account with ID Issuer:acct already exists on this YubiKey.",
+            ));
+    }
+
+    // Exact match wins over the period-prefixed account
+    let mut args = vec!["oath", "accounts", "delete", "Issuer:acct", "-f"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stdout("Deleted Issuer:acct.\n");
+
+    let mut args = vec!["oath", "accounts", "delete", "missing", "-f"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stdout("No matches, nothing to be done.\n");
+
+    oath_reset();
+}
+
 #[rstest]
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
