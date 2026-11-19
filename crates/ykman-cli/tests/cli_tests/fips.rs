@@ -91,7 +91,7 @@ fn hsmauth_requires_approval_and_names_password_policy_errors() {
         vec!["generate", "fips-generate"],
         vec!["import", "fips-import", "missing.pem"],
         vec!["symmetric", "fips-symmetric", "--generate"],
-        vec!["derive", "fips-derive", "derivation-password"],
+        vec!["derive", "fips-derive", "--derivation-password", "x"],
     ] {
         let mut command = vec!["hsmauth", "credentials"];
         command.extend(args);
@@ -143,7 +143,7 @@ fn hsmauth_requires_approval_and_names_password_policy_errors() {
         vec!["generate", "fips-generate"],
         vec!["import", "fips-import", key.to_str().unwrap()],
         vec!["symmetric", "fips-symmetric", "--generate"],
-        vec!["derive", "fips-derive", "derivation-password"],
+        vec!["derive", "fips-derive", "--derivation-password", "x"],
     ] {
         ykman_dev()
             .args(["hsmauth", "credentials"])
