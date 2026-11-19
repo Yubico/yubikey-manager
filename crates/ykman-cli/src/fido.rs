@@ -14,6 +14,9 @@
 
 //! FIDO CLI commands.
 
+use crate::yk4_fips::{
+    apdu_sw, fips_change_pin, fips_reset, fips_verify_pin, is_in_fips_mode, is_yk4_fips,
+};
 use anyhow::{Error, Result, anyhow};
 use clap::Subcommand;
 use yubikit::core::{Connection, Transport};
@@ -23,8 +26,9 @@ use yubikit::ctap2::{
     CtapStatus, Info, Permissions, PinProtocol,
 };
 use yubikit::device::{DeviceError, ReinsertStatus, YubiKeyDevice};
+use yubikit::fido::FidoConnection;
 use yubikit::management::{Capability, UsbInterface};
-use yubikit::smartcard::SmartCardError;
+use yubikit::smartcard::{SmartCardError, Sw};
 
 use crate::cancel;
 use crate::context;
@@ -33,6 +37,8 @@ use crate::util::{format_smartcard_connection_error, print_table};
 
 const KEEPALIVE_PROCESSING: u8 = 1;
 const KEEPALIVE_UPNEEDED: u8 = 2;
+const U2F_PIN_MIN_LENGTH: usize = 6;
+const U2F_PIN_MAX_LENGTH: usize = 32;
 const FIDO_WINDOWS_ADMIN_MESSAGE: &str =
     "A YubiKey was detected, but FIDO access on Windows requires running as Administrator.";
 
@@ -63,6 +69,9 @@ pub enum FidoAction {
 #[derive(Subcommand)]
 pub enum FidoAccessAction {
     /// Set or change the PIN code
+    ///
+    /// On YubiKey FIPS (4 Series), this sets the FIDO U2F PIN, which must be
+    /// at least 6 characters long.
     #[command(name = "change-pin")]
     ChangePin {
         /// Current PIN code
@@ -73,6 +82,9 @@ pub enum FidoAccessAction {
         new_pin: Option<String>,
     },
     /// Verify the PIN (and unblock if needed)
+    ///
+    /// On YubiKey FIPS (4 Series) this unlocks the session, allowing U2F
+    /// registration.
     #[command(name = "verify-pin")]
     VerifyPin {
         /// PIN code
@@ -201,10 +213,25 @@ impl FidoAction {
             Self::Info => run_info(dev, scp_params),
             Self::Reset { force } => run_reset(dev, scp_params, force),
             Self::Access(access) => {
-                context::check_capability(dev, Capability::FIDO2)?;
+                // YubiKey FIPS (4 Series) has no FIDO2, but supports a U2F PIN.
+                let yk4_fips = is_yk4_fips(dev.info());
+                if !(yk4_fips
+                    && matches!(
+                        access,
+                        FidoAccessAction::ChangePin { .. } | FidoAccessAction::VerifyPin { .. }
+                    ))
+                {
+                    context::check_capability(dev, Capability::FIDO2)?;
+                }
                 match access {
+                    FidoAccessAction::ChangePin { pin, new_pin } if yk4_fips => {
+                        run_fips_change_pin(dev, pin.as_deref(), new_pin.as_deref())
+                    }
                     FidoAccessAction::ChangePin { pin, new_pin } => {
                         run_access_change_pin(dev, scp_params, pin.as_deref(), new_pin.as_deref())
+                    }
+                    FidoAccessAction::VerifyPin { pin } if yk4_fips => {
+                        run_fips_verify_pin(dev, pin.as_deref())
                     }
                     FidoAccessAction::VerifyPin { pin } => {
                         run_access_verify_pin(dev, scp_params, pin.as_deref())
@@ -529,6 +556,52 @@ fn map_enroll_error<E: std::error::Error + Send + Sync + 'static>(
     }
 }
 
+fn read_new_pin() -> Result<String> {
+    eprint!("Enter your new PIN: ");
+    let p1 = rpassword::read_password().map_err(|e| anyhow!("Failed to read PIN: {e}"))?;
+    eprint!("Confirm your new PIN: ");
+    let p2 = rpassword::read_password().map_err(|e| anyhow!("Failed to read PIN: {e}"))?;
+    if p1 != p2 {
+        return Err(anyhow!("PINs do not match."));
+    }
+    Ok(p1)
+}
+
+// ---------------------------------------------------------------------------
+// YubiKey FIPS (4 Series) U2F helpers
+// ---------------------------------------------------------------------------
+
+fn open_u2f(dev: &dyn YubiKeyDevice) -> Result<CtapSession<Box<dyn FidoConnection + Send>>> {
+    let connection = dev
+        .open_fido()
+        .map_err(|e| anyhow!("Failed to connect to the YubiKey: {e}"))?;
+    CtapSession::new_fido(connection).map_err(|(e, _)| anyhow!("Failed to initialize CTAP: {e}"))
+}
+
+fn check_u2f_pin_length(pin: &str, name: &str) -> Result<()> {
+    let length = pin.chars().count();
+    if length < U2F_PIN_MIN_LENGTH {
+        return Err(anyhow!(
+            "{name} must be at least {U2F_PIN_MIN_LENGTH} characters long."
+        ));
+    }
+    if length > U2F_PIN_MAX_LENGTH {
+        return Err(anyhow!(
+            "{name} must be at most {U2F_PIN_MAX_LENGTH} characters long."
+        ));
+    }
+    Ok(())
+}
+
+fn format_fips_pin_error(e: Error, context: &str) -> Error {
+    match apdu_sw(&e) {
+        Some(sw) if sw == Sw::VerifyFailNoRetry as u16 => anyhow!("Wrong PIN."),
+        Some(sw) if sw == Sw::AuthMethodBlocked as u16 => anyhow!("PIN is blocked."),
+        Some(sw) => anyhow!("{context}: SW=0x{sw:04X}."),
+        None => anyhow!("{context}: {e}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // CLI command implementations
 // ---------------------------------------------------------------------------
@@ -661,17 +734,24 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
             .supported_capabilities
             .get(&transport)
             .is_some_and(|caps: &Capability| caps.contains(Capability::FIDO2));
+        let mut rows = Vec::new();
         if fido2_supported {
-            print_table([
-                ("CTAP2", "Disabled".to_string()),
-                ("PIN", "Disabled".to_string()),
-            ]);
+            rows.extend([("CTAP2", "Disabled"), ("PIN", "Disabled")]);
         } else {
-            print_table([
-                ("CTAP2", "Not supported".to_string()),
-                ("PIN", "Not supported".to_string()),
-            ]);
+            rows.push(("CTAP2", "Not supported"));
+            let pin = if !is_yk4_fips(dev_info) {
+                "Not supported"
+            } else if is_in_fips_mode(&mut open_u2f(dev)?)
+                .map_err(|e| anyhow!("Failed to read U2F PIN status: {e}"))?
+            {
+                // The U2F application is in FIPS approved mode exactly when a PIN is set.
+                "Set"
+            } else {
+                "Not set"
+            };
+            rows.push(("PIN", pin));
         }
+        print_table(rows);
         if reset_blocked {
             println!("Factory reset is blocked");
         }
@@ -698,7 +778,9 @@ pub fn run_reset(dev: &mut dyn YubiKeyDevice, scp_params: &ScpParams, force: boo
         .get(&transport)
         .is_some_and(|caps: &Capability| caps.contains(Capability::FIDO2));
 
-    if !fido2_enabled {
+    let yk4_fips = transport == Transport::Usb && is_yk4_fips(info);
+
+    if !fido2_enabled && !yk4_fips {
         return Err(anyhow!("FIDO2 is not enabled on this YubiKey.".to_string(),));
     }
 
@@ -713,6 +795,21 @@ pub fn run_reset(dev: &mut dyn YubiKeyDevice, scp_params: &ScpParams, force: boo
             .map_err(|e| anyhow!("Failed to read input: {e}"))?;
         if !answer.trim().eq_ignore_ascii_case("y") {
             return Err(anyhow!("Reset aborted by user."));
+        }
+        if yk4_fips {
+            eprint!(
+                "WARNING! This is a YubiKey FIPS (4 Series) device. This command will \
+                 also overwrite the U2F attestation key; this action cannot be undone \
+                 and this YubiKey will no longer be a FIPS compliant device.\n\
+                 To proceed, enter the text \"OVERWRITE\": "
+            );
+            let mut answer = String::new();
+            std::io::stdin()
+                .read_line(&mut answer)
+                .map_err(|e| anyhow!("Failed to read input: {e}"))?;
+            if answer.trim_end_matches(['\r', '\n']) != "OVERWRITE" {
+                return Err(anyhow!("Reset aborted by user."));
+            }
         }
 
         // Close and reinsert
@@ -736,9 +833,35 @@ pub fn run_reset(dev: &mut dyn YubiKeyDevice, scp_params: &ScpParams, force: boo
         .map_err(|e| anyhow!("Reinsert failed: {e}"))?;
     }
 
+    if yk4_fips {
+        return run_fips_reset(dev);
+    }
+
     with_fido_session!(dev, scp_params, |ctap2, ctap_info| {
         run_reset_inner(ctap2, ctap_info, transport)
     })
+}
+
+fn run_fips_reset(dev: &dyn YubiKeyDevice) -> Result<()> {
+    let mut session = open_u2f(dev)?;
+    cancel::clear();
+    let result = fips_reset(
+        &mut session,
+        &mut || eprintln!("Touch the YubiKey to confirm."),
+        &cancel::is_cancelled,
+    );
+    match result {
+        Ok(()) => {
+            println!("FIDO application has been reset.");
+            Ok(())
+        }
+        Err(e) if cancel::is_cancelled() => Err(e),
+        Err(e) if apdu_sw(&e) == Some(Sw::CommandNotAllowed as u16) => Err(anyhow!(
+            "Reset failed. Reset must be triggered within 5 seconds after the \
+             YubiKey is inserted."
+        )),
+        Err(e) => Err(anyhow!("FIDO reset failed: {e}")),
+    }
 }
 
 fn run_reset_inner<C: Connection + 'static>(
@@ -825,18 +948,7 @@ pub fn run_access_change_pin(
             };
             let new = match new_pin {
                 Some(p) => Ctap2Pin::new(p).map_err(Error::msg)?,
-                None => {
-                    eprint!("Enter your new PIN: ");
-                    let p1 = rpassword::read_password()
-                        .map_err(|e| anyhow!("Failed to read PIN: {e}"))?;
-                    eprint!("Confirm your new PIN: ");
-                    let p2 = rpassword::read_password()
-                        .map_err(|e| anyhow!("Failed to read PIN: {e}"))?;
-                    if p1 != p2 {
-                        return Err(anyhow!("PINs do not match."));
-                    }
-                    Ctap2Pin::new(&p1).map_err(Error::msg)?
-                }
+                None => Ctap2Pin::new(&read_new_pin()?).map_err(Error::msg)?,
             };
             client_pin
                 .change_pin(&current_pin, &new)
@@ -851,18 +963,7 @@ pub fn run_access_change_pin(
             }
             let new = match new_pin.or(pin) {
                 Some(p) => Ctap2Pin::new(p).map_err(Error::msg)?,
-                None => {
-                    eprint!("Enter your new PIN: ");
-                    let p1 = rpassword::read_password()
-                        .map_err(|e| anyhow!("Failed to read PIN: {e}"))?;
-                    eprint!("Confirm your new PIN: ");
-                    let p2 = rpassword::read_password()
-                        .map_err(|e| anyhow!("Failed to read PIN: {e}"))?;
-                    if p1 != p2 {
-                        return Err(anyhow!("PINs do not match."));
-                    }
-                    Ctap2Pin::new(&p1).map_err(Error::msg)?
-                }
+                None => Ctap2Pin::new(&read_new_pin()?).map_err(Error::msg)?,
             };
             client_pin
                 .set_pin(&new)
@@ -872,6 +973,51 @@ pub fn run_access_change_pin(
 
         Ok(())
     })
+}
+
+fn run_fips_change_pin(
+    dev: &dyn YubiKeyDevice,
+    pin: Option<&str>,
+    new_pin: Option<&str>,
+) -> Result<()> {
+    let new_pin = match new_pin {
+        Some(p) => p.to_string(),
+        None => read_new_pin()?,
+    };
+    check_u2f_pin_length(&new_pin, "New PIN")?;
+
+    let mut session = open_u2f(dev)?;
+    // Failing with an empty current PIN does not use up a retry.
+    let result = match fips_change_pin(&mut session, pin.unwrap_or(""), &new_pin) {
+        Err(e) if apdu_sw(&e) == Some(Sw::WrongLength as u16) => {
+            eprint!("Enter your current PIN: ");
+            let current =
+                rpassword::read_password().map_err(|e| anyhow!("Failed to read PIN: {e}"))?;
+            check_u2f_pin_length(&current, "PIN")?;
+            fips_change_pin(&mut session, &current, &new_pin)
+        }
+        result => result,
+    };
+    result.map_err(|e| format_fips_pin_error(e, "Failed to change PIN"))?;
+    println!("FIDO PIN updated.");
+    Ok(())
+}
+
+fn run_fips_verify_pin(dev: &dyn YubiKeyDevice, pin: Option<&str>) -> Result<()> {
+    let pin = match pin {
+        Some(p) => p.to_string(),
+        None => {
+            eprint!("Enter your PIN: ");
+            rpassword::read_password().map_err(|e| anyhow!("Failed to read PIN: {e}"))?
+        }
+    };
+    let mut session = open_u2f(dev)?;
+    fips_verify_pin(&mut session, &pin).map_err(|e| match apdu_sw(&e) {
+        Some(sw) if sw == Sw::CommandNotAllowed as u16 => anyhow!("PIN is not set."),
+        _ => format_fips_pin_error(e, "PIN verification failed"),
+    })?;
+    println!("PIN verified.");
+    Ok(())
 }
 
 pub fn run_access_verify_pin(

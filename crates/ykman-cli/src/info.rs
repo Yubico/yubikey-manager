@@ -1,15 +1,19 @@
+use crate::yk4_fips::{is_in_fips_mode, is_yk4_fips, otp_is_in_fips_mode};
 use anyhow::{Context, Result, ensure};
 use yubikit::core::{Transport, Version};
+use yubikit::ctap::CtapSession;
 use yubikit::device::{DeviceError, YubiKeyDevice};
 use yubikit::management::{
     Capability, ManagementError, ManagementSession, StorageInfo, UsbInterface,
 };
+use yubikit::oath::OathSession;
 use yubikit::smartcard::{SmartCardError, Sw};
+use yubikit::yubiotp::YubiOtpSession;
 
 use crate::color::{self, Tone};
 use crate::util::Table;
 
-pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
+pub fn run(dev: &dyn YubiKeyDevice) -> Result<()> {
     let info = dev.info();
 
     let mut rows = vec![("Device type", dev.name())];
@@ -37,25 +41,17 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
         }
     }
     let device_table = Table::new(rows);
+    let (fips_capable, fips_approved) = if is_yk4_fips(info) {
+        yk4_fips_status(dev)
+    } else {
+        (info.fips_capable, info.fips_approved)
+    };
     let applications = app_status_table(
         &info.supported_capabilities,
         &info.config.enabled_capabilities,
-        info.fips_capable,
-        info.fips_approved,
+        fips_capable,
+        fips_approved,
     );
-    let all_approved = Capability::ALL
-        .iter()
-        .all(|&cap| !info.fips_capable.contains(cap) || info.fips_approved.contains(cap));
-    let fips_mode = Table::new(check_fips.then_some((
-        "FIPS approved mode",
-        if info.fips_capable.is_empty() {
-            "Not applicable (device is not FIPS capable)"
-        } else if all_approved {
-            "Yes"
-        } else {
-            "No"
-        },
-    )));
     // Preserve device details in the output when storage reporting fails.
     let storage = read_storage_info(dev).and_then(|storage| {
         storage
@@ -63,7 +59,7 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
             .transpose()
     });
     let label_width = info_label_width(
-        &[&device_table, &applications, &fips_mode],
+        &[&device_table, &applications],
         match &storage {
             Ok(summary) => summary.as_ref(),
             Err(_) => None,
@@ -106,12 +102,58 @@ pub fn run(dev: &dyn YubiKeyDevice, check_fips: bool) -> Result<()> {
         print!("\n{output}");
     }
 
-    if check_fips {
-        println!();
-        print!("{}", fips_mode.render(label_width, false));
-    }
-
     Ok(())
+}
+
+/// FIPS capable and approved applications of a YubiKey FIPS (4 Series).
+///
+/// These devices don't report FIPS status in their device info, so each
+/// application enabled over USB is queried. Applications that are disabled,
+/// or whose status can't be read, are reported as not approved.
+fn yk4_fips_status(dev: &dyn YubiKeyDevice) -> (Capability, Capability) {
+    let enabled = dev
+        .info()
+        .config
+        .enabled_capabilities
+        .get(&Transport::Usb)
+        .copied()
+        .unwrap_or(Capability::NONE);
+
+    let checks: [(Capability, &dyn Fn() -> Result<bool>); 3] = [
+        (Capability::OTP, &|| {
+            let connection = dev.open_otp()?;
+            let mut session = YubiOtpSession::new_otp(connection).map_err(|(e, _)| e)?;
+            Ok(otp_is_in_fips_mode(&mut session)?)
+        }),
+        (Capability::U2F, &|| {
+            let connection = dev.open_fido()?;
+            let mut session = CtapSession::new_fido(connection).map_err(|(e, _)| e)?;
+            is_in_fips_mode(&mut session)
+        }),
+        (Capability::OATH, &|| {
+            let connection = dev.open_smartcard()?;
+            let session = OathSession::new(connection).map_err(|(e, _)| e)?;
+            Ok(session.has_key())
+        }),
+    ];
+
+    let mut capable = Capability::NONE;
+    let mut approved = Capability::NONE;
+    for (capability, check) in checks {
+        capable |= capability;
+        if !enabled.contains(capability) {
+            continue;
+        }
+        match check() {
+            Ok(true) => approved |= capability,
+            Ok(false) => {}
+            Err(e) => log::warn!(
+                "Failed to read {} FIPS status: {e:#}",
+                capability.display_name()
+            ),
+        }
+    }
+    (capable, approved)
 }
 
 fn info_label_width(tables: &[&Table], storage: Option<&StorageSummary>) -> usize {
@@ -642,19 +684,16 @@ mod tests {
         ]);
         let applications =
             app_status_table(&supported, &supported, Capability::NONE, Capability::NONE);
-        let mode = Table::new([("FIPS approved mode", "Yes")]);
-        let label_width = info_label_width(&[&device, &applications, &mode], Some(&summary));
+        let label_width = info_label_width(&[&device, &applications], Some(&summary));
         let device_output = device.render(label_width, false);
         let value_column = device_output.find("xxxxxxxx").unwrap();
-        for (table, value) in [(&applications, "USB"), (&mode, "Yes")] {
-            let output = table.render(label_width, false);
-            assert_eq!(
-                output.lines().next().unwrap().find(value),
-                Some(value_column)
-            );
-        }
+        let output = applications.render(label_width, false);
+        assert_eq!(
+            output.lines().next().unwrap().find("USB"),
+            Some(value_column)
+        );
         let short_device = Table::new([("Enabled USB interfaces", "CCID")]);
-        let short_width = info_label_width(&[&short_device, &applications, &mode], Some(&summary));
+        let short_width = info_label_width(&[&short_device, &applications], Some(&summary));
         let short_output = applications.render(short_width, false);
         let output = applications.render(label_width, false);
         assert_eq!(
@@ -983,7 +1022,7 @@ mod tests {
             };
             let info = read_storage_info(&device).unwrap().unwrap();
             assert_eq!(info, storage_info(&[(0, 10, 100)]));
-            run(&device, true).unwrap();
+            run(&device).unwrap();
         }
     }
 
@@ -996,7 +1035,7 @@ mod tests {
             };
             device.info.version = version;
             assert!(read_storage_info(&device).unwrap().is_none());
-            run(&device, false).unwrap();
+            run(&device).unwrap();
         }
         let device = StorageDevice {
             interfaces: UsbInterface::FIDO,
@@ -1004,7 +1043,7 @@ mod tests {
             ..Default::default()
         };
         assert!(read_storage_info(&device).unwrap().is_none());
-        run(&device, false).unwrap();
+        run(&device).unwrap();
     }
 
     #[test]
@@ -1015,7 +1054,7 @@ mod tests {
                 ..Default::default()
             };
             assert!(read_storage_info(&device).unwrap().is_none());
-            run(&device, false).unwrap();
+            run(&device).unwrap();
         }
     }
 
@@ -1025,16 +1064,14 @@ mod tests {
             fail_open: true,
             ..Default::default()
         };
-        assert!(
-            format!("{:#}", run(&device, false).unwrap_err()).contains("reader is unavailable")
-        );
+        assert!(format!("{:#}", run(&device).unwrap_err()).contains("reader is unavailable"));
         for sw in [0x6982, 0x6f00] {
             let device = StorageDevice {
                 sw,
                 ..Default::default()
             };
             assert!(
-                run(&device, false)
+                run(&device)
                     .unwrap_err()
                     .to_string()
                     .contains("Failed to read storage")
@@ -1045,7 +1082,7 @@ mod tests {
                 response,
                 ..Default::default()
             };
-            assert!(run(&device, false).is_err());
+            assert!(run(&device).is_err());
         }
     }
 }

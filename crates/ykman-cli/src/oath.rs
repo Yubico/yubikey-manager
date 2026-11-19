@@ -2,9 +2,11 @@ use anyhow::{Result, anyhow};
 use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::yk4_fips::is_yk4_fips;
 use clap::Subcommand;
+use yubikit::core::Version;
 use yubikit::device::YubiKeyDevice;
-use yubikit::management::Capability;
+use yubikit::management::{Capability, DeviceInfo};
 use yubikit::oath::{
     Credential, CredentialData, HashAlgorithm, OathAccessKey, OathError, OathSession, OathType,
     format_cred_id, parse_b32_key,
@@ -411,6 +413,14 @@ fn validate_and_remember(
         keys.put_secret(session.device_id(), &hex::encode(key.expose_secret()))
             .map_err(|e| anyhow!("Failed to remember password: {e}"))?;
         eprintln!("Password remembered.");
+    }
+    Ok(())
+}
+
+fn require_algorithm_support(info: &DeviceInfo, algorithm: HashAlgorithm) -> Result<()> {
+    if algorithm == HashAlgorithm::Sha512 && (info.version < Version(4, 3, 1) || is_yk4_fips(info))
+    {
+        return Err(anyhow!("Algorithm SHA512 not supported on this YubiKey."));
     }
     Ok(())
 }
@@ -901,6 +911,7 @@ pub fn run_accounts_add(
     };
     let oath_type: OathType = oath_type.into();
     let hash_algorithm: HashAlgorithm = algorithm.into();
+    require_algorithm_support(dev.info(), hash_algorithm)?;
     let digits = digits.as_u8();
 
     let secret_bytes = if let Some(s) = secret {
@@ -1234,6 +1245,7 @@ pub fn run_accounts_uri(
         }
     }
 
+    require_algorithm_support(dev.info(), algorithm)?;
     let secret_str = secret.ok_or_else(|| anyhow!("URI missing 'secret' parameter"))?;
     let secret_bytes =
         parse_b32_key(&secret_str).map_err(|_| anyhow!("Invalid Base32-encoded secret."))?;
@@ -1328,6 +1340,9 @@ pub fn run_accounts_import(
 
     if credentials.is_empty() {
         return Err(anyhow!("No valid OATH accounts found in the file."));
+    }
+    for cred in &credentials {
+        require_algorithm_support(dev.info(), cred.hash_algorithm)?;
     }
 
     let mut session = open_session(dev, scp_params, password, remember)?;
