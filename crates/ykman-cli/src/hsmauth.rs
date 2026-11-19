@@ -712,33 +712,7 @@ fn parse_ec_private_key(data: &[u8], password: Option<&str>) -> Result<p256::Sec
     use elliptic_curve::pkcs8::DecodePrivateKey;
     use p256::NistP256;
 
-    if let Ok(text) = std::str::from_utf8(data)
-        && text.contains("-----BEGIN")
-    {
-        if text.contains("ENCRYPTED") {
-            let _pw = match password {
-                Some(p) => p.to_string(),
-                None => crate::util::prompt_secret("Enter password to decrypt key")?,
-            };
-            // Try parsing as non-encrypted first (some tools wrap non-encrypted keys)
-            if let Ok(sk) = SecretKey::<NistP256>::from_pkcs8_pem(text) {
-                return Ok(sk);
-            }
-            return Err(anyhow!(
-                "Cannot decrypt encrypted key in-process. Convert first:\n  \
-                 openssl pkey -in key.pem -out key_dec.pem"
-            ));
-        }
-        // Try PKCS#8 PEM
-        if let Ok(sk) = SecretKey::<NistP256>::from_pkcs8_pem(text) {
-            return Ok(sk);
-        }
-        // Try SEC1 PEM (EC PRIVATE KEY)
-        if let Ok(sk) = SecretKey::<NistP256>::from_sec1_pem(text) {
-            return Ok(sk);
-        }
-        return Err(anyhow!("Failed to parse EC P-256 private key from PEM."));
-    }
+    let data = &crate::util::load_private_key(data, password)?;
 
     // Try PKCS#8 DER
     if let Ok(sk) = SecretKey::<NistP256>::from_pkcs8_der(data) {
@@ -772,7 +746,6 @@ pub fn run_credentials_export(
     })?;
 
     // Export as SubjectPublicKeyInfo
-    use base64::Engine;
     use p256::elliptic_curve::sec1::ToSec1Point;
 
     let pk_point = public_key.to_sec1_point(false);
@@ -814,13 +787,7 @@ pub fn run_credentials_export(
             }
         }
         CliFormat::Pem => {
-            let b64 = base64::engine::general_purpose::STANDARD.encode(&spki);
-            let mut pem = String::from("-----BEGIN PUBLIC KEY-----\n");
-            for chunk in b64.as_bytes().chunks(64) {
-                pem.push_str(std::str::from_utf8(chunk).unwrap());
-                pem.push('\n');
-            }
-            pem.push_str("-----END PUBLIC KEY-----\n");
+            let pem = ykman::pki::pem_encode("PUBLIC KEY", &spki);
 
             write_file_or_stdout(output, pem.as_bytes())?;
             if output != "-" {

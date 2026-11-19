@@ -6,6 +6,8 @@
  ** CLI: Validate PIV slots and the "otp static --length" range before connecting to the YubiKey.
  ** CLI: Show the default credentials after "piv reset" and "openpgp reset".
  ** CLI: Print "No YubiKeys detected." from "list" to stderr.
+ ** CLI: Read keys and certificates the same way in all commands: PEM, encrypted PKCS#8 PEM, DER and PKCS#12 are accepted wherever a private key or certificate file is read, including "hsmauth credentials import", "sd keys import", "openpgp certificates import" and "--scp".
+ ** Library: Add ykman::pki with helpers for reading private keys and certificates from PEM, DER and PKCS#12 data.
  ** OTP: Accept "-" for "--access-code" and "--new-access-code" to prompt for the access code, and allow "--delete-access-code" with the group-level "--access-code".
  ** Management: Remove "ykman info --check-fips"; FIPS approved status is always shown in the applications table, including for YubiKey FIPS (4 Series).
  ** FIDO: Remove the "FIPS approved" row from "fido info"; FIPS status is shown by "ykman info".

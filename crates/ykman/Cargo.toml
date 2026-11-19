@@ -30,6 +30,10 @@ ctrlc.workspace = true
 hex.workspace = true
 log = { workspace = true, features = ["std"] }
 sha2.workspace = true
+base64.workspace = true
+pkcs8.workspace = true
+p12-keystore.workspace = true
+x509-cert.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order", "raw_value"] }
 dirs.workspace = true
