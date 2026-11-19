@@ -7,7 +7,7 @@ use yubikit::device::YubiKeyDevice;
 use yubikit::management::Capability;
 use yubikit::oath::{
     Credential, CredentialData, HashAlgorithm, OathAccessKey, OathError, OathSession, OathType,
-    parse_b32_key,
+    format_cred_id, parse_b32_key,
 };
 use yubikit::smartcard::{SmartCardError, Sw};
 use zeroize::Zeroizing;
@@ -189,7 +189,7 @@ pub enum OathAccountAction {
     },
     /// Delete an OATH account
     Delete {
-        /// Account to delete (search query)
+        /// A query to match a single account (as shown in "list")
         query: String,
         /// Password to unlock OATH
         #[arg(short = 'p', long)]
@@ -203,9 +203,9 @@ pub enum OathAccountAction {
     },
     /// Rename an OATH account
     Rename {
-        /// Account to rename (search query)
+        /// A query to match a single account (as shown in "list")
         query: String,
-        /// New name (issuer:name or just name)
+        /// The new name of the account (use "<issuer>:<name>" to specify issuer)
         new_name: String,
         /// Password to unlock OATH
         #[arg(short = 'p', long)]
@@ -499,13 +499,6 @@ fn now_timestamp() -> u64 {
         .as_secs()
 }
 
-fn format_cred_name(cred: &Credential) -> String {
-    match &cred.issuer {
-        Some(issuer) => format!("{issuer}:{}", cred.name),
-        None => cred.name.clone(),
-    }
-}
-
 fn is_hidden(cred: &Credential) -> bool {
     cred.issuer.as_deref().is_some_and(|i| i.starts_with('_'))
 }
@@ -547,6 +540,14 @@ fn search_creds<'a, T>(
         }
     }
     hits
+}
+
+fn multiple_matches_error<'a>(creds: impl Iterator<Item = &'a Credential>) -> anyhow::Error {
+    let ids: Vec<String> = creds.map(cred_string_id).collect();
+    anyhow!(
+        "Multiple matches, make the query more specific.\n\n{}",
+        ids.join("\n")
+    )
 }
 
 const STEAM_CHAR_TABLE: &[u8] = b"23456789BCDFGHJKMNPQRTVWXY";
@@ -721,20 +722,22 @@ pub fn run_accounts_list(
         .list_credentials()
         .map_err(|e| anyhow!("Failed to list credentials: {e}"))?;
 
+    let mut creds: Vec<_> = creds
+        .into_iter()
+        .filter(|c| show_hidden || !is_hidden(c))
+        .collect();
+    creds.sort_by_key(cred_sort_key);
     for cred in &creds {
-        if !show_hidden && is_hidden(cred) {
-            continue;
-        }
-        let mut line = format_cred_name(cred);
+        let mut line = cred_string_id(cred);
         if show_oath_type {
             let t = match cred.oath_type {
                 OathType::Totp => "TOTP",
                 OathType::Hotp => "HOTP",
             };
-            line = format!("{line} ({t})");
+            line.push_str(&format!(", {t}"));
         }
-        if show_period && cred.oath_type == OathType::Totp {
-            line = format!("{line} [period: {}]", cred.period);
+        if show_period {
+            line.push_str(&format!(", {}", cred.period));
         }
         println!("{line}");
     }
@@ -800,11 +803,7 @@ pub fn run_accounts_code(
         if hits.is_empty() {
             return Err(anyhow!("No matching account found."));
         }
-        let names: Vec<String> = hits.iter().map(|(c, _)| cred_string_id(c)).collect();
-        return Err(anyhow!(
-            "Multiple matches, make the query more specific.\n\n{}",
-            names.join("\n")
-        ));
+        return Err(multiple_matches_error(hits.iter().map(|(c, _)| c)));
     } else {
         hits.sort_by_key(|(c, _)| cred_sort_key(c));
         let mut outputs = Vec::with_capacity(hits.len());
@@ -946,13 +945,11 @@ pub fn run_accounts_add(
         let existing = session
             .list_credentials()
             .map_err(|e| anyhow!("Failed to list: {e}"))?;
-        let display_name = match issuer {
-            Some(i) => format!("{i}:{name}"),
-            None => name.to_string(),
-        };
-        if existing.iter().any(|c| format_cred_name(c) == display_name)
+        let cred_id = cred_data.get_id();
+        if existing.iter().any(|c| c.id == cred_id)
             && !confirm(&format!(
-                "A credential called {display_name} already exists, overwrite?"
+                "A credential called {} already exists, overwrite?",
+                String::from_utf8_lossy(&cred_id)
             ))
         {
             return Err(anyhow!("Aborted by user."));
@@ -994,34 +991,25 @@ pub fn run_accounts_delete(
         .list_credentials()
         .map_err(|e| anyhow!("Failed to list: {e}"))?;
 
-    let matching: Vec<_> = creds
-        .iter()
-        .filter(|c| {
-            format_cred_name(c)
-                .to_ascii_lowercase()
-                .contains(&query.to_ascii_lowercase())
-        })
-        .collect();
-
-    let cred = match matching.len() {
-        0 => return Err(anyhow!("No credential matching '{query}'.")),
-        1 => matching[0],
-        _ => {
-            return Err(anyhow!(
-                "Multiple credentials matching '{query}'. Be more specific."
-            ));
+    let hits = search_creds(&creds, |c| c, query, true);
+    let cred = match hits.as_slice() {
+        [] => {
+            println!("No matches, nothing to be done.");
+            return Ok(());
         }
+        [cred] => *cred,
+        _ => return Err(multiple_matches_error(hits.into_iter())),
     };
 
-    let name = format_cred_name(cred);
-    if !force && !confirm(&format!("Delete credential {name}?")) {
+    let id = cred_string_id(cred);
+    if !force && !confirm(&format!("Delete account: {id} ?")) {
         return Err(anyhow!("Aborted by user."));
     }
 
     session
         .delete_credential(&cred.id)
         .map_err(|e| anyhow!("Failed to delete: {e}"))?;
-    eprintln!("Credential deleted: {name}");
+    println!("Deleted {id}.");
     Ok(())
 }
 
@@ -1039,41 +1027,37 @@ pub fn run_accounts_rename(
         .list_credentials()
         .map_err(|e| anyhow!("Failed to list: {e}"))?;
 
-    let matching: Vec<_> = creds
-        .iter()
-        .filter(|c| {
-            format_cred_name(c)
-                .to_ascii_lowercase()
-                .contains(&query.to_ascii_lowercase())
-        })
-        .collect();
-
-    let cred = match matching.len() {
-        0 => return Err(anyhow!("No credential matching '{query}'.")),
-        1 => matching[0],
-        _ => {
-            return Err(anyhow!(
-                "Multiple credentials matching '{query}'. Be more specific."
-            ));
+    let hits = search_creds(&creds, |c| c, query, true);
+    let cred = match hits.as_slice() {
+        [] => {
+            println!("No matches, nothing to be done.");
+            return Ok(());
         }
+        [cred] => *cred,
+        _ => return Err(multiple_matches_error(hits.into_iter())),
     };
 
-    let old_name = format_cred_name(cred);
-    // Parse new_name as "issuer:name" or just "name"
-    let (new_issuer, new_account) = if let Some((i, n)) = new_name.split_once(':') {
-        (Some(i), n)
-    } else {
-        (None, new_name)
+    let (new_issuer, new_account) = match new_name.split_once(':') {
+        Some((i, n)) => (Some(i), n),
+        None => (None, new_name),
     };
+    let new_id = format_cred_id(new_issuer, new_account, cred.oath_type, cred.period);
+    let new_id_str = String::from_utf8_lossy(&new_id).into_owned();
+    if creds.iter().any(|c| c.id == new_id) {
+        return Err(anyhow!(
+            "Another account with ID {new_id_str} already exists on this YubiKey."
+        ));
+    }
 
-    if !force && !confirm(&format!("Rename {old_name} to {new_name}?")) {
+    let old_id = cred_string_id(cred);
+    if !force && !confirm(&format!("Rename account: {old_id} ?")) {
         return Err(anyhow!("Aborted by user."));
     }
 
     session
         .rename_credential(&cred.id, new_account, new_issuer)
         .map_err(|e| anyhow!("Failed to rename: {e}"))?;
-    println!("Credential renamed: {old_name} → {new_name}");
+    println!("Renamed {old_id} to {new_id_str}.");
     Ok(())
 }
 
@@ -1383,13 +1367,9 @@ pub fn run_accounts_import(
 
         // Check for duplicate when forcing
         if force {
-            let display = match &cred.issuer {
-                Some(i) => format!("{i}:{}", cred.name),
-                None => cred.name.clone(),
-            };
-            if existing.iter().any(|c| format_cred_name(c) == display) {
+            let id = cred_data.get_id();
+            if existing.iter().any(|c| c.id == id) {
                 // Delete existing before re-adding
-                let id = cred_data.get_id();
                 let _ = session.delete_credential(&id);
             }
         }
