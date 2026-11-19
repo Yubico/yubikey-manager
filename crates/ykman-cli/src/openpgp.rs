@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use yubikit::device::YubiKeyDevice;
+use yubikit::keys::PrivateKey;
 use yubikit::management::Capability;
 use yubikit::openpgp::{
     KeyRef, KeyStatus, OpenPgpError, OpenPgpPin, OpenPgpSession, PinPolicy, Uif,
@@ -166,17 +167,50 @@ pub enum OpenpgpKeysAction {
     /// Import an attestation key
     ///
     /// The attestation key is by default pre-generated during production with
-    /// a Yubico-issued key and certificate.
+    /// a Yubico-issued key and certificate. Only the attestation key slot
+    /// (att) is supported; use GnuPG to import keys into the other slots.
     ///
     /// WARNING: This private key cannot be recovered once overwritten!
     Import {
-        /// Key reference
+        /// Key reference (only att is supported)
         key: CliKeyRef,
-        /// Key file
+        /// Private key file (PEM, DER or PKCS#12), or - for stdin
         key_file: String,
         /// Admin PIN
         #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
+        /// Password for decrypting password-protected key files
+        #[arg(short = 'p', long)]
+        password: Option<String>,
+    },
+    /// Export a public key
+    ///
+    /// Reads the public key of a key slot and writes it as a
+    /// SubjectPublicKeyInfo, in PEM or DER format.
+    Export {
+        /// Key reference
+        key: CliKeyRef,
+        /// Output file, or - for stdout
+        output: String,
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
+        format: CliFormat,
+    },
+    /// Delete a key
+    ///
+    /// Deletes the private key in a key slot, along with its fingerprint and
+    /// generation time.
+    ///
+    /// WARNING: The private key cannot be recovered once deleted!
+    Delete {
+        /// Key reference
+        key: CliKeyRef,
+        /// Admin PIN
+        #[arg(short = 'a', long, value_name = "PIN")]
+        admin_pin: Option<String>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
     },
     /// Generate an attestation certificate for a key
     ///
@@ -297,7 +331,25 @@ impl OpenpgpAction {
                     key,
                     key_file,
                     admin_pin,
-                } => run_keys_import(dev, scp_params, key, &key_file, admin_pin.as_deref()),
+                    password,
+                } => run_keys_import(
+                    dev,
+                    scp_params,
+                    key,
+                    &key_file,
+                    admin_pin.as_deref(),
+                    password.as_deref(),
+                ),
+                OpenpgpKeysAction::Export {
+                    key,
+                    output,
+                    format,
+                } => run_keys_export(dev, scp_params, key, &output, format),
+                OpenpgpKeysAction::Delete {
+                    key,
+                    admin_pin,
+                    force,
+                } => run_keys_delete(dev, scp_params, key, admin_pin.as_deref(), force),
                 OpenpgpKeysAction::Attest {
                     key,
                     output,
@@ -677,6 +729,28 @@ pub fn run_set_signature_policy(
     Ok(())
 }
 
+fn require_key(
+    version: yubikit::core::Version,
+    disc: &yubikit::openpgp::DiscretionaryDataObjects,
+    key_ref: KeyRef,
+) -> Result<()> {
+    let has_key = if version >= yubikit::core::Version(5, 2, 0) {
+        matches!(disc.key_information.get(&key_ref), Some(s) if *s != KeyStatus::None)
+    } else {
+        disc.fingerprints
+            .get(&key_ref)
+            .is_some_and(|f| f.iter().any(|&b| b != 0))
+    };
+    if has_key {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "No key stored in slot {}.",
+            format_key_ref(key_ref)
+        ))
+    }
+}
+
 pub fn run_keys_info(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
@@ -689,22 +763,8 @@ pub fn run_keys_info(
         .get_application_related_data()
         .map_err(|e| anyhow!("Failed to get application data: {e}"))?;
     let disc = &data.discretionary;
-
+    require_key(session.version(), disc, key_ref)?;
     let status = disc.key_information.get(&key_ref);
-    let has_key = if session.version() >= yubikit::core::Version(5, 2, 0) {
-        matches!(status, Some(s) if *s != KeyStatus::None)
-    } else {
-        disc.fingerprints
-            .get(&key_ref)
-            .is_some_and(|f| f.iter().any(|&b| b != 0))
-    };
-
-    if !has_key {
-        return Err(anyhow!(
-            "No key stored in slot {}.",
-            format_key_ref(key_ref)
-        ));
-    }
 
     let name = format_key_ref(key_ref);
     let mut rows = vec![("Key slot", name.to_string())];
@@ -803,20 +863,92 @@ pub fn run_keys_set_touch(
 }
 
 pub fn run_keys_import(
-    _dev: &dyn YubiKeyDevice,
-    _scp_params: &ScpParams,
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
     key: CliKeyRef,
     key_file: &str,
     admin_pin: Option<&str>,
+    password: Option<&str>,
 ) -> Result<()> {
-    let _key_ref: KeyRef = key.into();
-    let _data = read_file_or_stdin(key_file)?;
+    let key_ref: KeyRef = key.into();
+    if key_ref != KeyRef::Att {
+        return Err(anyhow!(
+            "Importing keys is only supported for the attestation key slot (att)."
+        ));
+    }
+    let data = read_file_or_stdin(key_file)?;
+    let der = crate::piv::decrypt_private_key_data(&data, password)?;
+    let private_key =
+        PrivateKey::from_pkcs8(&der).map_err(|_| anyhow!("Failed to parse private key."))?;
 
-    let _ap = ensure_admin_pin(admin_pin)?;
+    let ap = ensure_admin_pin(admin_pin)?;
+    let mut session = open_session(dev, scp_params)?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
+    session
+        .put_key(key_ref, &private_key)
+        .map_err(|e| anyhow!("Failed to import key: {e}"))?;
+    eprintln!("Private key imported for {}.", format_key_ref(key_ref));
+    Ok(())
+}
 
-    Err(anyhow!(
-        "Key import requires parsing private key format. Not yet implemented."
-    ))
+pub fn run_keys_export(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    key: CliKeyRef,
+    output: &str,
+    format: CliFormat,
+) -> Result<()> {
+    let key_ref: KeyRef = key.into();
+    let mut session = open_session(dev, scp_params)?;
+    let data = session
+        .get_application_related_data()
+        .map_err(|e| anyhow!("Failed to get application data: {e}"))?;
+    require_key(session.version(), &data.discretionary, key_ref)?;
+    let spki = session
+        .get_public_key(key_ref)
+        .map_err(|e| anyhow!("Failed to read public key: {e}"))?
+        .to_spki()
+        .map_err(|e| anyhow!("Failed to encode public key: {e}"))?;
+    write_output(output, &spki, format, "PUBLIC KEY")?;
+    eprintln!(
+        "Public key for {} written to {output}.",
+        format_key_ref(key_ref)
+    );
+    Ok(())
+}
+
+pub fn run_keys_delete(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    key: CliKeyRef,
+    admin_pin: Option<&str>,
+    force: bool,
+) -> Result<()> {
+    let key_ref: KeyRef = key.into();
+    let mut session = open_session(dev, scp_params)?;
+    let data = session
+        .get_application_related_data()
+        .map_err(|e| anyhow!("Failed to get application data: {e}"))?;
+    require_key(session.version(), &data.discretionary, key_ref)?;
+
+    if !force {
+        eprintln!("WARNING: The private key cannot be recovered once deleted!");
+        if !confirm(&format!("Delete the {} key?", format_key_ref(key_ref))) {
+            return Err(anyhow!("Aborted by user."));
+        }
+    }
+
+    let ap = ensure_admin_pin(admin_pin)?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
+    session
+        .delete_key(key_ref)
+        .map_err(|e| anyhow!("Failed to delete key: {e}"))?;
+    eprintln!("Deleted the {} key.", format_key_ref(key_ref));
+    Ok(())
 }
 
 pub fn run_keys_attest(

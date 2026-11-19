@@ -18,6 +18,9 @@
  ** OATH: Only treat accounts with an issuer starting with "_" as hidden.
  ** OATH: Reject SHA512 on YubiKey FIPS (4 Series) and on firmware before 4.3.1.
  ** OTP: Parse the "otp hotp" key as Base32, as in 5.x.
+ ** OpenPGP: Restore "openpgp keys import" for importing an attestation key.
+ ** OpenPGP: Add "openpgp keys export" and "openpgp keys delete".
+ ** OpenPGP: Clear the fingerprint and generation time when deleting a key.
  ** PIV: Clear a stored management key when changing it with "--pin", and warn when it can't be cleared.
  ** HSM Auth: Restore "--derivation-password" for "hsmauth credentials derive".
  ** HSM Auth: Restore "--management-password" for "hsmauth credentials change-password".
