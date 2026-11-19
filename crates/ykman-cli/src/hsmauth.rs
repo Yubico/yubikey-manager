@@ -75,8 +75,9 @@ pub enum HsmauthCredAction {
     Derive {
         /// Credential label
         label: String,
-        /// Derivation password
-        derivation_password: String,
+        /// Password to derive the ENC and MAC keys from
+        #[arg(long, value_name = "PASSWORD")]
+        derivation_password: Option<String>,
         /// Credential password (at most 16 UTF-8 bytes)
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
@@ -207,7 +208,7 @@ impl HsmauthAction {
                     dev,
                     scp_params,
                     &label,
-                    &derivation_password,
+                    derivation_password.as_deref(),
                     credential_password.as_deref(),
                     management_password.as_deref(),
                     touch,
@@ -531,7 +532,7 @@ pub fn run_credentials_derive(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     label: &str,
-    derivation_password: &str,
+    derivation_password: Option<&str>,
     credential_password: Option<&str>,
     management_key: Option<&str>,
     touch: bool,
@@ -543,10 +544,14 @@ pub fn run_credentials_derive(
     )?;
     let mgmt = require_management_password(management_key)?;
     let pw = require_credential_password(credential_password)?;
+    let derivation_password = match derivation_password {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_new_secret("Derivation password")?,
+    };
 
     let mut session = open_session(dev, scp_params)?;
     session
-        .put_credential_derived(&mgmt, label, derivation_password, &pw, touch)
+        .put_credential_derived(&mgmt, label, &derivation_password, &pw, touch)
         .map_err(|e| {
             anyhow!(format_credential_error(
                 &e,

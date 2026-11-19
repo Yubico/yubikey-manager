@@ -9,7 +9,7 @@ const HSMAUTH_DERIVATION_PASSWORD: &str = "K9$wQ3#nR6!tM2x%";
 #[rstest]
 #[case::generate(&["generate", "invalid-password"], "-c")]
 #[case::symmetric(&["symmetric", "invalid-password", "--generate"], "-c")]
-#[case::derive(&["derive", "invalid-password", "derivation-password"], "-c")]
+#[case::derive(&["derive", "invalid-password", "--derivation-password", "x"], "-c")]
 #[case::import(&["import", "invalid-password", "missing.pem"], "-c")]
 #[case::current_password(&["change-password", "invalid-password", "-n", "new"], "-c")]
 #[case::new_password(&["change-password", "invalid-password", "-c", "current"], "-n")]
@@ -134,6 +134,7 @@ fn test_hsmauth_add_derive_and_list() {
             "credentials",
             "derive",
             "derive-cred",
+            "--derivation-password",
             HSMAUTH_DERIVATION_PASSWORD,
             "-c",
             HSMAUTH_CREDENTIAL_PASSWORD,
@@ -212,6 +213,7 @@ fn test_hsmauth_change_management_password() {
             "credentials",
             "derive",
             "verify-key",
+            "--derivation-password",
             HSMAUTH_DERIVATION_PASSWORD,
             "-c",
             HSMAUTH_CREDENTIAL_PASSWORD,
