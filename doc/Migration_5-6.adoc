@@ -3,7 +3,133 @@
 Version 6 is a complete rewrite of yubikey-manager in Rust, with Python bindings
 provided via PyO3. The Python API surface has been preserved where possible, but
 there are breaking changes. This documents migration steps required when using
-this project as a Python library.
+the `ykman` command-line tool and when using this project as a Python library.
+
+== Command-line interface
+
+Most commands and options are unchanged, but scripts invoking `ykman` should be
+reviewed for the changes below. Prefer long option names in scripts, as several
+short options have changed meaning.
+
+=== Device selection
+
+The `-r`/`--reader` option has been removed. YubiKeys connected over NFC are
+now discovered automatically alongside USB devices; use `--device SERIAL` to
+select one by serial number. `ykman list --readers` still lists the available
+smart card readers.
+
+=== Global options
+
+The global options `--device`, `--log-level`, `--log-file`, `--color`, and the
+secure channel (`--scp*`) options can now be given anywhere on the command line,
+including after a subcommand:
+
+    $ ykman piv info --device 123456
+
+As a consequence, `-d` (`--device`) and `-l` (`--log-level`) are reserved in
+every command, and subcommand options that used these short forms have changed.
+For example, `ykman oath accounts add -d 8 ...` now selects the YubiKey with
+serial number 8 instead of setting the number of digits.
+
+The secure channel options no longer have short forms: use `--scp`, `--scp-ca`,
+and `--scp-password` instead of `-s`, `-t`, and `-p`. The `--scp-sd` and
+`--scp-oce` options are now always shown in the help.
+
+=== Changed short options
+
+[cols="2,1,1"]
+|===
+| Command | 5.x | 6.x
+
+| `config usb`, `config nfc` (`--disable`)
+| `-d`
+| `-x`
+
+| `config nfc` (`--disable-all`)
+| `-D`
+| `-X`
+
+| `config set-lock-code` (`--lock-code`)
+| `-l`
+| `-L`
+
+| `oath accounts add` (`--digits`)
+| `-d`
+| `--digits` only
+
+| `otp calculate` (`--digits`)
+| `-d`
+| `--digits` only
+
+| `otp hotp` (`--digits`)
+| `-d`
+| `--digits` only
+
+| `otp static` (`--length`)
+| `-l`
+| `-L`
+
+| `piv certificates generate` (`--valid-days`)
+| `-d`
+| `--valid-days` only
+|===
+
+The OTP `--access-code` option is still accepted directly after `otp`, and can
+now also be given after the subcommands that need it.
+
+=== Removed commands and options
+
+[cols="1,1"]
+|===
+| 5.x | 6.x
+
+| `ykman script`
+| Run scripts with the Python interpreter, using the `yubikit` library (see
+  link:Scripting.adoc[Scripting])
+
+| `ykman -v`, `ykman --version`
+| `ykman version` (`--version` is still accepted)
+
+| `ykman --diagnose`
+| `ykman diagnose` (`--diagnose` is still accepted)
+
+| `ykman --full-help`
+| Removed; the `apdu` and `sd` commands are now included in the regular help
+
+| `ykman config usb --list`, `ykman config nfc --list`
+| `ykman info` shows the enabled applications for each transport
+
+| `ykman info --check-fips`
+| Removed; `ykman info` always shows the FIPS approved status of each
+  application, including on YubiKey FIPS (4 Series)
+
+| `ykman fido access change-pin --u2f`
+| Removed; on YubiKey FIPS (4 Series) `change-pin` sets the U2F PIN
+  automatically
+
+| `ykman piv access change-management-key --force`
+| Removed; give the required values (e.g. `--management-key`, `--pin`,
+  `--new-management-key` or `--generate`) as options to avoid prompts
+
+| `--management-key` (`hsmauth` commands)
+| Use `--management-password`
+
+|===
+
+=== New commands
+
+* `ykman sd` manages the Security Domain (SCP keys), and `ykman apdu` sends raw
+  APDUs. Both existed as hidden commands in 5.x.
+* `ykman diagnose`, `ykman version`, and `ykman licenses`.
+* `ykman fido credentials update`.
+* `ykman piv keys sign`, `decrypt`, `derive`, and `decapsulate`.
+
+See link:../NEWS[NEWS] for other additions.
+
+
+== Python library
+
+The remaining sections cover the Python library.
 
 == Architecture
 
@@ -359,8 +485,18 @@ Building from source requires Rust (stable) and `maturin`. The latter is handled
 | `ykman.pcsc`
 | Native Rust PC/SC (transparent)
 
-| `ykman.util`
-| Functionality moved to Rust core
+| `ykman.util.parse_private_key()`, `parse_certificates()`,
+  `get_leaf_certificates()`, `is_pem()`, `is_pkcs12()`,
+  `InvalidPasswordError`
+| Removed; use `cryptography` directly, e.g.
+  `serialization.load_pem_private_key()`,
+  `serialization.load_der_private_key()`,
+  `x509.load_pem_x509_certificates()`, `x509.load_der_x509_certificate()`,
+  and `serialization.pkcs12.load_key_and_certificates()`
+
+| `ykman.util.display_serial()`, `is_nfc_restricted()`,
+  `get_windows_version()`
+| Removed
 
 | `ykman.piv`
 | Generation and signing helpers moved to `yubikit.piv`; Pivman helpers
@@ -373,6 +509,40 @@ Building from source requires Rust (stable) and `maturin`. The latter is handled
 
 | `ykman.scripting`
 | `yubikit.scripting`
+
+| `ykman.diagnostics`
+| Removed; use the `ykman diagnose` command
+
+| `ykman.fido` (YubiKey FIPS (4 Series) U2F PIN and reset helpers)
+| Removed
+
+| `ykman.hsmauth.get_hsmauth_info()`, `generate_random_management_key()`
+| Removed; use `HsmAuthSession` methods, and `os.urandom(16)` to generate a
+  management key
+
+| `ykman.logging`, `ykman.logging_setup`
+| Removed; configure the standard `logging` module directly. The `TRAFFIC`
+  level is available as `yubikit.logging.LOG_LEVEL.TRAFFIC`
+
+| `ykman.oath` (`is_steam()`, `calculate_steam()`, `is_hidden()`,
+  `is_in_fips_mode()`, `delete_broken_credential()`)
+| Removed
+
+| `ykman.openpgp` (`get_openpgp_info()`, `get_key_info()`, `safe_reset()`)
+| Removed; use `OpenPgpSession` methods
+
+| `ykman.otp.format_csv()`
+| `yubikit.core.otp.format_csv()`
+
+| `ykman.otp` (`generate_static_pw()`, `parse_oath_key()`,
+  `format_oath_code()`, `time_challenge()`, `is_in_fips_mode()`)
+| Removed
+
+| `ykman.scancodes`
+| Removed; `StaticPasswordSlotConfiguration` takes raw scan codes
+
+| `ykman.settings`
+| Removed
 
 | `yubikit.support.read_info()`
 | Use `device.info` instead

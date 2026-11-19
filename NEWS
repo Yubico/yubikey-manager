@@ -1,3 +1,19 @@
+* Version 6.0.0-beta.1 (unreleased)
+ ** CLI: Restore 5.x short options that were changed or dropped: "otp chalresp -t/-T", "otp calculate -T", "otp settings -A", "oath -r", "list -r", and "openpgp access change-reset-code/unblock-pin -r".
+ ** CLI: Accept "--update-chuid" again for "piv certificates generate/import/delete".
+ ** Management: Remove "ykman info --check-fips"; FIPS approved status is always shown in the applications table, including for YubiKey FIPS (4 Series).
+ ** FIDO: Support YubiKey FIPS (4 Series): show U2F PIN state in "fido info", set and verify the U2F PIN with "fido access change-pin/verify-pin", and reset with "fido reset".
+ ** OATH: Restore PSKC export with "oath accounts add --output", optionally encrypted with "--pskc-passphrase" or "--pskc-key".
+ ** OATH: Support importing encrypted PSKC files, and fix parsing of some PSKC values.
+ ** OATH: Restore 5.x behavior of "oath accounts code": calculate touch and HOTP accounts on a single match, prompt for touch, prefer exact matches, sort output, and show Steam codes.
+ ** OATH: Restore 5.x behavior of "oath accounts list/delete/rename": use full credential IDs (including period prefix), prefer exact matches, and sort the list.
+ ** OATH: Only treat accounts with an issuer starting with "_" as hidden.
+ ** OATH: Reject SHA512 on YubiKey FIPS (4 Series) and on firmware before 4.3.1.
+ ** OTP: Parse the "otp hotp" key as Base32, as in 5.x.
+ ** PIV: Clear a stored management key when changing it with "--pin", and warn when it can't be cleared.
+ ** HSM Auth: Restore "--derivation-password" for "hsmauth credentials derive".
+ ** HSM Auth: Restore "--management-password" for "hsmauth credentials change-password".
+
 * Version 6.0.0-beta.0 (released 2026-11-03)
  ** Initial beta of the Rust rewrite, with a native CLI and Rust-backed Python bindings.
  ** Rust libraries provided by the yubikit and ykman crates.
@@ -8,7 +24,6 @@
  ** Windows: Bundle a background service allowing FIDO management without running the CLI as administrator.
  ** Windows: Add native ARM64 installers.
  ** Management: Show application storage usage in "ykman info" on supported devices.
- ** Management: Remove "ykman info --check-fips"; FIPS approved status is always shown in the applications table, including for YubiKey FIPS (4 Series).
  ** PIV: Add support for ML-DSA and ML-KEM, including ML-DSA context and external mu signing.
  ** PIV: Add "piv keys sign", "piv keys decrypt", "piv keys derive", and "piv keys decapsulate" commands.
  ** PIV: Remove support for legacy PIN-derived management keys. Use 5.x to replace derived keys before upgrading.
