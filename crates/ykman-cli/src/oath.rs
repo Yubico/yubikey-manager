@@ -207,7 +207,7 @@ pub enum OathAccountAction {
     Rename {
         /// A query to match a single account (as shown in "list")
         query: String,
-        /// The new name of the account (use "<issuer>:<name>" to specify issuer)
+        /// The new name of the account (use "issuer:name" to specify issuer)
         new_name: String,
         /// Password to unlock OATH
         #[arg(short = 'p', long)]
