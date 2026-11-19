@@ -1,6 +1,9 @@
 * Version 6.0.0-beta.1 (unreleased)
  ** CLI: Restore 5.x short options that were changed or dropped: "otp chalresp -t/-T", "otp calculate -T", "otp settings -A", "oath -r", "list -r", and "openpgp access change-reset-code/unblock-pin -r".
  ** CLI: Accept "--update-chuid" again for "piv certificates generate/import/delete".
+ ** CLI: Make output consistent across commands: uppercase placeholders in help, value names for all options, uniform confirmation prompts and abort messages, status messages on stderr, and a lowercase "error:" prefix.
+ ** OATH: Remove the unused "--password" option from "oath info".
+ ** OTP: Accept "-" for "--access-code" and "--new-access-code" to prompt for the access code, and allow "--delete-access-code" with the group-level "--access-code".
  ** Management: Remove "ykman info --check-fips"; FIPS approved status is always shown in the applications table, including for YubiKey FIPS (4 Series).
  ** FIDO: Support YubiKey FIPS (4 Series): show U2F PIN state in "fido info", set and verify the U2F PIN with "fido access change-pin/verify-pin", and reset with "fido reset".
  ** OATH: Restore PSKC export with "oath accounts add --output", optionally encrypted with "--pskc-passphrase" or "--pskc-key".

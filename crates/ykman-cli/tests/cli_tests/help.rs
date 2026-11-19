@@ -285,7 +285,7 @@ fn test_help_layout_and_entry_points() {
     ] {
         assert_eq!(root.lines().filter(|line| *line == heading).count(), 1);
     }
-    assert!(root.contains("ykman [options] [command]"));
+    assert!(root.contains("ykman [OPTIONS] [COMMAND]"));
     let additional = root
         .split("ADDITIONAL COMMANDS\n")
         .nth(1)
@@ -313,7 +313,7 @@ fn test_help_layout_and_entry_points() {
     let nested = plain_help(&["piv", "keys", "export", "--help"]);
     assert_eq!(nested, plain_help(&["help", "piv", "keys", "export"]));
     assert_eq!(nested, plain_help(&["piv", "keys", "export", "-h"]));
-    assert!(nested.contains("ykman piv keys export [options] <slot> <output>"));
+    assert!(nested.contains("ykman piv keys export [OPTIONS] <SLOT> <OUTPUT>"));
     assert!(nested.contains("firmware before"));
     assert!(nested.contains("authoritative public-key metadata"));
     assert!(!nested.contains("\nCOMMANDS\n"));

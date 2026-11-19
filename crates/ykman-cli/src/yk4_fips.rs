@@ -118,7 +118,7 @@ pub fn fips_reset<C: Connection + 'static>(
                     prompted = true;
                 }
                 if cancel() {
-                    return Err(anyhow!("Reset aborted by user."));
+                    return Err(anyhow!("Aborted by user."));
                 }
                 sleep(RESET_POLL_INTERVAL);
             }
