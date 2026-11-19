@@ -100,12 +100,18 @@ pub enum HsmauthCredAction {
         force: bool,
     },
     /// Change credential password
+    ///
+    /// Requires either the current credential password or the management
+    /// password (not both).
     ChangePassword {
         /// Credential label
         label: String,
         /// Current credential password (at most 16 UTF-8 bytes)
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
+        /// Management password
+        #[arg(short = 'm', long, conflicts_with = "credential_password")]
+        management_password: Option<String>,
         /// New credential password (at most 16 UTF-8 bytes)
         #[arg(short = 'n', long, value_name = "PASSWORD")]
         new_credential_password: Option<String>,
@@ -227,12 +233,14 @@ impl HsmauthAction {
                 HsmauthCredAction::ChangePassword {
                     label,
                     credential_password,
+                    management_password,
                     new_credential_password,
                 } => run_credentials_change_password(
                     dev,
                     scp_params,
                     &label,
                     credential_password.as_deref(),
+                    management_password.as_deref(),
                     new_credential_password.as_deref(),
                 ),
                 HsmauthCredAction::Export {
@@ -564,18 +572,35 @@ pub fn run_credentials_derive(
     Ok(())
 }
 
+enum ChangePasswordAuth {
+    Credential(CredentialPassword),
+    Management(HsmAuthManagementKey),
+}
+
 pub fn run_credentials_change_password(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     label: &str,
     credential_password: Option<&str>,
+    management_password: Option<&str>,
     new_credential_password: Option<&str>,
 ) -> Result<()> {
-    let old_pw = match credential_password {
-        Some(p) => CredentialPassword::from_password(p)?,
-        None => {
-            let p = crate::util::prompt_secret("Enter current credential password")?;
-            CredentialPassword::from_password(&p)?
+    let auth = match (credential_password, management_password) {
+        (Some(p), _) => ChangePasswordAuth::Credential(CredentialPassword::from_password(p)?),
+        (None, Some(p)) => ChangePasswordAuth::Management(parse_management_password(p)?),
+        (None, None) => {
+            eprintln!("Choose authentication method:");
+            eprintln!(" [1] Current credential password");
+            eprintln!(" [2] Management password");
+            let choice = crate::util::prompt("Enter selection [1]")?;
+            match choice.as_str() {
+                "" | "1" => {
+                    let p = crate::util::prompt_secret("Enter current credential password")?;
+                    ChangePasswordAuth::Credential(CredentialPassword::from_password(&p)?)
+                }
+                "2" => ChangePasswordAuth::Management(require_management_password(None)?),
+                _ => return Err(anyhow!("Invalid selection: {choice}")),
+            }
         }
     };
     let new_pw = match new_credential_password {
@@ -591,16 +616,26 @@ pub fn run_credentials_change_password(
     };
 
     let mut session = open_session(dev, scp_params)?;
-    session
-        .change_credential_password(label, &old_pw, &new_pw)
-        .map_err(|e| {
-            anyhow!(format_credential_error(
-                &e,
-                "Failed to change password.",
-                "Credential password",
-                Some("Credential password")
-            ))
-        })?;
+    let result = match &auth {
+        ChangePasswordAuth::Credential(old_pw) => {
+            session.change_credential_password(label, old_pw, &new_pw)
+        }
+        ChangePasswordAuth::Management(mgmt) => {
+            session.change_credential_password_admin(mgmt, label, &new_pw)
+        }
+    };
+    let authentication = match auth {
+        ChangePasswordAuth::Credential(_) => "Credential password",
+        ChangePasswordAuth::Management(_) => "Management password",
+    };
+    result.map_err(|e| {
+        anyhow!(format_credential_error(
+            &e,
+            "Failed to change password.",
+            authentication,
+            Some("Credential password")
+        ))
+    })?;
     eprintln!("Credential password changed for: {label}");
     Ok(())
 }

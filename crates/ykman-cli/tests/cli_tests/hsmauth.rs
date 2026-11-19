@@ -124,6 +124,59 @@ fn test_hsmauth_add_symmetric_and_list() {
 }
 
 #[test]
+fn test_hsmauth_change_credential_password() {
+    require_capability!("YubiHSM Auth");
+    let management_key = prepare_hsmauth_for_credentials();
+    const ADMIN_SET_PASSWORD: &str = "P4!sW7#kD2$hL8x%";
+
+    ykman_dev()
+        .args([
+            "hsmauth",
+            "credentials",
+            "symmetric",
+            "test-cred",
+            "--generate",
+            "-c",
+            HSMAUTH_CREDENTIAL_PASSWORD,
+            "-m",
+            management_key,
+        ])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args([
+            "hsmauth",
+            "credentials",
+            "change-password",
+            "test-cred",
+            "-m",
+            management_key,
+            "-n",
+            ADMIN_SET_PASSWORD,
+        ])
+        .assert()
+        .success();
+
+    // The password set with the management password is now the current one
+    ykman_dev()
+        .args([
+            "hsmauth",
+            "credentials",
+            "change-password",
+            "test-cred",
+            "-c",
+            ADMIN_SET_PASSWORD,
+            "-n",
+            HSMAUTH_CREDENTIAL_PASSWORD,
+        ])
+        .assert()
+        .success();
+
+    hsmauth_reset();
+}
+
+#[test]
 fn test_hsmauth_add_derive_and_list() {
     require_capability!("YubiHSM Auth");
     let management_key = prepare_hsmauth_for_credentials();
