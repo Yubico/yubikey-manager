@@ -96,13 +96,7 @@ fn test_otp_hotp() {
     otp_delete_slot2();
 
     ykman_dev()
-        .args([
-            "otp",
-            "hotp",
-            "2",
-            "3132333435363738393031323334353637383930",
-            "-f",
-        ])
+        .args(["otp", "hotp", "2", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "-f"])
         .assert()
         .success();
 
@@ -271,7 +265,7 @@ fn test_otp_hotp_8digits() {
             "otp",
             "hotp",
             "2",
-            "3132333435363738393031323334353637383930",
+            "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
             "--digits",
             "8",
             "-f",
