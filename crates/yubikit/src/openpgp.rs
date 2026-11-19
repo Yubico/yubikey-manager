@@ -2394,6 +2394,8 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     }
 
     /// Delete the key in a slot by resetting its algorithm attributes.
+    ///
+    /// The fingerprint and generation time of the slot are cleared as well.
     pub fn delete_key(&mut self, key_ref: KeyRef) -> Result<(), OpenPgpError> {
         log::debug!("Deleting key for {:?}", key_ref);
         if 0 < self.version.0 && self.version.0 < 4 {
@@ -2419,6 +2421,8 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
                 RsaImportFormat::Standard,
             )),
         )?;
+        self.set_fingerprint(key_ref, &[0; 20])?;
+        self.set_generation_time(key_ref, 0)?;
         log::info!("Key deleted for {:?}", key_ref);
         Ok(())
     }

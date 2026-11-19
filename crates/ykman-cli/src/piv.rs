@@ -2464,7 +2464,7 @@ fn random_serial_number() -> Result<SerialNumber> {
 /// Attempt to decrypt/parse a private key from raw data, handling
 /// PEM (plain or ENCRYPTED), PKCS#12, and raw DER. If the key is encrypted
 /// and no password is provided, the user is prompted interactively.
-fn decrypt_private_key_data(data: &[u8], password: Option<&str>) -> Result<Vec<u8>> {
+pub(crate) fn decrypt_private_key_data(data: &[u8], password: Option<&str>) -> Result<Vec<u8>> {
     if let Ok(text) = std::str::from_utf8(data)
         && text.contains("-----BEGIN")
     {

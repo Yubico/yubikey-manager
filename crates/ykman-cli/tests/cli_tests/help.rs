@@ -219,6 +219,8 @@ fn test_all_command_help_pages() {
         &["openpgp", "keys", "info"],
         &["openpgp", "keys", "set-touch"],
         &["openpgp", "keys", "import"],
+        &["openpgp", "keys", "export"],
+        &["openpgp", "keys", "delete"],
         &["openpgp", "keys", "attest"],
         &["openpgp", "certificates"],
         &["openpgp", "certificates", "export"],
