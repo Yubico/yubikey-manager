@@ -157,6 +157,57 @@ fn test_oath_add_hotp_and_code() {
 }
 
 #[test]
+fn test_oath_code_single_match_and_listing() {
+    require_capability!("OATH");
+    let password = prepare_oath_for_credentials();
+
+    for name in ["hotp", "hotp-other"] {
+        let mut args = vec![
+            "oath",
+            "accounts",
+            "add",
+            "-o",
+            "hotp",
+            "-f",
+            name,
+            OATH_ACCOUNT_SECRET,
+        ];
+        add_password(&mut args, password);
+        ykman_dev().args(args).assert().success();
+    }
+
+    // Listing doesn't calculate HOTP codes
+    let mut args = vec!["oath", "accounts", "code"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"(?m)^hotp\s+\[HOTP Account\]$").unwrap());
+
+    // An exact match is preferred, and a single match is calculated without -s
+    let mut args = vec!["oath", "accounts", "code", "hotp"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^hotp  \d{6}\n$").unwrap());
+
+    let mut args = vec!["oath", "accounts", "code", "HOTP", "-s"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Multiple matches, make the query more specific.",
+        ));
+
+    oath_reset();
+}
+
+#[test]
 fn test_oath_rename() {
     require_capability!("OATH");
     if skip_before_version((5, 3, 1), "OATH rename") {
