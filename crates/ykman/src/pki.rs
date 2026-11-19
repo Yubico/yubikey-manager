@@ -338,7 +338,11 @@ mod tests {
     fn test_pem_round_trip() {
         let der = fixture("ec_p256_cert.der");
         let pem = pem_encode("CERTIFICATE", &der);
-        assert_eq!(pem, String::from_utf8(fixture("ec_p256_cert.pem")).unwrap());
+        // The fixture may be checked out with CRLF line endings on Windows
+        let expected = String::from_utf8(fixture("ec_p256_cert.pem"))
+            .unwrap()
+            .replace("\r\n", "\n");
+        assert_eq!(pem, expected);
         assert_eq!(pem_decode(&pem).unwrap(), der);
     }
 
