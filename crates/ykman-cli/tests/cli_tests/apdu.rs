@@ -35,9 +35,9 @@ fn test_apdu_send_flag() {
 #[test]
 fn test_apdu_expected_sw() {
     require_capability!("OATH");
-    // Send LIST with expected SW=9000
+    // SELECT works regardless of whether the applet is password-protected.
     ykman_dev()
-        .args(["apdu", "-a", "oath", "a1=9000"])
+        .args(["apdu", "00a40400:a000000527210101=9000"])
         .assert()
         .success();
 }

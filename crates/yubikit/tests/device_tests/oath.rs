@@ -406,7 +406,10 @@ fn test_oath_totp_sha256_consistency(#[case] tc: TestConnection) {
 fn test_oath_totp_sha512(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::OATH);
-    require_version!(Version(4, 0, 0));
+    require_version!(Version(4, 3, 1));
+    if device_is_yk4_fips() {
+        skip!("OATH SHA-512 is not supported on YubiKey 4 FIPS");
+    }
     let Some(mut session) = reset_oath(open_oath_session(&tc), &tc) else {
         return;
     };

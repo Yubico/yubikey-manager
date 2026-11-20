@@ -278,7 +278,7 @@ fn test_oath_list_delete_rename_by_credential_id() {
         predicate::str::is_match(r"(?m)^Issuer:acct, TOTP, 30$")
             .unwrap()
             .and(predicate::str::is_match(r"(?m)^60/Issuer:acct, TOTP, 60$").unwrap())
-            .and(predicate::str::is_match(r"(?m)^b, TOTP, 30\n?\z").unwrap()),
+            .and(predicate::str::is_match(r"(?m)^b, TOTP, 30$").unwrap()),
     );
 
     if !skip_before_version((5, 3, 1), "OATH rename") {

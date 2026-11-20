@@ -2,7 +2,7 @@ use super::common::{
     DEFAULT_HSMAUTH_MANAGEMENT_KEY, DEFAULT_MANAGEMENT_KEY, DEFAULT_PIN, DEFAULT_PUK,
     FIPS_PIV_MANAGEMENT_KEY, FIPS_PIV_PIN, FIPS_PIV_PUK, OATH_PASSWORD, app_is_fips_capable,
     device_info, fixture_path, hsmauth_reset_raw, oath_reset_raw, openpgp_reset_raw, piv_reset,
-    piv_reset_raw, ykman_dev,
+    piv_reset_raw, skip_before_version, ykman_dev,
 };
 use predicates::prelude::*;
 use std::time::Duration;
@@ -24,6 +24,9 @@ fn reject(args: &[&str], message: &str) {
 #[test]
 fn oath_requires_approval_for_all_account_import_paths() {
     require_capability!("OATH");
+    if skip_before_version((5, 0, 0), "OATH command approval policy") {
+        return;
+    }
     if !app_is_fips_capable("OATH") {
         skip!("OATH is not FIPS capable");
     }

@@ -624,6 +624,11 @@ fn device_is_fips() -> bool {
     get_device().info().is_fips
 }
 
+fn device_is_yk4_fips() -> bool {
+    let version = device_version();
+    version >= Version(4, 4, 0) && version < Version(4, 5, 0)
+}
+
 fn device_is_fips_capable(capability: Capability) -> bool {
     get_device().info().fips_capable.contains(capability)
 }

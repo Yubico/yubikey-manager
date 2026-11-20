@@ -478,14 +478,31 @@ pub fn piv_has_puk() -> bool {
         );
     }
 
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("PUK tries remaining:"))
-        .and_then(|tries| {
-            let (_, total) = tries.trim().split_once('/')?;
-            total.trim().parse::<u8>().ok()
-        })
-        .is_some_and(|total| total > 0)
+    piv_info_has_puk(
+        &String::from_utf8_lossy(&output.stdout),
+        device_version().expect("missing device version"),
+    )
+}
+
+fn piv_info_has_puk(info: &str, version: (u8, u8, u8)) -> bool {
+    // Older firmware has a PUK but cannot report its retry metadata.
+    version < (5, 3, 0)
+        || info
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("PUK tries remaining:"))
+            .and_then(|tries| {
+                let (_, total) = tries.trim().split_once('/')?;
+                total.trim().parse::<u8>().ok()
+            })
+            .is_some_and(|total| total > 0)
+}
+
+#[test]
+fn test_piv_info_has_puk() {
+    assert!(piv_info_has_puk("PIN tries remaining: 3\n", (4, 4, 5)));
+    assert!(piv_info_has_puk("PUK tries remaining: 0/3\n", (5, 7, 0)));
+    assert!(!piv_info_has_puk("PUK tries remaining: 0/0\n", (5, 7, 0)));
+    assert!(!piv_info_has_puk("Biometrics: Not configured\n", (5, 7, 0)));
 }
 
 pub fn piv_pin() -> &'static str {

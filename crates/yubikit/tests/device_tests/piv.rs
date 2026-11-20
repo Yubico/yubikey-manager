@@ -35,7 +35,7 @@ fn fips_piv_puk() -> PivPin {
 
 /// Get the effective PIN (FIPS keys require changing from default).
 fn effective_piv_pin() -> PivPin {
-    if device_is_fips() {
+    if device_is_fips_capable(Capability::PIV) {
         fips_piv_pin()
     } else {
         default_piv_pin()
@@ -54,7 +54,7 @@ const FIPS_MGMT_KEY: [u8; 16] = [
 
 /// Get the effective management key.
 fn effective_management_key(session: &PivSession<PcscSmartCardConnection>) -> ManagementKey {
-    if device_is_fips() {
+    if device_is_fips_capable(Capability::PIV) {
         ManagementKey::new(yubikit::piv::ManagementKeyType::Aes128, &FIPS_MGMT_KEY).unwrap()
     } else {
         default_management_key_for(session)
@@ -65,7 +65,7 @@ fn effective_management_key(session: &PivSession<PcscSmartCardConnection>) -> Ma
 /// FIPS requires all defaults to be changed before crypto operations are allowed,
 /// and PINs must be at least 8 characters.
 fn fips_init_piv(session: &mut PivSession<PcscSmartCardConnection>) {
-    if !device_is_fips() {
+    if !device_is_fips_capable(Capability::PIV) {
         return;
     }
     session
@@ -112,9 +112,10 @@ fn reset_piv(
 }
 
 fn piv_has_puk(session: &mut PivSession<PcscSmartCardConnection>) -> bool {
-    session
-        .get_puk_metadata()
-        .is_ok_and(|meta| meta.total_attempts > 0)
+    session.version() < Version(5, 3, 0)
+        || session
+            .get_puk_metadata()
+            .is_ok_and(|meta| meta.total_attempts > 0)
 }
 
 #[rstest]
@@ -849,7 +850,7 @@ fn test_piv_pin_management(#[case] tc: TestConnection) {
     let mut session = reset_piv(session);
 
     let current_pin = effective_piv_pin();
-    let current_puk = if device_is_fips() {
+    let current_puk = if device_is_fips_capable(Capability::PIV) {
         fips_piv_puk()
     } else {
         PivPin::new("12345678").unwrap()
@@ -861,29 +862,26 @@ fn test_piv_pin_management(#[case] tc: TestConnection) {
         .change_pin(&current_pin, &new_pin)
         .expect("change_pin");
 
-    // Old PIN should fail
-    assert!(session.verify_pin(&current_pin).is_err());
-
-    // New PIN should work
-    session.verify_pin(&new_pin).expect("verify new PIN");
-
-    // Wrong PIN should decrement attempts
+    // On firmware before 5.3, the retry counter can only be read before verifying the PIN.
+    drop(session);
+    let mut session = open_piv_session(&tc);
     let attempts_before = session.get_pin_attempts().expect("get_pin_attempts");
-    let wrong = PivPin::new("99887766").unwrap();
-    assert!(session.verify_pin(&wrong).is_err());
+    assert!(session.verify_pin(&current_pin).is_err());
     let attempts = session.get_pin_attempts().expect("get_pin_attempts");
     assert!(
         attempts < attempts_before,
         "attempts should have decreased from {attempts_before}"
     );
 
+    session.verify_pin(&new_pin).expect("verify new PIN");
+
     if !piv_has_puk(&mut session) {
         return;
     }
 
     // Block PIN by exhausting retries
-    for _ in 0..attempts {
-        let _ = session.verify_pin(&wrong);
+    for _ in 0..attempts_before {
+        let _ = session.verify_pin(&current_pin);
     }
     assert!(
         session.verify_pin(&new_pin).is_err(),
@@ -957,7 +955,7 @@ fn test_piv_management_key_and_metadata(#[case] tc: TestConnection) {
     let mk_meta = session
         .get_management_key_metadata()
         .expect("get_management_key_metadata");
-    if !device_is_fips() {
+    if !device_is_fips_capable(Capability::PIV) {
         assert!(mk_meta.default_value, "should be default after reset");
     } else {
         assert!(!mk_meta.default_value, "FIPS key was changed from default");
@@ -1295,7 +1293,7 @@ fn test_piv_pin_policy_never(#[case] tc: TestConnection) {
     skip_if_needed!(tc);
     require_capability!(Capability::PIV);
     require_version!(Version(4, 0, 0));
-    if device_is_fips_capable(Capability::PIV) {
+    if device_is_fips_capable(Capability::PIV) || device_is_yk4_fips() {
         skip!("PinPolicy::Never is not supported by FIPS-capable PIV");
     }
 

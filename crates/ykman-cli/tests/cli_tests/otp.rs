@@ -1,4 +1,4 @@
-use super::common::{otp_delete_slot2, skip_before_version, ykman_dev};
+use super::common::{device_info, otp_delete_slot2, skip_before_version, ykman_dev};
 use predicates::prelude::*;
 
 #[test]
@@ -312,6 +312,12 @@ fn test_otp_ndef() {
     require_capability!("OTP");
     if skip_before_version((4, 1, 0), "OTP device info") {
         return;
+    }
+    if !device_info()
+        .lines()
+        .any(|line| line.starts_with("NFC transport is "))
+    {
+        skip!("OTP NDEF requires NFC support");
     }
     otp_delete_slot2();
 
