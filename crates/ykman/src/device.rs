@@ -38,6 +38,36 @@ pub trait DeviceSource {
     fn is_service(&self) -> bool {
         false
     }
+
+    /// Whether smart card readers are also accessed directly, alongside the
+    /// service. Used in remote sessions, where the service cannot see readers
+    /// redirected from the client device.
+    fn local_ccid(&self) -> bool {
+        false
+    }
+
+    /// List only the devices provided by the service, without any directly
+    /// accessed readers. Same as [`DeviceSource::list_devices`] by default.
+    fn list_service_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError> {
+        self.list_devices()
+    }
+}
+
+/// Combine service devices with directly accessed CCID devices, dropping
+/// local devices with a serial number the service already provides.
+pub fn merge_local_ccid<T>(
+    service: Vec<T>,
+    local: Vec<T>,
+    serial: impl Fn(&T) -> Option<u32>,
+) -> Vec<T> {
+    let serials: std::collections::HashSet<u32> = service.iter().filter_map(&serial).collect();
+    let mut merged = service;
+    merged.extend(
+        local
+            .into_iter()
+            .filter(|device| serial(device).is_none_or(|s| !serials.contains(&s))),
+    );
+    merged
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +204,55 @@ impl DeviceSource for RpcDeviceSource {
     }
 }
 
+/// Device source for remote (RDP or Citrix) sessions: all devices of the
+/// ykman-svc service, plus CCID devices on smart card readers redirected into
+/// the session, which only processes in the session itself can use.
+#[cfg(all(target_os = "windows", feature = "hardware"))]
+pub struct RemoteSessionDeviceSource {
+    service: RpcDeviceSource,
+}
+
+#[cfg(all(target_os = "windows", feature = "hardware"))]
+impl DeviceSource for RemoteSessionDeviceSource {
+    fn list_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError> {
+        use yubikit::management::UsbInterface;
+        use yubikit::platform::device::list_devices;
+
+        let service = self.service.list_devices()?;
+        let local = match list_devices(UsbInterface::CCID) {
+            Ok(local) => local
+                .into_iter()
+                .map(|d| Box::new(d) as Box<dyn YubiKeyDevice>)
+                .collect(),
+            Err(e) => {
+                log::warn!("Failed to list smart card readers in remote session: {e}");
+                Vec::new()
+            }
+        };
+        Ok(merge_local_ccid(service, local, |d| d.info().serial))
+    }
+
+    fn select_fido(
+        &mut self,
+        cancel: Option<&dyn Fn() -> bool>,
+    ) -> Result<Box<dyn YubiKeyDevice>, DeviceError> {
+        // Touch selection uses FIDO HID, which only the service provides.
+        self.service.select_fido(cancel)
+    }
+
+    fn is_service(&self) -> bool {
+        true
+    }
+
+    fn local_ccid(&self) -> bool {
+        true
+    }
+
+    fn list_service_devices(&mut self) -> Result<Vec<Box<dyn YubiKeyDevice>>, DeviceError> {
+        self.service.list_devices()
+    }
+}
+
 fn rpc_to_device_error(e: RpcCallError) -> DeviceError {
     log::warn!("Service error: {e}");
     DeviceError::Transport(Box::new(e))
@@ -187,7 +266,10 @@ fn rpc_poisoned_device_error() -> DeviceError {
 
 /// Get the best available device source for the current platform.
 ///
-/// On Windows, attempts to connect to the ykman-svc Named Pipe service.
+/// On Windows, attempts to connect to the ykman-svc Named Pipe service. In
+/// remote (RDP or Citrix) sessions, smart card readers redirected into the
+/// session are additionally accessed directly, since the service cannot use
+/// them.
 /// On other platforms in debug builds, attempts a Unix socket connection.
 /// Falls back to direct local device access on failure or when the service
 /// is unavailable. When the `direct` feature is disabled, returns
@@ -198,7 +280,13 @@ pub fn get_device_source() -> Box<dyn DeviceSource> {
         match RpcClient::connect_pipe() {
             Ok(client) => {
                 log::debug!("Connected to ykman-svc service");
-                return Box::new(RpcDeviceSource::new(client));
+                let service = RpcDeviceSource::new(client);
+                #[cfg(feature = "hardware")]
+                if crate::rpc::windows::is_remote_session() {
+                    log::info!("Remote session, also accessing smart card readers directly");
+                    return Box::new(RemoteSessionDeviceSource { service });
+                }
+                return Box::new(service);
             }
             Err(e) => {
                 log::debug!("ykman-svc not available ({e}), using direct access");
@@ -234,6 +322,22 @@ mod tests {
     use serde_json::json;
 
     use super::{DeviceSource, RpcDeviceSource};
+
+    #[test]
+    fn merge_local_ccid_prefers_service_devices() {
+        let service = vec![(Some(1), "svc"), (None, "svc-no-serial")];
+        let local = vec![(Some(1), "local"), (Some(2), "local"), (None, "local")];
+        let merged = super::merge_local_ccid(service, local, |d| d.0);
+        assert_eq!(
+            merged,
+            vec![
+                (Some(1), "svc"),
+                (None, "svc-no-serial"),
+                (Some(2), "local"),
+                (None, "local")
+            ]
+        );
+    }
 
     #[cfg(not(target_os = "windows"))]
     #[test]

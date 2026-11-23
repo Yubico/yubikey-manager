@@ -10,6 +10,13 @@ This service allows Yubico client applications such as the ykman CLI to access
 the FIDO functionality of a YubiKey on Windows without requiring running them
 as administrator.
 
+Clients in remote sessions (Remote Desktop or Citrix HDX) still use the service
+for devices attached to the host, but access smart card readers redirected from
+the client device directly. A service in session 0 cannot use readers
+redirected into a remote session. FIDO over a redirected reader (FIDO over
+CCID) is blocked by the client device unless the Remote Desktop or Citrix
+client is itself running as administrator on that device.
+
 ## Installation
 
 For production, use the signed Windows installers provided by the client

@@ -28,6 +28,7 @@
  ** HSM Auth: Restore "--management-password" for "hsmauth credentials change-password".
  ** Windows: Link the C runtime statically so ykman and the service no longer require the Visual C++ Redistributable.
  ** Windows: The installer no longer deletes unrelated files in a custom installation directory.
+ ** Windows: In Remote Desktop and Citrix sessions, access smart card readers redirected from the client device directly, since the service cannot use them.
 
 * Version 6.0.0-beta.0 (released 2026-11-03)
  ** Initial beta of the Rust rewrite, with a native CLI and Rust-backed Python bindings.
