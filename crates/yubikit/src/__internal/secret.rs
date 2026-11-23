@@ -35,19 +35,6 @@ impl<T: Zeroize> SecretValue<T> {
     pub fn expose_secret_mut(&mut self) -> &mut T {
         &mut self.0
     }
-
-    /// Consume the wrapper and return the inner value.
-    ///
-    /// The caller takes responsibility for zeroizing the value.
-    #[allow(dead_code)]
-    pub fn into_inner(self) -> T {
-        // Use ManuallyDrop to prevent ZeroizeOnDrop from running,
-        // since we're transferring ownership to the caller.
-        let md = std::mem::ManuallyDrop::new(self);
-        // Safety: we take the inner value and forget the wrapper.
-        // The caller is now responsible for zeroization.
-        unsafe { std::ptr::read(&md.0) }
-    }
 }
 
 impl<T: Zeroize> fmt::Debug for SecretValue<T> {
@@ -93,13 +80,6 @@ mod tests {
     fn test_expose_secret() {
         let secret = SecretValue::new(vec![1, 2, 3]);
         assert_eq!(secret.expose_secret(), &vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn test_into_inner() {
-        let secret = SecretValue::new(vec![4, 5, 6]);
-        let inner = secret.into_inner();
-        assert_eq!(inner, vec![4, 5, 6]);
     }
 
     #[test]

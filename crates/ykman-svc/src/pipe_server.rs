@@ -83,6 +83,7 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
     impl Drop for PipeHandle {
         fn drop(&mut self) {
             if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE {
+                // SAFETY: The handle is owned by `self` and not closed elsewhere.
                 unsafe { CloseHandle(self.0) };
             }
         }
@@ -107,6 +108,8 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
     impl Drop for LocalSecurityDescriptor {
         fn drop(&mut self) {
             if !self.0.is_null() {
+                // SAFETY: The descriptor was allocated with LocalAlloc by
+                // ConvertStringSecurityDescriptorToSecurityDescriptorW.
                 unsafe { LocalFree(self.0 as *mut core::ffi::c_void) };
             }
         }
@@ -121,32 +124,42 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         impl Drop for EventHandle {
             fn drop(&mut self) {
                 if !self.0.is_null() {
+                    // SAFETY: The event is owned by `self` and not closed elsewhere.
                     unsafe { CloseHandle(self.0) };
                 }
             }
         }
 
+        // SAFETY: Null arguments select default security and no name.
         let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
         if event.is_null() {
             log::error!("CreateEventW failed: {}", std::io::Error::last_os_error());
             return false;
         }
         let event = EventHandle(event);
+        // SAFETY: OVERLAPPED is a plain C struct of integers and pointers,
+        // for which all-zero is a valid value.
         let mut overlapped = unsafe { std::mem::zeroed::<OVERLAPPED>() };
         overlapped.hEvent = event.0;
 
+        // SAFETY: `handle` is an overlapped pipe handle; `overlapped` stays
+        // alive until the operation completes or is cancelled below.
         let connected = unsafe { ConnectNamedPipe(handle, &mut overlapped) };
         if connected != 0 {
             return true;
         }
 
+        // SAFETY: Plain FFI call without arguments.
         match unsafe { GetLastError() } {
             ERROR_PIPE_CONNECTED => true,
             ERROR_IO_PENDING => {
                 while !stop.load(Ordering::Relaxed) {
+                    // SAFETY: `event` is a valid event handle.
                     match unsafe { WaitForSingleObject(event.0, 100) } {
                         WAIT_OBJECT_0 => {
                             let mut transferred = 0;
+                            // SAFETY: `overlapped` is the structure passed to
+                            // ConnectNamedPipe, and the operation has signalled.
                             let ok = unsafe {
                                 GetOverlappedResult(handle, &mut overlapped, &mut transferred, 0)
                             };
@@ -169,6 +182,9 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
                         }
                     }
                 }
+                // SAFETY: `overlapped` is the structure passed to
+                // ConnectNamedPipe; waiting for the result ensures the kernel
+                // is done with it before it goes out of scope.
                 unsafe {
                     CancelIoEx(handle, &mut overlapped);
                     let mut transferred = 0;
@@ -204,6 +220,7 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         .chain(std::iter::once(0))
         .collect();
     let mut sd_ptr: *mut SECURITY_DESCRIPTOR = std::ptr::null_mut();
+    // SAFETY: `sddl` is NUL-terminated and `sd_ptr` is a valid out-pointer.
     let ok = unsafe {
         ConvertStringSecurityDescriptorToSecurityDescriptorW(
             sddl.as_ptr(),
@@ -230,6 +247,8 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
 
     while !stop.load(Ordering::Relaxed) {
         // Create a new pipe instance
+        // SAFETY: `pipe_name_w` is NUL-terminated and `sa_ptr` is either null
+        // or points to `sa`, which outlives the call.
         let handle = unsafe {
             CreateNamedPipeW(
                 pipe_name_w.as_ptr(),
@@ -276,8 +295,8 @@ fn run_named_pipe_server(manager: Arc<DeviceManager>, stop: &AtomicBool) {
         let handle_addr = handle.into_raw_addr();
         std::thread::spawn(move || {
             let handle = handle_addr as *mut core::ffi::c_void;
-            // SAFETY: handle is a valid pipe handle that we own exclusively in this thread.
-            // ClientSession owns all I/O for the endpoint.
+            // SAFETY: `handle` is a valid pipe handle whose ownership was
+            // released by `into_raw_addr` and is taken over here.
             let pipe = unsafe { OwnedHandle::from_raw_handle(handle) };
             let io = match named_pipe_io::NamedPipeIo::new(pipe) {
                 Ok(io) => io,
@@ -346,6 +365,7 @@ mod named_pipe_io {
             let handle = self.writer.pipe().as_raw_handle() as HANDLE;
             // Disconnecting makes any subsequent read fail immediately, and
             // cancelling aborts a read that is already pending.
+            // SAFETY: `handle` is a valid pipe handle kept alive by `self`.
             unsafe {
                 DisconnectNamedPipe(handle);
                 CancelIoEx(handle, std::ptr::null());

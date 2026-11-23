@@ -37,6 +37,8 @@ pub fn client_service() -> Result<WindowsService, std::io::Error> {
     use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName;
 
     let mut length = 0;
+    // SAFETY: With a null buffer and length 0, the call only writes the
+    // required length to `length`.
     let status = unsafe { GetCurrentPackageFullName(&mut length, std::ptr::null_mut()) };
     if status == APPMODEL_ERROR_NO_PACKAGE {
         return Ok(WindowsService::Shared);
@@ -45,6 +47,7 @@ pub fn client_service() -> Result<WindowsService, std::io::Error> {
         return Err(std::io::Error::from_raw_os_error(status as i32));
     }
     let mut name = vec![0u16; length as usize];
+    // SAFETY: `name` is a writable buffer of `length` UTF-16 units.
     let status = unsafe { GetCurrentPackageFullName(&mut length, name.as_mut_ptr()) };
     if status != 0 {
         return Err(std::io::Error::from_raw_os_error(status as i32));
@@ -86,6 +89,8 @@ fn wts_client_protocol() -> Option<u16> {
 
     let mut buffer = std::ptr::null_mut();
     let mut size = 0;
+    // SAFETY: The out-pointers are valid for writes; the returned buffer is
+    // freed below with `WTSFreeMemory`.
     let ok = unsafe {
         WTSQuerySessionInformationW(
             WTS_CURRENT_SERVER_HANDLE,
@@ -98,8 +103,10 @@ fn wts_client_protocol() -> Option<u16> {
     if ok == 0 || buffer.is_null() {
         return None;
     }
+    // SAFETY: `buffer` holds `size` bytes, which is checked to fit a u16.
     let protocol = (size as usize >= size_of::<u16>())
         .then(|| unsafe { std::ptr::read_unaligned(buffer as *const u16) });
+    // SAFETY: `buffer` was allocated by `WTSQuerySessionInformationW`.
     unsafe { WTSFreeMemory(buffer.cast()) };
     protocol
 }
@@ -122,6 +129,8 @@ fn citrix_active_protocol() -> Option<u32> {
         "wfapi.dll"
     };
     let name: Vec<u16> = dll.encode_utf16().chain(Some(0)).collect();
+    // SAFETY: `name` is NUL-terminated and the search is restricted to
+    // System32.
     let module = unsafe {
         LoadLibraryExW(
             name.as_ptr(),
@@ -132,11 +141,18 @@ fn citrix_active_protocol() -> Option<u32> {
     if module.is_null() {
         return None;
     }
+    // SAFETY: `module` is a valid module handle and the name is NUL-terminated.
     let protocol =
         unsafe { GetProcAddress(module, c"WFGetActiveProtocol".as_ptr().cast()) }.map(|proc| {
+            // SAFETY: WFGetActiveProtocol is documented as
+            // `DWORD WINAPI WFGetActiveProtocol(DWORD SessionId)`, which
+            // matches `WfGetActiveProtocol`.
             let get_active_protocol: WfGetActiveProtocol = unsafe { std::mem::transmute(proc) };
+            // SAFETY: The function takes a session id and has no other
+            // preconditions. `module` is still loaded.
             unsafe { get_active_protocol(WF_CURRENT_SESSION) }
         });
+    // SAFETY: `module` was returned by `LoadLibraryExW` and is not used again.
     unsafe { FreeLibrary(module) };
     protocol
 }

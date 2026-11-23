@@ -41,6 +41,7 @@ const U2F_PIN_MIN_LENGTH: usize = 6;
 const U2F_PIN_MAX_LENGTH: usize = 32;
 const FIDO_WINDOWS_ADMIN_MESSAGE: &str =
     "A YubiKey was detected, but FIDO access on Windows requires running as Administrator.";
+#[cfg(all(target_os = "windows", feature = "hardware"))]
 const FIDO_REMOTE_CLIENT_ADMIN_MESSAGE: &str = "A YubiKey was detected on a smart card reader \
      redirected from the remote client device, but FIDO access was denied. Run the Remote \
      Desktop or Citrix client on that device as Administrator.";

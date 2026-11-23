@@ -77,11 +77,10 @@ extern "C" fn print_skip_summary() {
 fn record_skip() {
     static REGISTER: Once = Once::new();
     SKIP_COUNT.fetch_add(1, Ordering::Relaxed);
-    REGISTER.call_once(|| unsafe {
-        unsafe extern "C" {
-            fn atexit(cb: extern "C" fn()) -> i32;
-        }
-        let _ = atexit(print_skip_summary);
+    REGISTER.call_once(|| {
+        // SAFETY: `print_skip_summary` is an `extern "C" fn` with no arguments, which is
+        // what `atexit` expects.
+        unsafe { libc::atexit(print_skip_summary) };
     });
 }
 

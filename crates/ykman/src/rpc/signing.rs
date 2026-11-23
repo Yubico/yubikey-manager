@@ -96,12 +96,15 @@ fn verify_authenticode(path: &Path) -> Result<(), SigningError> {
     // INVALID_HANDLE_VALUE means "no parent window" — verification runs silently.
     let hwnd = -1isize as windows_sys::Win32::Foundation::HWND;
 
+    // SAFETY: `trust_data` and `file_info` are fully initialized and outlive
+    // both calls, and `path_w` outlives `file_info`.
     let status =
         unsafe { WinVerifyTrust(hwnd, &mut action_id, &mut trust_data as *mut _ as *mut _) };
 
     // Free the state data allocated by WTD_STATEACTION_VERIFY.
     if !trust_data.hWVTStateData.is_null() {
         trust_data.dwStateAction = WTD_STATEACTION_CLOSE;
+        // SAFETY: Same as above, `hWVTStateData` was set by the previous call.
         unsafe { WinVerifyTrust(hwnd, &mut action_id, &mut trust_data as *mut _ as *mut _) };
     }
 
@@ -124,6 +127,7 @@ fn get_process_image_path(pid: u32) -> Result<PathBuf, SigningError> {
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
     };
 
+    // SAFETY: Plain FFI call with value arguments.
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if handle.is_null() {
         let error = std::io::Error::last_os_error();
@@ -140,7 +144,10 @@ fn get_process_image_path(pid: u32) -> Result<PathBuf, SigningError> {
 
     let mut buf = [0u16; 1024];
     let mut size = buf.len() as u32;
+    // SAFETY: `handle` is a valid process handle and `size` holds the
+    // capacity of `buf` in UTF-16 units.
     let ok = unsafe { QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut size) };
+    // SAFETY: `handle` was returned by `OpenProcess` and is not used again.
     unsafe { CloseHandle(handle) };
 
     if ok == 0 {
@@ -174,11 +181,14 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
     impl Drop for ServiceHandle {
         fn drop(&mut self) {
             if !self.0.is_null() {
+                // SAFETY: The handle was returned by the service control
+                // manager and is owned by this struct.
                 unsafe { CloseServiceHandle(self.0) };
             }
         }
     }
 
+    // SAFETY: Null arguments select the local machine and default database.
     let manager = unsafe { OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT) };
     if manager.is_null() {
         return Err(SigningError(format!(
@@ -192,6 +202,8 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
+    // SAFETY: `manager` is a valid handle and `service_name_w` is
+    // NUL-terminated.
     let service = unsafe {
         OpenServiceW(
             manager.0,
@@ -207,8 +219,12 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
     }
     let service = ServiceHandle(service);
 
+    // SAFETY: SERVICE_STATUS_PROCESS is a plain C struct of integers, for
+    // which all-zero is a valid value.
     let mut status = unsafe { std::mem::zeroed::<SERVICE_STATUS_PROCESS>() };
     let mut bytes_needed = 0;
+    // SAFETY: `service` is a valid handle and `status` is a writable buffer
+    // of the size passed.
     let ok = unsafe {
         QueryServiceStatusEx(
             service.0,
@@ -232,9 +248,12 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
     }
 
     let mut config_bytes_needed = 0;
+    // SAFETY: With a null buffer and size 0, the call only writes the
+    // required size to `config_bytes_needed`.
     let ok = unsafe {
         QueryServiceConfigW(service.0, std::ptr::null_mut(), 0, &mut config_bytes_needed)
     };
+    // SAFETY: Plain FFI call without arguments.
     if ok != 0 || unsafe { GetLastError() } != ERROR_INSUFFICIENT_BUFFER {
         return Err(SigningError(format!(
             "QueryServiceConfigW({service_name}) sizing failed: {}",
@@ -242,7 +261,12 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
         )));
     }
 
-    let mut config = vec![0u8; config_bytes_needed as usize];
+    // The buffer holds a QUERY_SERVICE_CONFIGW followed by the strings it
+    // points to, so it must be aligned for the struct.
+    const _: () = assert!(std::mem::align_of::<QUERY_SERVICE_CONFIGW>() <= 8);
+    let mut config = vec![0u64; (config_bytes_needed as usize).div_ceil(8)];
+    // SAFETY: `service` is a valid handle and `config` is a writable buffer of
+    // at least `config_bytes_needed` bytes.
     let ok = unsafe {
         QueryServiceConfigW(
             service.0,
@@ -258,6 +282,9 @@ fn get_service_image_path_for_pid(pid: u32) -> Result<PathBuf, SigningError> {
         )));
     }
 
+    // SAFETY: The call above filled `config` with a valid struct, whose
+    // `lpBinaryPathName` is either null or a NUL-terminated string inside
+    // `config`.
     let binary_path = unsafe {
         let ptr = (*(config.as_ptr() as *const QUERY_SERVICE_CONFIGW)).lpBinaryPathName;
         if ptr.is_null() {
@@ -318,6 +345,8 @@ fn get_signing_cert(path: &Path) -> Result<Vec<u8>, SigningError> {
 
     impl Drop for CertStore {
         fn drop(&mut self) {
+            // SAFETY: The store handle was returned by `CryptQueryObject`
+            // and is owned by this struct.
             if !self.0.is_null() && unsafe { CertCloseStore(self.0, 0) } == 0 {
                 log::warn!("CertCloseStore failed: {}", std::io::Error::last_os_error());
             }
@@ -328,6 +357,8 @@ fn get_signing_cert(path: &Path) -> Result<Vec<u8>, SigningError> {
 
     impl Drop for CryptMessage {
         fn drop(&mut self) {
+            // SAFETY: The message handle was returned by `CryptQueryObject`
+            // and is owned by this struct.
             if !self.0.is_null() && unsafe { CryptMsgClose(self.0) } == 0 {
                 log::warn!("CryptMsgClose failed: {}", std::io::Error::last_os_error());
             }
@@ -343,6 +374,8 @@ fn get_signing_cert(path: &Path) -> Result<Vec<u8>, SigningError> {
     let mut cert_store = std::ptr::null_mut();
     let mut msg = std::ptr::null_mut();
 
+    // SAFETY: `path_w` is a NUL-terminated string, and the out-pointers are
+    // valid for writes.
     let ok = unsafe {
         CryptQueryObject(
             CERT_QUERY_OBJECT_FILE,
@@ -370,16 +403,20 @@ fn get_signing_cert(path: &Path) -> Result<Vec<u8>, SigningError> {
     let cert_store = CertStore(cert_store);
     let _msg = CryptMessage(msg);
 
+    // SAFETY: `cert_store` is a valid store handle; null starts enumeration.
     let cert_ctx = unsafe { CertEnumCertificatesInStore(cert_store.0, std::ptr::null()) };
     if cert_ctx.is_null() {
         return Err(SigningError("No certificate in signed file".into()));
     }
 
+    // SAFETY: `cert_ctx` is non-null and points to a context whose encoded
+    // certificate buffer has `cbCertEncoded` bytes.
     let cert_data = unsafe {
         let ctx = &*cert_ctx;
         std::slice::from_raw_parts(ctx.pbCertEncoded, ctx.cbCertEncoded as usize).to_vec()
     };
 
+    // SAFETY: `cert_ctx` was returned by the enumeration and is not used again.
     unsafe { CertFreeCertificateContext(cert_ctx) };
 
     Ok(cert_data)

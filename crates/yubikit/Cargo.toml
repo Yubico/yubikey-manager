@@ -85,6 +85,7 @@ ecdsa.workspace = true
 elliptic-curve = { workspace = true, features = ["pkcs8", "sec1"] }
 getrandom.workspace = true
 k256.workspace = true
+libc.workspace = true
 ml-dsa.workspace = true
 ml-kem.workspace = true
 p256 = { workspace = true, features = ["ecdsa", "group-digest", "pkcs8"] }
