@@ -26,6 +26,8 @@
  ** PIV: Clear a stored management key when changing it with "--pin", and warn when it can't be cleared.
  ** HSM Auth: Restore "--derivation-password" for "hsmauth credentials derive".
  ** HSM Auth: Restore "--management-password" for "hsmauth credentials change-password".
+ ** Windows: Link the C runtime statically so ykman and the service no longer require the Visual C++ Redistributable.
+ ** Windows: The installer no longer deletes unrelated files in a custom installation directory.
 
 * Version 6.0.0-beta.0 (released 2026-11-03)
  ** Initial beta of the Rust rewrite, with a native CLI and Rust-backed Python bindings.
