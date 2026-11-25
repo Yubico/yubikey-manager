@@ -39,8 +39,6 @@ const KEEPALIVE_PROCESSING: u8 = 1;
 const KEEPALIVE_UPNEEDED: u8 = 2;
 const U2F_PIN_MIN_LENGTH: usize = 6;
 const U2F_PIN_MAX_LENGTH: usize = 32;
-const FIDO_WINDOWS_ADMIN_MESSAGE: &str =
-    "A YubiKey was detected, but FIDO access on Windows requires running as Administrator.";
 
 #[derive(Subcommand)]
 pub enum FidoAction {
@@ -431,7 +429,18 @@ fn check_fido_fallback(
 
 fn format_ctap_init_error(e: CtapError<SmartCardError>) -> Error {
     if is_windows_fido_access_denied(&e) {
-        anyhow!(FIDO_WINDOWS_ADMIN_MESSAGE)
+        let message =
+            "A YubiKey was detected, but FIDO access on Windows requires running as Administrator.";
+        // In a remote session the service is bypassed, and a redirected
+        // reader is additionally restricted by the client device.
+        #[cfg(all(target_os = "windows", feature = "hardware"))]
+        if ykman::rpc::windows::is_remote_session() {
+            return anyhow!(
+                "{message}\nIn a remote session, the remote desktop client needs Administrator \
+                 access."
+            );
+        }
+        anyhow!(message)
     } else {
         anyhow!("Failed to initialize CTAP: {e}")
     }
