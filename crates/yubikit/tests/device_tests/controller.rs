@@ -34,11 +34,10 @@ fn register_pico_cleanup(base_url: &str, port: u8) {
         }
     }
 
-    REGISTER_PICO_CLEANUP.call_once(|| unsafe {
-        unsafe extern "C" {
-            fn atexit(cb: extern "C" fn()) -> i32;
-        }
-        let _ = atexit(cleanup_pico_touch);
+    REGISTER_PICO_CLEANUP.call_once(|| {
+        // SAFETY: `cleanup_pico_touch` is an `extern "C" fn` with no arguments, which is
+        // what `atexit` expects.
+        unsafe { libc::atexit(cleanup_pico_touch) };
     });
 }
 

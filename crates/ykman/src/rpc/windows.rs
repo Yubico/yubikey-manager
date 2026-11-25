@@ -37,6 +37,8 @@ pub fn client_service() -> Result<WindowsService, std::io::Error> {
     use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName;
 
     let mut length = 0;
+    // SAFETY: With a null buffer and length 0, the call only writes the
+    // required length to `length`.
     let status = unsafe { GetCurrentPackageFullName(&mut length, std::ptr::null_mut()) };
     if status == APPMODEL_ERROR_NO_PACKAGE {
         return Ok(WindowsService::Shared);
@@ -45,6 +47,7 @@ pub fn client_service() -> Result<WindowsService, std::io::Error> {
         return Err(std::io::Error::from_raw_os_error(status as i32));
     }
     let mut name = vec![0u16; length as usize];
+    // SAFETY: `name` is a writable buffer of `length` UTF-16 units.
     let status = unsafe { GetCurrentPackageFullName(&mut length, name.as_mut_ptr()) };
     if status != 0 {
         return Err(std::io::Error::from_raw_os_error(status as i32));

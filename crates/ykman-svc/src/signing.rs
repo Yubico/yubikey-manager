@@ -15,6 +15,8 @@ pub fn verify_client(
     use ykman::rpc::signing::{SigningError, verify_peer_by_pid};
 
     let mut client_pid: u32 = 0;
+    // SAFETY: `pipe_handle` is an open pipe handle and `client_pid` is a
+    // valid out-pointer.
     let ok = unsafe { GetNamedPipeClientProcessId(pipe_handle, &mut client_pid) };
     if ok == 0 {
         return Err(SigningError(format!(

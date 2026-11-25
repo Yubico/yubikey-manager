@@ -70,6 +70,7 @@ winresource.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
+libc.workspace = true
 predicates.workspace = true
 portable-pty.workspace = true
 rstest.workspace = true

@@ -25,11 +25,10 @@ extern "C" fn print_skip_summary() {
 pub fn record_skip() {
     static REGISTER: Once = Once::new();
     SKIP_COUNT.fetch_add(1, Ordering::Relaxed);
-    REGISTER.call_once(|| unsafe {
-        unsafe extern "C" {
-            fn atexit(cb: extern "C" fn()) -> i32;
-        }
-        let _ = atexit(print_skip_summary);
+    REGISTER.call_once(|| {
+        // SAFETY: `print_skip_summary` is an `extern "C" fn` with no arguments, which is
+        // what `atexit` expects.
+        unsafe { libc::atexit(print_skip_summary) };
     });
 }
 
@@ -379,11 +378,10 @@ fn register_pico_cleanup_if_configured() {
         }
     }
 
-    REGISTER_PICO_CLEANUP.call_once(|| unsafe {
-        unsafe extern "C" {
-            fn atexit(cb: extern "C" fn()) -> i32;
-        }
-        let _ = atexit(cleanup_pico_touch);
+    REGISTER_PICO_CLEANUP.call_once(|| {
+        // SAFETY: `cleanup_pico_touch` is an `extern "C" fn` with no arguments, which is
+        // what `atexit` expects.
+        unsafe { libc::atexit(cleanup_pico_touch) };
     });
 }
 

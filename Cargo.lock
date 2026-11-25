@@ -3548,6 +3548,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hex",
  "jiff",
+ "libc",
  "log",
  "p256",
  "p384",

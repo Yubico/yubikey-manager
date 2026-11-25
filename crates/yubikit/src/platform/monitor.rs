@@ -204,15 +204,24 @@ impl Shutdown {
             let tid = self.win_thread_id.load(Ordering::SeqCst);
             if tid != 0 {
                 use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
+                // SAFETY: Plain FFI call with value arguments; a stale thread
+                // id only makes the call fail.
                 unsafe { PostThreadMessageW(tid, WM_QUIT, 0, 0) };
             }
         }
 
-        // Stop the macOS HID run loop.
+        // Stop the macOS HID run loop. The lock is held across the call so
+        // the watcher thread cannot exit (and release the run loop) while it
+        // is being stopped.
         #[cfg(all(feature = "hid", target_os = "macos"))]
-        if let Some(rl) = *self.macos_runloop.lock().unwrap() {
-            use core_foundation_sys::runloop::{CFRunLoopRef, CFRunLoopStop};
-            unsafe { CFRunLoopStop(rl as CFRunLoopRef) };
+        {
+            let run_loop = self.macos_runloop.lock().unwrap();
+            if let Some(rl) = *run_loop {
+                use core_foundation_sys::runloop::{CFRunLoopRef, CFRunLoopStop};
+                // SAFETY: The slot is only set while the watcher thread, which
+                // owns the run loop, is alive and holds a reference to it.
+                unsafe { CFRunLoopStop(rl as CFRunLoopRef) };
+            }
         }
     }
 }
@@ -1132,6 +1141,8 @@ mod windows_pcsc {
         struct Context(usize);
         impl Drop for Context {
             fn drop(&mut self) {
+                // SAFETY: The context was established by `reader_device_instances`
+                // and is released exactly once here.
                 let status = unsafe { SCardReleaseContext(self.0) };
                 if status != 0 {
                     log::debug!("Releasing smart card context failed: {status:#x}");
@@ -1150,6 +1161,8 @@ mod windows_pcsc {
         fn instance_id(context: usize, name: &str) -> std::io::Result<String> {
             let name = wide(name);
             let mut len = 0;
+            // SAFETY: `name` is NUL-terminated; a null buffer requests the
+            // required length, written to `len`.
             check(unsafe {
                 SCardGetReaderDeviceInstanceIdW(
                     context,
@@ -1159,6 +1172,7 @@ mod windows_pcsc {
                 )
             })?;
             let mut instance = vec![0; len as usize];
+            // SAFETY: `instance` is a writable buffer of `len` UTF-16 units.
             check(unsafe {
                 SCardGetReaderDeviceInstanceIdW(
                     context,
@@ -1178,6 +1192,7 @@ mod windows_pcsc {
         }
 
         let mut context = 0;
+        // SAFETY: Reserved arguments are null and `context` is a valid out-pointer.
         check(unsafe {
             SCardEstablishContext(
                 SCARD_SCOPE_USER,
@@ -1201,16 +1216,23 @@ mod windows_pcsc {
     ) -> LRESULT {
         if msg == WM_DEVICECHANGE && wparam == DBT_DEVICEREMOVECOMPLETE as WPARAM {
             let header = lparam as *const DEV_BROADCAST_HDR;
+            // SAFETY: For WM_DEVICECHANGE with DBT_DEVICEREMOVECOMPLETE, a
+            // non-null lparam points to a DEV_BROADCAST_HDR supplied by the
+            // system for the duration of the call.
             if !header.is_null()
                 && unsafe { (*header).dbch_devicetype } == DBT_DEVTYP_DEVICEINTERFACE
             {
                 let broadcast = lparam as *const DEV_BROADCAST_DEVICEINTERFACE_W;
                 let offset = std::mem::offset_of!(DEV_BROADCAST_DEVICEINTERFACE_W, dbcc_name);
+                // SAFETY: `header` was checked to be non-null above.
                 let size = unsafe { (*header).dbch_size } as usize;
                 if size < offset + std::mem::size_of::<u16>() {
                     log::debug!("Smart card removal notification has no interface path");
                     return 1;
                 }
+                // SAFETY: The device type says this is a
+                // DEV_BROADCAST_DEVICEINTERFACE_W of `size` bytes, so the
+                // name occupies the `size - offset` bytes after `dbcc_name`.
                 let name = unsafe {
                     let start = std::ptr::addr_of!((*broadcast).dbcc_name).cast::<u16>();
                     std::slice::from_raw_parts(start, (size - offset) / 2)
@@ -1233,11 +1255,15 @@ mod windows_pcsc {
             }
             return 1;
         }
+        // SAFETY: Forwarding the message arguments exactly as received.
         unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
     }
 
     /// Create a message-only window registered for reader notifications.
     fn register_notifications() -> Option<(HWND, *mut core::ffi::c_void)> {
+        // SAFETY: All pointer arguments refer to locals that outlive the
+        // calls; zeroed WNDCLASSW and DEV_BROADCAST_DEVICEINTERFACE_W are
+        // valid values; handles are only used while valid.
         unsafe {
             let hinstance = GetModuleHandleW(std::ptr::null());
             let class_name = wide("YubiKitPcscMonitor");
@@ -1245,6 +1271,7 @@ mod windows_pcsc {
             wc.lpfnWndProc = Some(wndproc);
             wc.hInstance = hinstance;
             wc.lpszClassName = class_name.as_ptr();
+            // Fails harmlessly if the class is already registered.
             RegisterClassW(&wc);
 
             let hwnd = CreateWindowExW(
@@ -1291,6 +1318,8 @@ mod windows_pcsc {
         let mut next_poll = Instant::now() + POLL_INTERVAL;
         while !shutdown.is_stopped() {
             let timeout = next_poll.saturating_duration_since(Instant::now());
+            // SAFETY: No handles are waited on, and `msg` is a valid local for
+            // the message calls to fill in.
             unsafe {
                 MsgWaitForMultipleObjects(
                     0,
@@ -1314,6 +1343,8 @@ mod windows_pcsc {
         }
 
         if let Some((hwnd, notify)) = registration {
+            // SAFETY: Both handles were returned by `register_notifications`
+            // and are released once, on the thread that created them.
             unsafe {
                 UnregisterDeviceNotification(notify);
                 DestroyWindow(hwnd);
@@ -1367,6 +1398,7 @@ fn spawn_hid_watcher(tx: mpsc::Sender<Change>, shutdown: Arc<Shutdown>) -> JoinH
                 revents: 0,
             };
             // Wake at least once a second to re-check the shutdown flag.
+            // SAFETY: `pollfd` is a valid array of one entry.
             let result = unsafe { libc::poll(&mut pollfd, 1, 1000) };
             if result < 0 {
                 log::debug!(
@@ -1437,9 +1469,9 @@ mod windows_hid {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE, DBT_DEVTYP_DEVICEINTERFACE,
         DEV_BROADCAST_DEVICEINTERFACE_W, DEVICE_NOTIFY_WINDOW_HANDLE, DefWindowProcW,
-        DispatchMessageW, GetMessageW, HWND_MESSAGE, MSG, PM_NOREMOVE, PeekMessageW,
-        RegisterClassW, RegisterDeviceNotificationW, TranslateMessage, WM_DEVICECHANGE, WM_USER,
-        WNDCLASSW,
+        DestroyWindow, DispatchMessageW, GetMessageW, HWND_MESSAGE, MSG, PM_NOREMOVE, PeekMessageW,
+        RegisterClassW, RegisterDeviceNotificationW, TranslateMessage,
+        UnregisterDeviceNotification, WM_DEVICECHANGE, WM_USER, WNDCLASSW,
     };
 
     thread_local! {
@@ -1468,12 +1500,17 @@ mod windows_hid {
             });
             return 0;
         }
+        // SAFETY: Forwarding the message arguments exactly as received.
         unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
     }
 
     pub(super) fn run(tx: mpsc::Sender<Change>, shutdown: &Shutdown) {
         SENDER.with(|sender| *sender.borrow_mut() = Some(tx));
 
+        // SAFETY: All pointer arguments refer to locals that outlive the
+        // calls; zeroed WNDCLASSW, DEV_BROADCAST_DEVICEINTERFACE_W and MSG are
+        // valid values; the window and notification handles are released on
+        // every exit path below, on the thread that created them.
         unsafe {
             let hinstance = GetModuleHandleW(std::ptr::null());
             let class_name = wide("YubiKitHidMonitor");
@@ -1482,6 +1519,7 @@ mod windows_hid {
             wc.lpfnWndProc = Some(wndproc);
             wc.hInstance = hinstance;
             wc.lpszClassName = class_name.as_ptr();
+            // Fails harmlessly if the class is already registered.
             RegisterClassW(&wc);
 
             let hwnd = CreateWindowExW(
@@ -1515,6 +1553,7 @@ mod windows_hid {
             );
             if notify.is_null() {
                 log::debug!("Failed to register for HID device notifications");
+                DestroyWindow(hwnd);
                 return;
             }
 
@@ -1532,15 +1571,17 @@ mod windows_hid {
             shutdown
                 .win_thread_id
                 .store(GetCurrentThreadId(), Ordering::SeqCst);
-            if shutdown.is_stopped() {
-                return;
+            if !shutdown.is_stopped() {
+                while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
             }
 
-            while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
+            UnregisterDeviceNotification(notify);
+            DestroyWindow(hwnd);
         }
+        SENDER.with(|sender| *sender.borrow_mut() = None);
     }
 }
 
@@ -1554,7 +1595,8 @@ mod macos_hid {
     use core_foundation_sys::base::{CFAllocatorRef, kCFAllocatorDefault};
     use core_foundation_sys::dictionary::CFDictionaryRef;
     use core_foundation_sys::runloop::{
-        CFRunLoopGetCurrent, CFRunLoopRef, CFRunLoopRun, kCFRunLoopDefaultMode,
+        CFRunLoopGetCurrent, CFRunLoopRef, CFRunLoopRunInMode, kCFRunLoopDefaultMode,
+        kCFRunLoopRunFinished,
     };
     use core_foundation_sys::string::CFStringRef;
     use std::os::raw::c_void;
@@ -1573,6 +1615,7 @@ mod macos_hid {
         device: IOHIDDeviceRef,
     );
 
+    // SAFETY: Signatures match the IOKit IOHIDManager API declarations.
     #[link(name = "IOKit", kind = "framework")]
     unsafe extern "C" {
         fn IOHIDManagerCreate(allocator: CFAllocatorRef, options: IOOptionBits) -> IOHIDManagerRef;
@@ -1619,6 +1662,9 @@ mod macos_hid {
         let tx = Box::new(tx);
         let context = (&*tx as *const mpsc::Sender<Change>) as *mut c_void;
 
+        // SAFETY: `manager` is checked for null before use and closed before
+        // this block ends; `context` points to `tx`, which outlives the run
+        // loop and hence every callback invocation.
         unsafe {
             let manager = IOHIDManagerCreate(kCFAllocatorDefault, 0);
             if manager.is_null() {
@@ -1634,12 +1680,20 @@ mod macos_hid {
             IOHIDManagerScheduleWithRunLoop(manager, run_loop, kCFRunLoopDefaultMode);
             IOHIDManagerOpen(manager, 0);
 
-            // Publish the run loop so shutdown can stop it. If a stop was
-            // requested before we got here, don't enter the run loop.
+            // Publish the run loop so shutdown can wake it. Run the loop in
+            // bounded slices and re-check the stop flag between them, so a
+            // stop that arrives before the loop is entered (when
+            // `CFRunLoopStop` is a no-op) is still noticed.
             *shutdown.macos_runloop.lock().unwrap() = Some(run_loop as usize);
-            if !shutdown.is_stopped() {
-                CFRunLoopRun();
+            while !shutdown.is_stopped() {
+                if CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, 0) == kCFRunLoopRunFinished {
+                    log::debug!("HID monitor run loop has no sources");
+                    break;
+                }
             }
+            // Taking the lock here waits for any in-progress `CFRunLoopStop`
+            // before the run loop can be torn down with the thread.
+            *shutdown.macos_runloop.lock().unwrap() = None;
 
             IOHIDManagerUnscheduleFromRunLoop(manager, run_loop, kCFRunLoopDefaultMode);
             IOHIDManagerClose(manager, 0);

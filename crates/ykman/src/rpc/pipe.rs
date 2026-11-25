@@ -7,44 +7,34 @@
 //! polling (and Windows timer-resolution latency) of `PeekNamedPipe` + sleep.
 
 use std::io::{self, Read, Write};
-use std::os::windows::io::{AsRawHandle, OwnedHandle};
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::sync::Arc;
 use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_OPERATION_ABORTED,
-    ERROR_PIPE_NOT_CONNECTED, GetLastError, HANDLE, WAIT_OBJECT_0,
+    ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_OPERATION_ABORTED, ERROR_PIPE_NOT_CONNECTED,
+    GetLastError, HANDLE, WAIT_OBJECT_0,
 };
 use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 
-struct Event(HANDLE);
-
-// SAFETY: Event handles may be used from any thread.
-unsafe impl Send for Event {}
-
-impl Event {
-    fn new() -> io::Result<Self> {
-        let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
-        if event.is_null() {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(Self(event))
-        }
-    }
-}
-
-impl Drop for Event {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.0) };
+/// Create a manual-reset event for overlapped I/O completion.
+fn create_event() -> io::Result<OwnedHandle> {
+    // SAFETY: Null arguments select default security and no name.
+    let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+    if event.is_null() {
+        Err(io::Error::last_os_error())
+    } else {
+        // SAFETY: The handle was just created and is owned by nothing else.
+        Ok(unsafe { OwnedHandle::from_raw_handle(event) })
     }
 }
 
 /// Blocking I/O on a pipe handle opened with `FILE_FLAG_OVERLAPPED`.
 pub struct PipeEndpoint {
     pipe: Arc<OwnedHandle>,
-    event: Event,
+    event: OwnedHandle,
     read_timeout: Option<Duration>,
 }
 
@@ -52,7 +42,7 @@ impl PipeEndpoint {
     pub fn new(pipe: Arc<OwnedHandle>) -> io::Result<Self> {
         Ok(Self {
             pipe,
-            event: Event::new()?,
+            event: create_event()?,
             read_timeout: None,
         })
     }
@@ -73,9 +63,12 @@ impl PipeEndpoint {
         start: impl FnOnce(HANDLE, *mut OVERLAPPED) -> i32,
     ) -> io::Result<usize> {
         let handle = self.pipe.as_raw_handle() as HANDLE;
+        // SAFETY: OVERLAPPED is a plain C struct of integers and pointers,
+        // for which all-zero is a valid value.
         let mut overlapped = unsafe { std::mem::zeroed::<OVERLAPPED>() };
-        overlapped.hEvent = self.event.0;
+        overlapped.hEvent = self.event.as_raw_handle() as HANDLE;
         if start(handle, &mut overlapped) == 0 {
+            // SAFETY: Plain FFI call without arguments.
             let err = unsafe { GetLastError() };
             if err != ERROR_IO_PENDING {
                 return Err(io::Error::from_raw_os_error(err as i32));
@@ -85,7 +78,11 @@ impl PipeEndpoint {
         let mut cancelled = false;
         if let Some(timeout) = timeout {
             let millis = timeout.as_millis().clamp(1, u32::MAX as u128 - 1) as u32;
-            if unsafe { WaitForSingleObject(self.event.0, millis) } != WAIT_OBJECT_0 {
+            // SAFETY: The event is a valid handle owned by `self`.
+            let waited =
+                unsafe { WaitForSingleObject(self.event.as_raw_handle() as HANDLE, millis) };
+            if waited != WAIT_OBJECT_0 {
+                // SAFETY: `overlapped` is the structure passed to `start`.
                 unsafe { CancelIoEx(handle, &overlapped) };
                 cancelled = true;
             }
@@ -94,6 +91,8 @@ impl PipeEndpoint {
         // Always wait for completion: `overlapped` must outlive the operation.
         // If cancellation raced with completion, the transferred data is kept.
         let mut transferred = 0u32;
+        // SAFETY: `overlapped` is the structure passed to `start`, and stays
+        // alive until this call returns.
         if unsafe { GetOverlappedResult(handle, &overlapped, &mut transferred, 1) } == 0 {
             let err = io::Error::last_os_error();
             if cancelled && err.raw_os_error() == Some(ERROR_OPERATION_ABORTED as i32) {
@@ -108,6 +107,8 @@ impl PipeEndpoint {
 impl Read for PipeEndpoint {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let len = buf.len().min(u32::MAX as usize) as u32;
+        // SAFETY: `buf` is valid for `len` bytes of writes and outlives the
+        // operation, since `transfer` waits for it to complete.
         let result = self.transfer(self.read_timeout, |handle, overlapped| unsafe {
             ReadFile(
                 handle,
@@ -139,6 +140,8 @@ impl Read for PipeEndpoint {
 impl Write for PipeEndpoint {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let len = buf.len().min(u32::MAX as usize) as u32;
+        // SAFETY: `buf` is valid for `len` bytes of reads and outlives the
+        // operation, since `transfer` waits for it to complete.
         self.transfer(None, |handle, overlapped| unsafe {
             WriteFile(handle, buf.as_ptr(), len, std::ptr::null_mut(), overlapped)
         })
@@ -153,7 +156,6 @@ impl Write for PipeEndpoint {
 mod tests {
     use super::*;
     use std::os::windows::fs::OpenOptionsExt;
-    use std::os::windows::io::FromRawHandle;
     use std::time::Instant;
 
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
@@ -168,6 +170,7 @@ mod tests {
             Instant::now()
         );
         let name_w: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: `name_w` is NUL-terminated and the other arguments are values.
         let server = unsafe {
             CreateNamedPipeW(
                 name_w.as_ptr(),
@@ -181,6 +184,7 @@ mod tests {
             )
         };
         assert_ne!(server, INVALID_HANDLE_VALUE);
+        // SAFETY: The handle was just created and is owned by nothing else.
         let server = unsafe { OwnedHandle::from_raw_handle(server) };
         let client = std::fs::OpenOptions::new()
             .read(true)
