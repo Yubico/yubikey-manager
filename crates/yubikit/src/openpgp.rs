@@ -1411,6 +1411,7 @@ fn kdf_s2k_hash(
 fn algorithm_attributes_for_key(
     key_ref: KeyRef,
     private_key: &PrivateKey,
+    version: Version,
 ) -> Result<AlgorithmAttributes, OpenPgpError> {
     match private_key {
         PrivateKey::Rsa(rsa) => {
@@ -1423,7 +1424,10 @@ fn algorithm_attributes_for_key(
                     )));
                 }
             };
-            let import_format = if !rsa.dp.expose_secret().is_empty() && !rsa.n.is_empty() {
+            let import_format = if version.0 == 4 {
+                // YubiKey 4 advertises the standard (e, p, q) import format.
+                RsaImportFormat::Standard
+            } else if !rsa.dp.expose_secret().is_empty() && !rsa.n.is_empty() {
                 RsaImportFormat::CrtWMod
             } else if !rsa.dp.expose_secret().is_empty() {
                 RsaImportFormat::Crt
@@ -1469,25 +1473,32 @@ fn algorithm_attributes_for_key(
 fn build_private_key_template(
     key_ref: KeyRef,
     private_key: &PrivateKey,
+    attributes: &AlgorithmAttributes,
 ) -> Result<Zeroizing<Vec<u8>>, OpenPgpError> {
     let mut temp = Zeroizing::new(Vec::new());
     let component_tlvs: Vec<(u32, &[u8])> = match private_key {
         PrivateKey::Rsa(rsa) => {
+            let AlgorithmAttributes::Rsa(attrs) = attributes else {
+                unreachable!("RSA key with non-RSA attributes");
+            };
             let mut v = vec![
                 (0x91, rsa.e.as_slice()),
                 (0x92, rsa.p.expose_secret().as_slice()),
                 (0x93, rsa.q.expose_secret().as_slice()),
             ];
-            if !rsa.qinv.expose_secret().is_empty() {
+            let crt = matches!(
+                attrs.import_format,
+                RsaImportFormat::Crt | RsaImportFormat::CrtWMod
+            );
+            if crt {
                 v.push((0x94, rsa.qinv.expose_secret().as_slice()));
-            }
-            if !rsa.dp.expose_secret().is_empty() {
                 v.push((0x95, rsa.dp.expose_secret().as_slice()));
-            }
-            if !rsa.dq.expose_secret().is_empty() {
                 v.push((0x96, rsa.dq.expose_secret().as_slice()));
             }
-            if !rsa.n.is_empty() {
+            if matches!(
+                attrs.import_format,
+                RsaImportFormat::StandardWMod | RsaImportFormat::CrtWMod
+            ) {
                 v.push((0x97, rsa.n.as_slice()));
             }
             v
@@ -2384,9 +2395,22 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
         private_key: &PrivateKey,
     ) -> Result<(), OpenPgpError> {
         log::debug!("Importing key for {:?}", key_ref);
-        let attributes = algorithm_attributes_for_key(key_ref, private_key)?;
+        let attributes = algorithm_attributes_for_key(key_ref, private_key, self.version)?;
+        if self.version.0 == 4
+            && let AlgorithmAttributes::Rsa(_) = &attributes
+        {
+            let supported = self.get_algorithm_information()?;
+            if !supported
+                .get(&key_ref)
+                .is_some_and(|options| options.contains(&attributes))
+            {
+                return Err(OpenPgpError::NotSupported(format!(
+                    "RSA attributes not supported in slot {key_ref:?} on this YubiKey"
+                )));
+            }
+        }
+        let template = build_private_key_template(key_ref, private_key, &attributes)?;
         self.set_algorithm_attributes(key_ref, &attributes)?;
-        let template = build_private_key_template(key_ref, private_key)?;
         self.protocol
             .send_apdu(0, INS_PUT_DATA_ODD, 0x3F, 0xFF, &template)?;
         log::info!("Key imported");
@@ -2394,6 +2418,8 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
     }
 
     /// Delete the key in a slot by resetting its algorithm attributes.
+    ///
+    /// The fingerprint and generation time of the slot are cleared as well.
     pub fn delete_key(&mut self, key_ref: KeyRef) -> Result<(), OpenPgpError> {
         log::debug!("Deleting key for {:?}", key_ref);
         if 0 < self.version.0 && self.version.0 < 4 {
@@ -2419,6 +2445,8 @@ impl<C: SmartCardConnection> OpenPgpSession<C> {
                 RsaImportFormat::Standard,
             )),
         )?;
+        self.set_fingerprint(key_ref, &[0; 20])?;
+        self.set_generation_time(key_ref, 0)?;
         log::info!("Key deleted for {:?}", key_ref);
         Ok(())
     }
@@ -2885,13 +2913,14 @@ mod tests {
         use crate::keys::{EcCurve, EcPrivateKey};
         let key =
             PrivateKey::Ec(EcPrivateKey::new(EcCurve::P256, vec![0x01, 0x02, 0x03], None).unwrap());
-        let template = build_private_key_template(KeyRef::Sig, &key).unwrap();
+        let attributes = algorithm_attributes_for_key(KeyRef::Sig, &key, Version(5, 7, 0)).unwrap();
+        let template = build_private_key_template(KeyRef::Sig, &key, &attributes).unwrap();
         // Should start with 0x4D tag
         assert_eq!(template[0], 0x4D);
     }
 
     #[test]
-    fn test_build_private_key_template_rsa() {
+    fn test_build_private_key_template_rsa_yk4_uses_standard_format() {
         use crate::keys::{RsaKeySize, RsaPrivateKey};
         let key = PrivateKey::Rsa(
             RsaPrivateKey::new(
@@ -2906,8 +2935,22 @@ mod tests {
             )
             .unwrap(),
         );
-        let template = build_private_key_template(KeyRef::Sig, &key).unwrap();
-        assert_eq!(template[0], 0x4D);
+        let attributes = algorithm_attributes_for_key(KeyRef::Sig, &key, Version(4, 4, 5)).unwrap();
+        assert_eq!(
+            attributes,
+            AlgorithmAttributes::Rsa(RsaAttributes::create(
+                RsaKeySize::Rsa2048,
+                RsaImportFormat::Standard
+            ))
+        );
+        let template = build_private_key_template(KeyRef::Sig, &key, &attributes).unwrap();
+        let inner = tlv_unpack(0x4D, &template).unwrap();
+        let (tag, offset, len, _) = tlv_parse(&inner, 2).unwrap();
+        assert_eq!(tag, 0x7F48);
+        assert_eq!(
+            &inner[offset..offset + len],
+            &[0x91, 3, 0x92, 0x81, 128, 0x93, 0x81, 128]
+        );
     }
 
     #[test]
@@ -2926,7 +2969,8 @@ mod tests {
             )
             .unwrap(),
         );
-        let template = build_private_key_template(KeyRef::Sig, &key).unwrap();
+        let attributes = algorithm_attributes_for_key(KeyRef::Sig, &key, Version(5, 7, 0)).unwrap();
+        let template = build_private_key_template(KeyRef::Sig, &key, &attributes).unwrap();
         assert_eq!(template[0], 0x4D);
         // Parse outer TLV to verify structure
         let (tag, val_off, val_len, _) = tlv_parse(&template, 0).unwrap();

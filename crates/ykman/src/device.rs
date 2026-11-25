@@ -187,14 +187,18 @@ fn rpc_poisoned_device_error() -> DeviceError {
 
 /// Get the best available device source for the current platform.
 ///
-/// On Windows, attempts to connect to the ykman-svc Named Pipe service.
+/// On Windows, attempts to connect to the ykman-svc Named Pipe service,
+/// except in remote (RDP or Citrix) sessions, where the service cannot use
+/// smart card readers redirected from the client device.
 /// On other platforms in debug builds, attempts a Unix socket connection.
 /// Falls back to direct local device access on failure or when the service
 /// is unavailable. When the `direct` feature is disabled, returns
 /// [`NoDeviceSource`] if no RPC service is available.
 pub fn get_device_source() -> Box<dyn DeviceSource> {
     #[cfg(target_os = "windows")]
-    {
+    if crate::rpc::windows::is_remote_session() {
+        log::debug!("Remote session detected, using direct access");
+    } else {
         match RpcClient::connect_pipe() {
             Ok(client) => {
                 log::debug!("Connected to ykman-svc service");

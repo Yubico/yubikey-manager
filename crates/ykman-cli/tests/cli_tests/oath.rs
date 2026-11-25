@@ -157,6 +157,57 @@ fn test_oath_add_hotp_and_code() {
 }
 
 #[test]
+fn test_oath_code_single_match_and_listing() {
+    require_capability!("OATH");
+    let password = prepare_oath_for_credentials();
+
+    for name in ["hotp", "hotp-other"] {
+        let mut args = vec![
+            "oath",
+            "accounts",
+            "add",
+            "-o",
+            "hotp",
+            "-f",
+            name,
+            OATH_ACCOUNT_SECRET,
+        ];
+        add_password(&mut args, password);
+        ykman_dev().args(args).assert().success();
+    }
+
+    // Listing doesn't calculate HOTP codes
+    let mut args = vec!["oath", "accounts", "code"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"(?m)^hotp\s+\[HOTP Account\]$").unwrap());
+
+    // An exact match is preferred, and a single match is calculated without -s
+    let mut args = vec!["oath", "accounts", "code", "hotp"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^hotp  \d{6}\n$").unwrap());
+
+    let mut args = vec!["oath", "accounts", "code", "HOTP", "-s"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Multiple matches, make the query more specific.",
+        ));
+
+    oath_reset();
+}
+
+#[test]
 fn test_oath_rename() {
     require_capability!("OATH");
     if skip_before_version((5, 3, 1), "OATH rename") {
@@ -197,6 +248,75 @@ fn test_oath_rename() {
     let mut args = vec!["oath", "accounts", "delete", "renamed-acct", "-f"];
     add_password(&mut args, password);
     ykman_dev().args(args).assert().success();
+
+    oath_reset();
+}
+
+#[test]
+fn test_oath_list_delete_rename_by_credential_id() {
+    require_capability!("OATH");
+    let password = prepare_oath_for_credentials();
+
+    for (name, period) in [("Issuer:acct", "30"), ("Issuer:acct", "60"), ("b", "30")] {
+        let mut args = vec![
+            "oath",
+            "accounts",
+            "add",
+            "-f",
+            "-P",
+            period,
+            name,
+            OATH_ACCOUNT_SECRET,
+        ];
+        add_password(&mut args, password);
+        ykman_dev().args(args).assert().success();
+    }
+
+    let mut args = vec!["oath", "accounts", "list", "-o", "-P"];
+    add_password(&mut args, password);
+    ykman_dev().args(args).assert().success().stdout(
+        predicate::str::is_match(r"(?m)^Issuer:acct, TOTP, 30$")
+            .unwrap()
+            .and(predicate::str::is_match(r"(?m)^60/Issuer:acct, TOTP, 60$").unwrap())
+            .and(predicate::str::is_match(r"(?m)^b, TOTP, 30$").unwrap()),
+    );
+
+    if !skip_before_version((5, 3, 1), "OATH rename") {
+        let mut args = vec!["oath", "accounts", "rename", "60/", "Other:acct", "-f"];
+        add_password(&mut args, password);
+        ykman_dev()
+            .args(args)
+            .assert()
+            .success()
+            .stdout("Renamed 60/Issuer:acct to 60/Other:acct.\n");
+
+        let mut args = vec!["oath", "accounts", "rename", "b", "Issuer:acct", "-f"];
+        add_password(&mut args, password);
+        ykman_dev()
+            .args(args)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "Another account with ID Issuer:acct already exists on this YubiKey.",
+            ));
+    }
+
+    // Exact match wins over the period-prefixed account
+    let mut args = vec!["oath", "accounts", "delete", "Issuer:acct", "-f"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stdout("Deleted Issuer:acct.\n");
+
+    let mut args = vec!["oath", "accounts", "delete", "missing", "-f"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stdout("No matches, nothing to be done.\n");
 
     oath_reset();
 }
@@ -377,6 +497,66 @@ fn test_oath_import_pskc() {
         .assert()
         .success()
         .stdout(predicate::str::contains("pskc-test"));
+
+    oath_reset();
+}
+
+#[rstest]
+#[case::plain(&[], None)]
+#[case::passphrase(&["--pskc-passphrase", "passphrase123"], Some("passphrase123"))]
+#[case::preshared_key(
+    &["--pskc-key", "12345678901234567890123456789012"],
+    Some("12345678901234567890123456789012")
+)]
+fn test_oath_add_pskc_output(#[case] encryption: &[&str], #[case] decryption: Option<&str>) {
+    if decryption.is_some() && InputMode::Interactive.skip_if_windows() {
+        return;
+    }
+    require_capability!("OATH");
+    let password = prepare_oath_for_credentials();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("export.xml");
+    let path = path.to_str().unwrap();
+
+    let mut args = vec![
+        "oath",
+        "accounts",
+        "add",
+        "-i",
+        "Issuer",
+        "export-test",
+        OATH_ACCOUNT_SECRET,
+        "-O",
+        path,
+    ];
+    args.extend(encryption);
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Credential written to PSKC file"));
+
+    let password = prepare_oath_for_credentials();
+    let mut args = vec!["oath", "accounts", "import", path, "-f"];
+    add_password(&mut args, password);
+    match decryption {
+        None => {
+            ykman_dev().args(args).assert().success();
+        }
+        Some(secret) => {
+            let output = ykman_dev_tty(&args, &format!("{secret}\n"));
+            assert!(output.status.success(), "{output:?}");
+        }
+    }
+
+    let mut args = vec!["oath", "accounts", "list"];
+    add_password(&mut args, password);
+    ykman_dev()
+        .args(args)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Issuer:export-test"));
 
     oath_reset();
 }

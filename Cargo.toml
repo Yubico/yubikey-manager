@@ -103,6 +103,10 @@ tempfile = "3"
 # Build
 winresource = "0.1"
 
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
 [workspace.lints.clippy]
 too_many_arguments = "allow"
 type_complexity = "allow"
+undocumented_unsafe_blocks = "deny"

@@ -5,7 +5,7 @@ use std::time::Duration;
 use clap::{Args, Subcommand};
 use x509_cert::Certificate;
 use x509_cert::builder::{Builder, CertificateBuilder, Profile, RequestBuilder};
-use x509_cert::der::{self, Decode, Encode, EncodePem, pem::LineEnding};
+use x509_cert::der::{Decode, Encode, EncodePem, pem::LineEnding};
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
@@ -31,19 +31,22 @@ use crate::cli_enums::{
 };
 use crate::scp::ScpParams;
 use crate::util::{
-    ByteFormat, ByteLen, confirm, open_smartcard_session, print_table, prompt_bytes,
-    read_file_or_stdin, require_fips_approved, write_file_or_stdout,
+    ByteFormat, ByteLen, confirm, load_certificate, load_private_key, open_smartcard_session,
+    print_table, prompt_bytes, read_file_or_stdin, require_fips_approved, write_file_or_stdout,
 };
 
 use yubikit::__internal::{padding, piv_secret};
 
 #[derive(Subcommand)]
 pub enum PivAction {
-    /// Display PIV status
+    /// Display general status of the PIV application
     Info,
-    /// Reset the PIV application
+    /// Reset all PIV data
+    ///
+    /// This action will wipe all data and restore factory settings for the
+    /// PIV application on the YubiKey.
     Reset {
-        /// Confirm the reset without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -54,6 +57,10 @@ pub enum PivAction {
     #[command(subcommand)]
     Keys(PivKeysAction),
     /// Manage PIV certificates
+    ///
+    /// By default, modifying the certificate in a slot will also update the
+    /// CHUID with a new random GUID. To prevent this, use the
+    /// --no-update-chuid option.
     #[command(subcommand)]
     Certificates(PivCertAction),
     /// Manage PIV data objects
@@ -75,33 +82,43 @@ pub enum PivAction {
 #[derive(Subcommand)]
 pub enum PivAccessAction {
     /// Change the PIV PIN
+    ///
+    /// The PIN must be between 6 and 8 bytes long, and supports any type of
+    /// alphanumeric characters. For cross-platform compatibility, numeric PINs
+    /// are recommended.
     ChangePin {
         /// Current PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// New PIN
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PIN")]
         new_pin: Option<String>,
     },
     /// Change the PIV PUK
+    ///
+    /// If the PIN is lost or blocked it can be reset using the PUK. The PUK
+    /// must be between 6 and 8 bytes long, and supports any type of
+    /// alphanumeric characters.
     ChangePuk {
         /// Current PUK
         #[arg(short = 'p', long)]
         puk: Option<String>,
         /// New PUK
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PUK")]
         new_puk: Option<String>,
     },
-    /// Unblock the PIN using PUK
+    /// Unblock the PIN using the PUK
     UnblockPin {
         /// Current PUK
         #[arg(short = 'p', long)]
         puk: Option<String>,
         /// New PIN
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PIN")]
         new_pin: Option<String>,
     },
-    /// Set PIN and PUK retry counts
+    /// Set the PIN and PUK retry counts
+    ///
+    /// This will also reset the PIN and PUK to their factory default values.
     SetRetries {
         /// PIN retry count
         pin_retries: u8,
@@ -113,11 +130,16 @@ pub enum PivAccessAction {
         /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
-        /// Confirm changing retry counters without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
     /// Change the management key
+    ///
+    /// Management functionality is guarded by a management key. This key is
+    /// required for administrative tasks, such as generating key pairs. Use
+    /// --generate together with --protect to store a random management key on
+    /// the YubiKey, protected by the PIN.
     ChangeManagementKey {
         /// Current management key (hex, 16/24/32 bytes)
         #[arg(short = 'm', long, value_name = "KEY")]
@@ -146,8 +168,12 @@ pub enum PivAccessAction {
 #[derive(Subcommand)]
 pub enum PivKeysAction {
     /// Generate an asymmetric key pair
+    ///
+    /// The private key is generated on the YubiKey, and written to one of the
+    /// slots. The public key is written to OUTPUT.
     Generate {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Output file for public key
         output: String,
@@ -155,10 +181,10 @@ pub enum PivKeysAction {
         #[arg(short = 'a', long, default_value = "eccp256")]
         algorithm: CliKeyType,
         /// PIN policy for the generated key
-        #[arg(long, default_value = "default")]
+        #[arg(long, default_value = "default", value_name = "POLICY")]
         pin_policy: CliPinPolicy,
         /// Touch policy for the generated key
-        #[arg(long, default_value = "default")]
+        #[arg(long, default_value = "default", value_name = "POLICY")]
         touch_policy: CliTouchPolicy,
         /// Management key (hex, 16/24/32 bytes)
         #[arg(short = 'm', long, value_name = "KEY")]
@@ -173,14 +199,15 @@ pub enum PivKeysAction {
     /// Import a private key
     Import {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Private key file
         key_file: String,
         /// PIN policy for the imported key
-        #[arg(long, default_value = "default")]
+        #[arg(long, default_value = "default", value_name = "POLICY")]
         pin_policy: CliPinPolicy,
         /// Touch policy for the imported key
-        #[arg(long, default_value = "default")]
+        #[arg(long, default_value = "default", value_name = "POLICY")]
         touch_policy: CliTouchPolicy,
         /// Management key (hex, 16/24/32 bytes)
         #[arg(short = 'm', long, value_name = "KEY")]
@@ -199,13 +226,13 @@ pub enum PivKeysAction {
     Sign {
         #[command(flatten)]
         operation: KeyOperation,
-        /// RSA/ECDSA hash (default: sha256); unused for Ed25519/ML-DSA
+        /// Hash algorithm for RSA/ECDSA, unused for Ed25519/ML-DSA [default: sha256]
         #[arg(short = 'a', long, value_name = "HASH")]
         hash_algorithm: Option<CliHashAlgorithm>,
         /// Input is already a digest (RSA/ECDSA only)
         #[arg(long)]
         prehashed: bool,
-        /// RSA padding (default: pkcs1v15; PSS salt is digest length)
+        /// RSA padding (PSS uses a salt of digest length) [default: pkcs1v15]
         #[arg(long)]
         padding: Option<CliSignaturePadding>,
         /// ML-DSA context string (at most 255 bytes)
@@ -225,7 +252,7 @@ pub enum PivKeysAction {
         /// RSA encryption padding
         #[arg(long, default_value = "oaep")]
         padding: CliDecryptionPadding,
-        /// OAEP and MGF1 hash (default: sha256; empty label)
+        /// Hash algorithm for OAEP and MGF1 (with an empty label) [default: sha256]
         #[arg(short = 'a', long, value_name = "HASH")]
         hash_algorithm: Option<CliHashAlgorithm>,
     },
@@ -239,14 +266,24 @@ pub enum PivKeysAction {
         #[command(flatten)]
         operation: KeyOperation,
     },
-    /// Show key metadata
+    /// Show metadata for a key
+    ///
+    /// This will show what type of key is stored in a specific slot, whether it
+    /// was imported into the YubiKey or generated on-chip, and what the PIN and
+    /// touch policies are for using the key. Requires YubiKey 5.3 or later.
     Info {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
     },
-    /// Generate attestation certificate
+    /// Generate an attestation certificate for a key
+    ///
+    /// Attestation is used to show that an asymmetric key was generated on the
+    /// YubiKey and therefore doesn't exist outside the device. Requires
+    /// YubiKey 4.3 or later.
     Attest {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Output certificate file
         output: String,
@@ -254,9 +291,15 @@ pub enum PivKeysAction {
         #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
-    /// Export public key
+    /// Export a public key
+    ///
+    /// On YubiKey 5.3 and later, the public key is read from the slot metadata.
+    /// On older YubiKeys, it is read from the certificate stored in the slot,
+    /// which is assumed to contain the correct public key. Use --verify to
+    /// check that it matches the private key.
     Export {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Output file
         output: String,
@@ -273,7 +316,10 @@ pub enum PivKeysAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
-    /// Move key between slots
+    /// Move a key to another slot
+    ///
+    /// Moves a key from one PIV slot into another. Requires YubiKey 5.7 or
+    /// later.
     Move {
         /// Source slot
         source: String,
@@ -286,9 +332,13 @@ pub enum PivKeysAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
-    /// Delete key in slot
+    /// Delete a key
+    ///
+    /// Deletes a key from a PIV slot on the YubiKey. Requires YubiKey 5.7 or
+    /// later.
     Delete {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Management key (hex, 16/24/32 bytes)
         #[arg(short = 'm', long, value_name = "KEY")]
@@ -302,6 +352,7 @@ pub enum PivKeysAction {
 #[derive(Args)]
 pub struct KeyOperation {
     /// PIV slot
+    #[arg(value_parser = parse_slot_arg)]
     slot: String,
     /// Input file, or - for stdin
     input: String,
@@ -317,9 +368,10 @@ pub struct KeyOperation {
 
 #[derive(Subcommand)]
 pub enum PivCertAction {
-    /// Export certificate from slot
+    /// Export a certificate
     Export {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Output file
         output: String,
@@ -327,9 +379,10 @@ pub enum PivCertAction {
         #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
-    /// Import certificate to slot
+    /// Import a certificate
     Import {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Certificate file
         cert_file: String,
@@ -351,13 +404,17 @@ pub enum PivCertAction {
         /// challenge. Does not check certificate signatures, validity, or trust.
         #[arg(short = 'v', long)]
         verify: bool,
+        /// Update CHUID after importing certificate (default)
+        #[arg(long = "update-chuid", conflicts_with = "no_update_chuid")]
+        _update_chuid: bool,
         /// Don't update CHUID after importing certificate
         #[arg(long)]
         no_update_chuid: bool,
     },
-    /// Delete certificate from slot
+    /// Delete a certificate
     Delete {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// Management key (hex, 16/24/32 bytes)
         #[arg(short = 'm', long, value_name = "KEY")]
@@ -365,13 +422,21 @@ pub enum PivCertAction {
         /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
+        /// Update CHUID after deleting certificate (default)
+        #[arg(long = "update-chuid", conflicts_with = "no_update_chuid")]
+        _update_chuid: bool,
         /// Don't update CHUID after deleting certificate
         #[arg(long)]
         no_update_chuid: bool,
     },
     /// Generate a self-signed certificate
+    ///
+    /// A self-signed certificate is generated and written to one of the slots
+    /// on the YubiKey. A private key must already be present in the
+    /// corresponding key slot.
     Generate {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// File containing a public key (use '-' for stdin). Optional if YubiKey >= 5.4.
         #[arg(value_name = "PUBLIC-KEY")]
@@ -391,13 +456,19 @@ pub enum PivCertAction {
         /// PIN for a PIN-protected management key
         #[arg(short = 'P', long)]
         pin: Option<String>,
+        /// Update CHUID after generating certificate (default)
+        #[arg(long = "update-chuid", conflicts_with = "no_update_chuid")]
+        _update_chuid: bool,
         /// Don't update CHUID after generating certificate
         #[arg(long)]
         no_update_chuid: bool,
     },
     /// Generate a Certificate Signing Request (CSR)
+    ///
+    /// A private key must already be present in the corresponding key slot.
     Request {
         /// PIV slot
+        #[arg(value_parser = parse_slot_arg)]
         slot: String,
         /// File containing a public key (use '-' for stdin)
         #[arg(value_name = "PUBLIC-KEY")]
@@ -429,6 +500,9 @@ pub enum PivObjectAction {
         pin: Option<String>,
     },
     /// Import a PIV data object
+    ///
+    /// Writes a PIV data object, given by name or ID in hex. Yubico writable
+    /// PIV objects are available in the range 5f0000 - 5fffff.
     Import {
         /// Object ID
         object: String,
@@ -441,7 +515,7 @@ pub enum PivObjectAction {
         #[arg(short = 'P', long)]
         pin: Option<String>,
     },
-    /// Generate a data object (CHUID or CCC)
+    /// Generate a PIV data object (CHUID or CCC)
     Generate {
         /// Object type: CHUID or CCC
         object: String,
@@ -649,6 +723,7 @@ impl PivAction {
                     password,
                     verify,
                     no_update_chuid,
+                    _update_chuid: _,
                 } => run_certificates_import(
                     dev,
                     scp_params,
@@ -666,6 +741,7 @@ impl PivAction {
                     management_key,
                     pin,
                     no_update_chuid,
+                    _update_chuid: _,
                 } => run_certificates_delete(
                     dev,
                     scp_params,
@@ -683,6 +759,7 @@ impl PivAction {
                     management_key,
                     pin,
                     no_update_chuid,
+                    _update_chuid: _,
                 } => run_certificates_generate(
                     dev,
                     scp_params,
@@ -760,6 +837,10 @@ fn open_session(
         PivSession::new,
         PivSession::new_with_scp,
     )
+}
+
+fn parse_slot_arg(s: &str) -> Result<String> {
+    parse_slot(s).map(|_| s.to_string())
 }
 
 fn parse_slot(s: &str) -> Result<Slot> {
@@ -1075,15 +1156,26 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
 
         if let Some(ref cert_der) = has_cert {
             // Parse certificate to show details
-            if let Some(info) = parse_cert_info(cert_der) {
+            if let Ok(info) = ykman::pki::certificate_info(cert_der) {
                 if has_key.is_some() {
-                    rows.push(("  Public key type", info.key_type));
+                    let key_type = info
+                        .public_key
+                        .as_ref()
+                        .and_then(|pk| KeyType::from_public_key(pk).ok())
+                        .map_or_else(|| "Unknown".to_string(), |kt| kt.to_string());
+                    rows.push(("  Public key type", key_type));
                 }
+                let serial = info
+                    .serial
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(":");
                 rows.extend([
                     ("  Subject DN", info.subject),
                     ("  Issuer DN", info.issuer),
-                    ("  Serial", info.serial),
-                    ("  Fingerprint", info.fingerprint),
+                    ("  Serial", serial),
+                    ("  Fingerprint", hex::encode(info.fingerprint)),
                     ("  Not before", info.not_before),
                     ("  Not after", info.not_after),
                 ]);
@@ -1110,51 +1202,6 @@ fn slot_heading(slot: Slot) -> String {
     format!("Slot {:02X} ({name})", slot as u8)
 }
 
-struct CertInfo {
-    key_type: String,
-    subject: String,
-    issuer: String,
-    serial: String,
-    fingerprint: String,
-    not_before: String,
-    not_after: String,
-}
-
-fn parse_cert_info(cert_der: &[u8]) -> Option<CertInfo> {
-    use sha2::Digest;
-    let fingerprint = hex::encode(sha2::Sha256::digest(cert_der));
-
-    let cert = Certificate::from_der(cert_der).ok()?;
-    let tbs = &cert.tbs_certificate;
-
-    let subject = tbs.subject.to_string();
-    let issuer = tbs.issuer.to_string();
-    let serial = hex::encode(tbs.serial_number.as_bytes())
-        .as_bytes()
-        .chunks(2)
-        .map(|c| std::str::from_utf8(c).unwrap_or("??"))
-        .collect::<Vec<_>>()
-        .join(":");
-    let not_before = tbs.validity.not_before.to_string();
-    let not_after = tbs.validity.not_after.to_string();
-
-    let key_type = PublicKey::from_spki(&tbs.subject_public_key_info.to_der().unwrap_or_default())
-        .ok()
-        .and_then(|pk| KeyType::from_public_key(&pk).ok())
-        .map(|kt| format!("{kt}"))
-        .unwrap_or_else(|| "Unknown".to_string());
-
-    Some(CertInfo {
-        key_type,
-        subject,
-        issuer,
-        serial,
-        fingerprint,
-        not_before,
-        not_after,
-    })
-}
-
 pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
     if dev.info().reset_blocked.contains(Capability::PIV) {
         return Err(anyhow!(
@@ -1167,7 +1214,7 @@ pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -
     if !force {
         eprintln!("WARNING! This will delete all stored PIV data and restore factory settings.");
         if !confirm("Proceed?") {
-            return Err(anyhow!("Aborted."));
+            return Err(anyhow!("Aborted by user."));
         }
     }
     let mut session = open_session(dev, scp_params)?;
@@ -1183,7 +1230,20 @@ pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -
     session
         .reset()
         .map_err(|e| anyhow!("Failed to reset PIV: {e}"))?;
+    // The PUK is blocked on biometric YubiKeys; firmware without metadata support has one
+    let has_puk = session
+        .get_puk_metadata()
+        .map_or(true, |meta| meta.attempts_remaining > 0);
     eprintln!("PIV application has been reset.");
+    if has_puk {
+        eprintln!("Your YubiKey now has the default PIN, PUK and Management Key:");
+        eprintln!("  PIN:             123456");
+        eprintln!("  PUK:             12345678");
+    } else {
+        eprintln!("Your YubiKey now has the default PIN and Management Key:");
+        eprintln!("  PIN:             123456");
+    }
+    eprintln!("  Management Key:  010203040506070801020304050607080102030405060708");
     Ok(())
 }
 
@@ -1298,7 +1358,7 @@ pub fn run_set_retries(
             "Set PIN retries to {pin_retries} and PUK retries to {puk_retries}? This will reset PIN and PUK to defaults."
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
 
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
@@ -1352,9 +1412,16 @@ pub fn run_change_management_key(
     };
 
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
-    if protect && !pin_verified {
+    let was_stored = has_stored_key(
+        &get_pivman_data(&mut session).map_err(|e| anyhow!("Failed to read pivman data: {e}"))?,
+    );
+    // The PIN is needed to store the new key, or to clear a previously stored key.
+    let pin_verified = if !pin_verified && (protect || (was_stored && pin.is_some())) {
         ensure_pin(&mut session, pin)?;
-    }
+        true
+    } else {
+        pin_verified
+    };
 
     let new_key = if generate {
         let mut k = vec![0u8; key_len];
@@ -1379,6 +1446,12 @@ pub fn run_change_management_key(
         eprintln!("Management key set: {}", hex::encode(&new_key));
     } else {
         eprintln!("Management key changed.");
+    }
+    if was_stored && !pin_verified {
+        eprintln!(
+            "WARNING: The previous management key stored on the YubiKey was not cleared. \
+             Provide the PIN (--pin) to clear it."
+        );
     }
     Ok(())
 }
@@ -1534,7 +1607,7 @@ pub fn run_keys_import(
 
     let data = read_file_or_stdin(key_file)?;
 
-    let der = decrypt_private_key_data(&data, password)?;
+    let der = load_private_key(&data, password)?;
 
     // Parse the private key (auto-detects algorithm from PKCS#8)
     let private_key = PrivateKey::from_pkcs8(&der)
@@ -1624,11 +1697,7 @@ fn pin_required(slot: Slot, pin_policy: PinPolicy, version: Version) -> bool {
 }
 
 fn peer_key_bytes(key_type: KeyType, input: &[u8]) -> Result<Vec<u8>> {
-    let der = if input.starts_with(b"-----BEGIN") {
-        pem_decode(std::str::from_utf8(input)?)?
-    } else {
-        input.to_vec()
-    };
+    let der = ykman::pki::pem_or_der(input)?;
     let public_key = PublicKey::from_spki(&der).map_err(|e| {
         anyhow!("Invalid peer public key (expected PEM/DER SubjectPublicKeyInfo): {e}")
     })?;
@@ -1998,7 +2067,7 @@ pub fn run_certificates_import(
 
     let data = read_file_or_stdin(cert_file)?;
 
-    let der = decrypt_certificate_data(&data, password)?;
+    let der = load_certificate(&data, password)?;
 
     let mut session = open_session(dev, scp_params)?;
     let pin_verified = authenticate_session(&mut session, mgmt_key, pin)?;
@@ -2312,15 +2381,7 @@ fn resolve_public_key(
 ) -> Result<(KeyType, Vec<u8>)> {
     if let Some(pk_file) = public_key_file {
         let data = read_file_or_stdin(pk_file)?;
-        let der = if let Ok(text) = std::str::from_utf8(&data) {
-            if text.contains("-----BEGIN") {
-                pem_decode(text)?
-            } else {
-                data
-            }
-        } else {
-            data
-        };
+        let der = ykman::pki::pem_or_der(&data)?;
         let pk = PublicKey::from_spki(&der)
             .map_err(|_| anyhow!("Could not determine key type from public key file."))?;
         let kt = KeyType::from_public_key(&pk)
@@ -2348,132 +2409,6 @@ fn random_serial_number() -> Result<SerialNumber> {
         buf[0] = 0x01;
     }
     SerialNumber::new(&buf).map_err(|e| anyhow!("Invalid serial number: {e}"))
-}
-
-// ---------------------------------------------------------------------------
-// Password-protected key/cert parsing helpers
-// ---------------------------------------------------------------------------
-
-/// Attempt to decrypt/parse a private key from raw data, handling
-/// PEM (plain or ENCRYPTED), PKCS#12, and raw DER. If the key is encrypted
-/// and no password is provided, the user is prompted interactively.
-fn decrypt_private_key_data(data: &[u8], password: Option<&str>) -> Result<Vec<u8>> {
-    if let Ok(text) = std::str::from_utf8(data)
-        && text.contains("-----BEGIN")
-    {
-        let encrypted = text.contains("ENCRYPTED");
-        if encrypted {
-            let pw = match password {
-                Some(p) => p.to_string(),
-                None => crate::util::prompt_secret("Enter password to decrypt key")?,
-            };
-            return decrypt_pem_private_key(text, &pw);
-        }
-        return pem_decode(text);
-    }
-
-    // Try PKCS#12 if the data looks like it
-    if is_pkcs12(data) {
-        let pw = match password {
-            Some(p) => p.to_string(),
-            None => crate::util::prompt_secret("Enter password to decrypt PKCS#12 file")?,
-        };
-        return extract_private_key_from_pkcs12(data, &pw);
-    }
-
-    // Try plain DER
-    Ok(data.to_vec())
-}
-
-/// Decrypt an encrypted PKCS#8 PEM private key.
-fn decrypt_pem_private_key(pem_text: &str, password: &str) -> Result<Vec<u8>> {
-    use pkcs8::EncryptedPrivateKeyInfo;
-
-    let der = pem_decode(pem_text)?;
-    let enc_key = EncryptedPrivateKeyInfo::try_from(der.as_slice())
-        .map_err(|e| anyhow!("Failed to parse encrypted key: {e}"))?;
-    let dec_key = enc_key
-        .decrypt(password)
-        .map_err(|_| anyhow!("Wrong password for encrypted key."))?;
-    Ok(dec_key.as_bytes().to_vec())
-}
-
-/// Attempt to parse a certificate from raw data, supporting password-protected
-/// PKCS#12 files. For PEM and DER certs, the password is ignored.
-fn decrypt_certificate_data(data: &[u8], password: Option<&str>) -> Result<Vec<u8>> {
-    if let Ok(text) = std::str::from_utf8(data)
-        && text.contains("-----BEGIN")
-    {
-        return pem_decode(text);
-    }
-
-    // Try PKCS#12
-    if is_pkcs12(data) {
-        let pw = match password {
-            Some(p) => p.to_string(),
-            None => crate::util::prompt_secret("Enter password to decrypt PKCS#12 file")?,
-        };
-        return extract_certificate_from_pkcs12(data, &pw);
-    }
-
-    // Plain DER certificate
-    Ok(data.to_vec())
-}
-
-/// Check if data looks like a PKCS#12 file.
-/// PKCS#12 is a DER SEQUENCE whose first element is INTEGER with value 3.
-fn is_pkcs12(data: &[u8]) -> bool {
-    if data.len() < 10 || data[0] != 0x30 {
-        return false;
-    }
-    // Skip the outer SEQUENCE length bytes
-    let len_byte = data[1];
-    let offset = if len_byte & 0x80 == 0 {
-        2
-    } else {
-        2 + (len_byte & 0x7f) as usize
-    };
-    // Expect INTEGER tag (0x02) with length 1 and value 3
-    offset + 3 <= data.len()
-        && data[offset] == 0x02
-        && data[offset + 1] == 0x01
-        && data[offset + 2] == 0x03
-}
-
-/// Extract a private key from PKCS#12 data.
-fn extract_private_key_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8>> {
-    use p12_keystore::KeyStore;
-
-    let ks = KeyStore::from_pkcs12(data, password)
-        .map_err(|e| anyhow!("Failed to parse PKCS#12 file: {e}"))?;
-    let (_, chain) = ks
-        .private_key_chain()
-        .ok_or_else(|| anyhow!("No private key found in PKCS#12 file."))?;
-    Ok(chain.key().to_vec())
-}
-
-/// Extract a certificate from PKCS#12 data.
-fn extract_certificate_from_pkcs12(data: &[u8], password: &str) -> Result<Vec<u8>> {
-    use p12_keystore::{KeyStore, KeyStoreEntry};
-
-    let ks = KeyStore::from_pkcs12(data, password)
-        .map_err(|e| anyhow!("Failed to parse PKCS#12 file: {e}"))?;
-
-    // Try cert from a key chain first, then standalone certs
-    for (_, entry) in ks.entries() {
-        match entry {
-            KeyStoreEntry::PrivateKeyChain(chain) => {
-                if let Some(cert) = chain.chain().first() {
-                    return Ok(cert.as_der().to_vec());
-                }
-            }
-            KeyStoreEntry::Certificate(cert) => {
-                return Ok(cert.as_der().to_vec());
-            }
-            _ => {}
-        }
-    }
-    Err(anyhow!("No certificate found in PKCS#12 file."))
 }
 
 /// Verify that a public key (as SPKI DER) matches the private key in a PIV slot
@@ -2573,18 +2508,6 @@ fn verify_signature(
     Ok(verified)
 }
 
-// ---------------------------------------------------------------------------
-// PEM encoding / decoding
-// ---------------------------------------------------------------------------
-
-fn pem_decode(text: &str) -> Result<Vec<u8>> {
-    // Generic PEM decode: extract first PEM block regardless of label
-    let doc = der::Document::from_pem(text)
-        .map(|(_, doc)| doc)
-        .map_err(|e| anyhow!("Invalid PEM data: {e}"))?;
-    Ok(doc.as_bytes().to_vec())
-}
-
 fn write_cert_file(output: &str, cert_der: &[u8], format: CliFormat) -> Result<()> {
     match format {
         CliFormat::Der => {
@@ -2614,9 +2537,8 @@ mod tests {
     use crate::cli_enums::CliKeyType;
 
     use super::{
-        check_management_key_type_supported, decrypt_private_key_data,
-        format_management_key_auth_error, format_piv_credential_error,
-        management_key_type_prompt_name, slot_heading,
+        check_management_key_type_supported, format_management_key_auth_error,
+        format_piv_credential_error, management_key_type_prompt_name, slot_heading,
     };
 
     fn device_info(fips: bool) -> yubikit::management::DeviceInfo {
@@ -3261,7 +3183,7 @@ mod tests {
                     env!("CARGO_MANIFEST_DIR")
                 );
                 let pem = std::fs::read(&path).expect("read OpenSSL key fixture");
-                let der = decrypt_private_key_data(&pem, None).expect("decode PEM");
+                let der = crate::util::load_private_key(&pem, None).expect("decode PEM");
                 let key = PrivateKey::from_pkcs8(&der).expect("parse PKCS#8 key");
                 assert_eq!(
                     KeyType::try_from(&key.algorithm()).unwrap(),

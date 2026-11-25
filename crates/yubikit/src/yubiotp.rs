@@ -322,6 +322,9 @@ pub enum ConfigSlot {
     ScanMap = 0x12,
     /// Read YubiKey 4+ capability flags.
     Yk4Capabilities = 0x13,
+    /// Query whether the OTP application of a YubiKey FIPS (4 Series) is in
+    /// FIPS approved mode.
+    Yk4FipsMode = 0x14,
     /// Set device info on YubiKey 4+.
     Yk4SetDeviceInfo = 0x15,
     /// Challenge-response with Yubico OTP for slot 1.

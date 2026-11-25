@@ -1,7 +1,7 @@
 use super::*;
 use elliptic_curve::Generate;
 use yubikit::keys::{EcCurve, EcPrivateKey, PrivateKey, RsaKeySize, RsaPrivateKey};
-use yubikit::openpgp::{KeyRef, OpenPgpPin, OpenPgpSession};
+use yubikit::openpgp::{AlgorithmAttributes, KeyRef, OpenPgpPin, OpenPgpSession};
 
 fn open_openpgp_session(tc: &TestConnection) -> OpenPgpSession<PcscSmartCardConnection> {
     let conn = open_smartcard_connection(tc);
@@ -426,7 +426,19 @@ fn test_import_rsa(#[case] tc: TestConnection, #[case] bits: usize) {
     skip_if_needed!(tc);
     require_capability!(Capability::OPENPGP);
     require_version!(Version(4, 0, 0));
-    let mut session = setup_for_import(&tc);
+    let mut session = open_openpgp_session(&tc);
+    let algorithms = session.get_algorithm_information().expect("get algorithms");
+    if !algorithms.get(&KeyRef::Sig).is_some_and(|options| {
+        options.iter().any(
+            |attr| matches!(attr, AlgorithmAttributes::Rsa(rsa) if usize::from(rsa.n_len) == bits),
+        )
+    }) {
+        skip!("OpenPGP RSA-{bits} is not supported in the signing slot");
+    }
+    reset_openpgp(&mut session);
+    session
+        .verify_admin(&effective_admin_pin())
+        .expect("verify admin");
 
     let key = generate_rsa_private_key(bits);
     session.put_key(KeyRef::Sig, &key).expect("put_key RSA");

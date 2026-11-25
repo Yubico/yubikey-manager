@@ -16,3 +16,9 @@ rustflags = ["-C", "link-arg=-Wl,--allow-shlib-undefined"]
 [target.aarch64-unknown-linux-gnu]
 # See x86_64-unknown-linux-gnu above.
 rustflags = ["-C", "link-arg=-Wl,--allow-shlib-undefined"]
+
+# Link the C runtime statically so ykman and ykman-svc don't need the Visual
+# C++ Redistributable. The binaries also restrict DLL loading to System32
+# (/DEPENDENTLOADFLAG), so shipping the runtime DLLs next to them wouldn't work.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

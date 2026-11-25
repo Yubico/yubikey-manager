@@ -9,7 +9,7 @@ const HSMAUTH_DERIVATION_PASSWORD: &str = "K9$wQ3#nR6!tM2x%";
 #[rstest]
 #[case::generate(&["generate", "invalid-password"], "-c")]
 #[case::symmetric(&["symmetric", "invalid-password", "--generate"], "-c")]
-#[case::derive(&["derive", "invalid-password", "derivation-password"], "-c")]
+#[case::derive(&["derive", "invalid-password", "--derivation-password", "x"], "-c")]
 #[case::import(&["import", "invalid-password", "missing.pem"], "-c")]
 #[case::current_password(&["change-password", "invalid-password", "-n", "new"], "-c")]
 #[case::new_password(&["change-password", "invalid-password", "-c", "current"], "-n")]
@@ -124,6 +124,59 @@ fn test_hsmauth_add_symmetric_and_list() {
 }
 
 #[test]
+fn test_hsmauth_change_credential_password() {
+    require_capability!("YubiHSM Auth");
+    let management_key = prepare_hsmauth_for_credentials();
+    const ADMIN_SET_PASSWORD: &str = "P4!sW7#kD2$hL8x%";
+
+    ykman_dev()
+        .args([
+            "hsmauth",
+            "credentials",
+            "symmetric",
+            "test-cred",
+            "--generate",
+            "-c",
+            HSMAUTH_CREDENTIAL_PASSWORD,
+            "-m",
+            management_key,
+        ])
+        .assert()
+        .success();
+
+    ykman_dev()
+        .args([
+            "hsmauth",
+            "credentials",
+            "change-password",
+            "test-cred",
+            "-m",
+            management_key,
+            "-n",
+            ADMIN_SET_PASSWORD,
+        ])
+        .assert()
+        .success();
+
+    // The password set with the management password is now the current one
+    ykman_dev()
+        .args([
+            "hsmauth",
+            "credentials",
+            "change-password",
+            "test-cred",
+            "-c",
+            ADMIN_SET_PASSWORD,
+            "-n",
+            HSMAUTH_CREDENTIAL_PASSWORD,
+        ])
+        .assert()
+        .success();
+
+    hsmauth_reset();
+}
+
+#[test]
 fn test_hsmauth_add_derive_and_list() {
     require_capability!("YubiHSM Auth");
     let management_key = prepare_hsmauth_for_credentials();
@@ -134,6 +187,7 @@ fn test_hsmauth_add_derive_and_list() {
             "credentials",
             "derive",
             "derive-cred",
+            "--derivation-password",
             HSMAUTH_DERIVATION_PASSWORD,
             "-c",
             HSMAUTH_CREDENTIAL_PASSWORD,
@@ -212,6 +266,7 @@ fn test_hsmauth_change_management_password() {
             "credentials",
             "derive",
             "verify-key",
+            "--derivation-password",
             HSMAUTH_DERIVATION_PASSWORD,
             "-c",
             HSMAUTH_CREDENTIAL_PASSWORD,

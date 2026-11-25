@@ -23,9 +23,11 @@ mod oath;
 mod openpgp;
 mod otp;
 mod piv;
+mod pskc;
 mod scp;
 mod securitydomain;
 mod util;
+mod yk4_fips;
 
 // Re-export library modules so binary-internal modules can use them via crate::
 use ykman::appdata;
@@ -186,16 +188,20 @@ enum Commands {
         #[arg(short = 's', long)]
         serials: bool,
         /// List available smart card readers
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         readers: bool,
     },
     /// Show general information
-    Info {
-        /// Check FIPS approved mode status
-        #[arg(short = 'c', long)]
-        check_fips: bool,
-    },
+    ///
+    /// Displays information about the attached YubiKey, such as serial number,
+    /// firmware version, form factor, and which applications are supported and
+    /// enabled over each transport.
+    Info,
     /// Enable or disable applications and settings
+    ///
+    /// The applications may be enabled and disabled independently over
+    /// different transports (USB and NFC). The configuration may also be
+    /// protected by a lock code.
     #[command(after_help = "Examples:\n\
       \n  Disable PIV over NFC:\
       \n  $ ykman config nfc --disable piv\
@@ -224,7 +230,17 @@ enum Commands {
         #[command(subcommand)]
         action: oath::OathAction,
     },
-    /// Manage the YubiKey OTP application
+    /// Manage the YubiOTP application
+    ///
+    /// The YubiKey provides two keyboard-based slots which can each be
+    /// configured with a credential. Several credential types are supported.
+    ///
+    /// A slot configuration may be write-protected with an access code. This
+    /// prevents the configuration from being overwritten without the access
+    /// code. Mode switching the YubiKey is not possible when a slot is
+    /// configured with an access code. To provide an access code to commands
+    /// which require it, use the --access-code option, given either directly
+    /// after "otp" or to the subcommand.
     #[command(after_help = "Examples:\n\
       \n  Swap the configurations between the two slots:\
       \n  $ ykman otp swap\
@@ -241,8 +257,8 @@ enum Commands {
       \n  Remove a currently set access code from slot 2:\
       \n  $ ykman otp --access-code 0123456789ab settings 2 --delete-access-code")]
     Otp {
-        /// 6 byte access code (use "-" to prompt for input)
-        #[arg(long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         #[command(subcommand)]
         action: otp::OtpAction,
@@ -291,12 +307,25 @@ enum Commands {
         action: hsmauth::HsmauthAction,
     },
     /// Manage the Security Domain
+    ///
+    /// The Security Domain holds the keys used to establish Secure Channel
+    /// (SCP03 and SCP11) sessions with the YubiKey.
     #[command(name = "sd")]
     SecurityDomain {
         #[command(subcommand)]
         action: securitydomain::SecurityDomainAction,
     },
     /// Send raw APDUs to the YubiKey
+    ///
+    /// Provide APDUs as a hex encoded, space-separated list using the following
+    /// syntax: `[CLA]INS[P1P2][:DATA][/LE][=EXPECTED_SW]`
+    ///
+    /// If not provided, CLA, P1 and P2 are all set to zero. Setting EXPECTED_SW
+    /// will cause the command to check the response SW and fail if it differs.
+    /// "=" can be used as shorthand for "=9000" (SW=OK).
+    ///
+    /// As an alternative, you can provide full APDUs using the -s/--send-apdu
+    /// option. You cannot mix -a and positional APDUs with --send-apdu.
     #[command(after_help = "Examples:\n\
       \n  Select the OATH application, send a LIST instruction (0xA1),\
       \n  and make sure we get sw=9000 (these are equivalent):\
@@ -410,9 +439,9 @@ fn run_command(
             }
             list::run(serials, readers)
         }
-        Commands::Info { check_fips } => {
+        Commands::Info => {
             let dev = ctx.device()?;
-            info::run(&dev, check_fips)
+            info::run(&dev)
         }
         Commands::Config { action } => {
             let dev = ctx.device()?;
@@ -465,7 +494,7 @@ fn run_command(
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("Error: {e}");
+        eprintln!("error: {e}");
         process::exit(1);
     }
 }

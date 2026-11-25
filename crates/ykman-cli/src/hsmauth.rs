@@ -14,18 +14,21 @@ const MANAGEMENT_KEY_LEN: usize = 16;
 
 #[derive(Subcommand)]
 pub enum HsmauthAction {
-    /// Display HSM Auth status
+    /// Display general status of the YubiHSM Auth application
     Info,
-    /// Reset the HSM Auth application
+    /// Reset all YubiHSM Auth data
+    ///
+    /// This action will wipe all data and restore factory settings for the
+    /// YubiHSM Auth application on the YubiKey.
     Reset {
-        /// Confirm the reset without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Manage credentials
+    /// Manage YubiHSM Auth credentials
     #[command(subcommand)]
     Credentials(HsmauthCredAction),
-    /// Manage access
+    /// Manage YubiHSM Auth access (management password)
     #[command(subcommand)]
     Access(HsmauthAccessAction),
 }
@@ -34,7 +37,10 @@ pub enum HsmauthAction {
 pub enum HsmauthCredAction {
     /// List credentials
     List,
-    /// Generate asymmetric credential
+    /// Generate an asymmetric credential
+    ///
+    /// This will generate an asymmetric YubiHSM Auth credential (private key)
+    /// on the YubiKey. Requires YubiKey 5.6 or later.
     Generate {
         /// Credential label
         label: String,
@@ -42,21 +48,24 @@ pub enum HsmauthCredAction {
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, value_name = "PASSWORD")]
         management_password: Option<String>,
         /// Require touch to use the credential
         #[arg(short = 't', long)]
         touch: bool,
     },
-    /// Import symmetric credential
+    /// Import a symmetric credential
+    ///
+    /// This will import an encryption and MAC key as a symmetric YubiHSM Auth
+    /// credential on the YubiKey.
     Symmetric {
         /// Credential label
         label: String,
         /// Encryption key in hex
-        #[arg(short = 'E', long)]
+        #[arg(short = 'E', long, value_name = "KEY")]
         enc_key: Option<String>,
         /// MAC key in hex
-        #[arg(short = 'M', long)]
+        #[arg(short = 'M', long, value_name = "KEY")]
         mac_key: Option<String>,
         /// Generate random encryption and MAC keys
         #[arg(short = 'g', long)]
@@ -65,51 +74,69 @@ pub enum HsmauthCredAction {
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, value_name = "PASSWORD")]
         management_password: Option<String>,
         /// Require touch to use the credential
         #[arg(short = 't', long)]
         touch: bool,
     },
-    /// Import credential derived from password
+    /// Import a symmetric credential derived from a password
+    ///
+    /// This will import a symmetric YubiHSM Auth credential by deriving ENC and
+    /// MAC keys from a password.
     Derive {
         /// Credential label
         label: String,
-        /// Derivation password
-        derivation_password: String,
+        /// Password to derive the ENC and MAC keys from
+        #[arg(long, value_name = "PASSWORD")]
+        derivation_password: Option<String>,
         /// Credential password (at most 16 UTF-8 bytes)
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, value_name = "PASSWORD")]
         management_password: Option<String>,
         /// Require touch to use the credential
         #[arg(short = 't', long)]
         touch: bool,
     },
-    /// Delete credential
+    /// Delete a credential
     Delete {
         /// Credential label
         label: String,
         /// Management password
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, value_name = "PASSWORD")]
         management_password: Option<String>,
-        /// Confirm deletion without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Change credential password
+    /// Change the password of a credential
+    ///
+    /// Requires either the current credential password or the management
+    /// password (not both). Requires YubiKey 5.8 or later.
     ChangePassword {
         /// Credential label
         label: String,
         /// Current credential password (at most 16 UTF-8 bytes)
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
+        /// Management password
+        #[arg(
+            short = 'm',
+            long,
+            conflicts_with = "credential_password",
+            value_name = "PASSWORD"
+        )]
+        management_password: Option<String>,
         /// New credential password (at most 16 UTF-8 bytes)
         #[arg(short = 'n', long, value_name = "PASSWORD")]
         new_credential_password: Option<String>,
     },
     /// Import an asymmetric credential
+    ///
+    /// This will import a private key as an asymmetric YubiHSM Auth credential
+    /// to the YubiKey. Requires YubiKey 5.6 or later.
     Import {
         /// Credential label
         label: String,
@@ -123,13 +150,17 @@ pub enum HsmauthCredAction {
         #[arg(short = 'c', long, value_name = "PASSWORD")]
         credential_password: Option<String>,
         /// Management password
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, value_name = "PASSWORD")]
         management_password: Option<String>,
         /// Require touch
         #[arg(short = 't', long)]
         touch: bool,
     },
-    /// Export public key for asymmetric credential
+    /// Export the public key of an asymmetric credential
+    ///
+    /// This will export the long-term public key corresponding to the
+    /// asymmetric YubiHSM Auth credential stored on the YubiKey. Requires
+    /// YubiKey 5.6 or later.
     Export {
         /// Credential label
         label: String,
@@ -143,11 +174,14 @@ pub enum HsmauthCredAction {
 
 #[derive(Subcommand)]
 pub enum HsmauthAccessAction {
-    /// Change the management key
+    /// Change the management password
+    ///
+    /// Allows you to change the management password, which is required to add
+    /// and delete YubiHSM Auth credentials stored on the YubiKey.
     #[command(name = "change-management-password")]
     ChangeManagementPassword {
         /// Current management password
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, value_name = "PASSWORD")]
         management_password: Option<String>,
         /// New management password
         #[arg(short = 'n', long, value_name = "PASSWORD")]
@@ -207,7 +241,7 @@ impl HsmauthAction {
                     dev,
                     scp_params,
                     &label,
-                    &derivation_password,
+                    derivation_password.as_deref(),
                     credential_password.as_deref(),
                     management_password.as_deref(),
                     touch,
@@ -226,12 +260,14 @@ impl HsmauthAction {
                 HsmauthCredAction::ChangePassword {
                     label,
                     credential_password,
+                    management_password,
                     new_credential_password,
                 } => run_credentials_change_password(
                     dev,
                     scp_params,
                     &label,
                     credential_password.as_deref(),
+                    management_password.as_deref(),
                     new_credential_password.as_deref(),
                 ),
                 HsmauthCredAction::Export {
@@ -381,16 +417,16 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
 
 pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
     if !force {
-        eprintln!("WARNING! This will delete all stored HSM Auth credentials.");
+        eprintln!("WARNING! This will delete all stored YubiHSM Auth credentials.");
         if !confirm("Proceed?") {
-            return Err(anyhow!("Aborted."));
+            return Err(anyhow!("Aborted by user."));
         }
     }
     let mut session = open_session(dev, scp_params)?;
     session
         .reset()
         .map_err(|e| anyhow!("Failed to reset: {e}"))?;
-    eprintln!("HSM Auth application has been reset.");
+    eprintln!("YubiHSM Auth application has been reset.");
     Ok(())
 }
 
@@ -457,7 +493,7 @@ pub fn run_credentials_delete(
     force: bool,
 ) -> Result<()> {
     if !force && !confirm(&format!("Delete credential '{label}'?")) {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
     let mgmt = require_management_password(management_key)?;
     let mut session = open_session(dev, scp_params)?;
@@ -531,7 +567,7 @@ pub fn run_credentials_derive(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     label: &str,
-    derivation_password: &str,
+    derivation_password: Option<&str>,
     credential_password: Option<&str>,
     management_key: Option<&str>,
     touch: bool,
@@ -543,10 +579,14 @@ pub fn run_credentials_derive(
     )?;
     let mgmt = require_management_password(management_key)?;
     let pw = require_credential_password(credential_password)?;
+    let derivation_password = match derivation_password {
+        Some(p) => p.to_string(),
+        None => crate::util::prompt_new_secret("Derivation password")?,
+    };
 
     let mut session = open_session(dev, scp_params)?;
     session
-        .put_credential_derived(&mgmt, label, derivation_password, &pw, touch)
+        .put_credential_derived(&mgmt, label, &derivation_password, &pw, touch)
         .map_err(|e| {
             anyhow!(format_credential_error(
                 &e,
@@ -559,18 +599,35 @@ pub fn run_credentials_derive(
     Ok(())
 }
 
+enum ChangePasswordAuth {
+    Credential(CredentialPassword),
+    Management(HsmAuthManagementKey),
+}
+
 pub fn run_credentials_change_password(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
     label: &str,
     credential_password: Option<&str>,
+    management_password: Option<&str>,
     new_credential_password: Option<&str>,
 ) -> Result<()> {
-    let old_pw = match credential_password {
-        Some(p) => CredentialPassword::from_password(p)?,
-        None => {
-            let p = crate::util::prompt_secret("Enter current credential password")?;
-            CredentialPassword::from_password(&p)?
+    let auth = match (credential_password, management_password) {
+        (Some(p), _) => ChangePasswordAuth::Credential(CredentialPassword::from_password(p)?),
+        (None, Some(p)) => ChangePasswordAuth::Management(parse_management_password(p)?),
+        (None, None) => {
+            eprintln!("Choose authentication method:");
+            eprintln!(" [1] Current credential password");
+            eprintln!(" [2] Management password");
+            let choice = crate::util::prompt("Enter selection [1]")?;
+            match choice.as_str() {
+                "" | "1" => {
+                    let p = crate::util::prompt_secret("Enter current credential password")?;
+                    ChangePasswordAuth::Credential(CredentialPassword::from_password(&p)?)
+                }
+                "2" => ChangePasswordAuth::Management(require_management_password(None)?),
+                _ => return Err(anyhow!("Invalid selection: {choice}")),
+            }
         }
     };
     let new_pw = match new_credential_password {
@@ -586,16 +643,26 @@ pub fn run_credentials_change_password(
     };
 
     let mut session = open_session(dev, scp_params)?;
-    session
-        .change_credential_password(label, &old_pw, &new_pw)
-        .map_err(|e| {
-            anyhow!(format_credential_error(
-                &e,
-                "Failed to change password.",
-                "Credential password",
-                Some("Credential password")
-            ))
-        })?;
+    let result = match &auth {
+        ChangePasswordAuth::Credential(old_pw) => {
+            session.change_credential_password(label, old_pw, &new_pw)
+        }
+        ChangePasswordAuth::Management(mgmt) => {
+            session.change_credential_password_admin(mgmt, label, &new_pw)
+        }
+    };
+    let authentication = match auth {
+        ChangePasswordAuth::Credential(_) => "Credential password",
+        ChangePasswordAuth::Management(_) => "Management password",
+    };
+    result.map_err(|e| {
+        anyhow!(format_credential_error(
+            &e,
+            "Failed to change password.",
+            authentication,
+            Some("Credential password")
+        ))
+    })?;
     eprintln!("Credential password changed for: {label}");
     Ok(())
 }
@@ -645,33 +712,7 @@ fn parse_ec_private_key(data: &[u8], password: Option<&str>) -> Result<p256::Sec
     use elliptic_curve::pkcs8::DecodePrivateKey;
     use p256::NistP256;
 
-    if let Ok(text) = std::str::from_utf8(data)
-        && text.contains("-----BEGIN")
-    {
-        if text.contains("ENCRYPTED") {
-            let _pw = match password {
-                Some(p) => p.to_string(),
-                None => crate::util::prompt_secret("Enter password to decrypt key")?,
-            };
-            // Try parsing as non-encrypted first (some tools wrap non-encrypted keys)
-            if let Ok(sk) = SecretKey::<NistP256>::from_pkcs8_pem(text) {
-                return Ok(sk);
-            }
-            return Err(anyhow!(
-                "Cannot decrypt encrypted key in-process. Convert first:\n  \
-                 openssl pkey -in key.pem -out key_dec.pem"
-            ));
-        }
-        // Try PKCS#8 PEM
-        if let Ok(sk) = SecretKey::<NistP256>::from_pkcs8_pem(text) {
-            return Ok(sk);
-        }
-        // Try SEC1 PEM (EC PRIVATE KEY)
-        if let Ok(sk) = SecretKey::<NistP256>::from_sec1_pem(text) {
-            return Ok(sk);
-        }
-        return Err(anyhow!("Failed to parse EC P-256 private key from PEM."));
-    }
+    let data = &crate::util::load_private_key(data, password)?;
 
     // Try PKCS#8 DER
     if let Ok(sk) = SecretKey::<NistP256>::from_pkcs8_der(data) {
@@ -705,7 +746,6 @@ pub fn run_credentials_export(
     })?;
 
     // Export as SubjectPublicKeyInfo
-    use base64::Engine;
     use p256::elliptic_curve::sec1::ToSec1Point;
 
     let pk_point = public_key.to_sec1_point(false);
@@ -747,13 +787,7 @@ pub fn run_credentials_export(
             }
         }
         CliFormat::Pem => {
-            let b64 = base64::engine::general_purpose::STANDARD.encode(&spki);
-            let mut pem = String::from("-----BEGIN PUBLIC KEY-----\n");
-            for chunk in b64.as_bytes().chunks(64) {
-                pem.push_str(std::str::from_utf8(chunk).unwrap());
-                pem.push('\n');
-            }
-            pem.push_str("-----END PUBLIC KEY-----\n");
+            let pem = ykman::pki::pem_encode("PUBLIC KEY", &spki);
 
             write_file_or_stdout(output, pem.as_bytes())?;
             if output != "-" {

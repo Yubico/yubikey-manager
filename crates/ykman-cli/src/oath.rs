@@ -2,16 +2,21 @@ use anyhow::{Result, anyhow};
 use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::yk4_fips::is_yk4_fips;
 use clap::Subcommand;
+use yubikit::core::Version;
 use yubikit::device::YubiKeyDevice;
-use yubikit::management::Capability;
+use yubikit::management::{Capability, DeviceInfo};
 use yubikit::oath::{
-    Code, Credential, CredentialData, HashAlgorithm, OathAccessKey, OathSession, OathType,
-    parse_b32_key,
+    Credential, CredentialData, HashAlgorithm, OathAccessKey, OathError, OathSession, OathType,
+    format_cred_id, parse_b32_key,
 };
+use yubikit::smartcard::{SmartCardError, Sw};
+use zeroize::Zeroizing;
 
 use crate::appdata::AppData;
 use crate::cli_enums::{CliOathAlgorithm, CliOathDigits, CliOathType};
+use crate::pskc::{PskcEncryption, PskcFile, PskcProtection, write_pskc};
 use crate::scp::{self, ScpParams};
 use crate::util::{
     b32_encode, confirm, format_session_error, format_smartcard_connection_error, print_table,
@@ -21,12 +26,11 @@ use crate::util::{
 #[derive(Subcommand)]
 pub enum OathAction {
     /// Display general status of the OATH application
-    Info {
-        /// Password to unlock OATH
-        #[arg(short = 'p', long)]
-        password: Option<String>,
-    },
-    /// Reset the OATH application
+    Info,
+    /// Reset all OATH data
+    ///
+    /// This action will delete all accounts and restore factory settings for
+    /// the OATH application on the YubiKey.
     Reset {
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -43,21 +47,28 @@ pub enum OathAction {
 #[derive(Subcommand)]
 pub enum OathAccessAction {
     /// Change the password used to protect OATH accounts
+    ///
+    /// Allows you to set or change a password that will be required to access
+    /// the OATH accounts stored on the YubiKey. Use --clear to remove the
+    /// password.
     Change {
         /// Current password to unlock OATH
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// New password to set
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PASSWORD")]
         new_password: Option<String>,
         /// Remove the password
         #[arg(short = 'c', long)]
         clear: bool,
         /// Remember the new password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
     },
     /// Remember the password for the current YubiKey on this computer
+    ///
+    /// Stores the OATH password of the YubiKey on this computer, to avoid
+    /// having to enter it on each use.
     Remember {
         /// Password to store
         #[arg(short = 'p', long)]
@@ -79,7 +90,7 @@ pub enum OathAccountAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Show hidden accounts
         #[arg(short = 'H', long)]
@@ -91,24 +102,35 @@ pub enum OathAccountAction {
         #[arg(short = 'P', long)]
         period: bool,
     },
-    /// Calculate OTP codes
+    /// Generate codes
+    ///
+    /// Generate codes from OATH accounts stored on the YubiKey. Provide a query
+    /// string to match one or more specific accounts. Accounts of type HOTP, or
+    /// those that require touch, require a single match to be triggered.
     Code {
         /// Password to unlock OATH
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Search filter
         query: Option<String>,
         /// Show hidden accounts
         #[arg(short = 'H', long)]
         show_hidden: bool,
-        /// Output single code (for scripting)
+        /// Ensure only a single match, and output only the code
         #[arg(short = 's', long)]
         single: bool,
     },
     /// Add an OATH account
+    ///
+    /// This will add a new OATH account to the YubiKey. If SECRET is not given,
+    /// you will be prompted for it, unless --generate is used to create a
+    /// random secret.
+    ///
+    /// Use --output to also write the account to a PSKC file, which can be
+    /// used to back up the account or to add it to another YubiKey.
     Add {
         /// Account name
         name: String,
@@ -119,13 +141,13 @@ pub enum OathAccountAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Issuer name
         #[arg(short = 'i', long)]
         issuer: Option<String>,
         /// Credential type
-        #[arg(short = 'o', long, default_value = "totp")]
+        #[arg(short = 'o', long, default_value = "totp", value_name = "TYPE")]
         oath_type: CliOathType,
         /// Number of digits
         #[arg(long, default_value = "6")]
@@ -142,6 +164,20 @@ pub enum OathAccountAction {
         /// Generate a random credential key
         #[arg(short = 'g', long)]
         generate: bool,
+        /// Also write the account to a PSKC file (use '-' for stdout)
+        #[arg(short = 'O', long, value_name = "FILE")]
+        output: Option<String>,
+        /// Encrypt the PSKC file with a pre-shared key (32 hex digits, use '-' to prompt)
+        #[arg(
+            long,
+            value_name = "KEY",
+            requires = "output",
+            conflicts_with = "pskc_passphrase"
+        )]
+        pskc_key: Option<String>,
+        /// Encrypt the PSKC file with a passphrase (use '-' to prompt)
+        #[arg(long, value_name = "PASSPHRASE", requires = "output")]
+        pskc_passphrase: Option<String>,
         /// Require touch for code generation
         #[arg(short = 't', long)]
         touch: bool,
@@ -149,7 +185,13 @@ pub enum OathAccountAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Add new account(s) from a PSKC file
+    /// Add accounts from a PSKC file
+    ///
+    /// Reads accounts from a PSKC file, adding them to the YubiKey. The file
+    /// can contain multiple accounts, and you will be prompted to confirm each
+    /// one before it is added, unless --force is used, in which case all valid
+    /// accounts will be added without prompting, overwriting any existing
+    /// accounts with the same name.
     Import {
         /// PSKC file to import
         file: String,
@@ -157,7 +199,7 @@ pub enum OathAccountAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Require touch for code generation
         #[arg(short = 't', long)]
@@ -168,35 +210,40 @@ pub enum OathAccountAction {
     },
     /// Delete an OATH account
     Delete {
-        /// Account to delete (search query)
+        /// A query to match a single account (as shown in "list")
         query: String,
         /// Password to unlock OATH
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
     /// Rename an OATH account
+    ///
+    /// Requires YubiKey 5.3.1 or later.
     Rename {
-        /// Account to rename (search query)
+        /// A query to match a single account (as shown in "list")
         query: String,
-        /// New name (issuer:name or just name)
+        /// The new name of the account (use "issuer:name" to specify issuer)
         new_name: String,
         /// Password to unlock OATH
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Add account from otpauth:// URI
+    /// Add an OATH account from an otpauth:// URI
+    ///
+    /// Use a URI, such as one encoded in a QR code provided by a service, to
+    /// add a new account to the YubiKey.
     Uri {
         /// otpauth:// URI string
         uri: String,
@@ -204,7 +251,7 @@ pub enum OathAccountAction {
         #[arg(short = 'p', long)]
         password: Option<String>,
         /// Remember the password on this computer
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         remember: bool,
         /// Require touch for code generation
         #[arg(short = 't', long)]
@@ -218,7 +265,7 @@ pub enum OathAccountAction {
 impl OathAction {
     pub fn run(self, dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
         match self {
-            Self::Info { password } => run_info(dev, scp_params, password.as_deref()),
+            Self::Info => run_info(dev, scp_params),
             Self::Reset { force } => run_reset(dev, scp_params, force),
             Self::Access(access) => match access {
                 OathAccessAction::Change {
@@ -282,6 +329,9 @@ impl OathAction {
                     counter,
                     period,
                     generate,
+                    output,
+                    pskc_key,
+                    pskc_passphrase,
                     touch,
                     force,
                 } => run_accounts_add(
@@ -298,6 +348,11 @@ impl OathAction {
                     algorithm,
                     counter,
                     period,
+                    output.as_deref().map(|path| PskcOutput {
+                        path,
+                        key: pskc_key.as_deref(),
+                        passphrase: pskc_passphrase.as_deref(),
+                    }),
                     touch,
                     force,
                 ),
@@ -386,6 +441,14 @@ fn validate_and_remember(
     Ok(())
 }
 
+fn require_algorithm_support(info: &DeviceInfo, algorithm: HashAlgorithm) -> Result<()> {
+    if algorithm == HashAlgorithm::Sha512 && (info.version < Version(4, 3, 1) || is_yk4_fips(info))
+    {
+        return Err(anyhow!("Algorithm SHA512 not supported on this YubiKey."));
+    }
+    Ok(())
+}
+
 fn new_oath_session<'a>(
     dev: &'a dyn YubiKeyDevice,
     scp_config: &Option<yubikit::smartcard::ScpKeyParams>,
@@ -470,26 +533,167 @@ fn now_timestamp() -> u64 {
         .as_secs()
 }
 
-fn format_cred_name(cred: &Credential) -> String {
-    match &cred.issuer {
-        Some(issuer) => format!("{issuer}:{}", cred.name),
-        None => cred.name.clone(),
-    }
-}
-
 fn is_hidden(cred: &Credential) -> bool {
-    cred.issuer.as_deref().unwrap_or("").starts_with('_') || cred.name.starts_with('_')
+    cred.issuer.as_deref().is_some_and(|i| i.starts_with('_'))
 }
 
-pub fn run_info(
-    dev: &dyn YubiKeyDevice,
-    scp_params: &ScpParams,
-    password: Option<&str>,
-) -> Result<()> {
+/// The full credential ID as a string, including any non-default period prefix.
+fn cred_string_id(cred: &Credential) -> String {
+    String::from_utf8_lossy(&cred.id).into_owned()
+}
+
+/// Sort key ordering credentials by issuer (or name), then name, case-insensitively.
+fn cred_sort_key(cred: &Credential) -> (String, String) {
+    (
+        cred.issuer.as_deref().unwrap_or(&cred.name).to_lowercase(),
+        cred.name.to_lowercase(),
+    )
+}
+
+/// Find credentials matching a query. An exact ID match takes precedence over
+/// case-insensitive substring matches.
+fn search_creds<'a, T>(
+    entries: &'a [T],
+    cred_of: impl Fn(&T) -> &Credential,
+    query: &str,
+    show_hidden: bool,
+) -> Vec<&'a T> {
+    let query_lower = query.to_lowercase();
+    let mut hits = Vec::new();
+    for entry in entries {
+        let cred = cred_of(entry);
+        if !show_hidden && is_hidden(cred) {
+            continue;
+        }
+        let id = cred_string_id(cred);
+        if id == query {
+            return vec![entry];
+        }
+        if id.to_lowercase().contains(&query_lower) {
+            hits.push(entry);
+        }
+    }
+    hits
+}
+
+fn multiple_matches_error<'a>(creds: impl Iterator<Item = &'a Credential>) -> anyhow::Error {
+    let ids: Vec<String> = creds.map(cred_string_id).collect();
+    anyhow!(
+        "Multiple matches, make the query more specific.\n\n{}",
+        ids.join("\n")
+    )
+}
+
+const STEAM_CHAR_TABLE: &[u8] = b"23456789BCDFGHJKMNPQRTVWXY";
+
+fn is_steam(cred: &Credential) -> bool {
+    cred.oath_type == OathType::Totp && cred.issuer.as_deref() == Some("Steam")
+}
+
+fn calculate_steam(
+    session: &mut OathSession<impl yubikit::smartcard::SmartCardConnection>,
+    cred: &Credential,
+    timestamp: u64,
+) -> Result<String, OathError> {
+    let resp = session.calculate(&cred.id, &(timestamp / 30).to_be_bytes())?;
+    format_steam(&resp).ok_or_else(|| OathError::InvalidData("Response too short".into()))
+}
+
+/// Format a full HMAC response as a 5-character Steam Guard code.
+fn format_steam(resp: &[u8]) -> Option<String> {
+    let offset = (resp.last()? & 0x0F) as usize;
+    let bytes: [u8; 4] = resp.get(offset..offset + 4)?.try_into().ok()?;
+    let mut code = u32::from_be_bytes(bytes) & 0x7FFF_FFFF;
+    let mut chars = String::with_capacity(5);
+    for _ in 0..5 {
+        chars.push(STEAM_CHAR_TABLE[code as usize % STEAM_CHAR_TABLE.len()] as char);
+        code /= STEAM_CHAR_TABLE.len() as u32;
+    }
+    Some(chars)
+}
+
+fn is_apdu_error(err: &OathError, sw: Sw) -> bool {
+    matches!(err, OathError::Connection(SmartCardError::Apdu { sw: s, .. }) if *s == sw as u16)
+}
+
+/// Look for a single credential in a corrupted state and delete it.
+///
+/// Returns true if a broken credential was found and deleted.
+fn delete_broken_credential(
+    session: &mut OathSession<impl yubikit::smartcard::SmartCardConnection>,
+) -> Result<bool> {
+    log::debug!("Probing for broken credentials");
+    let creds = session
+        .list_credentials()
+        .map_err(|e| anyhow!("Failed to list credentials: {e}"))?;
+    let timestamp = now_timestamp();
+    let mut broken = Vec::new();
+    for cred in creds.iter().filter(|c| c.oath_type == OathType::Totp) {
+        let mut ok = false;
+        for i in 0..5 {
+            match session.calculate_code(cred, timestamp) {
+                Ok(_) => {
+                    log::debug!("Credential appears OK: {}", cred_string_id(cred));
+                    ok = true;
+                    break;
+                }
+                Err(e) if is_apdu_error(&e, Sw::MemoryFailure) => {
+                    if i == 0 {
+                        log::debug!("Memory failure in: {}", cred_string_id(cred));
+                    }
+                }
+                // Touch credentials can't be probed without user interaction.
+                Err(e) if is_apdu_error(&e, Sw::SecurityConditionNotSatisfied) => {
+                    ok = true;
+                    break;
+                }
+                Err(e) => return Err(anyhow!("Failed to calculate: {e}")),
+            }
+        }
+        if !ok {
+            log::warn!("Credential appears to be broken: {}", cred_string_id(cred));
+            broken.push(cred);
+        }
+    }
+
+    if let [cred] = broken.as_slice() {
+        log::info!("Deleting broken credential");
+        session
+            .delete_credential(&cred.id)
+            .map_err(|e| anyhow!("Failed to delete credential: {e}"))?;
+        return Ok(true);
+    }
+    log::warn!(
+        "Requires a single broken credential, found {}",
+        broken.len()
+    );
+    Ok(false)
+}
+
+fn prompt_for_touch() {
+    eprintln!("Touch your YubiKey...");
+}
+
+/// Run `f`, prompting for touch if it hasn't completed within 500 ms.
+fn with_touch_prompt_timeout<T>(f: impl FnOnce() -> T) -> T {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let timer = std::thread::spawn(move || {
+        if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+            rx.recv_timeout(std::time::Duration::from_millis(500))
+        {
+            prompt_for_touch();
+        }
+    });
+    let result = f();
+    drop(tx);
+    let _ = timer.join();
+    result
+}
+
+pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
     // Open a raw session without unlocking — info doesn't require authentication
     let scp_config = scp::resolve_scp_for_app(dev, scp_params, Capability::OATH, "OATH")?;
     let session = new_oath_session(dev, &scp_config)?;
-    let _ = password; // Not needed for info
     let keys = oath_keys()?;
     print_table([
         ("OATH version", session.version().to_string()),
@@ -547,20 +751,22 @@ pub fn run_accounts_list(
         .list_credentials()
         .map_err(|e| anyhow!("Failed to list credentials: {e}"))?;
 
+    let mut creds: Vec<_> = creds
+        .into_iter()
+        .filter(|c| show_hidden || !is_hidden(c))
+        .collect();
+    creds.sort_by_key(cred_sort_key);
     for cred in &creds {
-        if !show_hidden && is_hidden(cred) {
-            continue;
-        }
-        let mut line = format_cred_name(cred);
+        let mut line = cred_string_id(cred);
         if show_oath_type {
             let t = match cred.oath_type {
                 OathType::Totp => "TOTP",
                 OathType::Hotp => "HOTP",
             };
-            line = format!("{line} ({t})");
+            line.push_str(&format!(", {t}"));
         }
-        if show_period && cred.oath_type == OathType::Totp {
-            line = format!("{line} [period: {}]", cred.period);
+        if show_period {
+            line.push_str(&format!(", {}", cred.period));
         }
         println!("{line}");
     }
@@ -579,74 +785,119 @@ pub fn run_accounts_code(
     let mut session = open_session(dev, scp_params, password, remember)?;
     let timestamp = now_timestamp();
 
-    let entries = session
-        .calculate_all(timestamp)
-        .map_err(|e| anyhow!("Failed to calculate codes: {e}"))?;
-
-    // Filter by query
-    let filtered: Vec<&(Credential, Option<Code>)> = entries
-        .iter()
-        .filter(|(cred, _)| {
-            if !show_hidden && is_hidden(cred) {
-                return false;
+    let entries = match session.calculate_all(timestamp) {
+        Ok(entries) => entries,
+        Err(e) if is_apdu_error(&e, Sw::MemoryFailure) => {
+            log::warn!("Corrupted data in OATH accounts, attempting to fix");
+            if !delete_broken_credential(&mut session)? {
+                log::error!("Unable to fix memory failure");
+                return Err(anyhow!("Failed to calculate codes: {e}"));
             }
-            if let Some(q) = query {
-                let name = format_cred_name(cred);
-                name.to_ascii_lowercase().contains(&q.to_ascii_lowercase())
-            } else {
-                true
-            }
-        })
-        .collect();
-
-    if single {
-        if filtered.len() != 1 {
-            return Err(anyhow!(
-                "Expected exactly 1 match, found {}.",
-                filtered.len()
-            ));
+            session
+                .calculate_all(timestamp)
+                .map_err(|e| anyhow!("Failed to calculate codes: {e}"))?
         }
-        let (cred, code) = filtered[0];
-        let code = match code {
-            Some(c) => c.value.clone(),
-            None => {
-                // Touch required or HOTP - calculate individually
-                let c = session
-                    .calculate_code(cred, timestamp)
-                    .map_err(|e| anyhow!("Failed to calculate: {e}"))?;
-                c.value
-            }
-        };
-        println!("{code}");
-    } else {
-        // Find max name width for alignment
-        let max_w = filtered
-            .iter()
-            .map(|(c, _)| format_cred_name(c).len())
-            .max()
-            .unwrap_or(0);
+        Err(e) => return Err(anyhow!("Failed to calculate codes: {e}")),
+    };
 
-        for (cred, code) in &filtered {
-            let name = format_cred_name(cred);
+    let mut hits = search_creds(&entries, |(c, _)| c, query.unwrap_or(""), show_hidden);
+
+    if let [(cred, code)] = hits.as_slice() {
+        if cred.touch_required == Some(true) {
+            prompt_for_touch();
+        }
+        let value = if is_steam(cred) {
+            calculate_steam(&mut session, cred, timestamp)
+        } else if let Some(code) = code {
+            Ok(code.value.clone())
+        } else if cred.oath_type == OathType::Hotp {
+            // HOTP might require touch, we don't know. Assume yes after 500ms.
+            with_touch_prompt_timeout(|| session.calculate_code(cred, timestamp)).map(|c| c.value)
+        } else {
+            session.calculate_code(cred, timestamp).map(|c| c.value)
+        };
+        let value = match value {
+            Ok(v) => v,
+            Err(e) if is_apdu_error(&e, Sw::SecurityConditionNotSatisfied) => {
+                return Err(anyhow!("Touch account timed out!"));
+            }
+            Err(e) => return Err(anyhow!("Failed to calculate: {e}")),
+        };
+        if single {
+            println!("{value}");
+        } else {
+            println!("{}  {value}", cred_string_id(cred));
+        }
+    } else if single {
+        if hits.is_empty() {
+            return Err(anyhow!("No matching account found."));
+        }
+        return Err(multiple_matches_error(hits.iter().map(|(c, _)| c)));
+    } else {
+        hits.sort_by_key(|(c, _)| cred_sort_key(c));
+        let mut outputs = Vec::with_capacity(hits.len());
+        for (cred, code) in hits {
             let code_str = match code {
+                Some(_) if is_steam(cred) => calculate_steam(&mut session, cred, timestamp)
+                    .map_err(|e| anyhow!("Failed to calculate: {e}"))?,
                 Some(c) => c.value.clone(),
-                None => {
-                    if cred.touch_required == Some(true) {
-                        "[Requires Touch]".into()
-                    } else if cred.oath_type == OathType::Hotp {
-                        "[HOTP]".into()
-                    } else {
-                        let c = session
-                            .calculate_code(cred, timestamp)
-                            .map_err(|e| anyhow!("Failed to calculate: {e}"))?;
-                        c.value
-                    }
-                }
+                None if cred.touch_required == Some(true) => "[Requires Touch]".into(),
+                None if cred.oath_type == OathType::Hotp => "[HOTP Account]".into(),
+                None => String::new(),
             };
+            outputs.push((cred_string_id(cred), code_str));
+        }
+        let max_w = outputs.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+        for (name, code_str) in outputs {
             println!("{name:<max_w$}  {code_str}");
         }
     }
     Ok(())
+}
+
+/// Where and how to write a PSKC copy of an added account.
+pub struct PskcOutput<'a> {
+    path: &'a str,
+    key: Option<&'a str>,
+    passphrase: Option<&'a str>,
+}
+
+fn prompt_confirmed_secret(prompt: &str) -> Result<Zeroizing<String>> {
+    let value = Zeroizing::new(crate::util::prompt_secret(prompt)?);
+    let confirm = Zeroizing::new(crate::util::prompt_secret("Repeat for confirmation")?);
+    if value != confirm {
+        return Err(anyhow!("The values do not match."));
+    }
+    Ok(value)
+}
+
+fn pskc_encryption(output: &PskcOutput) -> Result<Option<PskcEncryption>> {
+    if let Some(passphrase) = output.passphrase {
+        let passphrase = if passphrase == "-" {
+            prompt_confirmed_secret("Enter passphrase to encrypt PSKC file")?
+        } else {
+            Zeroizing::new(passphrase.to_string())
+        };
+        if passphrase.chars().count() < 8 {
+            return Err(anyhow!("Passphrase must be at least 8 characters."));
+        }
+        Ok(Some(PskcEncryption::Passphrase(passphrase)))
+    } else if let Some(key) = output.key {
+        let key = if key == "-" {
+            prompt_confirmed_secret("Enter pre-shared key (hex) to encrypt PSKC file")?
+        } else {
+            Zeroizing::new(key.to_string())
+        };
+        let key = Zeroizing::new(hex::decode(key.trim()).unwrap_or_default());
+        if key.len() != 16 {
+            return Err(anyhow!(
+                "Pre-shared key must be 16 bytes (32 hex characters)."
+            ));
+        }
+        Ok(Some(PskcEncryption::PresharedKey(key)))
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn run_accounts_add(
@@ -663,12 +914,23 @@ pub fn run_accounts_add(
     algorithm: CliOathAlgorithm,
     counter: u32,
     period: u32,
+    output: Option<PskcOutput>,
     touch: bool,
     force: bool,
 ) -> Result<()> {
     require_fips_approved(dev.info(), Capability::OATH, "prior to adding accounts")?;
+    let pskc = match &output {
+        Some(output) => {
+            let serial = dev.info().serial.ok_or_else(|| {
+                anyhow!("YubiKey has no readable serial number, cannot write to PSKC file.")
+            })?;
+            Some((output.path, serial, pskc_encryption(output)?))
+        }
+        None => None,
+    };
     let oath_type: OathType = oath_type.into();
     let hash_algorithm: HashAlgorithm = algorithm.into();
+    require_algorithm_support(dev.info(), hash_algorithm)?;
     let digits = digits.as_u8();
 
     let secret_bytes = if let Some(s) = secret {
@@ -676,10 +938,12 @@ pub fn run_accounts_add(
     } else if generate {
         let mut key = vec![0u8; 20];
         getrandom::fill(&mut key).map_err(|e| anyhow!("Failed to generate random: {e}"))?;
-        eprintln!(
-            "Using a randomly generated secret (base32): {}",
-            b32_encode(&key)
-        );
+        if pskc.is_none() {
+            eprintln!(
+                "Using a randomly generated secret (base32): {}",
+                b32_encode(&key)
+            );
+        }
         key
     } else {
         loop {
@@ -711,13 +975,11 @@ pub fn run_accounts_add(
         let existing = session
             .list_credentials()
             .map_err(|e| anyhow!("Failed to list: {e}"))?;
-        let display_name = match issuer {
-            Some(i) => format!("{i}:{name}"),
-            None => name.to_string(),
-        };
-        if existing.iter().any(|c| format_cred_name(c) == display_name)
+        let cred_id = cred_data.get_id();
+        if existing.iter().any(|c| c.id == cred_id)
             && !confirm(&format!(
-                "A credential called {display_name} already exists, overwrite?"
+                "A credential called {} already exists, overwrite?",
+                String::from_utf8_lossy(&cred_id)
             ))
         {
             return Err(anyhow!("Aborted by user."));
@@ -732,7 +994,17 @@ pub fn run_accounts_add(
         Some(i) => format!("{i}:{name}"),
         None => name.to_string(),
     };
-    println!("Credential added: {display}");
+    match pskc {
+        Some((path, serial, encryption)) => {
+            eprintln!("Credential added: {display}");
+            let xml = write_pskc(&cred_data, serial, encryption.as_ref())?;
+            crate::util::write_file_or_stdout(path, xml.as_bytes())?;
+            if path != "-" {
+                eprintln!("Credential written to PSKC file: {path}");
+            }
+        }
+        None => println!("Credential added: {display}"),
+    }
     Ok(())
 }
 
@@ -749,34 +1021,25 @@ pub fn run_accounts_delete(
         .list_credentials()
         .map_err(|e| anyhow!("Failed to list: {e}"))?;
 
-    let matching: Vec<_> = creds
-        .iter()
-        .filter(|c| {
-            format_cred_name(c)
-                .to_ascii_lowercase()
-                .contains(&query.to_ascii_lowercase())
-        })
-        .collect();
-
-    let cred = match matching.len() {
-        0 => return Err(anyhow!("No credential matching '{query}'.")),
-        1 => matching[0],
-        _ => {
-            return Err(anyhow!(
-                "Multiple credentials matching '{query}'. Be more specific."
-            ));
+    let hits = search_creds(&creds, |c| c, query, true);
+    let cred = match hits.as_slice() {
+        [] => {
+            println!("No matches, nothing to be done.");
+            return Ok(());
         }
+        [cred] => *cred,
+        _ => return Err(multiple_matches_error(hits.into_iter())),
     };
 
-    let name = format_cred_name(cred);
-    if !force && !confirm(&format!("Delete credential {name}?")) {
+    let id = cred_string_id(cred);
+    if !force && !confirm(&format!("Delete account: {id} ?")) {
         return Err(anyhow!("Aborted by user."));
     }
 
     session
         .delete_credential(&cred.id)
         .map_err(|e| anyhow!("Failed to delete: {e}"))?;
-    eprintln!("Credential deleted: {name}");
+    println!("Deleted {id}.");
     Ok(())
 }
 
@@ -794,41 +1057,37 @@ pub fn run_accounts_rename(
         .list_credentials()
         .map_err(|e| anyhow!("Failed to list: {e}"))?;
 
-    let matching: Vec<_> = creds
-        .iter()
-        .filter(|c| {
-            format_cred_name(c)
-                .to_ascii_lowercase()
-                .contains(&query.to_ascii_lowercase())
-        })
-        .collect();
-
-    let cred = match matching.len() {
-        0 => return Err(anyhow!("No credential matching '{query}'.")),
-        1 => matching[0],
-        _ => {
-            return Err(anyhow!(
-                "Multiple credentials matching '{query}'. Be more specific."
-            ));
+    let hits = search_creds(&creds, |c| c, query, true);
+    let cred = match hits.as_slice() {
+        [] => {
+            println!("No matches, nothing to be done.");
+            return Ok(());
         }
+        [cred] => *cred,
+        _ => return Err(multiple_matches_error(hits.into_iter())),
     };
 
-    let old_name = format_cred_name(cred);
-    // Parse new_name as "issuer:name" or just "name"
-    let (new_issuer, new_account) = if let Some((i, n)) = new_name.split_once(':') {
-        (Some(i), n)
-    } else {
-        (None, new_name)
+    let (new_issuer, new_account) = match new_name.split_once(':') {
+        Some((i, n)) => (Some(i), n),
+        None => (None, new_name),
     };
+    let new_id = format_cred_id(new_issuer, new_account, cred.oath_type, cred.period);
+    let new_id_str = String::from_utf8_lossy(&new_id).into_owned();
+    if creds.iter().any(|c| c.id == new_id) {
+        return Err(anyhow!(
+            "Another account with ID {new_id_str} already exists on this YubiKey."
+        ));
+    }
 
-    if !force && !confirm(&format!("Rename {old_name} to {new_name}?")) {
+    let old_id = cred_string_id(cred);
+    if !force && !confirm(&format!("Rename account: {old_id} ?")) {
         return Err(anyhow!("Aborted by user."));
     }
 
     session
         .rename_credential(&cred.id, new_account, new_issuer)
         .map_err(|e| anyhow!("Failed to rename: {e}"))?;
-    println!("Credential renamed: {old_name} → {new_name}");
+    println!("Renamed {old_id} to {new_id_str}.");
     Ok(())
 }
 
@@ -1005,6 +1264,7 @@ pub fn run_accounts_uri(
         }
     }
 
+    require_algorithm_support(dev.info(), algorithm)?;
     let secret_str = secret.ok_or_else(|| anyhow!("URI missing 'secret' parameter"))?;
     let secret_bytes =
         parse_b32_key(&secret_str).map_err(|_| anyhow!("Invalid Base32-encoded secret."))?;
@@ -1064,26 +1324,6 @@ fn urldecode(s: &str) -> String {
     result
 }
 
-// ---------------------------------------------------------------------------
-// PSKC import
-// ---------------------------------------------------------------------------
-
-const PSKC_ALG_PREFIX: &str = "urn:ietf:params:xml:ns:keyprov:pskc:";
-
-/// A credential parsed from a PSKC XML file.
-struct PskcCredential {
-    #[allow(dead_code)]
-    id: String,
-    issuer: Option<String>,
-    name: String,
-    oath_type: OathType,
-    hash_algorithm: HashAlgorithm,
-    secret: Vec<u8>,
-    digits: u8,
-    period: u32,
-    counter: u32,
-}
-
 pub fn run_accounts_import(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
@@ -1097,10 +1337,31 @@ pub fn run_accounts_import(
     let data = crate::util::read_file_or_stdin(file)?;
     let xml_str = String::from_utf8(data).map_err(|_| anyhow!("PSKC file is not valid UTF-8."))?;
 
-    let credentials = parse_pskc(&xml_str)?;
+    let pskc = PskcFile::parse(&xml_str)?;
+    let key = match pskc.protection() {
+        PskcProtection::None => None,
+        PskcProtection::Passphrase => {
+            let passphrase = Zeroizing::new(crate::util::prompt_secret(
+                "Enter passphrase to decrypt PSKC file",
+            )?);
+            Some(pskc.derive_key(&passphrase)?)
+        }
+        PskcProtection::PresharedKey => {
+            let key = Zeroizing::new(crate::util::prompt_secret(
+                "Enter pre-shared key (32 hex digits) to decrypt PSKC file",
+            )?);
+            Some(Zeroizing::new(hex::decode(key.trim()).map_err(|_| {
+                anyhow!("Invalid pre-shared key: must be valid hexadecimal.")
+            })?))
+        }
+    };
+    let credentials = pskc.credentials(key.as_ref().map(|k| k.as_slice()))?;
 
     if credentials.is_empty() {
         return Err(anyhow!("No valid OATH accounts found in the file."));
+    }
+    for cred in &credentials {
+        require_algorithm_support(dev.info(), cred.hash_algorithm)?;
     }
 
     let mut session = open_session(dev, scp_params, password, remember)?;
@@ -1131,7 +1392,7 @@ pub fn run_accounts_import(
             name: cred.name.clone(),
             oath_type: cred.oath_type,
             hash_algorithm: cred.hash_algorithm,
-            secret: cred.secret.clone(),
+            secret: cred.secret.to_vec(),
             digits: cred.digits,
             period: cred.period,
             counter: cred.counter,
@@ -1140,13 +1401,9 @@ pub fn run_accounts_import(
 
         // Check for duplicate when forcing
         if force {
-            let display = match &cred.issuer {
-                Some(i) => format!("{i}:{}", cred.name),
-                None => cred.name.clone(),
-            };
-            if existing.iter().any(|c| format_cred_name(c) == display) {
+            let id = cred_data.get_id();
+            if existing.iter().any(|c| c.id == id) {
                 // Delete existing before re-adding
-                let id = cred_data.get_id();
                 let _ = session.delete_credential(&id);
             }
         }
@@ -1162,227 +1419,74 @@ pub fn run_accounts_import(
     Ok(())
 }
 
-/// Parse a PSKC XML string and extract OATH credentials.
-fn parse_pskc(xml: &str) -> Result<Vec<PskcCredential>> {
-    use quick_xml::Reader;
-    use quick_xml::events::Event;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let mut reader = Reader::from_str(xml);
-    let mut credentials = Vec::new();
-
-    // Track XML state
-    let mut in_key_package = false;
-    let mut current_id: Option<String> = None;
-    let mut current_algorithm: Option<String> = None;
-    let mut current_algorithm_suite: Option<String> = None;
-    let mut current_issuer: Option<String> = None;
-    let mut current_userid: Option<String> = None;
-    let mut current_friendly_name: Option<String> = None;
-    let mut current_secret_b64: Option<String> = None;
-    let mut current_response_length: Option<u8> = None;
-    let mut current_time_interval: Option<u32> = None;
-    let mut current_counter: Option<u32> = None;
-    let mut in_secret = false;
-    let mut in_plain_value = false;
-    let mut _in_response_format = false;
-    let mut in_otp_params = false;
-    let mut current_tag: Option<String> = None;
-
-    loop {
-        match reader.read_event() {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                match local_name(e.name().as_ref()) {
-                    "KeyPackage" => {
-                        in_key_package = true;
-                        current_id = None;
-                        current_algorithm = None;
-                        current_algorithm_suite = None;
-                        current_issuer = None;
-                        current_userid = None;
-                        current_friendly_name = None;
-                        current_secret_b64 = None;
-                        current_response_length = None;
-                        current_time_interval = None;
-                        current_counter = None;
-                    }
-                    "Key" if in_key_package => {
-                        for attr in e.attributes().flatten() {
-                            let val = attr
-                                .normalized_value(quick_xml::XmlVersion::Implicit1_0)
-                                .unwrap_or_default()
-                                .to_string();
-                            match local_name(attr.key.as_ref()) {
-                                "Id" => current_id = Some(val),
-                                "Algorithm" => current_algorithm = Some(val),
-                                _ => {}
-                            }
-                        }
-                    }
-                    "AlgorithmParameters" if in_key_package => {}
-                    "Suite" if in_key_package => {
-                        current_tag = Some("Suite".to_string());
-                    }
-                    "Secret" if in_key_package => in_secret = true,
-                    "PlainValue" if in_secret => in_plain_value = true,
-                    "ResponseFormat" if in_key_package => {
-                        _in_response_format = true;
-                        for attr in e.attributes().flatten() {
-                            let val = attr
-                                .normalized_value(quick_xml::XmlVersion::Implicit1_0)
-                                .unwrap_or_default()
-                                .to_string();
-                            if local_name(attr.key.as_ref()) == "Length" {
-                                current_response_length = val.parse().ok();
-                            }
-                        }
-                    }
-                    "OTPParameters" if in_key_package => in_otp_params = true,
-                    "Time" | "TimeInterval" if in_otp_params => {
-                        current_tag = Some("TimeInterval".to_string());
-                    }
-                    "Counter" if in_otp_params || in_key_package => {
-                        current_tag = Some("Counter".to_string());
-                    }
-                    "Issuer" if in_key_package => {
-                        current_tag = Some("Issuer".to_string());
-                    }
-                    "KeyUserId" | "UserId" if in_key_package => {
-                        current_tag = Some("KeyUserId".to_string());
-                    }
-                    "FriendlyName" if in_key_package => {
-                        current_tag = Some("FriendlyName".to_string());
-                    }
-                    _ => {}
-                }
-            }
-            Ok(Event::Text(ref e)) => {
-                let text = e
-                    .xml_content(quick_xml::XmlVersion::Implicit1_0)
-                    .to_string();
-                if in_plain_value && in_secret {
-                    current_secret_b64 = Some(text.clone());
-                }
-                if let Some(tag) = &current_tag {
-                    match tag.as_str() {
-                        "Suite" => current_algorithm_suite = Some(text.clone()),
-                        "TimeInterval" => current_time_interval = text.parse().ok(),
-                        "Counter" => current_counter = text.parse().ok(),
-                        "Issuer" => current_issuer = Some(text.clone()),
-                        "KeyUserId" => current_userid = Some(text.clone()),
-                        "FriendlyName" => current_friendly_name = Some(text.clone()),
-                        _ => {}
-                    }
-                }
-            }
-            Ok(Event::End(ref e)) => {
-                match local_name(e.name().as_ref()) {
-                    "PlainValue" => in_plain_value = false,
-                    "Secret" => in_secret = false,
-                    "ResponseFormat" => _in_response_format = false,
-                    "OTPParameters" => in_otp_params = false,
-                    "Suite" | "Time" | "TimeInterval" | "Counter" | "Issuer" | "KeyUserId"
-                    | "UserId" | "FriendlyName" => {
-                        current_tag = None;
-                    }
-                    "KeyPackage" => {
-                        in_key_package = false;
-
-                        // Build credential from collected data
-                        let algorithm = match &current_algorithm {
-                            Some(a) if a.starts_with(PSKC_ALG_PREFIX) => a.clone(),
-                            _ => continue,
-                        };
-
-                        let oath_type_str = &algorithm[PSKC_ALG_PREFIX.len()..];
-                        let oath_type = match oath_type_str.to_ascii_uppercase().as_str() {
-                            "HOTP" => OathType::Hotp,
-                            "TOTP" => OathType::Totp,
-                            _ => continue,
-                        };
-
-                        let secret = match &current_secret_b64 {
-                            Some(b64) => {
-                                use base64::Engine;
-                                match base64::engine::general_purpose::STANDARD.decode(b64.trim()) {
-                                    Ok(s) => s,
-                                    Err(_) => continue,
-                                }
-                            }
-                            None => continue,
-                        };
-
-                        let id = match &current_id {
-                            Some(id) => id.clone(),
-                            None => continue,
-                        };
-
-                        let hash_algorithm = match current_algorithm_suite
-                            .as_deref()
-                            .map(|s| s.to_ascii_uppercase())
-                        {
-                            Some(ref s) if s.contains("SHA256") || s == "SHA256" => {
-                                HashAlgorithm::Sha256
-                            }
-                            Some(ref s) if s.contains("SHA512") || s == "SHA512" => {
-                                HashAlgorithm::Sha512
-                            }
-                            _ => HashAlgorithm::Sha1,
-                        };
-
-                        let mut issuer = None;
-                        let mut name = id.clone();
-
-                        // Try friendly_name for issuer:name
-                        if let Some(ref friendly) = current_friendly_name
-                            && friendly.contains(':')
-                        {
-                            let mut parts = friendly.splitn(2, ':');
-                            issuer = parts.next().map(|s| s.to_string());
-                            if let Some(n) = parts.next() {
-                                name = n.to_string();
-                            }
-                        }
-                        if let Some(ref iss) = current_issuer {
-                            issuer = Some(iss.clone());
-                        }
-                        if let Some(ref uid) = current_userid {
-                            // Try to extract CN from DN format
-                            if uid.contains("CN=") {
-                                if let Some(cn) =
-                                    uid.split("CN=").nth(1).and_then(|s| s.split(',').next())
-                                {
-                                    name = cn.to_string();
-                                }
-                            } else {
-                                name = uid.clone();
-                            }
-                        }
-
-                        credentials.push(PskcCredential {
-                            id,
-                            issuer,
-                            name,
-                            oath_type,
-                            hash_algorithm,
-                            secret,
-                            digits: current_response_length.unwrap_or(6),
-                            period: current_time_interval.unwrap_or(30),
-                            counter: current_counter.unwrap_or(0),
-                        });
-                    }
-                    _ => {}
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(e) => return Err(anyhow!("Failed to parse PSKC XML: {e}")),
-            _ => {}
+    fn cred(id: &str, issuer: Option<&str>, name: &str) -> Credential {
+        Credential {
+            device_id: String::new(),
+            id: id.as_bytes().to_vec(),
+            issuer: issuer.map(str::to_string),
+            name: name.to_string(),
+            oath_type: OathType::Totp,
+            period: 30,
+            touch_required: None,
         }
     }
 
-    Ok(credentials)
-}
+    #[test]
+    fn test_format_steam() {
+        let resp = hex::decode("75a48a19d4cbe100644e8ac1397eea747a2d33ab").unwrap();
+        assert_eq!(format_steam(&resp).as_deref(), Some("PV9M4"));
+        let resp = hex::decode("278c02e53610f84c40bd9135acd4101012410a14").unwrap();
+        assert_eq!(format_steam(&resp).as_deref(), Some("PY4YB"));
+        assert_eq!(format_steam(&[0x0F]), None);
+    }
 
-/// Extract the local name from a potentially namespace-prefixed XML name.
-fn local_name(full: &str) -> &str {
-    full.rsplit_once(':').map_or(full, |(_, local)| local)
+    #[test]
+    fn test_search_creds_exact_match_wins() {
+        let creds = [
+            cred("foobar", None, "foobar"),
+            cred("foo", None, "foo"),
+            cred("Foo:x", Some("Foo"), "x"),
+        ];
+        let hits = search_creds(&creds, |c| c, "foo", false);
+        assert_eq!(hits, vec![&creds[1]]);
+        let hits = search_creds(&creds, |c| c, "FOO", false);
+        assert_eq!(hits.len(), 3);
+    }
+
+    #[test]
+    fn test_search_creds_uses_period_prefixed_id() {
+        let creds = [
+            cred("Issuer:name", Some("Issuer"), "name"),
+            cred("60/Issuer:name", Some("Issuer"), "name"),
+        ];
+        let hits = search_creds(&creds, |c| c, "60/", false);
+        assert_eq!(hits, vec![&creds[1]]);
+    }
+
+    #[test]
+    fn test_search_creds_hidden_by_issuer_only() {
+        let creds = [
+            cred("_hidden:a", Some("_hidden"), "a"),
+            cred("_b", None, "_b"),
+        ];
+        assert_eq!(search_creds(&creds, |c| c, "", false), vec![&creds[1]]);
+        assert_eq!(search_creds(&creds, |c| c, "", true).len(), 2);
+    }
+
+    #[test]
+    fn test_cred_sort_key() {
+        let mut creds = [
+            cred("b:z", Some("b"), "z"),
+            cred("A:y", Some("A"), "y"),
+            cred("c", None, "c"),
+            cred("a", None, "a"),
+        ];
+        creds.sort_by_key(cred_sort_key);
+        let ids: Vec<_> = creds.iter().map(cred_string_id).collect();
+        assert_eq!(ids, ["a", "A:y", "b:z", "c"]);
+    }
 }

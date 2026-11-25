@@ -84,29 +84,6 @@ fn is_global(arg: &Arg) -> bool {
     arg.is_global_set() || matches!(arg.get_long(), Some("help" | "version"))
 }
 
-fn lowercase_placeholders(usage: &str) -> String {
-    let mut output = String::with_capacity(usage.len());
-    let mut rest = usage;
-    while let Some(start) = rest.find(['[', '<']) {
-        output.push_str(&rest[..=start]);
-        rest = &rest[start + 1..];
-        let end = rest.find(['[', '<', ']', '>']).unwrap_or(rest.len());
-        let token = &rest[..end];
-        if !token.starts_with('-')
-            && token
-                .bytes()
-                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || matches!(c, b'_' | b'-'))
-        {
-            output.push_str(&token.to_ascii_lowercase());
-        } else {
-            output.push_str(token);
-        }
-        rest = &rest[end..];
-    }
-    output.push_str(rest);
-    output
-}
-
 fn finalize(command: &mut Command, root: bool) {
     // Render each section from filtered metadata, never by parsing clap's formatted rows.
     let mut output = command
@@ -117,10 +94,7 @@ fn finalize(command: &mut Command, root: bool) {
     section(
         &mut output,
         "USAGE",
-        &format!(
-            "  {}",
-            lowercase_placeholders(&render(command.clone(), "{usage}"))
-        ),
+        &format!("  {}", render(command.clone(), "{usage}")),
     );
     section(
         &mut output,
@@ -187,16 +161,8 @@ fn finalize(command: &mut Command, root: bool) {
 mod tests {
     use clap::{CommandFactory, FromArgMatches};
 
-    use super::{configure, lowercase_placeholders};
+    use super::configure;
     use crate::{Cli, Commands};
-
-    #[test]
-    fn usage_only_lowercases_placeholders() {
-        assert_eq!(
-            lowercase_placeholders("ykman keys [OPTIONS] <PUBLIC-KEY> [<FILE>] [-P|--pin] [-P]"),
-            "ykman keys [options] <public-key> [<file>] [-P|--pin] [-P]"
-        );
-    }
 
     #[test]
     fn presentation_preserves_command_grammar() {

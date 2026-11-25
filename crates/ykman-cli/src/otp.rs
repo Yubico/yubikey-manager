@@ -93,7 +93,7 @@ pub struct EnterArgs {
 
 #[derive(Subcommand)]
 pub enum OtpAction {
-    /// Display OTP slot status
+    /// Display general status of the YubiOTP application
     Info,
     /// Swap the two OTP slot configurations
     Swap {
@@ -101,18 +101,22 @@ pub enum OtpAction {
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Delete an OTP slot configuration
+    /// Delete the configuration of a slot
     Delete {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
-        /// Access code (hex)
-        #[arg(short = 'A', long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Configure an NDEF slot
+    /// Configure a slot to be used over NDEF (NFC)
+    ///
+    /// If --prefix is not given, a default value is used, based on the type.
+    /// For URI the default is `https://my.yubico.com/yk/#`, for text it is an
+    /// empty string.
     Ndef {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
@@ -120,10 +124,10 @@ pub enum OtpAction {
         #[arg(short = 'p', long)]
         prefix: Option<String>,
         /// NDEF type
-        #[arg(short = 't', long, default_value = "uri")]
+        #[arg(short = 't', long, default_value = "uri", value_name = "TYPE")]
         ndef_type: crate::cli_enums::CliNdefType,
-        /// Access code (hex)
-        #[arg(short = 'A', long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -134,10 +138,10 @@ pub enum OtpAction {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
         /// Public ID (modhex, 0-16 bytes)
-        #[arg(short = 'P', long)]
+        #[arg(short = 'P', long, value_name = "MODHEX")]
         public_id: Option<String>,
         /// Private ID (hex, 6 bytes)
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, value_name = "HEX")]
         private_id: Option<String>,
         /// AES key (hex, 16 bytes)
         #[arg(short = 'k', long)]
@@ -153,17 +157,25 @@ pub enum OtpAction {
         generate_key: bool,
         #[command(flatten)]
         enter: EnterArgs,
-        /// Access code (hex)
-        #[arg(short = 'A', long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
         /// File path to output configuration
-        #[arg(short = 'O', long)]
+        #[arg(short = 'O', long, value_name = "FILE")]
         config_output: Option<String>,
     },
     /// Program a static password
+    ///
+    /// To avoid problems with different keyboard layouts, only the following
+    /// characters (upper and lower case) are allowed by default:
+    /// cbdefghijklnrtuv
+    ///
+    /// Use the --keyboard-layout option to allow more characters, based on
+    /// your preferred keyboard layout. Use --list-layouts to show the
+    /// available layouts.
     Static {
         /// Slot number (1 or 2)
         #[arg(required_unless_present = "list_layouts")]
@@ -174,8 +186,13 @@ pub enum OtpAction {
         #[arg(short = 'g', long, conflicts_with = "password")]
         generate: bool,
         /// Length of generated password
-        #[arg(short = 'L', long, default_value_t = 38)]
-        length: usize,
+        #[arg(
+            short = 'L',
+            long,
+            default_value_t = 38,
+            value_parser = clap::value_parser!(u8).range(1..=38)
+        )]
+        length: u8,
         /// Keyboard layout, 'layout' or 'layout:variant' (see --list-layouts)
         #[arg(short = 'k', long, value_name = "LAYOUT", default_value = "modhex")]
         keyboard_layout: LayoutSelection,
@@ -184,55 +201,78 @@ pub enum OtpAction {
         list_layouts: bool,
         #[command(flatten)]
         enter: EnterArgs,
-        /// Access code (hex)
-        #[arg(short = 'A', long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Program challenge-response (HMAC-SHA1)
+    /// Program a challenge-response credential
+    ///
+    /// Programs an HMAC-SHA1 challenge-response credential. If KEY is not
+    /// given, you will be prompted for it, unless --generate is used to create
+    /// a random key.
     Chalresp {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
-        /// HMAC-SHA1 key (hex)
+        /// HMAC-SHA1 key (hex, or Base32 with --totp)
         key: Option<String>,
         /// Use TOTP mode
-        #[arg(short = 't', long)]
+        #[arg(short = 'T', long)]
         totp: bool,
         /// Require touch
-        #[arg(short = 'T', long)]
+        #[arg(short = 't', long)]
         touch: bool,
         /// Generate random key
         #[arg(short = 'g', long, conflicts_with = "key")]
         generate: bool,
-        /// Access code (hex)
-        #[arg(short = 'A', long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
     /// Perform a challenge-response calculation
+    ///
+    /// Send a challenge (in hex) to a slot with a challenge-response
+    /// credential, and read the response. If CHALLENGE is not given, you will
+    /// be prompted for it.
+    ///
+    /// With --totp, the response is output as an OATH-TOTP code. The challenge
+    /// is then derived from the current time, or from CHALLENGE given as a
+    /// Unix timestamp.
     Calculate {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
         /// Challenge (hex)
         challenge: Option<String>,
         /// Use TOTP mode (time-based challenge)
-        #[arg(short = 't', long)]
+        #[arg(short = 'T', long)]
         totp: bool,
         /// Number of digits for TOTP
         #[arg(long, default_value = "6")]
         digits: CliCalcDigits,
     },
-    /// Program OATH-HOTP credential
+    /// Program an OATH-HOTP credential
+    ///
+    /// Programs an HMAC-SHA1 OATH-HOTP credential. If KEY is not given, you
+    /// will be prompted for it.
+    ///
+    /// The YubiKey can be configured to output an OATH Token Identifier as a
+    /// prefix to the OTP itself, which consists of OMP+TT+MUI. Using the
+    /// --identifier option, you may specify the OMP+TT as 4 characters (the
+    /// serial number is then used as MUI), the MUI as 8 characters ("ubhe" is
+    /// then used as OMP+TT), or the full OMP+TT+MUI as 12 characters. Use "-"
+    /// for "ubhe" followed by the serial number. If omitted, no token
+    /// identifier is output.
     Hotp {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
-        /// HMAC key (hex, or Base32 with --totp)
+        /// HMAC key (Base32)
         key: Option<String>,
-        /// Number of digits (6 or 8)
+        /// Number of digits
         #[arg(long, default_value = "6")]
         digits: CliHotpDigits,
         /// Initial counter value
@@ -240,8 +280,8 @@ pub enum OtpAction {
         counter: u32,
         #[command(flatten)]
         enter: EnterArgs,
-        /// Access code (hex)
-        #[arg(short = 'A', long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -250,14 +290,17 @@ pub enum OtpAction {
         #[arg(short = 'i', long)]
         identifier: Option<String>,
     },
-    /// Update slot settings
+    /// Update the settings for a slot
+    ///
+    /// Change the settings for a slot without changing the stored secret.
+    /// All settings not specified will be written with default values.
     Settings {
         /// Slot number (1 or 2)
         slot: CliOtpSlot,
         #[command(flatten)]
         enter: EnterArgs,
-        /// Keystroke pacing in ms
-        #[arg(short = 'p', long)]
+        /// Delay between keystrokes in milliseconds
+        #[arg(short = 'p', long, value_name = "MS")]
         pacing: Option<CliPacing>,
         /// Use numeric keypad for digits
         #[arg(long)]
@@ -265,14 +308,14 @@ pub enum OtpAction {
         /// Make serial visible over USB
         #[arg(long)]
         serial_usb_visible: bool,
-        /// New access code (hex)
-        #[arg(long)]
+        /// New 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(short = 'A', long, value_name = "HEX")]
         new_access_code: Option<String>,
         /// Delete access code
-        #[arg(long, conflicts_with = "new_access_code", requires = "access_code")]
+        #[arg(long, conflicts_with = "new_access_code")]
         delete_access_code: bool,
-        /// Current access code (hex)
-        #[arg(short = 'A', long)]
+        /// 6 byte access code (hex, use "-" to prompt for input)
+        #[arg(long, value_name = "HEX")]
         access_code: Option<String>,
         /// Confirm without prompting
         #[arg(short = 'f', long)]
@@ -368,7 +411,7 @@ impl OtpAction {
                         slot,
                         password: password.as_deref(),
                         generate,
-                        length,
+                        length: length.into(),
                         keyboard_layout,
                         enter: enter.value(),
                         access_code: effective_access_code(parent_access_code, &access_code),
@@ -564,6 +607,13 @@ fn generate_static_pw(length: usize, layout: LayoutSelection) -> Result<String> 
 }
 
 fn parse_access_code(s: &str) -> Result<[u8; ACC_CODE_SIZE]> {
+    if s == "-" {
+        return parse_access_code_hex(&util::prompt_secret("Enter the access code")?);
+    }
+    parse_access_code_hex(s)
+}
+
+fn parse_access_code_hex(s: &str) -> Result<[u8; ACC_CODE_SIZE]> {
     let bytes = hex::decode(s).map_err(|_| anyhow!("Access code must be hex-encoded."))?;
     if bytes.len() != ACC_CODE_SIZE {
         return Err(anyhow!(
@@ -644,7 +694,7 @@ pub fn run_info(dev: &dyn YubiKeyDevice, scp_params: &ScpParams) -> Result<()> {
 
 pub fn run_swap(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -> Result<()> {
     if !force && !confirm("Swap the two slot configurations?") {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
     struct Swap;
     impl YubiOtpOp<()> for Swap {
@@ -682,7 +732,7 @@ pub fn run_delete(
             return Err(anyhow!("Not possible to delete an empty slot."));
         }
         if !confirm(&format!("Delete slot {}?", slot.map(1, 2))) {
-            return Err(anyhow!("Aborted."));
+            return Err(anyhow!("Aborted by user."));
         }
     }
 
@@ -721,7 +771,7 @@ pub fn run_ndef(
             slot.map(1, 2)
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
     struct Ndef {
         slot: Slot,
@@ -886,7 +936,7 @@ pub fn run_yubiotp(
             slot.map(1, 2)
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
 
     let mut config = SlotConfiguration::yubiotp(&pub_id_bytes, &priv_id, &key_bytes)
@@ -1097,7 +1147,7 @@ pub fn run_chalresp(
             slot.map(1, 2)
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
 
     let hmac_key = HmacKey::new(&key_bytes).map_err(|e| anyhow!("Invalid key: {e}"))?;
@@ -1258,12 +1308,12 @@ pub fn run_hotp(
     let acc = access_code.map(parse_access_code).transpose()?;
 
     let key_bytes = if let Some(k) = key {
-        parse_hex_key(k)?
+        parse_b32_key(k).map_err(|_| anyhow!("Invalid Base32-encoded key."))?
     } else {
         loop {
             match util::prompt_bytes(
                 "Enter a secret key",
-                &util::ByteFormat::hex(util::ByteLen::Any).masked(),
+                &util::ByteFormat::base32(util::ByteLen::Any).masked(),
             ) {
                 Ok(k) => break k,
                 Err(e) => eprintln!("{e}"),
@@ -1326,7 +1376,7 @@ pub fn run_hotp(
             slot.map(1, 2)
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
 
     let hmac_key = HmacKey::new(&key_bytes).map_err(|e| anyhow!("Invalid key: {e}"))?;
@@ -1422,7 +1472,16 @@ pub fn run_settings(
     let new_acc = if delete_access_code {
         None
     } else if let Some(nac) = new_access_code {
-        Some(parse_access_code(nac)?)
+        let nac = if nac == "-" {
+            parse_access_code_hex(&util::prompt_new_secret("Enter new access code")?)?
+        } else {
+            parse_access_code_hex(nac)?
+        };
+        let unique: std::collections::HashSet<_> = nac.iter().collect();
+        if dev.info().pin_complexity && unique.len() < 2 {
+            return Err(anyhow!("Access code does not meet complexity requirement."));
+        }
+        Some(nac)
     } else {
         cur_acc
     };
@@ -1433,7 +1492,7 @@ pub fn run_settings(
             slot.map(1, 2)
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
 
     let mut config = SlotConfiguration::update();

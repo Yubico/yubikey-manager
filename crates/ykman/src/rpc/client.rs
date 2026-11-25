@@ -155,6 +155,8 @@ impl RpcClient {
         use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
 
         let mut server_pid: u32 = 0;
+        // SAFETY: `pipe_handle` is an open pipe handle and `server_pid` is a
+        // valid out-pointer.
         let ok = unsafe { GetNamedPipeServerProcessId(pipe_handle, &mut server_pid) };
         if ok == 0 {
             return Err(RpcCallError::Transport(format!(

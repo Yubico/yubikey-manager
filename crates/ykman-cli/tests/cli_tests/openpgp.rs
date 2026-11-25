@@ -4,6 +4,8 @@ use super::common::{
 };
 use predicates::prelude::*;
 use rstest::rstest;
+use x509_cert::Certificate;
+use x509_cert::der::{Decode, Encode};
 
 struct OpenPgpResetGuard;
 
@@ -218,8 +220,155 @@ fn test_openpgp_keys_set_touch(#[case] mode: InputMode) {
     openpgp_reset();
 }
 
-// NOTE: openpgp keys import is not yet implemented in the CLI.
-// test_openpgp_keys_import would test this when available.
+#[test]
+fn test_openpgp_keys_import_requires_att() {
+    require_capability!("OpenPGP");
+    let key_file = fixture_path("ec_p256_key.pem");
+    ykman_dev()
+        .args([
+            "openpgp",
+            "keys",
+            "import",
+            "sig",
+            key_file.to_str().unwrap(),
+            "--admin-pin",
+            openpgp_admin_pin(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "only supported for the attestation key",
+        ));
+}
+
+/// Subject of the certificate written alongside the test attestation key.
+const TEST_ATT_SUBJECT: &str = "CN=Test EC P256";
+
+/// Returns true if the attestation key and certificate may be overwritten by
+/// tests.
+///
+/// The factory-provisioned attestation key and certificate cannot be restored,
+/// so the slot is only considered safe if it has no key, or if it holds a key
+/// previously imported by a test, identified by the test certificate (matched
+/// by subject) whose public key matches the stored key. Tests must leave the
+/// test certificate in place while the test key is present.
+fn att_slot_is_test_owned() -> bool {
+    let key = ykman_dev()
+        .args(["openpgp", "keys", "export", "att", "-F", "der", "-"])
+        .output()
+        .expect("failed to run ykman");
+    if !key.status.success() {
+        return String::from_utf8_lossy(&key.stderr).contains("No key stored");
+    }
+    let cert = ykman_dev()
+        .args(["openpgp", "certificates", "export", "att", "-F", "der", "-"])
+        .output()
+        .expect("failed to run ykman");
+    if !cert.status.success() {
+        return false;
+    }
+    let Ok(cert) = Certificate::from_der(&cert.stdout) else {
+        return false;
+    };
+    let tbs = &cert.tbs_certificate;
+    tbs.subject.to_string() == TEST_ATT_SUBJECT
+        && tbs
+            .subject_public_key_info
+            .to_der()
+            .is_ok_and(|spki| spki == key.stdout)
+}
+
+#[rstest]
+#[case::arguments(InputMode::Arguments)]
+#[case::interactive(InputMode::Interactive)]
+fn test_openpgp_keys_import_export_delete(#[case] mode: InputMode) {
+    if mode.skip_if_windows() {
+        return;
+    }
+    require_capability!("OpenPGP");
+    if skip_before_version((5, 2, 0), "OpenPGP attestation key") {
+        return;
+    }
+    let _guard = OpenPgpResetGuard::reset();
+    if !att_slot_is_test_owned() {
+        skip!("attestation key slot holds a non-test key, refusing to overwrite it");
+    }
+
+    // Write the test certificate first, marking the slot as test-owned.
+    ykman_dev()
+        .args([
+            "openpgp",
+            "certificates",
+            "import",
+            "att",
+            fixture_path("ec_p256_cert.pem").to_str().unwrap(),
+            "--admin-pin",
+            openpgp_admin_pin(),
+        ])
+        .assert()
+        .success();
+
+    let key_file = fixture_path("ec_p256_key.pem");
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &[
+                "openpgp",
+                "keys",
+                "import",
+                "att",
+                key_file.to_str().unwrap(),
+            ],
+            &format!("{}\n", openpgp_admin_pin()),
+        );
+        assert!(output.status.success(), "{output:?}");
+    } else {
+        ykman_dev()
+            .args([
+                "openpgp",
+                "keys",
+                "import",
+                "att",
+                key_file.to_str().unwrap(),
+                "--admin-pin",
+                openpgp_admin_pin(),
+            ])
+            .assert()
+            .success();
+    }
+
+    ykman_dev()
+        .args(["openpgp", "keys", "export", "att", "-"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("BEGIN PUBLIC KEY"));
+
+    if mode.is_interactive() {
+        let output = ykman_dev_tty(
+            &["openpgp", "keys", "delete", "att"],
+            &format!("y\n{}\n", openpgp_admin_pin()),
+        );
+        assert!(output.status.success(), "{output:?}");
+    } else {
+        ykman_dev()
+            .args([
+                "openpgp",
+                "keys",
+                "delete",
+                "att",
+                "--admin-pin",
+                openpgp_admin_pin(),
+                "-f",
+            ])
+            .assert()
+            .success();
+    }
+
+    ykman_dev()
+        .args(["openpgp", "keys", "export", "att", "-"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No key stored"));
+}
 
 #[rstest]
 #[case::arguments(InputMode::Arguments)]
@@ -233,6 +382,9 @@ fn test_openpgp_certificates_import_export(#[case] mode: InputMode) {
         return;
     }
     openpgp_reset();
+    if !att_slot_is_test_owned() {
+        skip!("attestation slot holds a non-test key, refusing to overwrite its certificate");
+    }
 
     let cert_file = fixture_path("ec_p256_cert.pem");
     if mode.is_interactive() {
@@ -284,6 +436,9 @@ fn test_openpgp_certificates_delete(#[case] mode: InputMode) {
         return;
     }
     openpgp_reset();
+    if !att_slot_is_test_owned() {
+        skip!("attestation slot holds a non-test key, refusing to overwrite its certificate");
+    }
 
     let cert_file = fixture_path("ec_p256_cert.pem");
     ykman_dev()
@@ -318,6 +473,20 @@ fn test_openpgp_certificates_delete(#[case] mode: InputMode) {
             .assert()
             .success();
     }
+
+    // Restore the test certificate, which marks the slot as test-owned.
+    ykman_dev()
+        .args([
+            "openpgp",
+            "certificates",
+            "import",
+            "att",
+            cert_file.to_str().unwrap(),
+            "--admin-pin",
+            openpgp_admin_pin(),
+        ])
+        .assert()
+        .success();
 
     openpgp_reset();
 }

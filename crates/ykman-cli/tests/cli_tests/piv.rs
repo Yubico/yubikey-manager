@@ -1,5 +1,5 @@
 use super::common::{
-    InputMode, app_is_fips_capable, fixture_path, piv_has_puk, piv_management_key,
+    InputMode, app_is_fips_capable, device_version, fixture_path, piv_has_puk, piv_management_key,
     piv_management_key_algorithm, piv_new_management_key, piv_new_pin, piv_new_puk, piv_pin,
     piv_puk, piv_reset, reset_blocked, skip_before_version, ykman_dev, ykman_dev_tty,
 };
@@ -19,6 +19,43 @@ impl Drop for PivResetGuard {
     fn drop(&mut self) {
         piv_reset();
     }
+}
+
+fn generate_key_and_certificate(subject: &str, mode: InputMode) {
+    let dir = tempfile::tempdir().expect("public key temp dir");
+    let public_key = dir.path().join("public.pem");
+    let public_key = public_key.to_str().expect("public key file path");
+    let mut generate = vec![
+        "piv",
+        "keys",
+        "generate",
+        "9a",
+        public_key,
+        "-m",
+        piv_management_key(),
+    ];
+    let mut certificate = vec!["piv", "certificates", "generate", "9a"];
+    if device_version().is_some_and(|version| version < (5, 3, 0)) {
+        certificate.push(public_key);
+    }
+    certificate.extend(["-s", subject, "-m", piv_management_key()]);
+    for args in [&mut generate, &mut certificate] {
+        if mode.is_interactive() {
+            let output = ykman_dev_tty(args, &format!("{}\n", piv_pin()));
+            assert!(output.status.success(), "{output:?}");
+        } else {
+            ykman_dev()
+                .args(args.iter().copied())
+                .args(["-P", piv_pin()])
+                .assert()
+                .success();
+        }
+    }
+    assert!(
+        std::fs::read_to_string(public_key)
+            .unwrap()
+            .contains("BEGIN PUBLIC KEY")
+    );
 }
 
 #[test]
@@ -227,6 +264,48 @@ fn test_piv_change_management_key(#[case] mode: InputMode) {
     piv_reset();
 }
 
+fn change_management_key(current: &str, new: &str, extra: &[&str]) -> assert_cmd::assert::Assert {
+    ykman_dev()
+        .args([
+            "piv",
+            "access",
+            "change-management-key",
+            "-m",
+            current,
+            "-n",
+            new,
+            "-a",
+            piv_management_key_algorithm(),
+        ])
+        .args(extra)
+        .assert()
+        .success()
+}
+
+#[test]
+fn test_piv_change_management_key_clears_stored_key() {
+    require_capability!("PIV");
+    if skip_before_version((4, 1, 0), "PIV management") {
+        return;
+    }
+    if app_is_fips_capable("PIV") {
+        eprintln!("SKIP: --protect requires FIPS approved mode");
+        return;
+    }
+    piv_reset();
+    let (key, new_key) = (piv_management_key(), piv_new_management_key());
+    let warning = "previous management key stored on the YubiKey was not cleared";
+
+    change_management_key(key, new_key, &["--protect", "-P", piv_pin()]);
+    change_management_key(new_key, key, &["-P", piv_pin()])
+        .stderr(predicate::str::contains(warning).not());
+
+    change_management_key(key, new_key, &["--protect", "-P", piv_pin()]);
+    change_management_key(new_key, key, &[]).stderr(predicate::str::contains(warning));
+
+    piv_reset();
+}
+
 #[rstest]
 #[case::arguments(InputMode::Arguments)]
 #[case::interactive(InputMode::Interactive)]
@@ -240,74 +319,7 @@ fn test_piv_generate_self_signed(#[case] mode: InputMode) {
     }
     piv_reset();
 
-    if mode.is_interactive() {
-        let output = ykman_dev_tty(
-            &[
-                "piv",
-                "keys",
-                "generate",
-                "9a",
-                "-",
-                "-m",
-                piv_management_key(),
-            ],
-            &format!("{}\n", piv_pin()),
-        );
-        assert!(output.status.success(), "{output:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stdout).contains("BEGIN PUBLIC KEY"),
-            "{output:?}"
-        );
-    } else {
-        ykman_dev()
-            .args([
-                "piv",
-                "keys",
-                "generate",
-                "9a",
-                "-",
-                "-m",
-                piv_management_key(),
-                "-P",
-                piv_pin(),
-            ])
-            .assert()
-            .success()
-            .stdout(predicate::str::contains("BEGIN PUBLIC KEY"));
-    }
-
-    if mode.is_interactive() {
-        let output = ykman_dev_tty(
-            &[
-                "piv",
-                "certificates",
-                "generate",
-                "9a",
-                "-s",
-                "CN=test",
-                "-m",
-                piv_management_key(),
-            ],
-            &format!("{}\n", piv_pin()),
-        );
-        assert!(output.status.success(), "{output:?}");
-    } else {
-        ykman_dev()
-            .args([
-                "piv",
-                "certificates",
-                "generate",
-                "9a",
-                "-s",
-                "CN=test",
-                "-m",
-                piv_management_key(),
-                "-P",
-                piv_pin(),
-            ])
-            .assert()
-            .success();
-    }
+    generate_key_and_certificate("CN=test", mode);
 
     ykman_dev()
         .args(["piv", "info"])
@@ -326,51 +338,7 @@ fn test_piv_export_certificate() {
     }
     piv_reset();
 
-    ykman_dev()
-        .args([
-            "piv",
-            "keys",
-            "generate",
-            "9a",
-            "-",
-            "-m",
-            piv_management_key(),
-            "-P",
-            piv_pin(),
-        ])
-        .assert()
-        .success();
-
-    ykman_dev()
-        .args([
-            "piv",
-            "keys",
-            "generate",
-            "9a",
-            "-",
-            "-m",
-            piv_management_key(),
-            "-P",
-            piv_pin(),
-        ])
-        .assert()
-        .success();
-
-    ykman_dev()
-        .args([
-            "piv",
-            "certificates",
-            "generate",
-            "9a",
-            "-s",
-            "CN=export-test",
-            "-m",
-            piv_management_key(),
-            "-P",
-            piv_pin(),
-        ])
-        .assert()
-        .success();
+    generate_key_and_certificate("CN=export-test", InputMode::Arguments);
 
     ykman_dev()
         .args(["piv", "certificates", "export", "9a", "-"])
@@ -506,37 +474,7 @@ fn test_piv_delete_certificate() {
     }
     piv_reset();
 
-    // Generate a key and self-signed cert
-    ykman_dev()
-        .args([
-            "piv",
-            "keys",
-            "generate",
-            "9a",
-            "-",
-            "-m",
-            piv_management_key(),
-            "-P",
-            piv_pin(),
-        ])
-        .assert()
-        .success();
-
-    ykman_dev()
-        .args([
-            "piv",
-            "certificates",
-            "generate",
-            "9a",
-            "-s",
-            "CN=delete-test",
-            "-m",
-            piv_management_key(),
-            "-P",
-            piv_pin(),
-        ])
-        .assert()
-        .success();
+    generate_key_and_certificate("CN=delete-test", InputMode::Arguments);
 
     // Delete the certificate
     ykman_dev()
@@ -564,37 +502,7 @@ fn test_piv_export_key() {
     }
     piv_reset();
 
-    // Generate a key and self-signed cert (cert needed for export)
-    ykman_dev()
-        .args([
-            "piv",
-            "keys",
-            "generate",
-            "9a",
-            "-",
-            "-m",
-            piv_management_key(),
-            "-P",
-            piv_pin(),
-        ])
-        .assert()
-        .success();
-
-    ykman_dev()
-        .args([
-            "piv",
-            "certificates",
-            "generate",
-            "9a",
-            "-s",
-            "CN=export-key-test",
-            "-m",
-            piv_management_key(),
-            "-P",
-            piv_pin(),
-        ])
-        .assert()
-        .success();
+    generate_key_and_certificate("CN=export-key-test", InputMode::Arguments);
 
     // Export the public key
     ykman_dev()
@@ -614,36 +522,7 @@ fn test_piv_export_key_der() {
     }
     piv_reset();
 
-    ykman_dev()
-        .args([
-            "piv",
-            "keys",
-            "generate",
-            "9a",
-            "-",
-            "-m",
-            piv_management_key(),
-            "-P",
-            piv_pin(),
-        ])
-        .assert()
-        .success();
-
-    ykman_dev()
-        .args([
-            "piv",
-            "certificates",
-            "generate",
-            "9a",
-            "-s",
-            "CN=der-test",
-            "-m",
-            piv_management_key(),
-            "-P",
-            piv_pin(),
-        ])
-        .assert()
-        .success();
+    generate_key_and_certificate("CN=der-test", InputMode::Arguments);
 
     // Export in DER format — binary output, just check non-empty
     let output = ykman_dev()
@@ -664,37 +543,7 @@ fn test_piv_export_key_verify() {
     }
     piv_reset();
 
-    // Generate key and cert so --verify can match them
-    ykman_dev()
-        .args([
-            "piv",
-            "keys",
-            "generate",
-            "9a",
-            "-",
-            "-m",
-            piv_management_key(),
-            "-P",
-            piv_pin(),
-        ])
-        .assert()
-        .success();
-
-    ykman_dev()
-        .args([
-            "piv",
-            "certificates",
-            "generate",
-            "9a",
-            "-s",
-            "CN=verify-test",
-            "-m",
-            piv_management_key(),
-            "-P",
-            piv_pin(),
-        ])
-        .assert()
-        .success();
+    generate_key_and_certificate("CN=verify-test", InputMode::Arguments);
 
     ykman_dev()
         .args([
@@ -717,7 +566,7 @@ fn test_piv_export_key_verify() {
 #[test]
 fn test_piv_key_move() {
     require_capability!("PIV");
-    if skip_before_version((4, 1, 0), "PIV management") {
+    if skip_before_version((5, 7, 0), "PIV key move") {
         return;
     }
     piv_reset();
@@ -1707,10 +1556,7 @@ fn test_piv_import_pkcs12_wrong_password() {
         ])
         .assert()
         .failure()
-        .stderr(
-            predicate::str::contains("MAC")
-                .and(predicate::str::contains("fail").or(predicate::str::contains("mismatch"))),
-        );
+        .stderr(predicate::str::contains("Wrong password."));
 
     piv_reset();
 }

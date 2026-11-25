@@ -1,4 +1,4 @@
-use super::common::{otp_delete_slot2, skip_before_version, ykman_dev};
+use super::common::{device_info, otp_delete_slot2, skip_before_version, ykman_dev};
 use predicates::prelude::*;
 
 #[test]
@@ -96,13 +96,7 @@ fn test_otp_hotp() {
     otp_delete_slot2();
 
     ykman_dev()
-        .args([
-            "otp",
-            "hotp",
-            "2",
-            "3132333435363738393031323334353637383930",
-            "-f",
-        ])
+        .args(["otp", "hotp", "2", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "-f"])
         .assert()
         .success();
 
@@ -271,7 +265,7 @@ fn test_otp_hotp_8digits() {
             "otp",
             "hotp",
             "2",
-            "3132333435363738393031323334353637383930",
+            "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
             "--digits",
             "8",
             "-f",
@@ -318,6 +312,12 @@ fn test_otp_ndef() {
     require_capability!("OTP");
     if skip_before_version((4, 1, 0), "OTP device info") {
         return;
+    }
+    if !device_info()
+        .lines()
+        .any(|line| line.starts_with("NFC transport is "))
+    {
+        skip!("OTP NDEF requires NFC support");
     }
     otp_delete_slot2();
 

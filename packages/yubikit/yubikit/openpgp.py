@@ -925,8 +925,8 @@ def _prepare_private_key_for_native(
             return (1, [e, p, q, iqmp, dmp1, dmq1, n], None)
         return (0, [e, p, q], None)
     elif isinstance(private_key, ec.EllipticCurvePrivateKeyWithSerialization):
-        pn = private_key.private_numbers()
-        scalar = int2bytes(pn.private_value)
+        ec_pn = private_key.private_numbers()
+        scalar = int2bytes(ec_pn.private_value)
         pub_bytes = private_key.public_key().public_bytes(
             Encoding.X962, PublicFormat.UncompressedPoint
         )

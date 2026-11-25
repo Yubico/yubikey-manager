@@ -49,7 +49,7 @@ pub struct ApduArgs {
     #[arg(long)]
     short: bool,
     /// Send full hex APDU strings (alternative to positional)
-    #[arg(short = 's', long)]
+    #[arg(short = 's', long, value_name = "APDU")]
     send_apdu: Vec<String>,
 }
 

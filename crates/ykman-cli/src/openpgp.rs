@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use yubikit::device::YubiKeyDevice;
+use yubikit::keys::PrivateKey;
 use yubikit::management::Capability;
 use yubikit::openpgp::{
     KeyRef, KeyStatus, OpenPgpError, OpenPgpPin, OpenPgpSession, PinPolicy, Uif,
@@ -9,34 +10,39 @@ use yubikit::openpgp::{
 use crate::cli_enums::{CliFormat, CliKeyRef, CliOpenpgpPinPolicy, CliUif};
 use crate::scp::ScpParams;
 use crate::util::{
-    confirm, format_smartcard_connection_error, open_smartcard_session, print_table,
-    read_file_or_stdin, write_file_or_stdout,
+    confirm, format_smartcard_connection_error, load_certificate, load_private_key,
+    open_smartcard_session, print_table, read_file_or_stdin, write_file_or_stdout,
 };
 
 #[derive(Subcommand)]
 pub enum OpenpgpAction {
-    /// Display OpenPGP status
+    /// Display general status of the OpenPGP application
     Info,
-    /// Reset the OpenPGP application
+    /// Reset all OpenPGP data
+    ///
+    /// This action will wipe all OpenPGP data, and set all PINs to their
+    /// default values.
+    ///
+    /// The attestation key and certificate will NOT be reset.
     Reset {
-        /// Confirm the reset without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Manage access (PINs)
+    /// Manage OpenPGP access (PIN, Reset Code, Admin PIN)
     #[command(subcommand)]
     Access(OpenpgpAccessAction),
-    /// Manage keys
+    /// Manage OpenPGP keys
     #[command(subcommand)]
     Keys(OpenpgpKeysAction),
-    /// Manage certificates
+    /// Manage OpenPGP certificates
     #[command(subcommand)]
     Certificates(OpenpgpCertAction),
 }
 
 #[derive(Subcommand)]
 pub enum OpenpgpAccessAction {
-    /// Set PIN retry counts
+    /// Set the PIN, Reset Code and Admin PIN retry counts
     SetRetries {
         /// User PIN retry count
         pin_retries: u8,
@@ -45,92 +51,171 @@ pub enum OpenpgpAccessAction {
         /// Admin PIN retry count
         admin_pin_retries: u8,
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
-        /// Confirm changing retry counters without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Change user PIN
+    /// Change the User PIN
+    ///
+    /// The PIN has a minimum length of 6 (or 8, for YubiKey 5.7+ FIPS when not
+    /// using KDF), and supports any type of alphanumeric characters.
     ChangePin {
         /// Current user PIN
         #[arg(short = 'P', long)]
         pin: Option<String>,
         /// New user PIN
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PIN")]
         new_pin: Option<String>,
     },
-    /// Change admin PIN
+    /// Change the Admin PIN
+    ///
+    /// The Admin PIN has a minimum length of 8, and supports any type of
+    /// alphanumeric characters.
     ChangeAdminPin {
         /// Current admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
         /// New admin PIN
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PIN")]
         new_admin_pin: Option<String>,
     },
-    /// Change reset code
+    /// Change the Reset Code
+    ///
+    /// The Reset Code has a minimum length of 6, and supports any type of
+    /// alphanumeric characters.
     ChangeResetCode {
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
         /// New reset code
-        #[arg(short = 'R', long)]
+        #[arg(short = 'r', long, value_name = "CODE")]
         reset_code: Option<String>,
     },
-    /// Unblock PIN
+    /// Unblock the PIN using the Reset Code or Admin PIN
+    ///
+    /// If the PIN is lost or blocked, you can reset it to a new value using
+    /// the Reset Code (--reset-code). Alternatively, the Admin PIN can be used
+    /// (--admin-pin) instead of the Reset Code.
+    ///
+    /// The new PIN has a minimum length of 6, and supports any type of
+    /// alphanumeric characters.
     UnblockPin {
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
         /// Reset code
-        #[arg(long)]
+        #[arg(short = 'r', long, value_name = "CODE")]
         reset_code: Option<String>,
         /// New user PIN
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "PIN")]
         new_pin: Option<String>,
     },
-    /// Set signature PIN policy
+    /// Set the signature PIN policy
+    ///
+    /// The signature PIN policy controls whether the PIN is always required
+    /// when using the signature key, or if it is required only once per
+    /// session.
     SetSignaturePolicy {
         /// Policy
         policy: CliOpenpgpPinPolicy,
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
     },
 }
 
 #[derive(Subcommand)]
 pub enum OpenpgpKeysAction {
-    /// Show key metadata
+    /// Show metadata for a key
+    ///
+    /// This will show what type of key is stored in a specific slot, whether it
+    /// was imported into the YubiKey or generated on-chip, and what the touch
+    /// policy is for using the key.
     Info {
         /// Key reference
         key: CliKeyRef,
     },
-    /// Set touch policy for a key
+    /// Set the touch policy for a key
+    ///
+    /// The touch policy is used to require user interaction for all operations
+    /// using the private key on the YubiKey. The touch policy is set
+    /// individually for each key slot. To see the current touch policy, run
+    /// the "openpgp info" subcommand.
+    ///
+    /// The available policies are: off (default, no touch required), on
+    /// (touch required), fixed (touch required, can't be disabled without
+    /// deleting the private key), cached (touch required, cached for 15s after
+    /// use), and cached-fixed (touch required, cached for 15s after use, can't
+    /// be disabled without deleting the private key).
+    ///
+    /// WARNING: Setting the touch policy of the attestation key to "fixed"
+    /// cannot be undone without replacing the attestation private key.
     SetTouch {
         /// Key reference
         key: CliKeyRef,
         /// Touch policy
         policy: CliUif,
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
-        /// Confirm setting touch policy without prompting
+        /// Confirm without prompting
         #[arg(short = 'f', long)]
         force: bool,
     },
-    /// Import attestation key
+    /// Import an attestation key
+    ///
+    /// The attestation key is by default pre-generated during production with
+    /// a Yubico-issued key and certificate. Only the attestation key slot
+    /// (att) is supported; use GnuPG to import keys into the other slots.
+    ///
+    /// WARNING: This private key cannot be recovered once overwritten!
     Import {
-        /// Key reference
+        /// Key reference (only att is supported)
         key: CliKeyRef,
-        /// Key file
+        /// Private key file (PEM, DER or PKCS#12), or - for stdin
         key_file: String,
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
+        /// Password for decrypting password-protected key files
+        #[arg(short = 'p', long)]
+        password: Option<String>,
     },
-    /// Generate attestation certificate
+    /// Export a public key
+    ///
+    /// Reads the public key of a key slot and writes it as a
+    /// SubjectPublicKeyInfo, in PEM or DER format.
+    Export {
+        /// Key reference
+        key: CliKeyRef,
+        /// Output file, or - for stdout
+        output: String,
+        /// Output format (pem or der)
+        #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
+        format: CliFormat,
+    },
+    /// Delete a key
+    ///
+    /// Deletes the private key in a key slot, along with its fingerprint and
+    /// generation time.
+    ///
+    /// WARNING: The private key cannot be recovered once deleted!
+    Delete {
+        /// Key reference
+        key: CliKeyRef,
+        /// Admin PIN
+        #[arg(short = 'a', long, value_name = "PIN")]
+        admin_pin: Option<String>,
+        /// Confirm without prompting
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Generate an attestation certificate for a key
+    ///
+    /// Attestation is used to show that an asymmetric key was generated on the
+    /// YubiKey and therefore doesn't exist outside the device.
     Attest {
         /// Key reference
         key: CliKeyRef,
@@ -147,7 +232,7 @@ pub enum OpenpgpKeysAction {
 
 #[derive(Subcommand)]
 pub enum OpenpgpCertAction {
-    /// Export certificate
+    /// Export a certificate
     Export {
         /// Key reference
         key: CliKeyRef,
@@ -157,22 +242,22 @@ pub enum OpenpgpCertAction {
         #[arg(short = 'F', long, default_value = "pem", hide_possible_values = true)]
         format: CliFormat,
     },
-    /// Import certificate
+    /// Import a certificate
     Import {
         /// Key reference
         key: CliKeyRef,
         /// Certificate file
         cert_file: String,
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
     },
-    /// Delete certificate
+    /// Delete a certificate
     Delete {
         /// Key reference
         key: CliKeyRef,
         /// Admin PIN
-        #[arg(short = 'a', long)]
+        #[arg(short = 'a', long, value_name = "PIN")]
         admin_pin: Option<String>,
     },
 }
@@ -246,7 +331,25 @@ impl OpenpgpAction {
                     key,
                     key_file,
                     admin_pin,
-                } => run_keys_import(dev, scp_params, key, &key_file, admin_pin.as_deref()),
+                    password,
+                } => run_keys_import(
+                    dev,
+                    scp_params,
+                    key,
+                    &key_file,
+                    admin_pin.as_deref(),
+                    password.as_deref(),
+                ),
+                OpenpgpKeysAction::Export {
+                    key,
+                    output,
+                    format,
+                } => run_keys_export(dev, scp_params, key, &output, format),
+                OpenpgpKeysAction::Delete {
+                    key,
+                    admin_pin,
+                    force,
+                } => run_keys_delete(dev, scp_params, key, admin_pin.as_deref(), force),
                 OpenpgpKeysAction::Attest {
                     key,
                     output,
@@ -450,7 +553,7 @@ pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -
             "WARNING! This will delete all stored OpenPGP keys and restore factory settings."
         );
         if !confirm("Proceed?") {
-            return Err(anyhow!("Aborted."));
+            return Err(anyhow!("Aborted by user."));
         }
     }
 
@@ -474,6 +577,10 @@ pub fn run_reset(dev: &dyn YubiKeyDevice, scp_params: &ScpParams, force: bool) -
     }
 
     eprintln!("OpenPGP application has been reset.");
+    eprintln!("Your YubiKey now has the default PINs:");
+    eprintln!("  PIN:         123456");
+    eprintln!("  Reset code:  not set");
+    eprintln!("  Admin PIN:   12345678");
     Ok(())
 }
 
@@ -491,7 +598,7 @@ pub fn run_set_retries(
             "Set PIN retries to {pin_retries}/{reset_code_retries}/{admin_pin_retries}?"
         ))
     {
-        return Err(anyhow!("Aborted."));
+        return Err(anyhow!("Aborted by user."));
     }
     let mut session = open_session(dev, scp_params)?;
     let ap = ensure_admin_pin(admin_pin)?;
@@ -622,6 +729,28 @@ pub fn run_set_signature_policy(
     Ok(())
 }
 
+fn require_key(
+    version: yubikit::core::Version,
+    disc: &yubikit::openpgp::DiscretionaryDataObjects,
+    key_ref: KeyRef,
+) -> Result<()> {
+    let has_key = if version >= yubikit::core::Version(5, 2, 0) {
+        matches!(disc.key_information.get(&key_ref), Some(s) if *s != KeyStatus::None)
+    } else {
+        disc.fingerprints
+            .get(&key_ref)
+            .is_some_and(|f| f.iter().any(|&b| b != 0))
+    };
+    if has_key {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "No key stored in slot {}.",
+            format_key_ref(key_ref)
+        ))
+    }
+}
+
 pub fn run_keys_info(
     dev: &dyn YubiKeyDevice,
     scp_params: &ScpParams,
@@ -634,22 +763,8 @@ pub fn run_keys_info(
         .get_application_related_data()
         .map_err(|e| anyhow!("Failed to get application data: {e}"))?;
     let disc = &data.discretionary;
-
+    require_key(session.version(), disc, key_ref)?;
     let status = disc.key_information.get(&key_ref);
-    let has_key = if session.version() >= yubikit::core::Version(5, 2, 0) {
-        matches!(status, Some(s) if *s != KeyStatus::None)
-    } else {
-        disc.fingerprints
-            .get(&key_ref)
-            .is_some_and(|f| f.iter().any(|&b| b != 0))
-    };
-
-    if !has_key {
-        return Err(anyhow!(
-            "No key stored in slot {}.",
-            format_key_ref(key_ref)
-        ));
-    }
 
     let name = format_key_ref(key_ref);
     let mut rows = vec![("Key slot", name.to_string())];
@@ -727,7 +842,7 @@ pub fn run_keys_set_touch(
     if uif.is_fixed() && !force {
         eprintln!("WARNING: Setting a FIXED touch policy cannot be undone without a full reset!");
         if !confirm("Proceed?") {
-            return Err(anyhow!("Aborted."));
+            return Err(anyhow!("Aborted by user."));
         }
     }
 
@@ -748,20 +863,92 @@ pub fn run_keys_set_touch(
 }
 
 pub fn run_keys_import(
-    _dev: &dyn YubiKeyDevice,
-    _scp_params: &ScpParams,
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
     key: CliKeyRef,
     key_file: &str,
     admin_pin: Option<&str>,
+    password: Option<&str>,
 ) -> Result<()> {
-    let _key_ref: KeyRef = key.into();
-    let _data = read_file_or_stdin(key_file)?;
+    let key_ref: KeyRef = key.into();
+    if key_ref != KeyRef::Att {
+        return Err(anyhow!(
+            "Importing keys is only supported for the attestation key slot (att)."
+        ));
+    }
+    let data = read_file_or_stdin(key_file)?;
+    let der = load_private_key(&data, password)?;
+    let private_key =
+        PrivateKey::from_pkcs8(&der).map_err(|_| anyhow!("Failed to parse private key."))?;
 
-    let _ap = ensure_admin_pin(admin_pin)?;
+    let ap = ensure_admin_pin(admin_pin)?;
+    let mut session = open_session(dev, scp_params)?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
+    session
+        .put_key(key_ref, &private_key)
+        .map_err(|e| anyhow!("Failed to import key: {e}"))?;
+    eprintln!("Private key imported for {}.", format_key_ref(key_ref));
+    Ok(())
+}
 
-    Err(anyhow!(
-        "Key import requires parsing private key format. Not yet implemented."
-    ))
+pub fn run_keys_export(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    key: CliKeyRef,
+    output: &str,
+    format: CliFormat,
+) -> Result<()> {
+    let key_ref: KeyRef = key.into();
+    let mut session = open_session(dev, scp_params)?;
+    let data = session
+        .get_application_related_data()
+        .map_err(|e| anyhow!("Failed to get application data: {e}"))?;
+    require_key(session.version(), &data.discretionary, key_ref)?;
+    let spki = session
+        .get_public_key(key_ref)
+        .map_err(|e| anyhow!("Failed to read public key: {e}"))?
+        .to_spki()
+        .map_err(|e| anyhow!("Failed to encode public key: {e}"))?;
+    write_output(output, &spki, format, "PUBLIC KEY")?;
+    eprintln!(
+        "Public key for {} written to {output}.",
+        format_key_ref(key_ref)
+    );
+    Ok(())
+}
+
+pub fn run_keys_delete(
+    dev: &dyn YubiKeyDevice,
+    scp_params: &ScpParams,
+    key: CliKeyRef,
+    admin_pin: Option<&str>,
+    force: bool,
+) -> Result<()> {
+    let key_ref: KeyRef = key.into();
+    let mut session = open_session(dev, scp_params)?;
+    let data = session
+        .get_application_related_data()
+        .map_err(|e| anyhow!("Failed to get application data: {e}"))?;
+    require_key(session.version(), &data.discretionary, key_ref)?;
+
+    if !force {
+        eprintln!("WARNING: The private key cannot be recovered once deleted!");
+        if !confirm(&format!("Delete the {} key?", format_key_ref(key_ref))) {
+            return Err(anyhow!("Aborted by user."));
+        }
+    }
+
+    let ap = ensure_admin_pin(admin_pin)?;
+    session.verify_admin(&ap).map_err(|e| {
+        format_openpgp_credential_error(e, "Admin PIN", "Admin PIN verification failed")
+    })?;
+    session
+        .delete_key(key_ref)
+        .map_err(|e| anyhow!("Failed to delete key: {e}"))?;
+    eprintln!("Deleted the {} key.", format_key_ref(key_ref));
+    Ok(())
 }
 
 pub fn run_keys_attest(
@@ -815,15 +1002,7 @@ pub fn run_certificates_import(
     let key_ref: KeyRef = key.into();
     let data = read_file_or_stdin(cert_file)?;
 
-    let der = if let Ok(text) = std::str::from_utf8(&data) {
-        if text.contains("-----BEGIN") {
-            pem_decode(text)?
-        } else {
-            data
-        }
-    } else {
-        data
-    };
+    let der = load_certificate(&data, None)?;
 
     let ap = ensure_admin_pin(admin_pin)?;
     let mut session = open_session(dev, scp_params)?;
@@ -862,44 +1041,11 @@ fn write_output(path: &str, der: &[u8], format: CliFormat, label: &str) -> Resul
             write_file_or_stdout(path, der)?;
         }
         CliFormat::Pem => {
-            let pem = pem_encode(label, der);
+            let pem = ykman::pki::pem_encode(label, der);
             write_file_or_stdout(path, pem.as_bytes())?;
         }
     }
     Ok(())
-}
-
-fn pem_encode(label: &str, der: &[u8]) -> String {
-    use base64::Engine;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(der);
-    let mut pem = format!("-----BEGIN {label}-----\n");
-    for chunk in b64.as_bytes().chunks(64) {
-        pem.push_str(std::str::from_utf8(chunk).unwrap());
-        pem.push('\n');
-    }
-    pem.push_str(&format!("-----END {label}-----\n"));
-    pem
-}
-
-fn pem_decode(text: &str) -> Result<Vec<u8>> {
-    use base64::Engine;
-    let mut in_block = false;
-    let mut b64 = String::new();
-    for line in text.lines() {
-        if line.starts_with("-----BEGIN") {
-            in_block = true;
-            continue;
-        }
-        if line.starts_with("-----END") {
-            break;
-        }
-        if in_block {
-            b64.push_str(line.trim());
-        }
-    }
-    base64::engine::general_purpose::STANDARD
-        .decode(&b64)
-        .map_err(|e| anyhow!("Invalid PEM data: {e}"))
 }
 
 #[cfg(test)]

@@ -96,22 +96,15 @@ fn test_calculate_hmac_sha1_cancel(#[case] tc: TestConnection) {
 
     let dev = get_device();
 
-    // Program slot 2 with HMAC-SHA1 requiring touch (use CCID)
-    {
-        let conn = dev.open_smartcard().expect("open smartcard");
-        let mut session = YubiOtpSession::new(conn).expect("YubiOtpSession");
-        let hmac_key = HmacKey::new(&[0x0b; 20]).unwrap();
-        let config = SlotConfiguration::hmac_sha1(&hmac_key)
-            .expect("hmac config")
-            .require_touch(true);
-        session
-            .put_configuration(Slot::Two, &config, None, None)
-            .expect("put_configuration");
-    }
-
-    // Open OTP session and attempt calculate, cancel after first keepalive
     let conn = dev.open_otp().expect("open OTP");
     let mut session = YubiOtpSession::new_otp(conn).expect("YubiOtpSession");
+    let hmac_key = HmacKey::new(&[0x0b; 20]).unwrap();
+    let config = SlotConfiguration::hmac_sha1(&hmac_key)
+        .expect("hmac config")
+        .require_touch(true);
+    session
+        .put_configuration(Slot::Two, &config, None, None)
+        .expect("put_configuration");
 
     let got_keepalive = std::sync::atomic::AtomicBool::new(false);
     let start = std::time::Instant::now();
@@ -136,12 +129,7 @@ fn test_calculate_hmac_sha1_cancel(#[case] tc: TestConnection) {
         "Cancel took too long: {elapsed:?} (expected < 10s)"
     );
 
-    // Clean up: delete slot 2
-    {
-        let conn = dev.open_smartcard().expect("open smartcard");
-        let mut session = YubiOtpSession::new(conn).expect("YubiOtpSession");
-        session.delete_slot(Slot::Two, None).expect("delete slot");
-    }
+    session.delete_slot(Slot::Two, None).expect("delete slot");
 }
 
 /// Test HMAC-SHA1 challenge-response with a known test vector.
@@ -168,33 +156,11 @@ fn test_hmac_sha1_known_vector(#[case] tc: TestConnection) {
     }
 
     let dev = get_device();
-    let hmac_key = HmacKey::new(&[0x0b; 20]).unwrap();
-
-    // Program slot 2 with the test key via CCID (no touch required)
-    {
-        let conn = dev.open_smartcard().expect("open smartcard");
-        let mut session = YubiOtpSession::new(conn).expect("YubiOtpSession");
-        let config = SlotConfiguration::hmac_sha1(&hmac_key)
-            .expect("hmac config")
-            .require_touch(false);
-        session
-            .put_configuration(Slot::Two, &config, None, None)
-            .expect("put_configuration");
-    }
-
-    let expected: [u8; 20] = [
-        0xb6, 0x17, 0x31, 0x86, 0x55, 0x05, 0x72, 0x64, 0xe2, 0x8b, 0xc0, 0xb6, 0xfb, 0x37, 0x8c,
-        0x8e, 0xf1, 0x46, 0xbe, 0x00,
-    ];
-
     match tc {
         TestConnection::UsbHid => {
             let conn = dev.open_otp().expect("open OTP");
             let mut session = YubiOtpSession::new_otp(conn).expect("YubiOtpSession OTP");
-            let result = session
-                .calculate_hmac_sha1(Slot::Two, b"Hi There")
-                .expect("calculate_hmac_sha1");
-            assert_eq!(result, expected, "HMAC-SHA1 test vector mismatch");
+            check_hmac_sha1_known_vector(&mut session);
         }
         _ => {
             let conn = open_smartcard_connection(&tc);
@@ -204,17 +170,28 @@ fn test_hmac_sha1_known_vector(#[case] tc: TestConnection) {
             } else {
                 YubiOtpSession::new(conn).expect("YubiOtpSession")
             };
-            let result = session
-                .calculate_hmac_sha1(Slot::Two, b"Hi There")
-                .expect("calculate_hmac_sha1");
-            assert_eq!(result, expected, "HMAC-SHA1 test vector mismatch");
+            check_hmac_sha1_known_vector(&mut session);
         }
     }
+}
 
-    // Clean up via CCID
-    {
-        let conn = dev.open_smartcard().expect("open smartcard");
-        let mut session = YubiOtpSession::new(conn).expect("YubiOtpSession");
-        session.delete_slot(Slot::Two, None).expect("delete slot");
-    }
+fn check_hmac_sha1_known_vector<C: yubikit::core::Connection + 'static>(
+    session: &mut YubiOtpSession<C>,
+) {
+    let hmac_key = HmacKey::new(&[0x0b; 20]).unwrap();
+    let config = SlotConfiguration::hmac_sha1(&hmac_key).expect("hmac config");
+    session
+        .put_configuration(Slot::Two, &config, None, None)
+        .expect("put_configuration");
+    let result = session.calculate_hmac_sha1(Slot::Two, b"Hi There");
+    session.delete_slot(Slot::Two, None).expect("delete slot");
+    let expected = [
+        0xb6, 0x17, 0x31, 0x86, 0x55, 0x05, 0x72, 0x64, 0xe2, 0x8b, 0xc0, 0xb6, 0xfb, 0x37, 0x8c,
+        0x8e, 0xf1, 0x46, 0xbe, 0x00,
+    ];
+    assert_eq!(
+        result.expect("calculate_hmac_sha1"),
+        expected,
+        "HMAC-SHA1 test vector mismatch"
+    );
 }

@@ -48,8 +48,10 @@ pub struct SetupDiDeviceInfo {
 pub(crate) fn list_setupdi_devices() -> Vec<SetupDiDeviceInfo> {
     let mut devices = Vec::new();
 
+    // SAFETY: Plain FFI call without arguments.
     let hid_guid = unsafe { HidD_GetHidGuid() };
 
+    // SAFETY: `hid_guid` is a valid GUID, the other arguments are optional.
     let dev_info = unsafe {
         SetupDiGetClassDevsW(
             Some(&hid_guid),
@@ -74,6 +76,8 @@ pub(crate) fn list_setupdi_devices() -> Vec<SetupDiDeviceInfo> {
             ..Default::default()
         };
 
+        // SAFETY: `dev_info` is a valid device info set and `iface_data` has
+        // its `cbSize` set.
         let ok = unsafe {
             SetupDiEnumDeviceInterfaces(dev_info, None, &hid_guid, index, &mut iface_data)
         };
@@ -84,6 +88,8 @@ pub(crate) fn list_setupdi_devices() -> Vec<SetupDiDeviceInfo> {
 
         // First call to get required buffer size
         let mut required_size: u32 = 0;
+        // SAFETY: With a null output buffer and size 0, the call only writes
+        // the required size to `required_size`.
         let _ = unsafe {
             SetupDiGetDeviceInterfaceDetailW(
                 dev_info,
@@ -99,13 +105,19 @@ pub(crate) fn list_setupdi_devices() -> Vec<SetupDiDeviceInfo> {
             continue;
         }
 
-        // Allocate buffer and set cbSize to the fixed part of the struct
-        let mut buf = vec![0u8; required_size as usize];
+        // Allocate a buffer aligned for the struct, and set cbSize to the
+        // size of the fixed part of the struct.
+        const _: () = assert!(mem::align_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() <= 4);
+        let mut buf = vec![0u32; (required_size as usize).div_ceil(4)];
         let detail = buf.as_mut_ptr() as *mut SP_DEVICE_INTERFACE_DETAIL_DATA_W;
+        // SAFETY: `buf` is at least `required_size` bytes, which is larger
+        // than the fixed part of the struct, and is suitably aligned.
         unsafe {
             (*detail).cbSize = mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() as u32;
         }
 
+        // SAFETY: `dev_info` and `iface_data` are valid, and `detail` points to
+        // a writable buffer of `required_size` bytes.
         let ok = unsafe {
             SetupDiGetDeviceInterfaceDetailW(
                 dev_info,
@@ -121,7 +133,9 @@ pub(crate) fn list_setupdi_devices() -> Vec<SetupDiDeviceInfo> {
             continue;
         }
 
-        // Extract the device path string
+        // Extract the device path string.
+        // SAFETY: The call above filled `buf` with a struct whose `DevicePath`
+        // extends to the end of the `required_size` bytes.
         let path = unsafe {
             let path_ptr = (*detail).DevicePath.as_ptr();
             // Calculate the number of WCHARs in the path
@@ -139,6 +153,8 @@ pub(crate) fn list_setupdi_devices() -> Vec<SetupDiDeviceInfo> {
         }
     }
 
+    // SAFETY: `dev_info` was returned by `SetupDiGetClassDevsW` and is not
+    // used after this.
     unsafe {
         let _ = SetupDiDestroyDeviceInfoList(dev_info);
     }

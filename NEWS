@@ -1,3 +1,35 @@
+* Version 6.0.0-beta.1 (unreleased)
+ ** CLI: Restore 5.x short options that were changed or dropped: "otp chalresp -t/-T", "otp calculate -T", "otp settings -A", "oath -r", "list -r", and "openpgp access change-reset-code/unblock-pin -r".
+ ** CLI: Accept "--update-chuid" again for "piv certificates generate/import/delete".
+ ** CLI: Make output consistent across commands: uppercase placeholders in help, value names for all options, uniform confirmation prompts and abort messages, status messages on stderr, and a lowercase "error:" prefix.
+ ** CLI: Restore extended help descriptions and examples, and make command summaries consistent.
+ ** CLI: Validate PIV slots and the "otp static --length" range before connecting to the YubiKey.
+ ** CLI: Show the default credentials after "piv reset" and "openpgp reset".
+ ** CLI: Print "No YubiKeys detected." from "list" to stderr.
+ ** CLI: Read keys and certificates the same way in all commands: PEM, encrypted PKCS#8 PEM, DER and PKCS#12 are accepted wherever a private key or certificate file is read, including "hsmauth credentials import", "sd keys import", "openpgp certificates import" and "--scp".
+ ** Library: Add ykman::pki with helpers for reading private keys and certificates from PEM, DER and PKCS#12 data.
+ ** OTP: Accept "-" for "--access-code" and "--new-access-code" to prompt for the access code, and allow "--delete-access-code" with the group-level "--access-code".
+ ** Management: Remove "ykman info --check-fips"; FIPS approved status is always shown in the applications table, including for YubiKey FIPS (4 Series).
+ ** FIDO: Remove the "FIPS approved" row from "fido info"; FIPS status is shown by "ykman info".
+ ** FIDO: Support YubiKey FIPS (4 Series): show U2F PIN state in "fido info", set and verify the U2F PIN with "fido access change-pin/verify-pin", and reset with "fido reset".
+ ** OATH: Remove the unused "--password" option from "oath info".
+ ** OATH: Restore PSKC export with "oath accounts add --output", optionally encrypted with "--pskc-passphrase" or "--pskc-key".
+ ** OATH: Support importing encrypted PSKC files, and fix parsing of some PSKC values.
+ ** OATH: Restore 5.x behavior of "oath accounts code": calculate touch and HOTP accounts on a single match, prompt for touch, prefer exact matches, sort output, and show Steam codes.
+ ** OATH: Restore 5.x behavior of "oath accounts list/delete/rename": use full credential IDs (including period prefix), prefer exact matches, and sort the list.
+ ** OATH: Only treat accounts with an issuer starting with "_" as hidden.
+ ** OATH: Reject SHA512 on YubiKey FIPS (4 Series) and on firmware before 4.3.1.
+ ** OTP: Parse the "otp hotp" key as Base32, as in 5.x.
+ ** OpenPGP: Restore "openpgp keys import" for importing an attestation key.
+ ** OpenPGP: Add "openpgp keys export" and "openpgp keys delete".
+ ** OpenPGP: Clear the fingerprint and generation time when deleting a key.
+ ** PIV: Clear a stored management key when changing it with "--pin", and warn when it can't be cleared.
+ ** HSM Auth: Restore "--derivation-password" for "hsmauth credentials derive".
+ ** HSM Auth: Restore "--management-password" for "hsmauth credentials change-password".
+ ** Windows: Link the C runtime statically so ykman and the service no longer require the Visual C++ Redistributable.
+ ** Windows: The installer no longer deletes unrelated files in a custom installation directory.
+ ** Windows: In Remote Desktop sessions, bypass the service and access devices directly, so smart card readers redirected from the client device can be used.
+
 * Version 6.0.0-beta.0 (released 2026-11-03)
  ** Initial beta of the Rust rewrite, with a native CLI and Rust-backed Python bindings.
  ** Rust libraries provided by the yubikit and ykman crates.
