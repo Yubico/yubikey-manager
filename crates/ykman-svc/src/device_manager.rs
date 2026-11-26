@@ -272,54 +272,6 @@ impl DeviceManager {
             new_revisions.insert(name, *revision);
         }
 
-        // Deduplicate: remove name-based entries (no serial in key) whose
-        // firmware version matches a serial-keyed entry. This guards against
-        // the same device appearing twice — once via CCID (full info, serial
-        // readable) and once via FIDO/OTP fallback (partial info, serial=null).
-        let versions_with_serial: HashSet<(u8, u8, u8)> = new_devices
-            .iter()
-            .filter(|(k, _)| k.parse::<u32>().is_ok())
-            .filter_map(|(_, v)| {
-                let arr = v.get("version")?.as_array()?;
-                if arr.len() == 3 {
-                    Some((
-                        arr[0].as_u64()? as u8,
-                        arr[1].as_u64()? as u8,
-                        arr[2].as_u64()? as u8,
-                    ))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        new_devices.retain(|name, info| {
-            if name.parse::<u32>().is_ok() {
-                return true; // always keep serial-keyed entries
-            }
-            if let Some(arr) = info.get("version").and_then(|v| v.as_array())
-                && arr.len() == 3
-            {
-                let ver = (
-                    arr[0].as_u64().unwrap_or(0) as u8,
-                    arr[1].as_u64().unwrap_or(0) as u8,
-                    arr[2].as_u64().unwrap_or(0) as u8,
-                );
-                if versions_with_serial.contains(&ver) {
-                    log::warn!(
-                        "Dropping duplicate device entry '{name}' \
-                         (v{}.{}.{} already present under serial key)",
-                        ver.0,
-                        ver.1,
-                        ver.2
-                    );
-                    new_device_objects.remove(name);
-                    new_revisions.remove(name);
-                    return false;
-                }
-            }
-            true
-        });
-
         // Remove locks for devices that are no longer present
         state
             .locked_devices
@@ -533,6 +485,39 @@ mod tests {
     use super::{DeviceManager, DeviceReservation};
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
+    use yubikit::core::Version;
+    use yubikit::management::DeviceInfo;
+
+    fn test_device(pid: u16, serial: Option<u32>) -> super::LocalYubiKeyDevice {
+        let mut info = DeviceInfo::parse(&[0], Version(5, 4, 3)).unwrap();
+        info.serial = serial;
+        super::LocalYubiKeyDevice::from_parts(
+            None,
+            None,
+            None,
+            Some(pid),
+            super::Transport::Usb,
+            info,
+        )
+    }
+
+    #[test]
+    fn devices_without_serial_are_listed_alongside_same_version_devices() {
+        // A Security Key (no serial) plugged in next to a YubiKey 5 running
+        // the same firmware version must not be mistaken for a duplicate.
+        let manager = DeviceManager::new();
+        {
+            let mut inv = manager.monitored.lock().unwrap();
+            inv.insert(1, (test_device(0x0407, Some(17671839)), 1));
+            inv.insert(2, (test_device(0x0120, None), 2));
+        }
+        manager.next_revision.store(2, Ordering::Relaxed);
+
+        let devices = manager.update_devices();
+        assert_eq!(devices.len(), 2, "{devices:?}");
+        assert!(devices.contains_key("17671839"));
+        assert!(devices.keys().any(|k| k.parse::<u32>().is_err()));
+    }
 
     #[test]
     fn unchanged_inventory_reuses_projection_until_removal_invalidates_it() {

@@ -146,7 +146,9 @@ impl LocalYubiKeyDevice {
     ///
     /// Used by the device monitor's aggregation layer to build a merged
     /// device from a set of discovered [`DeviceNode`](crate::platform::monitor::DeviceNode)s.
-    pub(crate) fn from_parts(
+    /// Not part of the public API; exposed for tests in dependent crates.
+    #[doc(hidden)]
+    pub fn from_parts(
         reader_name: Option<String>,
         hid_path: Option<String>,
         fido_path: Option<String>,
