@@ -233,13 +233,12 @@ pub fn get_device_source() -> Box<dyn DeviceSource> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "windows")))]
 mod tests {
     use serde_json::json;
 
     use super::{DeviceSource, RpcDeviceSource};
 
-    #[cfg(not(target_os = "windows"))]
     #[test]
     fn service_listing_returns_devices_but_connections_report_busy() {
         use std::io::{BufRead, BufReader, Write};
@@ -311,7 +310,6 @@ mod tests {
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
     #[test]
     fn closing_last_connection_releases_device_before_switching() {
         use std::io::{BufRead, BufReader, Write};
@@ -395,7 +393,6 @@ mod tests {
         );
     }
 
-    #[cfg(not(target_os = "windows"))]
     #[test]
     fn dropped_fido_and_otp_connections_close_service_children() {
         use std::io::{BufRead, BufReader, Write};
