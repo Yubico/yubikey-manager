@@ -19,7 +19,7 @@ aes-gcm = "0.10"
 cbc = { version = "0.1", features = ["alloc"] }
 cipher = "0.4"
 cmac = "0.7"
-des = "0.8"
+des = "0.9"
 ecdsa = "0.17"
 ed25519-dalek = "3"
 elliptic-curve = { version = "0.14.3", features = ["sec1"] }
