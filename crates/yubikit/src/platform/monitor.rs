@@ -76,6 +76,13 @@ use super::hidapi::{
 };
 #[cfg(feature = "pcsc")]
 use super::pcsc::{PcscSmartCardConnection, ReaderStatus, is_reader_usb, list_reader_statuses};
+pub use super::usb_id::UsbDeviceId;
+#[cfg(feature = "pcsc")]
+use super::usb_id::connection_usb_device_id;
+#[cfg(feature = "hid")]
+use super::usb_id::hid_usb_device_id;
+#[cfg(all(feature = "pcsc", windows))]
+use super::usb_id::{reader_device_instances, usb_device_id_from_instance};
 #[cfg(feature = "pcsc")]
 use crate::device::read_info_ccid;
 #[cfg(feature = "hid")]
@@ -90,6 +97,8 @@ pub enum DeviceNode {
         reader_name: String,
         /// The USB Product ID derived from the reader name.
         pid: u16,
+        /// The USB device this reader belongs to, if known to the OS.
+        usb_id: Option<UsbDeviceId>,
     },
     /// A YubiKey card present in a PC/SC reader (USB or NFC).
     CardNode {
@@ -104,7 +113,10 @@ pub enum DeviceNode {
         hid_path: String,
         /// The USB Product ID.
         pid: u16,
-        /// Device info read over the OTP interface.
+        /// The USB device this interface belongs to, if known to the OS.
+        usb_id: Option<UsbDeviceId>,
+        /// Device info read over the OTP interface, or over another
+        /// interface of the same USB device.
         device_info: DeviceInfo,
     },
     /// A YubiKey FIDO HID interface.
@@ -113,7 +125,10 @@ pub enum DeviceNode {
         hid_path: String,
         /// The USB Product ID.
         pid: u16,
-        /// Device info read over the FIDO interface.
+        /// The USB device this interface belongs to, if known to the OS.
+        usb_id: Option<UsbDeviceId>,
+        /// Device info read over the FIDO interface, or over another
+        /// interface of the same USB device.
         device_info: DeviceInfo,
     },
 }
@@ -498,7 +513,7 @@ pub fn monitor_device_events(
             .unwrap_or_else(|e| e.into_inner());
         #[cfg(feature = "pcsc")]
         if usb_interfaces.contains(UsbInterface::CCID) {
-            state.refresh_pcsc(&mut on_event, &[]);
+            let _ = state.refresh_pcsc(&mut on_event, &[]);
         }
         #[cfg(feature = "hid")]
         if usb_interfaces.contains(UsbInterface::OTP) || usb_interfaces.contains(UsbInterface::FIDO)
@@ -525,18 +540,20 @@ pub fn monitor_device_events(
             match change {
                 Change::Stop => break,
                 #[cfg(feature = "pcsc")]
-                Change::Pcsc => state.refresh_pcsc(&mut on_event, &verified),
+                Change::Pcsc => {
+                    state.refresh_pcsc_and_hid(usb_interfaces, &mut on_event, &verified)
+                }
                 #[cfg(all(feature = "pcsc", windows))]
                 Change::PcscReaderRemoved(instance) => {
                     state.invalidate_usb_cards(instance.as_deref(), &mut on_event);
-                    state.refresh_pcsc(&mut on_event, &verified);
+                    state.refresh_pcsc_and_hid(usb_interfaces, &mut on_event, &verified);
                 }
                 #[cfg(feature = "hid")]
                 Change::Hid => state.refresh_hid(usb_interfaces, &mut on_event, &verified),
                 Change::VerifiedReinsert(id) => {
                     #[cfg(feature = "pcsc")]
                     if usb_interfaces.contains(UsbInterface::CCID) {
-                        state.refresh_pcsc(&mut on_event, &verified);
+                        let _ = state.refresh_pcsc(&mut on_event, &verified);
                     }
                     #[cfg(feature = "hid")]
                     if usb_interfaces.contains(UsbInterface::OTP)
@@ -581,6 +598,9 @@ struct MonitorState {
     /// Cached Windows device instance IDs, available even after a reader disappears.
     #[cfg(all(feature = "pcsc", any(windows, test)))]
     reader_instances: HashMap<String, ReaderInstance>,
+    /// The USB device of each USB reader, where the OS could tell us.
+    #[cfg(feature = "pcsc")]
+    reader_ids: HashMap<String, UsbDeviceId>,
     /// OTP HID nodes, keyed by HID path.
     #[cfg(feature = "hid")]
     hid_otp: HashMap<String, DeviceNode>,
@@ -672,7 +692,7 @@ impl MonitorState {
         if names.is_empty() {
             return;
         }
-        let results = match windows_pcsc::reader_device_instances(&names) {
+        let results = match reader_device_instances(&names) {
             Ok(results) => results,
             Err(e) => {
                 log::debug!("Reading reader device instances failed: {e}");
@@ -684,7 +704,12 @@ impl MonitorState {
         };
         for (name, result) in names.into_iter().zip(results) {
             let instance = match result {
-                Ok(instance) => ReaderInstance::Known(instance),
+                Ok(instance) => {
+                    if let Some(id) = usb_device_id_from_instance(&instance) {
+                        self.reader_ids.insert(name.to_string(), id);
+                    }
+                    ReaderInstance::Known(instance)
+                }
                 Err(e) => {
                     log::debug!("Reading device instance for '{name}' failed: {e}");
                     ReaderInstance::Unknown {
@@ -696,17 +721,39 @@ impl MonitorState {
         }
     }
 
+    /// Re-enumerate PC/SC readers and, if device info was read from a USB
+    /// card, re-check HID interfaces: those of the same USB device that could
+    /// not be opened earlier can now be reported using the card's info.
+    fn refresh_pcsc_and_hid(
+        &mut self,
+        interfaces: UsbInterface,
+        on_event: &mut impl FnMut(NodeEvent),
+        verified: &[LocalYubiKeyDevice],
+    ) {
+        let read = self.refresh_pcsc(on_event, verified);
+        #[cfg(feature = "hid")]
+        if read
+            && (interfaces.contains(UsbInterface::OTP) || interfaces.contains(UsbInterface::FIDO))
+        {
+            self.refresh_hid(interfaces, on_event, verified);
+        }
+        #[cfg(not(feature = "hid"))]
+        let _ = (read, interfaces);
+    }
+
     /// Re-enumerate PC/SC readers and emit events for any changes.
+    ///
+    /// Returns `true` if device info was read from a USB card.
     fn refresh_pcsc(
         &mut self,
         on_event: &mut impl FnMut(NodeEvent),
         verified: &[LocalYubiKeyDevice],
-    ) {
+    ) -> bool {
         let readers = match list_reader_statuses() {
             Ok(readers) => readers,
             Err(e) => {
                 log::debug!("PC/SC enumeration failed: {e}");
-                return;
+                return false;
             }
         };
         let present: HashMap<&str, bool> = readers
@@ -724,6 +771,7 @@ impl MonitorState {
         for name in gone {
             #[cfg(windows)]
             self.reader_instances.remove(&name);
+            self.reader_ids.remove(&name);
             self.card_events.remove(&name);
             self.stale_cards.remove(&name);
             // Card first, then reader.
@@ -750,7 +798,7 @@ impl MonitorState {
         #[cfg(windows)]
         self.lookup_reader_instances(&readers);
 
-        self.refresh_pcsc_cards(&readers, on_event, verified, read_card_info);
+        self.refresh_pcsc_cards(&readers, on_event, verified, read_card_info)
     }
 
     fn refresh_pcsc_cards(
@@ -758,13 +806,23 @@ impl MonitorState {
         readers: &[ReaderStatus],
         on_event: &mut impl FnMut(NodeEvent),
         verified: &[LocalYubiKeyDevice],
-        mut read_info: impl FnMut(&str, bool, bool) -> Result<DeviceInfo, DeviceError>,
-    ) {
+        mut read_info: impl FnMut(
+            &str,
+            CardProbe,
+        ) -> Result<(DeviceInfo, Option<UsbDeviceId>), DeviceError>,
+    ) -> bool {
+        let mut usb_info_read = false;
+
         // --- Process each currently-connected reader ---
         for status in readers {
             let name = &status.name;
             let card_present = &status.card_present;
             let usb = is_reader_usb(name);
+            let pid = if usb {
+                pid_from_reader_name(name)
+            } else {
+                None
+            };
 
             // A card swapped faster than the polling interval never shows as
             // absent; the changed event counter reveals the replacement.
@@ -778,34 +836,30 @@ impl MonitorState {
             }
 
             // USB reader node.
-            if usb
-                && let Some(pid) = pid_from_reader_name(name)
-                && !self.usb_readers.contains_key(name)
-            {
-                let node = DeviceNode::UsbReaderNode {
-                    reader_name: name.clone(),
-                    pid,
-                };
-                self.usb_readers.insert(name.clone(), node.clone());
-                on_event(NodeEvent::Added(node));
+            if let Some(pid) = pid {
+                self.update_usb_reader(name, pid, on_event);
             }
 
             if *card_present {
                 let refresh = self.stale_cards.contains(name);
                 if refresh || !self.cards.contains_key(name) {
-                    let pid = if usb {
-                        pid_from_reader_name(name)
-                    } else {
-                        None
+                    let probe = CardProbe {
+                        usb,
+                        exclusive_only: refresh,
+                        want_usb_id: pid.is_some() && !self.reader_ids.contains_key(name),
                     };
                     let info = verified_info(verified, VerifiedInterface::Ccid, name, pid)
-                        .map(Ok)
-                        .unwrap_or_else(|| read_info(name, usb, refresh));
+                        .map(|info| Ok((info, None)))
+                        .unwrap_or_else(|| read_info(name, probe));
                     match info {
-                        Ok(info) => {
+                        Ok((info, usb_id)) => {
+                            if let (Some(pid), Some(usb_id)) = (pid, usb_id) {
+                                self.reader_ids.insert(name.clone(), usb_id);
+                                self.update_usb_reader(name, pid, on_event);
+                            }
                             let node = DeviceNode::CardNode {
                                 reader_name: name.clone(),
-                                device_info: info,
+                                device_info: info.clone(),
                             };
                             let previous = self.cards.insert(name.clone(), node.clone());
                             self.card_events.insert(name.clone(), status.event_count);
@@ -815,6 +869,13 @@ impl MonitorState {
                                     on_event(NodeEvent::Removed(previous));
                                 }
                                 on_event(NodeEvent::Added(node));
+                            }
+                            if pid.is_some() {
+                                usb_info_read = true;
+                                #[cfg(feature = "hid")]
+                                if let Some(usb_id) = self.reader_ids.get(name).cloned() {
+                                    self.adopt_hid_info(&usb_id, &info, on_event);
+                                }
                             }
                         }
                         Err(e) => {
@@ -829,7 +890,57 @@ impl MonitorState {
                 }
             }
         }
+        usb_info_read
     }
+
+    /// Insert the reader node for `name`, or replace it if its USB device has
+    /// since become known.
+    fn update_usb_reader(&mut self, name: &str, pid: u16, on_event: &mut impl FnMut(NodeEvent)) {
+        let node = DeviceNode::UsbReaderNode {
+            reader_name: name.to_owned(),
+            pid,
+            usb_id: self.reader_ids.get(name).cloned(),
+        };
+        match self.usb_readers.get(name) {
+            Some(existing) if *existing == node => {}
+            Some(_) => {
+                let previous = self.usb_readers.insert(name.to_owned(), node.clone());
+                if let Some(previous) = previous {
+                    on_event(NodeEvent::Removed(previous));
+                }
+                on_event(NodeEvent::Added(node));
+            }
+            None => {
+                self.usb_readers.insert(name.to_owned(), node.clone());
+                on_event(NodeEvent::Added(node));
+            }
+        }
+    }
+
+    /// Device info already read from the card of the USB device `usb_id`.
+    fn card_info_for(&self, usb_id: &UsbDeviceId) -> Option<&DeviceInfo> {
+        self.usb_readers.iter().find_map(|(name, node)| match node {
+            DeviceNode::UsbReaderNode {
+                usb_id: Some(id), ..
+            } if id == usb_id => match self.cards.get(name) {
+                Some(DeviceNode::CardNode { device_info, .. }) => Some(device_info),
+                _ => None,
+            },
+            _ => None,
+        })
+    }
+}
+
+/// How a card's device info should be read.
+#[cfg(feature = "pcsc")]
+#[derive(Debug, Clone, Copy)]
+struct CardProbe {
+    /// Whether the reader is a USB YubiKey (as opposed to an NFC reader).
+    usb: bool,
+    /// Only use exclusive access, to detect a card that is in use elsewhere.
+    exclusive_only: bool,
+    /// Also resolve the reader's USB device through the connection.
+    want_usb_id: bool,
 }
 
 #[cfg(feature = "hid")]
@@ -844,48 +955,15 @@ impl MonitorState {
         if interfaces.contains(UsbInterface::OTP) {
             match list_otp_devices() {
                 Ok(devices) => {
-                    let current: HashMap<&str, u16> =
-                        devices.iter().map(|d| (d.path.as_str(), d.pid)).collect();
-                    // Removals.
-                    let gone: Vec<String> = self
-                        .hid_otp
-                        .keys()
-                        .filter(|path| !current.contains_key(path.as_str()))
-                        .cloned()
-                        .collect();
-                    for path in gone {
-                        if let Some(node) = self.hid_otp.remove(&path) {
-                            on_event(NodeEvent::Removed(node));
-                        }
-                    }
-                    // Additions.
-                    for device in &devices {
-                        if self.hid_otp.contains_key(&device.path) {
-                            continue;
-                        }
-                        let info = verified_info(
-                            verified,
-                            VerifiedInterface::Otp,
-                            &device.path,
-                            Some(device.pid),
-                        )
-                        .map(Ok)
-                        .unwrap_or_else(|| read_otp_info(&device.path, device.pid));
-                        match info {
-                            Ok(info) => {
-                                let node = DeviceNode::HidOtpNode {
-                                    hid_path: device.path.clone(),
-                                    pid: device.pid,
-                                    device_info: info,
-                                };
-                                self.hid_otp.insert(device.path.clone(), node.clone());
-                                on_event(NodeEvent::Added(node));
-                            }
-                            Err(e) => {
-                                log::debug!("Reading OTP info from '{}' failed: {e}", device.path);
-                            }
-                        }
-                    }
+                    let devices: Vec<(String, u16)> =
+                        devices.into_iter().map(|d| (d.path, d.pid)).collect();
+                    self.refresh_hid_interface(
+                        HidInterface::Otp,
+                        &devices,
+                        on_event,
+                        verified,
+                        read_otp_info,
+                    );
                 }
                 Err(e) => log::debug!("OTP HID enumeration failed: {e}"),
             }
@@ -894,51 +972,191 @@ impl MonitorState {
         if interfaces.contains(UsbInterface::FIDO) {
             match list_fido_devices() {
                 Ok(devices) => {
-                    let current: HashMap<&str, u16> =
-                        devices.iter().map(|d| (d.path.as_str(), d.pid)).collect();
-                    // Removals.
-                    let gone: Vec<String> = self
-                        .hid_fido
-                        .keys()
-                        .filter(|path| !current.contains_key(path.as_str()))
-                        .cloned()
-                        .collect();
-                    for path in gone {
-                        if let Some(node) = self.hid_fido.remove(&path) {
-                            on_event(NodeEvent::Removed(node));
-                        }
-                    }
-                    // Additions.
-                    for device in &devices {
-                        if self.hid_fido.contains_key(&device.path) {
-                            continue;
-                        }
-                        let info = verified_info(
-                            verified,
-                            VerifiedInterface::Fido,
-                            &device.path,
-                            Some(device.pid),
-                        )
-                        .map(Ok)
-                        .unwrap_or_else(|| read_fido_info(device));
-                        match info {
-                            Ok(info) => {
-                                let node = DeviceNode::HidFidoNode {
-                                    hid_path: device.path.clone(),
-                                    pid: device.pid,
-                                    device_info: info,
-                                };
-                                self.hid_fido.insert(device.path.clone(), node.clone());
-                                on_event(NodeEvent::Added(node));
-                            }
-                            Err(e) => {
-                                log::debug!("Reading FIDO info from '{}' failed: {e}", device.path);
-                            }
-                        }
-                    }
+                    let current: Vec<(String, u16)> =
+                        devices.iter().map(|d| (d.path.clone(), d.pid)).collect();
+                    self.refresh_hid_interface(
+                        HidInterface::Fido,
+                        &current,
+                        on_event,
+                        verified,
+                        |path, _| {
+                            let device = devices
+                                .iter()
+                                .find(|d| d.path == path)
+                                .expect("enumerated device");
+                            read_fido_info(device)
+                        },
+                    );
                 }
                 Err(e) => log::debug!("FIDO HID enumeration failed: {e}"),
             }
+        }
+    }
+
+    /// Diff the enumerated `(path, pid)` devices of one HID interface against
+    /// the tracked nodes.
+    ///
+    /// New interfaces whose USB device already has device info (read over
+    /// another interface) reuse it instead of being opened. This also allows
+    /// interfaces that cannot be opened (e.g. FIDO without administrator
+    /// rights on Windows) to be reported.
+    fn refresh_hid_interface(
+        &mut self,
+        interface: HidInterface,
+        devices: &[(String, u16)],
+        on_event: &mut impl FnMut(NodeEvent),
+        verified: &[LocalYubiKeyDevice],
+        mut read_info: impl FnMut(&str, u16) -> Result<DeviceInfo, DeviceError>,
+    ) {
+        let (verified_interface, label) = match interface {
+            HidInterface::Otp => (VerifiedInterface::Otp, "OTP"),
+            HidInterface::Fido => (VerifiedInterface::Fido, "FIDO"),
+        };
+        // Removals.
+        let gone: Vec<String> = self
+            .hid_nodes(interface)
+            .keys()
+            .filter(|path| !devices.iter().any(|(p, _)| p == *path))
+            .cloned()
+            .collect();
+        for path in gone {
+            if let Some(node) = self.hid_nodes_mut(interface).remove(&path) {
+                on_event(NodeEvent::Removed(node));
+            }
+        }
+        // Additions.
+        for (path, pid) in devices {
+            if self.hid_nodes(interface).contains_key(path) {
+                continue;
+            }
+            let usb_id = hid_usb_device_id(path);
+            let info = verified_info(verified, verified_interface, path, Some(*pid))
+                .or_else(|| usb_id.as_ref().and_then(|id| self.group_info(id).cloned()))
+                .map(Ok)
+                .unwrap_or_else(|| read_info(path, *pid));
+            match info {
+                Ok(info) => {
+                    let node = interface.node(path.clone(), *pid, usb_id, info);
+                    self.hid_nodes_mut(interface)
+                        .insert(path.clone(), node.clone());
+                    on_event(NodeEvent::Added(node));
+                }
+                Err(e) => {
+                    log::debug!("Reading {label} info from '{path}' failed: {e}");
+                }
+            }
+        }
+    }
+
+    fn hid_nodes(&self, interface: HidInterface) -> &HashMap<String, DeviceNode> {
+        match interface {
+            HidInterface::Otp => &self.hid_otp,
+            HidInterface::Fido => &self.hid_fido,
+        }
+    }
+
+    fn hid_nodes_mut(&mut self, interface: HidInterface) -> &mut HashMap<String, DeviceNode> {
+        match interface {
+            HidInterface::Otp => &mut self.hid_otp,
+            HidInterface::Fido => &mut self.hid_fido,
+        }
+    }
+
+    /// Device info already known for the USB device `usb_id`, preferring the
+    /// card (CCID) as the most complete source.
+    fn group_info(&self, usb_id: &UsbDeviceId) -> Option<&DeviceInfo> {
+        #[cfg(feature = "pcsc")]
+        if let Some(info) = self.card_info_for(usb_id) {
+            return Some(info);
+        }
+        self.hid_otp
+            .values()
+            .chain(self.hid_fido.values())
+            .find_map(|node| match node {
+                DeviceNode::HidOtpNode {
+                    usb_id: Some(id),
+                    device_info,
+                    ..
+                }
+                | DeviceNode::HidFidoNode {
+                    usb_id: Some(id),
+                    device_info,
+                    ..
+                } if id == usb_id => Some(device_info),
+                _ => None,
+            })
+    }
+
+    /// Update the HID nodes of the USB device `usb_id` with device info read
+    /// over its card, which is the authoritative source.
+    #[cfg(feature = "pcsc")]
+    fn adopt_hid_info(
+        &mut self,
+        usb_id: &UsbDeviceId,
+        info: &DeviceInfo,
+        on_event: &mut impl FnMut(NodeEvent),
+    ) {
+        for interface in [HidInterface::Otp, HidInterface::Fido] {
+            let outdated: Vec<(String, u16)> = self
+                .hid_nodes(interface)
+                .values()
+                .filter_map(|node| match node {
+                    DeviceNode::HidOtpNode {
+                        hid_path,
+                        pid,
+                        usb_id: Some(id),
+                        device_info,
+                    }
+                    | DeviceNode::HidFidoNode {
+                        hid_path,
+                        pid,
+                        usb_id: Some(id),
+                        device_info,
+                    } if id == usb_id && device_info != info => Some((hid_path.clone(), *pid)),
+                    _ => None,
+                })
+                .collect();
+            for (path, pid) in outdated {
+                let node = interface.node(path.clone(), pid, Some(usb_id.clone()), info.clone());
+                if let Some(previous) = self.hid_nodes_mut(interface).insert(path, node.clone()) {
+                    on_event(NodeEvent::Removed(previous));
+                }
+                on_event(NodeEvent::Added(node));
+            }
+        }
+    }
+}
+
+/// A HID interface type tracked by the monitor.
+#[cfg(feature = "hid")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HidInterface {
+    Otp,
+    Fido,
+}
+
+#[cfg(feature = "hid")]
+impl HidInterface {
+    fn node(
+        self,
+        hid_path: String,
+        pid: u16,
+        usb_id: Option<UsbDeviceId>,
+        device_info: DeviceInfo,
+    ) -> DeviceNode {
+        match self {
+            HidInterface::Otp => DeviceNode::HidOtpNode {
+                hid_path,
+                pid,
+                usb_id,
+                device_info,
+            },
+            HidInterface::Fido => DeviceNode::HidFidoNode {
+                hid_path,
+                pid,
+                usb_id,
+                device_info,
+            },
         }
     }
 }
@@ -950,21 +1168,25 @@ impl MonitorState {
 #[cfg(feature = "pcsc")]
 fn read_card_info(
     reader_name: &str,
-    usb: bool,
-    exclusive_only: bool,
-) -> Result<DeviceInfo, DeviceError> {
-    let conn = if exclusive_only {
+    probe: CardProbe,
+) -> Result<(DeviceInfo, Option<UsbDeviceId>), DeviceError> {
+    let conn = if probe.exclusive_only {
         PcscSmartCardConnection::new(reader_name, true)
     } else {
         PcscSmartCardConnection::open(reader_name)
     }?;
-    let pid = if usb {
+    let pid = if probe.usb {
         pid_from_reader_name(reader_name)
     } else {
         None
     };
-    let (info, _conn) = read_info_ccid(conn, pid)?;
-    Ok(info)
+    let (info, conn) = read_info_ccid(conn, pid)?;
+    let usb_id = if probe.want_usb_id {
+        connection_usb_device_id(&conn)
+    } else {
+        None
+    };
+    Ok((info, usb_id))
 }
 
 #[cfg(feature = "hid")]
@@ -1087,30 +1309,14 @@ fn pcsc_watch_loop(tx: &mpsc::Sender<Change>, shutdown: &Shutdown) {
     windows_pcsc::run(tx, shutdown);
 }
 
-#[cfg(all(feature = "pcsc", any(windows, test)))]
-fn reader_instance_from_path(path: &str) -> Option<String> {
-    let mut parts = path.strip_prefix(r"\\?\")?.split('#');
-    let bus = parts.next().filter(|part| !part.is_empty())?;
-    let device = parts.next().filter(|part| !part.is_empty())?;
-    let instance = parts.next().filter(|part| !part.is_empty())?;
-    let class = parts.next()?;
-    if !class.starts_with('{') || !class.ends_with('}') || parts.next().is_some() {
-        return None;
-    }
-    Some(format!(r"{bus}\{device}\{instance}"))
-}
-
 #[cfg(all(feature = "pcsc", windows))]
 mod windows_pcsc {
-    use super::{Change, Shutdown, reader_instance_from_path};
+    use super::{Change, Shutdown};
+    use crate::platform::usb_id::device_instance_from_path;
     use std::cell::RefCell;
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-    use windows_sys::Win32::Security::Credentials::{
-        SCARD_SCOPE_USER, SCardEstablishContext, SCardGetReaderDeviceInstanceIdW,
-        SCardReleaseContext,
-    };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DBT_DEVICEREMOVECOMPLETE, DBT_DEVTYP_DEVICEINTERFACE,
@@ -1132,80 +1338,6 @@ mod windows_pcsc {
 
     fn wide(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(std::iter::once(0)).collect()
-    }
-
-    /// Look up the device instance IDs of readers using one smart card context.
-    pub(super) fn reader_device_instances(
-        names: &[&str],
-    ) -> std::io::Result<Vec<std::io::Result<String>>> {
-        struct Context(usize);
-        impl Drop for Context {
-            fn drop(&mut self) {
-                // SAFETY: The context was established by `reader_device_instances`
-                // and is released exactly once here.
-                let status = unsafe { SCardReleaseContext(self.0) };
-                if status != 0 {
-                    log::debug!("Releasing smart card context failed: {status:#x}");
-                }
-            }
-        }
-
-        fn check(status: i32) -> std::io::Result<()> {
-            if status == 0 {
-                Ok(())
-            } else {
-                Err(std::io::Error::from_raw_os_error(status))
-            }
-        }
-
-        fn instance_id(context: usize, name: &str) -> std::io::Result<String> {
-            let name = wide(name);
-            let mut len = 0;
-            // SAFETY: `name` is NUL-terminated; a null buffer requests the
-            // required length, written to `len`.
-            check(unsafe {
-                SCardGetReaderDeviceInstanceIdW(
-                    context,
-                    name.as_ptr(),
-                    std::ptr::null_mut(),
-                    &mut len,
-                )
-            })?;
-            let mut instance = vec![0; len as usize];
-            // SAFETY: `instance` is a writable buffer of `len` UTF-16 units.
-            check(unsafe {
-                SCardGetReaderDeviceInstanceIdW(
-                    context,
-                    name.as_ptr(),
-                    instance.as_mut_ptr(),
-                    &mut len,
-                )
-            })?;
-            let end = instance.iter().position(|&c| c == 0).ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Unterminated device instance ID",
-                )
-            })?;
-            String::from_utf16(&instance[..end])
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-        }
-
-        let mut context = 0;
-        // SAFETY: Reserved arguments are null and `context` is a valid out-pointer.
-        check(unsafe {
-            SCardEstablishContext(
-                SCARD_SCOPE_USER,
-                std::ptr::null(),
-                std::ptr::null(),
-                &mut context,
-            )
-        })?;
-        let context = Context(context);
-        Ok(names
-            .iter()
-            .map(|name| instance_id(context.0, name))
-            .collect())
     }
 
     unsafe extern "system" fn wndproc(
@@ -1243,7 +1375,7 @@ mod windows_pcsc {
                 };
                 let name = String::from_utf16_lossy(&name[..end]);
                 log::debug!("Smart card reader removed: {name}");
-                let instance = reader_instance_from_path(&name);
+                let instance = device_instance_from_path(&name);
                 if instance.is_none() {
                     log::debug!("Unrecognised reader path; re-reading all USB readers");
                 }
@@ -1722,6 +1854,7 @@ pub type YubiKeyId = u64;
 pub struct YubiKey {
     id: YubiKeyId,
     device: LocalYubiKeyDevice,
+    usb_id: Option<UsbDeviceId>,
     nodes: Vec<DeviceNode>,
 }
 
@@ -1744,6 +1877,11 @@ impl YubiKey {
     /// The [`DeviceNode`]s that make up this physical device.
     pub fn nodes(&self) -> &[DeviceNode] {
         &self.nodes
+    }
+
+    /// The OS identity of the USB device, if known.
+    pub fn usb_id(&self) -> Option<&UsbDeviceId> {
+        self.usb_id.as_ref()
     }
 
     /// The device info.
@@ -1772,9 +1910,10 @@ pub enum YubiKeyEvent {
 ///
 /// This is a higher-level version of [`monitor_device_events`] that aggregates
 /// the low-level [`DeviceNode`] events into physical devices. Nodes that
-/// belong to the same physical device (matched by serial number, or by USB
-/// Product ID when a serial is not available) are merged into a single
-/// [`YubiKey`].
+/// belong to the same physical device are merged into a single [`YubiKey`].
+/// Nodes are grouped by the USB device the OS reports them under (see
+/// [`UsbDeviceId`]); where that is unavailable, by serial number, or by USB
+/// Product ID when only one device with that Product ID is connected.
 ///
 /// Connecting or disconnecting a YubiKey produces several node events in quick
 /// succession (one per interface). Events already queued when a change is
@@ -1927,6 +2066,9 @@ impl Aggregator {
                 if used[i] {
                     return false;
                 }
+                if let (Some(a), Some(c)) = (&b.usb_id, &prev[i].usb_id) {
+                    return a == c;
+                }
                 let p_serial = prev[i].device.info().serial;
                 match (b_serial, p_serial) {
                     (Some(a), Some(c)) => a == c,
@@ -1941,6 +2083,7 @@ impl Aggregator {
                     let yk = YubiKey {
                         id: prev[i].id,
                         device: b.device,
+                        usb_id: b.usb_id,
                         nodes: b.nodes,
                     };
                     if yk.nodes != prev[i].nodes {
@@ -1954,6 +2097,7 @@ impl Aggregator {
                     let yk = YubiKey {
                         id,
                         device: b.device,
+                        usb_id: b.usb_id,
                         nodes: b.nodes,
                     };
                     added.push(yk.clone());
@@ -2003,6 +2147,7 @@ impl Aggregator {
                         Transport::Nfc,
                         device_info.clone(),
                     ),
+                    usb_id: None,
                     nodes: vec![node.clone()],
                 });
             }
@@ -2038,7 +2183,7 @@ impl Aggregator {
         // USB partials, one per interface node.
         let mut readers: Vec<Partial> = Vec::new();
         for (reader_name, node) in &self.usb_readers {
-            if let DeviceNode::UsbReaderNode { pid, .. } = node {
+            if let DeviceNode::UsbReaderNode { pid, usb_id, .. } = node {
                 let mut nodes = vec![node.clone()];
                 let info = match self.cards.get(reader_name) {
                     Some(card @ DeviceNode::CardNode { device_info, .. }) => {
@@ -2052,6 +2197,7 @@ impl Aggregator {
                     hid_path: None,
                     fido_path: None,
                     pid: Some(*pid),
+                    usb_id: usb_id.clone(),
                     info,
                     nodes,
                 });
@@ -2062,7 +2208,10 @@ impl Aggregator {
             .iter()
             .filter_map(|(path, node)| {
                 if let DeviceNode::HidOtpNode {
-                    pid, device_info, ..
+                    pid,
+                    usb_id,
+                    device_info,
+                    ..
                 } = node
                 {
                     Some(Partial {
@@ -2070,6 +2219,7 @@ impl Aggregator {
                         hid_path: Some(path.clone()),
                         fido_path: None,
                         pid: Some(*pid),
+                        usb_id: usb_id.clone(),
                         info: Some(device_info.clone()),
                         nodes: vec![node.clone()],
                     })
@@ -2083,7 +2233,10 @@ impl Aggregator {
             .iter()
             .filter_map(|(path, node)| {
                 if let DeviceNode::HidFidoNode {
-                    pid, device_info, ..
+                    pid,
+                    usb_id,
+                    device_info,
+                    ..
                 } = node
                 {
                     Some(Partial {
@@ -2091,6 +2244,7 @@ impl Aggregator {
                         hid_path: None,
                         fido_path: Some(path.clone()),
                         pid: Some(*pid),
+                        usb_id: usb_id.clone(),
                         info: Some(device_info.clone()),
                         nodes: vec![node.clone()],
                     })
@@ -2118,6 +2272,7 @@ impl Aggregator {
                         Transport::Usb,
                         info,
                     ),
+                    usb_id: p.usb_id,
                     nodes: p.nodes,
                 });
             }
@@ -2130,6 +2285,7 @@ impl Aggregator {
 /// A device built from a group of merged nodes.
 struct BuiltDevice {
     device: LocalYubiKeyDevice,
+    usb_id: Option<UsbDeviceId>,
     nodes: Vec<DeviceNode>,
 }
 
@@ -2139,6 +2295,7 @@ struct Partial {
     hid_path: Option<String>,
     fido_path: Option<String>,
     pid: Option<u16>,
+    usb_id: Option<UsbDeviceId>,
     info: Option<DeviceInfo>,
     nodes: Vec<DeviceNode>,
 }
@@ -2146,6 +2303,15 @@ struct Partial {
 impl Partial {
     fn serial(&self) -> Option<u32> {
         self.info.as_ref().and_then(|i| i.serial)
+    }
+
+    /// Whether `other` could be the same device as far as OS identity goes:
+    /// either identity is unknown, or both are equal.
+    fn identity_compatible(&self, other: &Partial) -> bool {
+        match (&self.usb_id, &other.usb_id) {
+            (Some(a), Some(b)) => a == b,
+            _ => true,
+        }
     }
 
     /// Absorb another partial representing the same physical device.
@@ -2161,6 +2327,9 @@ impl Partial {
         }
         if self.pid.is_none() {
             self.pid = other.pid;
+        }
+        if self.usb_id.is_none() {
+            self.usb_id = other.usb_id;
         }
         // Prefer info with a serial number, or a higher firmware version.
         let take = match (&self.info, &other.info) {
@@ -2179,19 +2348,31 @@ impl Partial {
 }
 
 /// Merge `incoming` partials into `base`, combining entries that represent the
-/// same physical device. Matching is by serial number first, then by PID when
-/// exactly one device of that PID exists.
+/// same physical device.
+///
+/// Partials belonging to the same USB device (per the OS) are always merged.
+/// Otherwise, a partial is matched by serial number, or by PID when exactly
+/// one device of that PID exists, but never with a partial the OS attributes
+/// to a different USB device.
 fn merge_partials(base: &mut Vec<Partial>, incoming: Vec<Partial>, counts: &HashMap<u16, usize>) {
     for inc in incoming {
         let serial = inc.serial();
         let pid = inc.pid;
         let unique_pid = pid.map(|p| counts.get(&p) == Some(&1)).unwrap_or(false);
 
-        let idx = serial
-            .and_then(|s| base.iter().position(|b| b.serial() == Some(s)))
+        let idx = inc
+            .usb_id
+            .as_ref()
+            .and_then(|id| base.iter().position(|b| b.usb_id.as_ref() == Some(id)))
+            .or_else(|| {
+                let serial = serial?;
+                base.iter()
+                    .position(|b| b.serial() == Some(serial) && b.identity_compatible(&inc))
+            })
             .or_else(|| {
                 if unique_pid {
-                    base.iter().position(|b| b.pid == pid)
+                    base.iter()
+                        .position(|b| b.pid == pid && b.identity_compatible(&inc))
                 } else {
                     None
                 }
@@ -2285,6 +2466,7 @@ mod tests {
                 DeviceNode::UsbReaderNode {
                     reader_name: name.into(),
                     pid: 0x407,
+                    usb_id: None,
                 },
             );
             state.cards.insert(
@@ -2366,20 +2548,12 @@ mod tests {
             state.invalidate_usb_cards(removed, &mut |e| events.push(e));
             let instances = state.reader_instances.clone();
             let mut probes = 0;
-            state.refresh_pcsc_cards(
-                &statuses,
-                &mut |e| events.push(e),
-                &[],
-                |name, usb, exclusive_only| {
-                    assert_eq!(name, reader);
-                    assert!(usb && exclusive_only);
-                    probes += 1;
-                    Err(
-                        crate::platform::pcsc::PcscError::Pcsc(::pcsc::Error::SharingViolation)
-                            .into(),
-                    )
-                },
-            );
+            state.refresh_pcsc_cards(&statuses, &mut |e| events.push(e), &[], |name, probe| {
+                assert_eq!(name, reader);
+                assert!(probe.usb && probe.exclusive_only);
+                probes += 1;
+                Err(crate::platform::pcsc::PcscError::Pcsc(::pcsc::Error::SharingViolation).into())
+            });
             assert_eq!(probes, 1);
             assert!(events.is_empty());
             assert_eq!(state.cards, cards);
@@ -2387,21 +2561,16 @@ mod tests {
             assert_eq!(state.reader_instances, instances);
             assert!(state.stale_cards.contains(reader));
 
-            state.refresh_pcsc_cards(
-                &statuses,
-                &mut |e| events.push(e),
-                &[],
-                |_, _, exclusive_only| {
-                    assert!(exclusive_only);
-                    Ok(info.clone())
-                },
-            );
+            state.refresh_pcsc_cards(&statuses, &mut |e| events.push(e), &[], |_, probe| {
+                assert!(probe.exclusive_only);
+                Ok((info.clone(), None))
+            });
             assert!(events.is_empty());
             assert_eq!(state.cards, cards);
             assert_eq!(state.card_events, counters);
             assert_eq!(state.reader_instances, instances);
             assert!(state.stale_cards.is_empty());
-            state.refresh_pcsc_cards(&statuses, &mut |e| events.push(e), &[], |_, _, _| {
+            state.refresh_pcsc_cards(&statuses, &mut |e| events.push(e), &[], |_, _| {
                 panic!("An unchanged card should not be probed again")
             });
         }
@@ -2429,9 +2598,9 @@ mod tests {
             }],
             &mut |e| events.push(e),
             &[],
-            |_, _, exclusive_only| {
-                assert!(exclusive_only);
-                Ok(info.clone())
+            |_, probe| {
+                assert!(probe.exclusive_only);
+                Ok((info.clone(), None))
             },
         );
         assert_eq!(
@@ -2464,9 +2633,9 @@ mod tests {
             }],
             &mut |e| events.push(e),
             &[],
-            |_, _, exclusive_only| {
-                assert!(!exclusive_only);
-                Ok(info.clone())
+            |_, probe| {
+                assert!(!probe.exclusive_only);
+                Ok((info.clone(), None))
             },
         );
         assert_eq!(events, vec![NodeEvent::Added(node)]);
@@ -2488,7 +2657,7 @@ mod tests {
             }],
             &mut |e| events.push(e),
             &[],
-            |_, _, _| panic!("An absent card should not be probed"),
+            |_, _| panic!("An absent card should not be probed"),
         );
         assert_eq!(events, vec![NodeEvent::Removed(previous)]);
         assert!(!state.cards.contains_key(reader));
@@ -2515,9 +2684,9 @@ mod tests {
             }],
             &mut |e| events.push(e),
             &[],
-            |_, _, exclusive_only| {
-                assert!(!exclusive_only);
-                Ok(info.clone())
+            |_, probe| {
+                assert!(!probe.exclusive_only);
+                Ok((info.clone(), None))
             },
         );
         assert_eq!(
@@ -2545,6 +2714,7 @@ mod tests {
                 DeviceNode::UsbReaderNode {
                     reader_name: name.into(),
                     pid: 0x407,
+                    usb_id: None,
                 },
             );
             state.cards.insert(
@@ -2578,27 +2748,192 @@ mod tests {
         assert!(state.cards.contains_key("yk 1"));
     }
 
-    #[cfg(feature = "pcsc")]
-    #[test]
-    fn reader_instance_is_parsed_from_interface_path() {
-        assert_eq!(
-            reader_instance_from_path(
-                r"\\?\USB#VID_1050&PID_0407&MI_02#7&1a2b&0&0002#{50dd5230-ba8a-11d1-bf5d-0000f805f530}"
-            ),
-            Some(r"USB\VID_1050&PID_0407&MI_02\7&1a2b&0&0002".into())
-        );
-        assert_eq!(
-            reader_instance_from_path(r"\\?\SWD#ScReader#x#{50dd5230-ba8a-11d1-bf5d-0000f805f530}"),
-            Some(r"SWD\ScReader\x".into())
-        );
-        for path in [
-            "",
-            r"\\?\USB#VID_1050&PID_0407#x",
-            r"\\?\SWD#ScReader#x",
-            r"\\?\USB##x#{guid}",
-            r"USB\VID_1050&PID_0407\x",
-        ] {
-            assert_eq!(reader_instance_from_path(path), None, "{path}");
+    fn info(version: Version, serial: Option<u32>) -> DeviceInfo {
+        let mut info = DeviceInfo::parse_tlvs(&HashMap::new(), version).unwrap();
+        info.serial = serial;
+        info
+    }
+
+    fn reader(name: &str, usb_id: Option<&str>) -> DeviceNode {
+        DeviceNode::UsbReaderNode {
+            reader_name: name.into(),
+            pid: 0x407,
+            usb_id: usb_id.map(UsbDeviceId::new),
         }
+    }
+
+    fn card(name: &str, info: &DeviceInfo) -> DeviceNode {
+        DeviceNode::CardNode {
+            reader_name: name.into(),
+            device_info: info.clone(),
+        }
+    }
+
+    fn otp(path: &str, usb_id: Option<&str>, info: &DeviceInfo) -> DeviceNode {
+        DeviceNode::HidOtpNode {
+            hid_path: path.into(),
+            pid: 0x407,
+            usb_id: usb_id.map(UsbDeviceId::new),
+            device_info: info.clone(),
+        }
+    }
+
+    fn fido(path: &str, usb_id: Option<&str>, info: &DeviceInfo) -> DeviceNode {
+        DeviceNode::HidFidoNode {
+            hid_path: path.into(),
+            pid: 0x407,
+            usb_id: usb_id.map(UsbDeviceId::new),
+            device_info: info.clone(),
+        }
+    }
+
+    fn aggregate(nodes: Vec<DeviceNode>) -> Vec<BuiltDevice> {
+        let mut agg = Aggregator::default();
+        for node in nodes {
+            agg.apply(NodeEvent::Added(node));
+        }
+        let mut built = agg.build_devices();
+        built.sort_by(|a, b| a.device.reader_name.cmp(&b.device.reader_name));
+        built
+    }
+
+    #[test]
+    fn aggregator_groups_serial_less_keys_by_usb_identity() {
+        // Two identical same-version keys without serials (e.g. hidden serial
+        // API) would be indistinguishable from DeviceInfo alone.
+        let hidden = info(Version(5, 4, 3), None);
+        let built = aggregate(vec![
+            reader("yk 0", Some("a")),
+            card("yk 0", &hidden),
+            reader("yk 1", Some("b")),
+            card("yk 1", &hidden),
+            otp("otp0", Some("a"), &hidden),
+            otp("otp1", Some("b"), &hidden),
+            fido("fido1", Some("b"), &hidden),
+            fido("fido0", Some("a"), &hidden),
+        ]);
+        assert_eq!(built.len(), 2);
+        assert_eq!(built[0].device.reader_name.as_deref(), Some("yk 0"));
+        assert_eq!(built[0].device.hid_path.as_deref(), Some("otp0"));
+        assert_eq!(built[0].device.fido_path.as_deref(), Some("fido0"));
+        assert_eq!(built[0].usb_id, Some(UsbDeviceId::new("a")));
+        assert_eq!(built[1].device.reader_name.as_deref(), Some("yk 1"));
+        assert_eq!(built[1].device.hid_path.as_deref(), Some("otp1"));
+        assert_eq!(built[1].device.fido_path.as_deref(), Some("fido1"));
+    }
+
+    #[test]
+    fn aggregator_never_merges_across_usb_identities() {
+        // A single physical key would merge on unique PID; the OS says these
+        // are two devices, so they must stay apart even with equal info.
+        let same = info(Version(5, 4, 3), Some(42));
+        let built = aggregate(vec![
+            reader("yk 0", Some("a")),
+            card("yk 0", &same),
+            fido("fido1", Some("b"), &same),
+        ]);
+        assert_eq!(built.len(), 2);
+    }
+
+    #[test]
+    fn aggregator_falls_back_to_heuristics_without_identity() {
+        // macOS-style: readers have no identity, HID interfaces do.
+        let first = info(Version(5, 4, 3), Some(1));
+        let second = info(Version(5, 4, 3), Some(2));
+        let built = aggregate(vec![
+            reader("yk 0", None),
+            card("yk 0", &first),
+            reader("yk 1", None),
+            card("yk 1", &second),
+            otp("otp0", Some("a"), &first),
+            otp("otp1", Some("b"), &second),
+            fido("fido1", Some("b"), &second),
+            fido("fido0", Some("a"), &first),
+        ]);
+        assert_eq!(built.len(), 2);
+        assert_eq!(built[0].device.hid_path.as_deref(), Some("otp0"));
+        assert_eq!(built[0].device.fido_path.as_deref(), Some("fido0"));
+        assert_eq!(built[0].usb_id, Some(UsbDeviceId::new("a")));
+        assert_eq!(built[1].device.hid_path.as_deref(), Some("otp1"));
+        assert_eq!(built[1].device.fido_path.as_deref(), Some("fido1"));
+
+        // A single device of its PID still merges without any identity.
+        let only = info(Version(5, 7, 1), Some(3));
+        let built = aggregate(vec![
+            reader("yk 0", None),
+            card("yk 0", &only),
+            otp("otp0", None, &only),
+            fido("fido0", None, &only),
+        ]);
+        assert_eq!(built.len(), 1);
+        assert_eq!(built[0].nodes.len(), 4);
+    }
+
+    #[test]
+    fn aggregator_reconcile_tracks_identity_across_info_changes() {
+        // A key whose reported info changes (e.g. HID node adopting card info)
+        // stays the same YubiKey when the OS identity matches.
+        let hid_info = info(Version(5, 4, 3), None);
+        let card_info = info(Version(5, 4, 3), Some(7));
+        let mut agg = Aggregator::default();
+        let mut events = Vec::new();
+        agg.apply(NodeEvent::Added(fido("fido0", Some("a"), &hid_info)));
+        agg.reconcile(&mut |e| events.push(e));
+        let id = match events.as_slice() {
+            [YubiKeyEvent::Added(yk)] => yk.id(),
+            other => panic!("unexpected events: {other:?}"),
+        };
+        events.clear();
+        agg.apply(NodeEvent::Added(reader("yk 0", Some("a"))));
+        agg.apply(NodeEvent::Added(card("yk 0", &card_info)));
+        agg.apply(NodeEvent::Removed(fido("fido0", Some("a"), &hid_info)));
+        agg.apply(NodeEvent::Added(fido("fido0", Some("a"), &card_info)));
+        agg.reconcile(&mut |e| events.push(e));
+        match events.as_slice() {
+            [YubiKeyEvent::Changed(yk)] => {
+                assert_eq!(yk.id(), id);
+                assert_eq!(yk.info().serial, Some(7));
+                assert_eq!(yk.usb_id(), Some(&UsbDeviceId::new("a")));
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+    }
+
+    #[cfg(all(feature = "pcsc", feature = "hid"))]
+    #[test]
+    fn hid_nodes_adopt_card_info_for_the_same_usb_device() {
+        let hid_info = info(Version(5, 4, 3), None);
+        let card_info = info(Version(5, 4, 3), Some(7));
+        let mut state = MonitorState::default();
+        state
+            .usb_readers
+            .insert("yk 0".into(), reader("yk 0", Some("a")));
+        state.cards.insert("yk 0".into(), card("yk 0", &card_info));
+        state
+            .hid_fido
+            .insert("fido0".into(), fido("fido0", Some("a"), &hid_info));
+        state
+            .hid_fido
+            .insert("fido1".into(), fido("fido1", Some("b"), &hid_info));
+        state
+            .hid_otp
+            .insert("otp0".into(), otp("otp0", Some("a"), &card_info));
+
+        let id = UsbDeviceId::new("a");
+        assert_eq!(state.group_info(&id), Some(&card_info));
+        assert_eq!(state.group_info(&UsbDeviceId::new("b")), Some(&hid_info));
+        assert_eq!(state.group_info(&UsbDeviceId::new("c")), None);
+
+        let mut events = Vec::new();
+        state.adopt_hid_info(&id, &card_info, &mut |e| events.push(e));
+        assert!(matches!(
+            events.as_slice(),
+            [NodeEvent::Removed(DeviceNode::HidFidoNode { hid_path: r, .. }), NodeEvent::Added(DeviceNode::HidFidoNode { hid_path: a, device_info, .. })]
+                if r == "fido0" && a == "fido0" && *device_info == card_info
+        ));
+        assert!(matches!(
+            state.hid_fido.get("fido1"),
+            Some(DeviceNode::HidFidoNode { device_info, .. }) if *device_info == hid_info
+        ));
     }
 }

@@ -42,6 +42,10 @@ pub mod pcsc;
 /// Windows SetupDI device enumeration.
 pub mod setupdi;
 
+/// Identification of the physical USB device behind an interface.
+#[cfg(any(feature = "pcsc", feature = "hid"))]
+pub mod usb_id;
+
 /// Event-based monitoring of connected YubiKey devices.
 ///
 /// Available when either the `pcsc` or `hid` feature is enabled.

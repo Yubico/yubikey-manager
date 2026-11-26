@@ -32,6 +32,11 @@ use super::pcsc::{
 };
 #[cfg(windows)]
 use super::setupdi::list_setupdi_devices;
+use super::usb_id::UsbDeviceId;
+#[cfg(feature = "hid")]
+use super::usb_id::hid_usb_device_id;
+#[cfg(feature = "pcsc")]
+use super::usb_id::{connection_usb_device_id, reader_usb_device_id};
 
 #[cfg(not(feature = "hid"))]
 #[derive(Debug, Clone)]
@@ -173,7 +178,7 @@ impl LocalYubiKeyDevice {
     /// not discovered via USB enumeration.
     #[cfg(feature = "pcsc")]
     pub fn open_reader(reader_name: &str) -> Result<Self, DeviceError> {
-        let (info, transport) = read_info_reader(reader_name)?;
+        let (info, transport, _) = read_info_reader(reader_name)?;
         Ok(LocalYubiKeyDevice {
             reader_name: Some(reader_name.to_string()),
             hid_path: None,
@@ -263,31 +268,6 @@ impl LocalYubiKeyDevice {
     #[cfg(not(feature = "hid"))]
     pub fn open_fido(&self) -> Result<Box<dyn FidoConnection + Send>, DeviceError> {
         Err(DeviceError::UnsupportedFeature("hid"))
-    }
-
-    /// Absorb transport paths from another `LocalYubiKeyDevice` representing the
-    /// same physical key. Fills in any `None` fields from `other`.
-    #[cfg(any(feature = "hid", test))]
-    fn merge_from(&mut self, other: LocalYubiKeyDevice) {
-        if self.reader_name.is_none() {
-            self.reader_name = other.reader_name;
-        }
-        if self.hid_path.is_none() {
-            self.hid_path = other.hid_path;
-        }
-        if self.fido_path.is_none() {
-            self.fido_path = other.fido_path;
-        }
-        if self.pid.is_none() {
-            self.pid = other.pid;
-        }
-        // Prefer the info with a serial number, or with a higher firmware
-        // version.
-        if self.info.serial.is_none() && other.info.serial.is_some()
-            || self.info.serial == other.info.serial && other.info.version > self.info.version
-        {
-            self.info = other.info;
-        }
     }
 
     /// Wait for the user to remove and reinsert this YubiKey.
@@ -481,7 +461,7 @@ impl LocalYubiKeyDevice {
                 } else {
                     // Wait for card to reappear and verify it's the same device
                     match read_info_reader(reader) {
-                        Ok((info, _transport)) => {
+                        Ok((info, _transport, _)) => {
                             if info.serial == my_serial && info.version == my_version {
                                 log::debug!("NFC card reinserted successfully");
                                 self.info = info;
@@ -770,9 +750,12 @@ pub fn scan_usb_devices() -> (HashMap<u16, usize>, u64) {
 /// both USB and NFC readers.
 ///
 /// Each physical YubiKey is returned as a single [`LocalYubiKeyDevice`] with
-/// transport paths populated for every interface that was discovered. When
-/// only one device is present per USB Product ID the merge is trivial;
-/// multiple devices sharing a PID are matched by firmware version and serial.
+/// transport paths populated for every interface that was discovered.
+/// Interfaces are grouped into physical devices using the USB device the OS
+/// reports them under (see [`usb_id`](super::usb_id)), reading device info
+/// only once per device where possible. Where the OS offers no such mapping,
+/// interfaces are grouped by USB Product ID when only one device with that
+/// Product ID is present, and by serial number otherwise.
 pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<LocalYubiKeyDevice>, DeviceError> {
     log::debug!("Listing YubiKey devices (interfaces: {interfaces})");
 
@@ -864,94 +847,88 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<LocalYubiKeyDevice>,
     );
 
     // ── Phase 2: open connections and build device list ───────────
-    let mut devices: Vec<LocalYubiKeyDevice> = Vec::new();
-
-    // For each PID, decide whether we need full multi-transport enumeration.
-    for (&pid, &count) in &pid_counts {
-        if count <= 1 {
-            // Single device for this PID — open one connection only.
-            if let Some(dev) = open_single_usb(pid, &usb_readers, &otp_devs, &fido_devs)? {
-                devices.push(dev);
-            }
-        } else {
-            // Multiple devices with this PID — enumerate all requested
-            // interfaces and merge by identity.
-            let mut base: Vec<LocalYubiKeyDevice> = Vec::new();
-
-            #[cfg(feature = "pcsc")]
-            if want_ccid {
-                for &(p, ref reader) in &usb_readers {
-                    if p == pid
-                        && let Ok((info, transport)) = read_info_reader(reader)
-                    {
-                        base.push(LocalYubiKeyDevice {
-                            reader_name: Some(reader.clone()),
-                            hid_path: None,
-                            fido_path: None,
-                            pid: Some(pid),
-                            transport,
-                            info,
-                        });
-                    }
-                }
-            }
-
-            #[cfg(feature = "hid")]
-            if want_otp {
-                let mut otp_group = Vec::new();
-                for hid in &otp_devs {
-                    if hid.pid == pid {
-                        let info = read_info_otp_device(hid)?;
-                        otp_group.push(LocalYubiKeyDevice {
-                            reader_name: None,
-                            hid_path: Some(hid.path.clone()),
-                            fido_path: None,
-                            pid: Some(pid),
-                            transport: Transport::Usb,
-                            info,
-                        });
-                    }
-                }
-                if base.is_empty() {
-                    base = otp_group;
-                } else {
-                    merge_devices(&mut base, otp_group);
-                }
-            }
-
-            #[cfg(feature = "hid")]
-            if want_fido {
-                let mut fido_group = Vec::new();
-                for fido in &fido_devs {
-                    if fido.pid == pid {
-                        let info = read_info_fido_device(fido)?;
-                        fido_group.push(LocalYubiKeyDevice {
-                            reader_name: None,
-                            hid_path: None,
-                            fido_path: Some(fido.path.clone()),
-                            pid: Some(pid),
-                            transport: Transport::Usb,
-                            info,
-                        });
-                    }
-                }
-                if base.is_empty() {
-                    base = fido_group;
-                } else {
-                    merge_devices(&mut base, fido_group);
-                }
-            }
-
-            devices.extend(base);
-        }
+    // Readers first: CCID gives the most complete info and is preferred as
+    // the single interface to read per device.
+    let mut interfaces: Vec<ScannedInterface> = Vec::new();
+    #[cfg(feature = "pcsc")]
+    for (pid, reader) in &usb_readers {
+        interfaces.push(ScannedInterface {
+            kind: InterfaceKind::Reader,
+            path: reader.clone(),
+            pid: *pid,
+            usb_id: reader_usb_device_id(reader),
+        });
     }
+    #[cfg(feature = "hid")]
+    for hid in &otp_devs {
+        interfaces.push(ScannedInterface {
+            kind: InterfaceKind::Otp,
+            path: hid.path.clone(),
+            pid: hid.pid,
+            usb_id: hid_usb_device_id(&hid.path),
+        });
+    }
+    #[cfg(feature = "hid")]
+    for fido in &fido_devs {
+        interfaces.push(ScannedInterface {
+            kind: InterfaceKind::Fido,
+            path: fido.path.clone(),
+            pid: fido.pid,
+            usb_id: hid_usb_device_id(&fido.path),
+        });
+    }
+    #[cfg(not(feature = "pcsc"))]
+    let _ = usb_readers;
+    #[cfg(not(feature = "hid"))]
+    let _ = (otp_devs, fido_devs);
+
+    let mut devices = assemble_usb_devices(interfaces, &pid_counts, |iface| match iface.kind {
+        InterfaceKind::Reader => {
+            #[cfg(feature = "pcsc")]
+            {
+                read_info_reader(&iface.path)
+            }
+            #[cfg(not(feature = "pcsc"))]
+            {
+                Err(DeviceError::UnsupportedFeature("pcsc"))
+            }
+        }
+        InterfaceKind::Otp => {
+            #[cfg(feature = "hid")]
+            {
+                let hid = otp_devs
+                    .iter()
+                    .find(|h| h.path == iface.path)
+                    .expect("scanned OTP device");
+                read_info_otp_device(hid).map(|info| (info, Transport::Usb, None))
+            }
+            #[cfg(not(feature = "hid"))]
+            {
+                Err(DeviceError::UnsupportedFeature("hid"))
+            }
+        }
+        InterfaceKind::Fido => {
+            #[cfg(feature = "hid")]
+            {
+                let fido = fido_devs
+                    .iter()
+                    .find(|f| f.path == iface.path)
+                    .expect("scanned FIDO device");
+                read_info_fido_device(fido).map(|info| (info, Transport::Usb, None))
+            }
+            #[cfg(not(feature = "hid"))]
+            {
+                Err(DeviceError::UnsupportedFeature("hid"))
+            }
+        }
+    })?;
 
     // ── Phase 3: NFC devices (no merging needed) ─────────────────
     #[cfg(feature = "pcsc")]
     for reader in &nfc_readers {
         log::debug!("Checking NFC reader: {reader}");
         match read_info_reader(reader) {
-            Ok((info, transport)) => {
+            Ok((info, transport, _)) => {
                 devices.push(LocalYubiKeyDevice {
                     reader_name: Some(reader.clone()),
                     hid_path: None,
@@ -970,143 +947,154 @@ pub fn list_devices(interfaces: UsbInterface) -> Result<Vec<LocalYubiKeyDevice>,
     Ok(devices)
 }
 
-/// Open a single USB device, preferring CCID > OTP > FIDO.
-///
-/// Since there is exactly one device for this PID, any transport yields the
-/// same physical key. We open only one connection and populate the paths from
-/// the fast-scan data.
-fn open_single_usb(
+/// A USB interface found during the fast scan, before any connection is opened.
+#[derive(Debug, Clone)]
+struct ScannedInterface {
+    kind: InterfaceKind,
+    /// Reader name or HID path.
+    path: String,
     pid: u16,
-    _usb_readers: &[(u16, String)],
-    _otp_devs: &[HidDeviceInfo],
-    _fido_devs: &[FidoDeviceInfo],
-) -> Result<Option<LocalYubiKeyDevice>, DeviceError> {
-    #[cfg(feature = "pcsc")]
-    let reader = _usb_readers.iter().find(|(p, _)| *p == pid).map(|(_, r)| r);
-    #[cfg(feature = "hid")]
-    let otp = _otp_devs.iter().find(|h| h.pid == pid);
-    #[cfg(feature = "hid")]
-    let fido = _fido_devs.iter().find(|f| f.pid == pid);
-    let mut last_err = None;
+    /// The USB device the OS reports this interface under, if available.
+    usb_id: Option<UsbDeviceId>,
+}
 
-    // Try CCID first (gives the most complete info).
-    #[cfg(feature = "pcsc")]
-    if let Some(reader_name) = reader {
-        match read_info_reader(reader_name) {
-            Ok((info, transport)) => {
-                return Ok(Some(LocalYubiKeyDevice {
-                    reader_name: Some(reader_name.clone()),
-                    hid_path: {
-                        #[cfg(feature = "hid")]
-                        {
-                            otp.map(|h| h.path.clone())
-                        }
-                        #[cfg(not(feature = "hid"))]
-                        {
-                            None
-                        }
-                    },
-                    fido_path: {
-                        #[cfg(feature = "hid")]
-                        {
-                            fido.map(|f| f.path.clone())
-                        }
-                        #[cfg(not(feature = "hid"))]
-                        {
-                            None
-                        }
-                    },
-                    pid: Some(pid),
-                    transport,
-                    info,
-                }));
-            }
-            Err(e) => last_err = Some(e),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InterfaceKind {
+    Reader,
+    Otp,
+    Fido,
+}
+
+/// A physical USB device being assembled from its interfaces.
+struct UsbGroup {
+    usb_id: Option<UsbDeviceId>,
+    device: LocalYubiKeyDevice,
+}
+
+impl UsbGroup {
+    /// Whether `usb_id` could belong to this group: either identity is
+    /// unknown, or both are equal.
+    fn identity_compatible(&self, usb_id: &Option<UsbDeviceId>) -> bool {
+        match (&self.usb_id, usb_id) {
+            (Some(a), Some(b)) => a == b,
+            _ => true,
         }
     }
 
-    // Fall back to OTP HID.
-    #[cfg(feature = "hid")]
-    if let Some(hid) = otp {
-        match read_info_otp_device(hid) {
-            Ok(info) => {
-                return Ok(Some(LocalYubiKeyDevice {
-                    reader_name: None,
-                    hid_path: Some(hid.path.clone()),
-                    fido_path: fido.map(|f| f.path.clone()),
-                    pid: Some(pid),
-                    transport: Transport::Usb,
-                    info,
-                }));
-            }
-            Err(e) => last_err = Some(e),
+    fn add_interface(&mut self, iface: &ScannedInterface) {
+        let slot = match iface.kind {
+            InterfaceKind::Reader => &mut self.device.reader_name,
+            InterfaceKind::Otp => &mut self.device.hid_path,
+            InterfaceKind::Fido => &mut self.device.fido_path,
+        };
+        if slot.is_none() {
+            *slot = Some(iface.path.clone());
         }
-    }
-
-    // Fall back to FIDO HID.
-    #[cfg(feature = "hid")]
-    if let Some(f) = fido {
-        match read_info_fido_device(f) {
-            Ok(info) => {
-                return Ok(Some(LocalYubiKeyDevice {
-                    reader_name: None,
-                    hid_path: None,
-                    fido_path: Some(f.path.clone()),
-                    pid: Some(pid),
-                    transport: Transport::Usb,
-                    info,
-                }));
-            }
-            Err(e) => last_err = Some(e),
+        if self.usb_id.is_none() {
+            self.usb_id = iface.usb_id.clone();
         }
-    }
-
-    if let Some(e) = last_err {
-        Err(e)
-    } else {
-        Ok(None)
     }
 }
 
-/// Merge `incoming` partial devices into `base`, combining entries that
-/// represent the same physical YubiKey.
-#[cfg(any(feature = "hid", test))]
-fn merge_devices(base: &mut Vec<LocalYubiKeyDevice>, incoming: Vec<LocalYubiKeyDevice>) {
-    // Count how many devices per PID across both sets.
-    let mut pid_counts: HashMap<u16, usize> = HashMap::new();
-    for dev in base.iter().chain(incoming.iter()) {
-        if let Some(pid) = dev.pid {
-            *pid_counts.entry(pid).or_insert(0) += 1;
-        }
-    }
+/// Group scanned USB interfaces into physical devices, reading device info
+/// through `read` only where an interface cannot be attributed to a device
+/// that has already been read.
+///
+/// An interface joins an existing device without being read if the OS
+/// reports it under the same USB device, or if it is the only device with
+/// its PID. Otherwise its info is read and matched by serial number, never
+/// against a device the OS attributes to a different USB device.
+///
+/// `counts` is the number of physical devices per PID (the maximum number of
+/// interfaces of one kind sharing that PID). Interfaces are processed in
+/// order, so callers should list the preferred interface to read first.
+///
+/// A reader that cannot be read is tolerated if its device is identified
+/// through another interface; a HID interface that cannot be read is an error.
+fn assemble_usb_devices(
+    interfaces: Vec<ScannedInterface>,
+    counts: &HashMap<u16, usize>,
+    mut read: impl FnMut(
+        &ScannedInterface,
+    ) -> Result<(DeviceInfo, Transport, Option<UsbDeviceId>), DeviceError>,
+) -> Result<Vec<LocalYubiKeyDevice>, DeviceError> {
+    let mut groups: Vec<UsbGroup> = Vec::new();
+    let mut unread_readers: Vec<(ScannedInterface, DeviceError)> = Vec::new();
 
-    for inc in incoming {
-        // Strategy 1: PID uniqueness – if only one device of this PID
-        // exists in total, find the matching base entry and merge.
-        if let Some(pid) = inc.pid
-            && pid_counts.get(&pid) == Some(&2)
-        {
-            // Exactly 2 means one in base + one incoming = same device.
-            if let Some(target) = base.iter_mut().find(|d| d.pid == Some(pid)) {
-                target.merge_from(inc);
-                continue;
-            }
-        }
+    let find_group = |groups: &[UsbGroup], iface: &ScannedInterface| -> Option<usize> {
+        let unique_pid = counts.get(&iface.pid) == Some(&1);
+        groups.iter().position(|g| {
+            matches!((&g.usb_id, &iface.usb_id), (Some(a), Some(b)) if a == b)
+                || (unique_pid
+                    && g.device.pid == Some(iface.pid)
+                    && g.identity_compatible(&iface.usb_id))
+        })
+    };
 
-        // Strategy 2: Match by (version, serial).
-        let identity = (inc.info.version, inc.info.serial);
-        if let Some(target) = base
-            .iter_mut()
-            .find(|d| (d.info.version, d.info.serial) == identity)
-        {
-            target.merge_from(inc);
+    for iface in interfaces {
+        if let Some(i) = find_group(&groups, &iface) {
+            groups[i].add_interface(&iface);
             continue;
         }
-
-        // No match found – this is a new device only visible over
-        // this transport.
-        base.push(inc);
+        match read(&iface) {
+            Ok((info, transport, conn_id)) => {
+                let usb_id = iface.usb_id.clone().or(conn_id);
+                let by_serial = info.serial.and_then(|serial| {
+                    groups.iter().position(|g| {
+                        g.device.info.serial == Some(serial) && g.identity_compatible(&usb_id)
+                    })
+                });
+                match by_serial {
+                    Some(i) => {
+                        let group = &mut groups[i];
+                        group.add_interface(&iface);
+                        if group.usb_id.is_none() {
+                            group.usb_id = usb_id;
+                        }
+                        if group.device.info.version < info.version {
+                            group.device.info = info;
+                        }
+                    }
+                    None => {
+                        let mut group = UsbGroup {
+                            usb_id,
+                            device: LocalYubiKeyDevice {
+                                reader_name: None,
+                                hid_path: None,
+                                fido_path: None,
+                                pid: Some(iface.pid),
+                                transport,
+                                info,
+                            },
+                        };
+                        group.add_interface(&iface);
+                        groups.push(group);
+                    }
+                }
+            }
+            Err(e) => {
+                log::debug!(
+                    "Reading info from {:?} '{}' failed: {e}",
+                    iface.kind,
+                    iface.path
+                );
+                if iface.kind == InterfaceKind::Reader {
+                    unread_readers.push((iface, e));
+                } else {
+                    return Err(e);
+                }
+            }
+        }
     }
+
+    for (iface, e) in unread_readers {
+        match find_group(&groups, &iface) {
+            Some(i) => groups[i].add_interface(&iface),
+            None => return Err(e),
+        }
+    }
+
+    Ok(groups.into_iter().map(|g| g.device).collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -1118,14 +1106,22 @@ fn merge_devices(base: &mut Vec<LocalYubiKeyDevice>, incoming: Vec<LocalYubiKeyD
 /// For older devices (NEO, etc.) that lack the management applet,
 /// synthesizes DeviceInfo by probing individual applets.
 ///
-/// Returns the device info and the detected transport (USB or NFC).
+/// Returns the device info, the detected transport (USB or NFC), and the USB
+/// device the reader belongs to when the connection can tell.
 #[cfg(feature = "pcsc")]
-fn read_info_reader(reader_name: &str) -> Result<(DeviceInfo, Transport), DeviceError> {
+fn read_info_reader(
+    reader_name: &str,
+) -> Result<(DeviceInfo, Transport, Option<UsbDeviceId>), DeviceError> {
     let conn = PcscSmartCardConnection::open(reader_name)?;
     let transport = conn.transport();
     let pid = pid_from_reader_name(reader_name);
-    let (info, _conn) = read_info_ccid(conn, pid)?;
-    Ok((info, transport))
+    let (info, conn) = read_info_ccid(conn, pid)?;
+    let usb_id = if transport == Transport::Usb {
+        connection_usb_device_id(&conn)
+    } else {
+        None
+    };
+    Ok((info, transport, usb_id))
 }
 
 /// Open an OTP HID device and read [`DeviceInfo`].
@@ -1236,13 +1232,20 @@ pub fn select_fido(cancel: Option<&dyn Fn() -> bool>) -> Result<LocalYubiKeyDevi
 
     // Find the selected device in a full enumeration
     let all = UsbInterface::CCID | UsbInterface::OTP | UsbInterface::FIDO;
-    let devices = list_devices(all)?;
+    let mut devices = list_devices(all)?;
 
-    // Read device info from the selected FIDO path to identify it
+    if let Some(i) = devices
+        .iter()
+        .position(|d| d.fido_path.as_deref() == Some(path.as_str()))
+    {
+        return Ok(devices.swap_remove(i));
+    }
+
+    // The selected path was not attributed to any device; identify it by
+    // reading its info.
     let fido_devs = list_fido_devices()?;
     if let Some(fido_info) = fido_devs.iter().find(|d| d.path == path) {
         let info = read_info_fido_device(fido_info)?;
-        // Match by serial and version
         if let Some(dev) = devices
             .into_iter()
             .find(|d| d.info().serial == info.serial && d.info().version == info.version)
@@ -1582,100 +1585,250 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_merge_by_pid_uniqueness() {
-        // Three groups each with one device sharing the same PID → merge.
-        let ccid = vec![make_device(
-            Some("Yubico YubiKey OTP+FIDO+CCID 00"),
-            None,
-            None,
-            Some(0x0407),
-            Version(5, 4, 3),
-            Some(12345),
-        )];
-        let otp = vec![make_device(
-            None,
-            Some("/dev/hidraw0"),
-            None,
-            Some(0x0407),
-            Version(5, 4, 3),
-            Some(12345),
-        )];
-        let fido = vec![make_device(
-            None,
-            None,
-            Some("/dev/hidraw1"),
-            Some(0x0407),
-            Version(5, 4, 3),
-            Some(12345),
-        )];
+    /// Scan helpers for `assemble_usb_devices` tests.
+    fn scanned(
+        kind: InterfaceKind,
+        path: &str,
+        pid: u16,
+        usb_id: Option<&str>,
+    ) -> ScannedInterface {
+        ScannedInterface {
+            kind,
+            path: path.into(),
+            pid,
+            usb_id: usb_id.map(UsbDeviceId::new),
+        }
+    }
 
-        let mut result = ccid;
-        merge_devices(&mut result, otp);
-        merge_devices(&mut result, fido);
-        assert_eq!(result.len(), 1, "Should merge into a single device");
-        let dev = &result[0];
-        assert!(dev.reader_name.is_some());
-        assert!(dev.hid_path.is_some());
-        assert!(dev.fido_path.is_some());
-        assert_eq!(dev.pid(), Some(0x0407));
+    fn info_with_serial(serial: Option<u32>) -> DeviceInfo {
+        make_info(
+            Version(5, 4, 3),
+            FormFactor::UsbAKeychain,
+            false,
+            false,
+            serial,
+            false,
+            Capability(Capability::OTP.0 | Capability::PIV.0),
+            false,
+        )
+    }
+
+    /// Reads info by looking up the interface path in `infos`, counting reads.
+    fn reader<'a>(
+        infos: &'a [(&'a str, Option<u32>, Option<&'a str>)],
+        reads: &'a std::cell::RefCell<Vec<String>>,
+    ) -> impl FnMut(
+        &ScannedInterface,
+    ) -> Result<(DeviceInfo, Transport, Option<UsbDeviceId>), DeviceError>
+    + 'a {
+        move |iface| {
+            reads.borrow_mut().push(iface.path.clone());
+            let (_, serial, conn_id) = infos
+                .iter()
+                .find(|(path, _, _)| *path == iface.path)
+                .unwrap_or_else(|| panic!("unexpected read of {}", iface.path));
+            Ok((
+                info_with_serial(*serial),
+                Transport::Usb,
+                conn_id.map(UsbDeviceId::new),
+            ))
+        }
     }
 
     #[test]
-    fn test_merge_by_identity() {
-        // Two devices with same PID but different serials are NOT merged by PID,
-        // but merged by identity when serial matches.
-        let ccid = vec![
-            make_device(
-                Some("reader0"),
-                None,
-                None,
-                Some(0x0407),
-                Version(5, 4, 3),
-                Some(111),
-            ),
-            make_device(
-                Some("reader1"),
-                None,
-                None,
-                Some(0x0407),
-                Version(5, 4, 3),
-                Some(222),
-            ),
+    fn assemble_reads_once_per_usb_device() {
+        // Two same-PID keys without serials, fully identified by the OS.
+        let interfaces = vec![
+            scanned(InterfaceKind::Reader, "reader0", 0x407, Some("a")),
+            scanned(InterfaceKind::Reader, "reader1", 0x407, Some("b")),
+            scanned(InterfaceKind::Otp, "otp1", 0x407, Some("b")),
+            scanned(InterfaceKind::Otp, "otp0", 0x407, Some("a")),
+            scanned(InterfaceKind::Fido, "fido0", 0x407, Some("a")),
+            scanned(InterfaceKind::Fido, "fido1", 0x407, Some("b")),
         ];
-        let otp = vec![
-            make_device(
-                None,
-                Some("/dev/h0"),
-                None,
-                Some(0x0407),
-                Version(5, 4, 3),
-                Some(111),
-            ),
-            make_device(
-                None,
-                Some("/dev/h1"),
-                None,
-                Some(0x0407),
-                Version(5, 4, 3),
-                Some(222),
-            ),
-        ];
+        let infos = [("reader0", None, None), ("reader1", None, None)];
+        let reads = std::cell::RefCell::new(Vec::new());
+        let devices = assemble_usb_devices(
+            interfaces,
+            &HashMap::from([(0x407, 2)]),
+            reader(&infos, &reads),
+        )
+        .unwrap();
+        assert_eq!(reads.borrow().as_slice(), ["reader0", "reader1"]);
+        assert_eq!(devices.len(), 2);
+        let a = devices
+            .iter()
+            .find(|d| d.reader_name.as_deref() == Some("reader0"))
+            .unwrap();
+        assert_eq!(a.hid_path.as_deref(), Some("otp0"));
+        assert_eq!(a.fido_path.as_deref(), Some("fido0"));
+        let b = devices
+            .iter()
+            .find(|d| d.reader_name.as_deref() == Some("reader1"))
+            .unwrap();
+        assert_eq!(b.hid_path.as_deref(), Some("otp1"));
+        assert_eq!(b.fido_path.as_deref(), Some("fido1"));
+    }
 
-        let mut result = ccid;
-        merge_devices(&mut result, otp);
-        assert_eq!(result.len(), 2, "Should remain as two devices");
-        let d1 = result
+    #[test]
+    fn assemble_uses_connection_identity_for_readers() {
+        // Linux: the reader's USB device is only known once connected.
+        let interfaces = vec![
+            scanned(InterfaceKind::Reader, "reader0", 0x407, None),
+            scanned(InterfaceKind::Reader, "reader1", 0x407, None),
+            scanned(InterfaceKind::Fido, "fido1", 0x407, Some("b")),
+            scanned(InterfaceKind::Fido, "fido0", 0x407, Some("a")),
+        ];
+        let infos = [("reader0", None, Some("a")), ("reader1", None, Some("b"))];
+        let reads = std::cell::RefCell::new(Vec::new());
+        let devices = assemble_usb_devices(
+            interfaces,
+            &HashMap::from([(0x407, 2)]),
+            reader(&infos, &reads),
+        )
+        .unwrap();
+        assert_eq!(reads.borrow().len(), 2);
+        assert_eq!(devices.len(), 2);
+        let a = devices
+            .iter()
+            .find(|d| d.reader_name.as_deref() == Some("reader0"))
+            .unwrap();
+        assert_eq!(a.fido_path.as_deref(), Some("fido0"));
+        let b = devices
+            .iter()
+            .find(|d| d.reader_name.as_deref() == Some("reader1"))
+            .unwrap();
+        assert_eq!(b.fido_path.as_deref(), Some("fido1"));
+    }
+
+    #[test]
+    fn assemble_single_device_per_pid_without_identity_reads_once() {
+        let interfaces = vec![
+            scanned(InterfaceKind::Reader, "reader0", 0x407, None),
+            scanned(InterfaceKind::Otp, "otp0", 0x407, None),
+            scanned(InterfaceKind::Fido, "fido0", 0x407, None),
+            scanned(InterfaceKind::Fido, "sky", 0x120, None),
+        ];
+        let infos = [("reader0", Some(123), None), ("sky", None, None)];
+        let reads = std::cell::RefCell::new(Vec::new());
+        let counts = HashMap::from([(0x407, 1), (0x120, 1)]);
+        let devices = assemble_usb_devices(interfaces, &counts, reader(&infos, &reads)).unwrap();
+        assert_eq!(reads.borrow().as_slice(), ["reader0", "sky"]);
+        assert_eq!(devices.len(), 2);
+        let yk = &devices[0];
+        assert_eq!(yk.reader_name.as_deref(), Some("reader0"));
+        assert_eq!(yk.hid_path.as_deref(), Some("otp0"));
+        assert_eq!(yk.fido_path.as_deref(), Some("fido0"));
+        assert_eq!(devices[1].fido_path.as_deref(), Some("sky"));
+    }
+
+    #[test]
+    fn assemble_falls_back_to_serial_without_identity() {
+        // macOS-like: readers have no identity, HID interfaces do.
+        let interfaces = vec![
+            scanned(InterfaceKind::Reader, "reader0", 0x407, None),
+            scanned(InterfaceKind::Reader, "reader1", 0x407, None),
+            scanned(InterfaceKind::Otp, "otp0", 0x407, Some("a")),
+            scanned(InterfaceKind::Otp, "otp1", 0x407, Some("b")),
+            scanned(InterfaceKind::Fido, "fido1", 0x407, Some("b")),
+            scanned(InterfaceKind::Fido, "fido0", 0x407, Some("a")),
+        ];
+        let infos = [
+            ("reader0", Some(111), None),
+            ("reader1", Some(222), None),
+            ("otp0", Some(111), None),
+            ("otp1", Some(222), None),
+        ];
+        let reads = std::cell::RefCell::new(Vec::new());
+        let devices = assemble_usb_devices(
+            interfaces,
+            &HashMap::from([(0x407, 2)]),
+            reader(&infos, &reads),
+        )
+        .unwrap();
+        // FIDO interfaces are attached through the OTP interfaces' identity.
+        assert_eq!(
+            reads.borrow().as_slice(),
+            ["reader0", "reader1", "otp0", "otp1"]
+        );
+        assert_eq!(devices.len(), 2);
+        let d1 = devices
             .iter()
             .find(|d| d.info().serial == Some(111))
             .unwrap();
-        assert!(d1.reader_name.is_some());
-        assert!(d1.hid_path.is_some());
-        let d2 = result
+        assert_eq!(d1.reader_name.as_deref(), Some("reader0"));
+        assert_eq!(d1.hid_path.as_deref(), Some("otp0"));
+        assert_eq!(d1.fido_path.as_deref(), Some("fido0"));
+        let d2 = devices
             .iter()
             .find(|d| d.info().serial == Some(222))
             .unwrap();
-        assert!(d2.reader_name.is_some());
-        assert!(d2.hid_path.is_some());
+        assert_eq!(d2.reader_name.as_deref(), Some("reader1"));
+        assert_eq!(d2.hid_path.as_deref(), Some("otp1"));
+        assert_eq!(d2.fido_path.as_deref(), Some("fido1"));
+    }
+
+    #[test]
+    fn assemble_keeps_serial_less_devices_apart_when_identified() {
+        // Two same-version keys without serials; one hides its serial, the
+        // other is a Security Key. Both have a FIDO interface only.
+        let interfaces = vec![
+            scanned(InterfaceKind::Fido, "fido0", 0x120, Some("a")),
+            scanned(InterfaceKind::Fido, "fido1", 0x120, Some("b")),
+        ];
+        let infos = [("fido0", None, None), ("fido1", None, None)];
+        let reads = std::cell::RefCell::new(Vec::new());
+        let devices = assemble_usb_devices(
+            interfaces,
+            &HashMap::from([(0x120, 2)]),
+            reader(&infos, &reads),
+        )
+        .unwrap();
+        assert_eq!(devices.len(), 2);
+    }
+
+    #[test]
+    fn assemble_does_not_merge_matching_serials_across_usb_devices() {
+        // The OS identity wins over an (impossible) serial collision.
+        let interfaces = vec![
+            scanned(InterfaceKind::Reader, "reader0", 0x407, Some("a")),
+            scanned(InterfaceKind::Otp, "otp1", 0x407, Some("b")),
+        ];
+        let infos = [("reader0", Some(1), None), ("otp1", Some(1), None)];
+        let reads = std::cell::RefCell::new(Vec::new());
+        let devices = assemble_usb_devices(
+            interfaces,
+            &HashMap::from([(0x407, 2)]),
+            reader(&infos, &reads),
+        )
+        .unwrap();
+        assert_eq!(devices.len(), 2);
+    }
+
+    #[test]
+    fn assemble_tolerates_unreadable_reader_when_identified_otherwise() {
+        let interfaces = vec![
+            scanned(InterfaceKind::Reader, "reader0", 0x407, Some("a")),
+            scanned(InterfaceKind::Otp, "otp0", 0x407, Some("a")),
+        ];
+        let devices =
+            assemble_usb_devices(
+                interfaces,
+                &HashMap::from([(0x407, 1)]),
+                |iface| match iface.kind {
+                    InterfaceKind::Reader => Err(DeviceError::CcidUnavailable),
+                    _ => Ok((info_with_serial(Some(5)), Transport::Usb, None)),
+                },
+            )
+            .unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].reader_name.as_deref(), Some("reader0"));
+        assert_eq!(devices[0].hid_path.as_deref(), Some("otp0"));
+
+        let interfaces = vec![scanned(InterfaceKind::Reader, "reader0", 0x407, Some("a"))];
+        let result = assemble_usb_devices(interfaces, &HashMap::from([(0x407, 1)]), |_| {
+            Err(DeviceError::CcidUnavailable)
+        });
+        assert!(matches!(result, Err(DeviceError::CcidUnavailable)));
     }
 }

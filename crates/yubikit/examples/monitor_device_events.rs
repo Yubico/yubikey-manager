@@ -31,8 +31,12 @@ use yubikit::platform::monitor::{DeviceNode, NodeEvent, monitor_device_events};
 
 fn describe(node: &DeviceNode) -> String {
     match node {
-        DeviceNode::UsbReaderNode { reader_name, pid } => {
-            format!("UsbReader  pid={pid:#06x} reader='{reader_name}'")
+        DeviceNode::UsbReaderNode {
+            reader_name,
+            pid,
+            usb_id,
+        } => {
+            format!("UsbReader  pid={pid:#06x} usb_id={usb_id:?} reader='{reader_name}'")
         }
         DeviceNode::CardNode {
             reader_name,
@@ -47,9 +51,10 @@ fn describe(node: &DeviceNode) -> String {
             hid_path,
             pid,
             device_info,
+            usb_id,
         } => {
             format!(
-                "HidOtp     pid={pid:#06x} serial={:?} version={} path='{hid_path}'",
+                "HidOtp     pid={pid:#06x} usb_id={usb_id:?} serial={:?} version={} path='{hid_path}'",
                 device_info.serial, device_info.version
             )
         }
@@ -57,9 +62,10 @@ fn describe(node: &DeviceNode) -> String {
             hid_path,
             pid,
             device_info,
+            usb_id,
         } => {
             format!(
-                "HidFido    pid={pid:#06x} serial={:?} version={} path='{hid_path}'",
+                "HidFido    pid={pid:#06x} usb_id={usb_id:?} serial={:?} version={} path='{hid_path}'",
                 device_info.serial, device_info.version
             )
         }

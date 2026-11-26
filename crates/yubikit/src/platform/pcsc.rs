@@ -338,6 +338,23 @@ impl PcscSmartCardConnection {
         })
     }
 
+    /// The name of the reader this connection was opened on.
+    pub fn reader_name(&self) -> &str {
+        &self.reader_name
+    }
+
+    /// The reader's `SCARD_ATTR_CHANNEL_ID`, if the driver reports one.
+    ///
+    /// For USB readers the upper 16 bits are `0x0020` and the lower 16 bits
+    /// identify the USB device (libccid reports `bus << 8 | address`).
+    #[cfg(target_os = "linux")]
+    pub(crate) fn channel_id(&self) -> Option<u32> {
+        let card = self.card.as_ref()?;
+        let value = guard_pcsc(|| card.get_attribute_owned(::pcsc::Attribute::ChannelId)).ok()?;
+        let bytes: [u8; 4] = value.get(..4)?.try_into().ok()?;
+        Some(u32::from_ne_bytes(bytes))
+    }
+
     /// Open a connection with automatic fallback and retry logic.
     ///
     /// 1. Try exclusive access (unless `YKMAN_NO_EXLUSIVE` env var is set).
