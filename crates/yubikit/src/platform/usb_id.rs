@@ -3,7 +3,7 @@
 //! A YubiKey exposes up to three USB interfaces (CCID, OTP HID, FIDO HID),
 //! each of which is enumerated separately. The operating system knows which
 //! interfaces belong to the same USB device, and this module exposes that
-//! knowledge as a [`UsbDeviceId`] so interfaces can be grouped into physical
+//! knowledge as a [`UsbDeviceId`](crate::platform::usb_id::UsbDeviceId) so interfaces can be grouped into physical
 //! devices without reading and comparing device info over each of them.
 //!
 //! Coverage differs per platform:
