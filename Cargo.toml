@@ -62,7 +62,7 @@ getrandom = "0.4"
 jiff = "1"
 log = "0.4"
 thiserror = "2"
-x509-cert = { version = "0.2.5", features = ["builder", "pem"] }
+x509-cert = { version = "0.3.1", features = ["builder", "pem"] }
 
 # Hardware
 hidapi = { version = "2", default-features = false }
