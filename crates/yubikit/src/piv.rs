@@ -1360,6 +1360,35 @@ fn decompress_certificate(cert_data: &[u8]) -> Result<Vec<u8>, PivError> {
     ))
 }
 
+/// Parse a certificate (DER bytes) out of a raw PIV data object, as already
+/// fetched via [`PivSession::get_object`]/[`PivSession::get_object_raw`].
+/// Split out of [`PivSession::get_certificate`] so callers that already have
+/// the object's bytes (e.g. because they also need the raw data object
+/// itself) don't have to fetch it from the card a second time.
+pub fn parse_certificate_object(obj_data: &[u8]) -> Result<Vec<u8>, PivError> {
+    let entries = parse_tlv_dict(obj_data)
+        .map_err(|_| PivError::InvalidData("Malformed certificate data object".into()))?;
+
+    let cert_data = entries
+        .get(&TAG_CERTIFICATE)
+        .ok_or_else(|| PivError::InvalidData("Malformed certificate data object".into()))?;
+
+    let cert_info = entries
+        .get(&TAG_CERT_INFO)
+        .and_then(|v| v.first().copied())
+        .unwrap_or(0);
+
+    if cert_info == 1 {
+        decompress_certificate(cert_data)
+    } else if cert_info == 0 {
+        Ok(cert_data.clone())
+    } else {
+        Err(PivError::NotSupported(
+            "Unsupported value in CertInfo".into(),
+        ))
+    }
+}
+
 /// Check if a key type is supported by a specific YubiKey firmware version.
 pub fn check_key_support(
     version: Version,
@@ -2274,27 +2303,7 @@ impl<C: SmartCardConnection> PivSession<C> {
     pub fn get_certificate(&mut self, slot: Slot) -> Result<Vec<u8>, PivError> {
         log::debug!("Reading certificate from slot {:?}", slot);
         let obj_data = self.get_object(ObjectId::from_slot(slot))?;
-        let entries = parse_tlv_dict(&obj_data)
-            .map_err(|_| PivError::InvalidData("Malformed certificate data object".into()))?;
-
-        let cert_data = entries
-            .get(&TAG_CERTIFICATE)
-            .ok_or_else(|| PivError::InvalidData("Malformed certificate data object".into()))?;
-
-        let cert_info = entries
-            .get(&TAG_CERT_INFO)
-            .and_then(|v| v.first().copied())
-            .unwrap_or(0);
-
-        if cert_info == 1 {
-            decompress_certificate(cert_data)
-        } else if cert_info == 0 {
-            Ok(cert_data.clone())
-        } else {
-            Err(PivError::NotSupported(
-                "Unsupported value in CertInfo".into(),
-            ))
-        }
+        parse_certificate_object(&obj_data)
     }
 
     /// Import a certificate (DER bytes) to a slot.
